@@ -19,6 +19,8 @@ typedef struct crtui_render_item {
   int enabled; /* effective: false if this widget or any ancestor is disabled */
   const char* text; /* borrowed, may be NULL */
   int32_t value, min_value, max_value;
+  int focused; /* this widget holds the context focus */
+  int pressed; /* a pointer press is in progress on this widget */
 } crtui_render_item;
 
 typedef struct crtui_lvgl_backend crtui_lvgl_backend;

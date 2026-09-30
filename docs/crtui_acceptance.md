@@ -1,7 +1,8 @@
 # crtui Acceptance (Stage `05-ui`)
 
 **Status: contract frozen (Tranche 0, all three hosts); LVGL first pixels
-(Tranche 1) done on Windows/x64 2026-09-30.** The public contract in `libcrtui/include/crtui/ui.h` and the
+(Tranche 1, all three hosts); input, focus and resize (Tranche 2) done on
+Windows/x64 2026-09-30.** The public contract in `libcrtui/include/crtui/ui.h` and the
 rules in the table below are frozen and covered by a resource-free test.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
 surfaces and packaging behind that contract. Update the tranche sections with
@@ -63,7 +64,7 @@ the frozen contract; each is asserted by `crtui_contract_test`.
 | --- | --- |
 | Thread ownership | A context belongs to the thread that created it. Every call except `crtui_context_post()` must come from that thread, otherwise `CRTUI_ERROR_WRONG_THREAD` and nothing changes (this includes `crtui_context_destroy()`). `crtui_context_post()` is the single thread-safe entry: it queues a function that `crtui_context_pump()` runs on the UI thread in FIFO order, never inline |
 | Lifetime | A parent owns its children; destroying a widget destroys its whole subtree at once and every id in it is invalid from that moment (`CRTUI_ERROR_INVALID_HANDLE`), including from inside a callback. A reused slot never yields an equal id. No reparenting in v1. `crtui_context_destroy()` destroys all widgets and discards posted functions that never ran. Callback `user` pointers are borrowed |
-| Events | Input enters through `crtui_context_send_input()`. The event goes to the target's callback, then bubbles to each ancestor up to the window; a callback returning `CRTUI_EVENT_HANDLED` stops the bubble; `event->target` stays the original target. `FOCUS_IN`/`FOCUS_OUT`/`RESIZED` do not bubble. Default actions (Tab/Shift+Tab focus, Enter/Space activate a button, arrows step a slider) run only if `KEY_DOWN` was not handled. Programmatic changes emit no event. Input sent from inside a callback is queued and delivered after the current event finishes (FIFO), never nested; no callback fires for a destroyed widget |
+| Events | Input enters through `crtui_context_send_input()`. The event goes to the target's callback, then bubbles to each ancestor up to the window; a callback returning `CRTUI_EVENT_HANDLED` stops the bubble; `event->target` stays the original target. `FOCUS_IN`/`FOCUS_OUT`/`RESIZED` do not bubble. Default actions run only if the event was not handled: Tab/Shift+Tab move focus, arrows move focus spatially (a focused slider consumes Left/Right to step; Up/Down still navigate -- revised in Tranche 2, see below), Enter/Space activate a button, wheel steps a slider, a press on a slider sets it and captures the pointer until the release. Programmatic changes emit no event. Input sent from inside a callback is queued and delivered after the current event finishes (FIFO), never nested; no callback fires for a destroyed widget |
 | Focus and input routing | One focus per context. Pointer/wheel goes to the topmost visible widget under the point (later siblings on top, children clipped to every ancestor); a press on a focusable widget focuses it, and releasing over the same button activates it. Key input goes to the focused widget of the addressed window, else the window. Traversal is tree pre-order over widgets that are focusable, enabled and visible (all ancestors too), Tab wraps. When the focused widget is destroyed, hidden or disabled, focus moves to the next eligible widget after it (wrapping), else clears; `FOCUS_OUT` is never sent to a destroyed widget. A disabled widget (or one under a disabled ancestor) receives nothing: the input is dropped, not passed through. A modal window (the most recently made modal wins) drops all input for every other window and refuses focus into them; making a window modal moves focus into it |
 | Geometry | Bounds are integer logical pixels relative to the parent. A window's size and DPI scale (physical = logical x scale, scale > 0) come from `crtui_window_set_size()`, which emits `RESIZED` (x,y = size, value = scale in percent) to the window. Hit-testing uses the clipped, visible area. Automatic layout arrives in Tranche 4; until then bounds are application-set and authoritative |
 | Surfaces | `crtui_surface_view_create()` reserves the API and returns `CRTUI_ERROR_UNSUPPORTED` until Tranche 5. Frozen ownership rule: the view owns only position, size, clip, opacity, visibility, z-order, damage and hit-testing, never the producer's frame |
@@ -324,6 +325,75 @@ Map CRT keyboard/pointer/wheel (and touch where the host has it) to LVGL's
 input model. Tests: pointer hit-test, Tab focus traversal, Enter/Space
 activation, arrow navigation, slider keyboard adjustment, resize/re-layout,
 focus loss and recovery.
+
+**Windows/x64 done 2026-09-30.**
+
+*Design.* crtui's CRT-owned model already owned hit-testing, focus and event
+routing (Tranche 0); "mapping to LVGL's input model" therefore means the model
+drives what LVGL draws and crtgfx events drive the model, rather than a second
+copy of the state living in LVGL indevs. Three additions:
+
+- **crtgfx adapter (`crtui/crtgfx.h`, `crtui_window_handle_crtgfx_event()`).**
+  Reads `crtgfx_event` (no link dependency on crtgfx): evdev keycodes for Tab,
+  Enter/KP Enter, Space, the arrows and Escape (Shift carried), rounded pointer
+  motion, LEFT-button press/release, scroll as a wheel at the last pointer
+  position (dy rounded away from zero so a small scroll is never lost; sign as
+  crtgfx reports it, host-native and unverified per crtgfx's own note),
+  `RESIZE`/`DPI_SCALE_CHANGED` into `crtui_window_set_size()`, `FOCUS_OUT` into
+  the new `CRTUI_INPUT_POINTER_CANCEL` (an in-progress press or slider drag ends
+  without activating or changing anything). `TEXT` and unknown keys are ignored
+  until text input exists. There is no touch input in crtgfx on any host, so
+  "touch where available" is vacuous today; a touch source would map to the same
+  pointer inputs.
+- **Contract revision (arrows).** Tranche 0 froze "arrows step a focused
+  slider". For remote/STB-style navigation the arrows now move focus spatially
+  to the nearest eligible widget in that direction (score = distance along the
+  axis + 2 x offset across it; no wrap; with nothing focused the first eligible
+  widget), except that a focused slider consumes Left/Right to step and Up/Down
+  still leave it. `crtui_contract_test`'s slider test moved from Up to Right.
+- **Slider pointer and wheel.** A press sets the value from the pointer's x and
+  captures the pointer: moves (even far outside the slider) update it and reach
+  the slider, the release applies the final position and ends the capture; a
+  capture also ends if the slider is disabled, hidden or destroyed. The wheel
+  over a slider steps it by one. Focus and pressed state are drawn: a 2 px
+  `#FF9800` ring just outside the focused widget (clipped by a parent it touches,
+  per the clipping rule), and a pressed button in `#1E4FA8`.
+- **Resize / re-layout.** Automatic layout is Tranche 4, so re-layout is the
+  application's: the adapter turns a native resize into `crtui_window_set_size()`,
+  which emits `RESIZED` (new size, DPI scale in percent) and the application
+  repositions widgets in that callback; hit-testing, clipping and the renderer
+  follow immediately.
+
+*Evidence.*
+
+- `crtui_input_test` (headless, LVGL-free, runs on every host; synthesized
+  `crtgfx_event` values): `ok keyboard=pass pointer=pass slider_drag=pass
+  wheel=pass resize=pass focus_loss=pass recovery=pass errors=pass` -- evdev
+  mapping and Shift, Tab/Shift+Tab, Enter/Space/KP Enter, arrow navigation and
+  slider Left/Right, unknown keys and TEXT ignored, left/right/middle buttons,
+  press-and-release-elsewhere never activating, slider drag with capture past
+  both ends, wheel rounding, resize with application re-layout (old position no
+  longer hits, new one does; DPI change; focus survives a resize), focus loss
+  cancelling a press and a drag, focus recovery when the focused widget is
+  destroyed, and errors for NULL arguments and destroyed windows.
+- `crtui_contract_test` gained `arrow_nav=pass slider_pointer=pass`: spatial
+  navigation (best-aligned candidate, no wrap, disabled skipped, a handled arrow
+  suppresses it), drag capture and its end conditions, wheel.
+- `crtui_render_test` gained `focus_ring=pass pressed=pass slider_drag=pass
+  relayout=pass`: real pixels for the ring, the pressed fill, a dragged slider's
+  fill, and a re-laid-out progress bar after a window resize.
+- `crtui_window_demo 30` (real crtgfx window; a scripted sequence injected with
+  crtgfx's test hook onto the same queue real events use): Tab focuses the
+  button, Enter activates it, a click and a wheel step move the slider by the
+  expected amounts -- `presented=30 pixel_check=pass input_check=pass`, exit 0.
+  Run without a frame limit it is interactive (real keyboard, mouse and
+  resizing).
+- Mutation-checked: flipping the slider step's sign fails `crtui_input_test`
+  (1 failure) and `crtui_contract_test` (4 failures).
+- Full in-tree `ctest` passes (one expected no-webcam skip); the default C-stage
+  preset stays 127/127; `crt-ui-dist` verifies.
+- Not covered here: text entry, IME, touch (no crtgfx source), automatic layout
+  (Tranche 4), hover states.
 
 ### 3. `crtui` wrapper (first green)
 

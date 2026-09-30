@@ -23,6 +23,8 @@
 #define CRTUI_COLOR_SLIDER_FILL 0x2D6CDF
 #define CRTUI_COLOR_SLIDER_KNOB 0x1E4FA8
 #define CRTUI_COLOR_PROGRESS_FILL 0x2ECC71
+#define CRTUI_COLOR_BUTTON_PRESSED 0x1E4FA8
+#define CRTUI_COLOR_FOCUS_RING 0xFF9800
 
 struct crtui_lvgl_backend {
   lv_display_t* display;
@@ -81,7 +83,10 @@ static lv_obj_t* create_object(const crtui_render_item* item, lv_obj_t* parent) 
       obj = lv_button_create(parent);
       style_plain(obj, LV_PART_MAIN);
       lv_obj_set_style_radius(obj, 6, LV_PART_MAIN);
-      style_fill(obj, item->enabled ? CRTUI_COLOR_BUTTON_BG : CRTUI_COLOR_DISABLED_BG, LV_PART_MAIN);
+      style_fill(obj,
+                 !item->enabled ? CRTUI_COLOR_DISABLED_BG
+                                : (item->pressed ? CRTUI_COLOR_BUTTON_PRESSED : CRTUI_COLOR_BUTTON_BG),
+                 LV_PART_MAIN);
       lv_obj_t* label = lv_label_create(obj);
       lv_label_set_text(label, item->text != NULL ? item->text : "");
       lv_obj_set_style_text_color(label, lv_color_hex(CRTUI_COLOR_BUTTON_TEXT), LV_PART_MAIN);
@@ -115,6 +120,14 @@ static lv_obj_t* create_object(const crtui_render_item* item, lv_obj_t* parent) 
       break;
     default:
       break; /* surface views arrive in Tranche 5 */
+  }
+  if (obj != NULL && item->focused) {
+    /* The focus ring: a 2 px outline just outside the widget, drawn on the
+     * main part so it follows the widget's own rounding. */
+    lv_obj_set_style_outline_width(obj, 2, LV_PART_MAIN);
+    lv_obj_set_style_outline_pad(obj, 1, LV_PART_MAIN);
+    lv_obj_set_style_outline_color(obj, lv_color_hex(CRTUI_COLOR_FOCUS_RING), LV_PART_MAIN);
+    lv_obj_set_style_outline_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
   }
   if (obj != NULL) {
     lv_obj_set_scrollable(obj, false);

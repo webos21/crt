@@ -56,6 +56,7 @@ struct crtui_context {
 
   crtui_widget focus;
   crtui_widget pressed; /* widget that took the current pointer press */
+  crtui_widget capture; /* slider currently capturing the pointer */
   uint64_t version;     /* bumped by every change a renderer could see */
   uint64_t modal_counter;
 
@@ -283,6 +284,7 @@ static void set_focus_internal(crtui_context* context, crtui_widget next) {
     return;
   }
   context->focus = next;
+  touch(context);
   if (previous != CRTUI_INVALID_WIDGET && resolve(context, previous) != NULL) {
     crtui_event out;
     memset(&out, 0, sizeof(out));
@@ -469,6 +471,129 @@ static void focus_move(crtui_context* context, crtui_widget window, int backward
   free(order.ids);
 }
 
+static void set_pressed(crtui_context* context, crtui_widget id) {
+  if (context->pressed != id) {
+    context->pressed = id;
+    touch(context);
+  }
+}
+
+/* Absolute (window-space) rectangle of a widget: parent-relative bounds summed
+ * up the chain; the window itself contributes no offset. */
+static int abs_rect(crtui_context* context, crtui_widget id, int32_t* x, int32_t* y, int32_t* w, int32_t* h) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL || node->kind == CRTUI_WIDGET_WINDOW) {
+    return -1;
+  }
+  int32_t ax = 0;
+  int32_t ay = 0;
+  crtui_widget cursor = id;
+  for (int depth = 0; depth < CRTUI_MAX_DEPTH + 2 && cursor != CRTUI_INVALID_WIDGET; ++depth) {
+    crtui_node* current = resolve(context, cursor);
+    if (current == NULL) {
+      return -1;
+    }
+    if (current->kind != CRTUI_WIDGET_WINDOW) {
+      ax += current->x;
+      ay += current->y;
+    }
+    cursor = current->parent;
+  }
+  *x = ax;
+  *y = ay;
+  *w = node->width;
+  *h = node->height;
+  return 0;
+}
+
+/* User-driven slider change: clamps, and if the value moved, emits
+ * VALUE_CHANGED (bubbling) after the new value is stored. */
+static void slider_user_set(crtui_context* context, crtui_widget id, int32_t value) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL || node->kind != CRTUI_WIDGET_SLIDER) {
+    return;
+  }
+  if (value < node->min_value) value = node->min_value;
+  if (value > node->max_value) value = node->max_value;
+  if (value == node->value) {
+    return;
+  }
+  node->value = value;
+  touch(context);
+  send_simple(context, CRTUI_EVENT_VALUE_CHANGED, id, 0, 0, CRTUI_KEY_NONE, value, 1, NULL);
+}
+
+static void slider_from_pointer(crtui_context* context, crtui_widget id, int32_t px) {
+  crtui_node* node = resolve(context, id);
+  int32_t ax, ay, aw, ah;
+  if (node == NULL || abs_rect(context, id, &ax, &ay, &aw, &ah) != 0 || aw <= 0) {
+    return;
+  }
+  int64_t span = (int64_t)node->max_value - (int64_t)node->min_value;
+  int64_t offset = (int64_t)px - (int64_t)ax;
+  if (offset < 0) offset = 0;
+  if (offset > aw) offset = aw;
+  int32_t value = (int32_t)((int64_t)node->min_value + (offset * span + aw / 2) / aw);
+  slider_user_set(context, id, value);
+}
+
+/* Spatial focus navigation: among the eligible focusable widgets of the window,
+ * pick the one whose center lies strictly in the requested direction and
+ * minimizes (distance along the axis) + 2 * (offset across it). No wrap. */
+static void focus_navigate(crtui_context* context, crtui_widget window, crtui_key key) {
+  crtui_id_list order;
+  memset(&order, 0, sizeof(order));
+  collect_focus_order(context, window, 0, &order);
+  int32_t fx, fy, fw, fh;
+  if (order.count == 0) {
+    free(order.ids);
+    return;
+  }
+  if (context->focus == CRTUI_INVALID_WIDGET || abs_rect(context, context->focus, &fx, &fy, &fw, &fh) != 0) {
+    set_focus_internal(context, order.ids[0]);
+    free(order.ids);
+    return;
+  }
+  int64_t cx = (int64_t)fx * 2 + fw;
+  int64_t cy = (int64_t)fy * 2 + fh;
+  crtui_widget best = CRTUI_INVALID_WIDGET;
+  int64_t best_score = 0;
+  for (size_t i = 0; i < order.count; ++i) {
+    int32_t x, y, w, h;
+    if (order.ids[i] == context->focus || abs_rect(context, order.ids[i], &x, &y, &w, &h) != 0) {
+      continue;
+    }
+    int64_t dx = ((int64_t)x * 2 + w) - cx;
+    int64_t dy = ((int64_t)y * 2 + h) - cy;
+    int64_t primary;
+    int64_t secondary;
+    if (key == CRTUI_KEY_RIGHT && dx > 0) {
+      primary = dx;
+      secondary = dy < 0 ? -dy : dy;
+    } else if (key == CRTUI_KEY_LEFT && dx < 0) {
+      primary = -dx;
+      secondary = dy < 0 ? -dy : dy;
+    } else if (key == CRTUI_KEY_DOWN && dy > 0) {
+      primary = dy;
+      secondary = dx < 0 ? -dx : dx;
+    } else if (key == CRTUI_KEY_UP && dy < 0) {
+      primary = -dy;
+      secondary = dx < 0 ? -dx : dx;
+    } else {
+      continue;
+    }
+    int64_t score = primary + 2 * secondary;
+    if (best == CRTUI_INVALID_WIDGET || score < best_score) {
+      best = order.ids[i];
+      best_score = score;
+    }
+  }
+  free(order.ids);
+  if (best != CRTUI_INVALID_WIDGET) {
+    set_focus_internal(context, best);
+  }
+}
+
 static void process_input(crtui_context* context, const crtui_input* input) {
   crtui_widget window = input->window;
   crtui_node* window_node = resolve(context, window);
@@ -476,14 +601,37 @@ static void process_input(crtui_context* context, const crtui_input* input) {
     return; /* window gone, or a modal window blocks it: dropped */
   }
   switch (input->type) {
+    case CRTUI_INPUT_POINTER_CANCEL:
+      context->capture = CRTUI_INVALID_WIDGET;
+      set_pressed(context, CRTUI_INVALID_WIDGET);
+      return;
     case CRTUI_INPUT_POINTER_DOWN:
     case CRTUI_INPUT_POINTER_UP:
     case CRTUI_INPUT_POINTER_MOVE:
     case CRTUI_INPUT_WHEEL: {
+      /* An active slider capture (see crtui/ui.h) takes moves and the release
+       * wherever the pointer is; it ends if the slider stopped being eligible. */
+      if (context->capture != CRTUI_INVALID_WIDGET) {
+        crtui_node* captured = resolve(context, context->capture);
+        if (captured == NULL || !chain_visible_enabled(context, context->capture, 1)) {
+          context->capture = CRTUI_INVALID_WIDGET;
+          set_pressed(context, CRTUI_INVALID_WIDGET);
+        } else if (input->type == CRTUI_INPUT_POINTER_MOVE || input->type == CRTUI_INPUT_POINTER_UP) {
+          crtui_widget slider = context->capture;
+          slider_from_pointer(context, slider, input->x);
+          if (input->type == CRTUI_INPUT_POINTER_UP) {
+            context->capture = CRTUI_INVALID_WIDGET;
+            set_pressed(context, CRTUI_INVALID_WIDGET);
+          }
+          send_simple(context, input->type == CRTUI_INPUT_POINTER_UP ? CRTUI_EVENT_POINTER_UP : CRTUI_EVENT_POINTER_MOVE,
+                      slider, input->x, input->y, CRTUI_KEY_NONE, 0, 1, NULL);
+          return;
+        }
+      }
       crtui_widget target = hit_test_internal(context, window, input->x, input->y);
       if (target == CRTUI_INVALID_WIDGET || !chain_visible_enabled(context, target, 1)) {
         if (input->type == CRTUI_INPUT_POINTER_UP) {
-          context->pressed = CRTUI_INVALID_WIDGET;
+          set_pressed(context, CRTUI_INVALID_WIDGET);
         }
         return;
       }
@@ -492,11 +640,16 @@ static void process_input(crtui_context* context, const crtui_input* input) {
         if (node != NULL && node->focusable) {
           set_focus_internal(context, target);
         }
-        context->pressed = target;
+        set_pressed(context, target);
         send_simple(context, CRTUI_EVENT_POINTER_DOWN, target, input->x, input->y, CRTUI_KEY_NONE, 0, 1, NULL);
+        node = resolve(context, target);
+        if (node != NULL && node->kind == CRTUI_WIDGET_SLIDER) {
+          context->capture = target;
+          slider_from_pointer(context, target, input->x);
+        }
       } else if (input->type == CRTUI_INPUT_POINTER_UP) {
         crtui_widget pressed = context->pressed;
-        context->pressed = CRTUI_INVALID_WIDGET;
+        set_pressed(context, CRTUI_INVALID_WIDGET);
         send_simple(context, CRTUI_EVENT_POINTER_UP, target, input->x, input->y, CRTUI_KEY_NONE, 0, 1, NULL);
         crtui_node* node = resolve(context, target);
         if (pressed == target && node != NULL && node->kind == CRTUI_WIDGET_BUTTON) {
@@ -505,8 +658,13 @@ static void process_input(crtui_context* context, const crtui_input* input) {
       } else if (input->type == CRTUI_INPUT_POINTER_MOVE) {
         send_simple(context, CRTUI_EVENT_POINTER_MOVE, target, input->x, input->y, CRTUI_KEY_NONE, 0, 1, NULL);
       } else {
+        int handled = 0;
         send_simple(context, CRTUI_EVENT_WHEEL, target, input->x, input->y, CRTUI_KEY_NONE, input->wheel_delta, 1,
-                    NULL);
+                    &handled);
+        crtui_node* node = resolve(context, target);
+        if (!handled && node != NULL && node->kind == CRTUI_WIDGET_SLIDER && input->wheel_delta != 0) {
+          slider_user_set(context, target, node->value + (input->wheel_delta > 0 ? 1 : -1));
+        }
       }
       return;
     }
@@ -537,17 +695,13 @@ static void process_input(crtui_context* context, const crtui_input* input) {
       } else if ((input->key == CRTUI_KEY_ENTER || input->key == CRTUI_KEY_SPACE) && focused_node != NULL &&
                  focused_node->kind == CRTUI_WIDGET_BUTTON) {
         send_simple(context, CRTUI_EVENT_ACTIVATE, focused, 0, 0, CRTUI_KEY_NONE, 0, 1, NULL);
-      } else if (focused_node != NULL && focused_node->kind == CRTUI_WIDGET_SLIDER &&
-                 (input->key == CRTUI_KEY_LEFT || input->key == CRTUI_KEY_RIGHT || input->key == CRTUI_KEY_UP ||
-                  input->key == CRTUI_KEY_DOWN)) {
-        int32_t step = (input->key == CRTUI_KEY_LEFT || input->key == CRTUI_KEY_DOWN) ? -1 : 1;
-        int32_t next = focused_node->value + step;
-        if (next < focused_node->min_value) next = focused_node->min_value;
-        if (next > focused_node->max_value) next = focused_node->max_value;
-        if (next != focused_node->value) {
-          focused_node->value = next;
-          touch(context);
-          send_simple(context, CRTUI_EVENT_VALUE_CHANGED, focused, 0, 0, CRTUI_KEY_NONE, next, 1, NULL);
+      } else if (input->key == CRTUI_KEY_LEFT || input->key == CRTUI_KEY_RIGHT || input->key == CRTUI_KEY_UP ||
+                 input->key == CRTUI_KEY_DOWN) {
+        if (focused_node != NULL && focused_node->kind == CRTUI_WIDGET_SLIDER &&
+            (input->key == CRTUI_KEY_LEFT || input->key == CRTUI_KEY_RIGHT)) {
+          slider_user_set(context, focused, focused_node->value + (input->key == CRTUI_KEY_LEFT ? -1 : 1));
+        } else {
+          focus_navigate(context, window, input->key);
         }
       }
       return;
@@ -589,6 +743,9 @@ static void kill_subtree(crtui_context* context, crtui_widget id, int depth) {
   }
   if (context->pressed == id) {
     context->pressed = CRTUI_INVALID_WIDGET;
+  }
+  if (context->capture == id) {
+    context->capture = CRTUI_INVALID_WIDGET;
   }
   for (size_t i = 0; i < child_count && depth < CRTUI_MAX_DEPTH; ++i) {
     kill_subtree(context, children[i], depth + 1);
@@ -1039,6 +1196,8 @@ static int build_items(
   item->value = node->value;
   item->min_value = node->min_value;
   item->max_value = node->max_value;
+  item->focused = context->focus == id;
+  item->pressed = context->pressed == id;
   if (node->kind == CRTUI_WIDGET_WINDOW) {
     item->x = 0;
     item->y = 0;

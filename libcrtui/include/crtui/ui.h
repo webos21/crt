@@ -39,11 +39,20 @@
  * CRTUI_EVENT_HANDLED stops the bubble. FOCUS_IN, FOCUS_OUT and RESIZED go to
  * their target only. A disabled widget, or any widget under a disabled
  * ancestor, receives nothing (the input is dropped, not passed through).
- * Default actions run only if no callback handled a KEY_DOWN: Tab / Shift+Tab
- * move focus, Enter / Space activate a focused button (ACTIVATE), and the
- * arrow keys step a focused slider by one, clamped (VALUE_CHANGED). A pointer
- * press on a focusable widget focuses it first; releasing the pointer over the
- * same button that took the press activates it.
+ * Default actions run only if no callback handled the event. KEY_DOWN: Tab /
+ * Shift+Tab move focus through the traversal order; the arrow keys move focus
+ * spatially to the nearest eligible widget in that direction (no wrap; with
+ * nothing focused they focus the first eligible widget), except that a focused
+ * slider consumes Left/Right to step by one, clamped (VALUE_CHANGED) -- Up/Down
+ * still navigate away from it; Enter / Space activate a focused button
+ * (ACTIVATE). WHEEL over a slider steps it by one (positive delta = up, negative
+ * = down; the sign is exactly what the caller passes, crtgfx's is host-native).
+ * A pointer press on a focusable widget focuses it first; releasing the pointer
+ * over the same button that took the press activates it. A press on a slider
+ * sets its value from the pointer's x position and captures the pointer:
+ * moves update the value even outside the slider's bounds (and are delivered to
+ * the slider), until the release, which also ends the capture. A widget that
+ * becomes ineligible or is destroyed during a capture ends it.
  * Re-entrancy: callbacks may call any crtui function on the UI thread,
  * including destroying their own widget. Input sent from inside a callback is
  * queued and delivered after the current event finishes (FIFO), never nested.
@@ -135,7 +144,11 @@ typedef enum crtui_input_type {
   CRTUI_INPUT_POINTER_MOVE,
   CRTUI_INPUT_WHEEL,
   CRTUI_INPUT_KEY_DOWN,
-  CRTUI_INPUT_KEY_UP
+  CRTUI_INPUT_KEY_UP,
+  /* The pointer interaction was interrupted (window lost keyboard focus, touch
+   * cancelled): an in-progress press or slider drag ends without activating
+   * anything and without changing the slider. Carries no position. */
+  CRTUI_INPUT_POINTER_CANCEL
 } crtui_input_type;
 
 typedef struct crtui_input {

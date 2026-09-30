@@ -436,7 +436,10 @@ statuses, and exceptions are maintained in:
    `crtui` contract, headless model, `05-ui` stage, LVGL v9.6.0 pinned) is done
    on all three hosts. Tranche 1 (LVGL v9.6.0 imported privately, software
    rendering through a CRT display adapter into crtgfx) is done on Windows/x64
-   (2026-09-30); next are its macOS/arm64 and Linux replays, then input/focus. See `docs/crtui_acceptance.md`.
+   (2026-09-30) and closed on all three hosts; Tranche 2 (input, focus and resize
+   through a crtgfx adapter) is done on Windows/x64 (2026-09-30), so next are its
+   macOS/arm64 and Linux replays, then the `crtui` wrapper. See
+   `docs/crtui_acceptance.md`.
 2. After `05-ui`'s External Surface contract is accepted, begin `06-web`: a
    JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a
    Linux WPE reference baseline, then `PlatformCRT`. See

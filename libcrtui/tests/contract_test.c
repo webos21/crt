@@ -389,9 +389,9 @@ static void test_keyboard_and_focus(void) {
   int32_t value = -1;
   log_reset();
   tap_key(&s, CRTUI_KEY_RIGHT, 0);
-  tap_key(&s, CRTUI_KEY_UP, 0);
+  tap_key(&s, CRTUI_KEY_RIGHT, 0);
   crtui_slider_get_value(s.ctx, s.slider, &value);
-  CHECK(value == 2 && count_type(CRTUI_EVENT_VALUE_CHANGED) == 6, "arrows step the slider and bubble VALUE_CHANGED");
+  CHECK(value == 2 && count_type(CRTUI_EVENT_VALUE_CHANGED) == 6, "Left/Right step the slider and bubble VALUE_CHANGED");
   for (int i = 0; i < 20; ++i) tap_key(&s, CRTUI_KEY_RIGHT, 0);
   crtui_slider_get_value(s.ctx, s.slider, &value);
   CHECK(value == 10, "clamped at max");
@@ -648,6 +648,135 @@ static void test_progress(void) {
   end_scene(&s);
 }
 
+/* ---- 12. Tranche 2: arrow navigation, slider pointer/wheel ---------------- */
+
+static void test_arrow_navigation(void) {
+  scene s;
+  CHECK(build_scene(&s) == 0, "scene");
+  /* Absolute centers: A (70,45), B (170,45), slider (130,100). */
+  tap_key(&s, CRTUI_KEY_LEFT, 0);
+  CHECK(focused(&s) == s.button_a, "an arrow with nothing focused focuses the first eligible widget");
+  tap_key(&s, CRTUI_KEY_RIGHT, 0);
+  CHECK(focused(&s) == s.button_b, "Right moves to the widget on the right");
+  tap_key(&s, CRTUI_KEY_RIGHT, 0);
+  CHECK(focused(&s) == s.button_b, "no widget further right: focus stays (no wrap)");
+  tap_key(&s, CRTUI_KEY_DOWN, 0);
+  CHECK(focused(&s) == s.slider, "Down moves to the widget below");
+  tap_key(&s, CRTUI_KEY_UP, 0);
+  CHECK(focused(&s) == s.button_b, "Up from the slider picks the best-aligned widget above (B, not A)");
+  tap_key(&s, CRTUI_KEY_LEFT, 0);
+  CHECK(focused(&s) == s.button_a, "Left moves to the widget on the left");
+  tap_key(&s, CRTUI_KEY_LEFT, 0);
+  CHECK(focused(&s) == s.button_a, "no widget further left: focus stays");
+
+  /* A focused slider consumes Left/Right but still lets Up/Down navigate. */
+  crtui_widget_focus(s.ctx, s.slider);
+  int32_t value = -1;
+  tap_key(&s, CRTUI_KEY_RIGHT, 0);
+  tap_key(&s, CRTUI_KEY_RIGHT, 0);
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 2 && focused(&s) == s.slider, "Right steps the focused slider and keeps focus");
+  tap_key(&s, CRTUI_KEY_LEFT, 0);
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 1, "Left steps it back");
+  tap_key(&s, CRTUI_KEY_UP, 0);
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(focused(&s) == s.button_b && value == 1, "Up leaves the slider without changing its value");
+
+  /* A hidden or disabled widget is not a navigation target. */
+  crtui_widget_set_enabled(s.ctx, s.button_b, 0);
+  crtui_widget_focus(s.ctx, s.button_a);
+  tap_key(&s, CRTUI_KEY_RIGHT, 0);
+  CHECK(focused(&s) == s.slider, "a disabled widget is skipped: Right lands on the next candidate, not on B");
+  crtui_widget_set_enabled(s.ctx, s.button_b, 1);
+
+  /* A callback that handles the arrow suppresses navigation. */
+  crtui_widget_focus(s.ctx, s.button_a);
+  crtui_widget_set_callback(s.ctx, s.button_a, handled_cb, (void*)(intptr_t)TAG_A);
+  tap_key(&s, CRTUI_KEY_RIGHT, 0);
+  CHECK(focused(&s) == s.button_a, "a handled arrow does not navigate");
+  end_scene(&s);
+}
+
+static void test_slider_pointer(void) {
+  scene s;
+  CHECK(build_scene(&s) == 0, "scene");
+  /* Slider abs x 30..230 (width 200), range 0..10. */
+  log_reset();
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_DOWN, 130, 100));
+  int32_t value = -1;
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 5, "pressing the middle of the slider sets it to the middle");
+  CHECK(focused(&s) == s.slider, "a press on a slider focuses it");
+  CHECK(count_type(CRTUI_EVENT_VALUE_CHANGED) == 3, "VALUE_CHANGED bubbles");
+
+  log_reset();
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_MOVE, 280, 300)); /* far outside the slider and the window's content */
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 10, "a captured drag past the right end clamps at max");
+  int slider_saw_move = 0;
+  for (int i = 0; i < event_count; ++i) {
+    if (event_log[i].type == CRTUI_EVENT_POINTER_MOVE && event_log[i].tag == TAG_SLIDER) slider_saw_move = 1;
+  }
+  CHECK(slider_saw_move, "moves are delivered to the captured slider even outside its bounds");
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_MOVE, 10, 250));
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 0, "dragging past the left end clamps at min");
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_MOVE, 80, 250));
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 2 || value == 3, "dragging back inside sets the proportional value");
+
+  log_reset();
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_UP, 180, 250));
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 7 || value == 8, "the release position is applied");
+  CHECK(count_type(CRTUI_EVENT_POINTER_UP) == 3, "the release is delivered to the slider and bubbles");
+  int32_t after_release = value;
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_MOVE, 40, 100));
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == after_release, "the capture ended with the release");
+
+  /* Wheel. */
+  crtui_slider_set_value(s.ctx, s.slider, 5);
+  crtui_input wheel = pointer(&s, CRTUI_INPUT_WHEEL, 130, 100);
+  wheel.wheel_delta = 3;
+  send(&s, wheel);
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 6, "wheel up steps the slider up by one");
+  wheel.wheel_delta = -120;
+  send(&s, wheel);
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 5, "wheel down steps it down by one");
+  wheel.wheel_delta = 0;
+  send(&s, wheel);
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 5, "a zero delta does nothing");
+  crtui_widget_set_callback(s.ctx, s.slider, handled_cb, (void*)(intptr_t)TAG_SLIDER);
+  wheel.wheel_delta = 1;
+  send(&s, wheel);
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == 5, "a handled wheel event suppresses the default step");
+  crtui_widget_set_callback(s.ctx, s.slider, record_cb, (void*)(intptr_t)TAG_SLIDER);
+
+  /* A capture ends if the slider becomes ineligible or is destroyed. */
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_DOWN, 130, 100));
+  crtui_widget_set_enabled(s.ctx, s.slider, 0);
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  int32_t before = value;
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_MOVE, 220, 100));
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value == before, "disabling the slider mid-drag stops the drag");
+  crtui_widget_set_enabled(s.ctx, s.slider, 1);
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_DOWN, 130, 100));
+  crtui_widget_destroy(s.ctx, s.slider);
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_MOVE, 200, 100));
+  send(&s, pointer(&s, CRTUI_INPUT_POINTER_UP, 200, 100));
+  crtui_widget_kind kind;
+  CHECK(crtui_widget_get_kind(s.ctx, s.slider, &kind) == CRTUI_ERROR_INVALID_HANDLE,
+        "destroying the slider mid-drag is safe");
+  end_scene(&s);
+}
+
 int main(void) {
   test_errors();
   test_lifetime();
@@ -660,12 +789,14 @@ int main(void) {
   test_hit_testing();
   test_geometry();
   test_progress();
+  test_arrow_navigation();
+  test_slider_pointer();
   if (failures != 0) {
     fprintf(stderr, "crtui_contract_test: %d failure(s)\n", failures);
     return 1;
   }
   printf(
       "crtui_contract_test: ok errors=pass lifetime=pass threads=pass events=pass keyboard_focus=pass "
-      "focus_recovery=pass reentrancy=pass modal=pass hit_test=pass geometry=pass progress=pass\n");
+      "focus_recovery=pass reentrancy=pass modal=pass hit_test=pass geometry=pass progress=pass arrow_nav=pass slider_pointer=pass\n");
   return 0;
 }

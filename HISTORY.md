@@ -10,6 +10,43 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 2 closed on Windows/x64: crtgfx input, spatial focus
+  navigation, slider drag/wheel, drawn focus state, and resize -- driven end to
+  end through a real crtgfx window.** `docs/crtui_acceptance.md`'s Tranche 2
+  section has the full detail.
+
+  New `crtui/crtgfx.h` adapter (`crtui_window_handle_crtgfx_event()`; reads
+  `crtgfx_event`, adds no link dependency): evdev keys (Tab, Enter/KP Enter,
+  Space, arrows, Escape, Shift), rounded pointer motion, left-button
+  press/release, scroll as a wheel at the last pointer position, `RESIZE` and
+  `DPI_SCALE_CHANGED` into `crtui_window_set_size()`, `FOCUS_OUT` into the new
+  `CRTUI_INPUT_POINTER_CANCEL`. Model additions: spatial arrow navigation (with
+  a deliberate revision of Tranche 0's "arrows step a slider": a focused slider
+  still consumes Left/Right, Up/Down leave it, and the T0 test moved from Up to
+  Right), slider press/drag with pointer capture and wheel stepping, and
+  focus/pressed state carried into rendering (2 px `#FF9800` ring, `#1E4FA8`
+  pressed fill). Resize re-layout stays the application's until Tranche 4: the
+  adapter delivers `RESIZED`, the application repositions widgets, hit-testing
+  and rendering follow.
+
+  Evidence: `crtui_input_test: ok keyboard=pass pointer=pass slider_drag=pass
+  wheel=pass resize=pass focus_loss=pass recovery=pass errors=pass` (headless,
+  LVGL-free, so it runs on every host), `crtui_contract_test` +`arrow_nav=pass
+  slider_pointer=pass`, `crtui_render_test` +`focus_ring=pass pressed=pass
+  slider_drag=pass relayout=pass`, and `crtui_window_demo 30` -- a scripted
+  sequence injected through crtgfx's test hook onto the queue real events use --
+  `presented=30 pixel_check=pass input_check=pass`. Mutation-checked (flipping
+  the slider step sign fails both input tests). Two test-writing corrections
+  worth remembering: the focus ring on a child that touches its container's
+  edge is clipped by the container (the contract's clipping rule, so the ring
+  is asserted on the unclipped top edge), and a callback registered on an
+  ancestor sees a bubbled `ACTIVATE` with `current` = the ancestor, so
+  counters must key on `event->target`. crtgfx has no touch source on any
+  host, so touch is not covered; wheel sign is crtgfx's host-native one
+  (unverified, per its own note). Full in-tree `ctest` and the default
+  127-test C-stage preset pass; `crt-ui-dist` verifies. macOS/arm64 and Linux
+  replay is next.
+
 - **`crtui` Tranche 1 closed on Linux/x86_64 (native Intel host): LVGL
   renders and presents, after one Linux-only link-order fix.**
   `docs/crtui_acceptance.md`'s Tranche 1 section has the full detail.

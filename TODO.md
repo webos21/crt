@@ -76,8 +76,12 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   and compiled privately behind `-DCRTUI_ENABLE_LVGL=ON`; CRT display adapter;
   `crtui_render_test`, `crtui_window_demo`); evidence in `HISTORY.md` and
   `docs/crtui_acceptance.md`.
-* [ ] **2. Input, focus, resize.** Pointer, keyboard (Tab/arrows/Enter/Space),
-  wheel, touch where available; STB-style keyboard navigation from the start.
+* [ ] **2. Input, focus, resize.** Windows/x64 done 2026-09-30, recorded in
+  `HISTORY.md`: `crtui/crtgfx.h` adapter, spatial arrow navigation (contract
+  revision: a focused slider keeps Left/Right), slider drag with pointer capture
+  and wheel, drawn focus/pressed state, application-driven re-layout on resize,
+  `POINTER_CANCEL` on focus loss (`crtui_input_test: ok ...`, and
+  `crtui_window_demo 30`: `input_check=pass`). macOS/arm64 and Linux replay next.
 * [ ] **3. `crtui` wrapper (first green).** The sample calls no `lv_*` symbol;
   LVGL is private.
 * [ ] **4. Layout, styling, v1 widget set.** CRT-neutral properties only.

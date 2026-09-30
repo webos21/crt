@@ -48,6 +48,7 @@ endif()
 
 add_library(crtui STATIC
   src/core.c
+  src/crtgfx_adapter.c
   ${CRTUI_LVGL_SOURCES}
   ${CRTUI_LVGL_PRIVATE_SOURCES}
 )
@@ -58,6 +59,8 @@ target_link_libraries(crtui PRIVATE crt_build_flags c m dl cxx)
 target_include_directories(crtui PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+# crtui/crtgfx.h reads crtgfx_event, so the adapter needs crtgfx's headers (no link).
+target_include_directories(crtui PUBLIC "${CMAKE_SOURCE_DIR}/libcrtgfx/include")
 set_target_properties(crtui PROPERTIES
   OUTPUT_NAME crtui
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -65,6 +68,7 @@ set_target_properties(crtui PROPERTIES
 
 add_library(crtui_shared SHARED
   src/core.c
+  src/crtgfx_adapter.c
   ${CRTUI_LVGL_SOURCES}
   ${CRTUI_LVGL_PRIVATE_SOURCES}
 )
@@ -78,6 +82,7 @@ target_link_libraries(crtui_shared PRIVATE crt_build_flags c_shared m_shared dl_
 target_include_directories(crtui_shared PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+target_include_directories(crtui_shared PUBLIC "${CMAKE_SOURCE_DIR}/libcrtgfx/include")
 crt_configure_shared_runtime(crtui_shared)
 set_target_properties(crtui_shared PROPERTIES
   OUTPUT_NAME crtui
@@ -149,6 +154,54 @@ set_tests_properties(crtui_contract_test_runs PROPERTIES
   TIMEOUT 60
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_contract_test_runs)
+
+# crtui_input_test: Tranche 2 acceptance -- synthesized crtgfx_event values ->
+# crtui through the crtgfx adapter (keyboard, pointer, wheel, slider drag, resize
+# and re-layout, focus loss and recovery). Headless and LVGL-free, so it runs on
+# every host; it only needs crtgfx's headers, which crtui already exports.
+add_executable(crtui_input_test
+  ${CRT_STARTUP_OBJECTS}
+  tests/input_test.c
+)
+target_link_libraries(crtui_input_test PRIVATE crt_build_flags c crtui)
+target_include_directories(crtui_input_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtui_input_test PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtui_input_test PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtui_input_test PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtui_input_test PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtui_input_test PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtui_input_test PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtui_input_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtui_input_test)
+add_dependencies(crtui_input_test c crt1 crtui)
+
+add_test(NAME crtui_input_test_runs COMMAND crtui_input_test)
+set_tests_properties(crtui_input_test_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtui_input_test: ok"
+  TIMEOUT 60
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_input_test_runs)
 
 # crtui_render_test: Tranche 1 acceptance -- renders a Window > Container >
 # Label/Button/Slider/Progress scene through the private LVGL software renderer

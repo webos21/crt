@@ -38,6 +38,8 @@ static int failures = 0;
 #define COLOR_TRACK 0xC8C8C8u
 #define COLOR_SLIDER_FILL 0x2D6CDFu
 #define COLOR_PROGRESS_FILL 0x2ECC71u
+#define COLOR_PRESSED 0x1E4FA8u
+#define COLOR_FOCUS_RING 0xFF9800u
 
 typedef struct scene {
   crtui_context* ctx;
@@ -272,6 +274,93 @@ static void test_pixels(void) {
   CHECK(crtui_context_destroy(s.ctx) == CRTUI_OK, "destroy");
 }
 
+/* ---- Tranche 2: interaction state is visible in the rendered image -------- */
+
+static int relayout_on_resize(crtui_widget current, const crtui_event* e, void* user) {
+  (void)current;
+  scene* s = (scene*)user;
+  if (e->type == CRTUI_EVENT_RESIZED) {
+    /* The application's own re-layout: stretch the column and the progress bar. */
+    crtui_widget_set_bounds(s->ctx, s->column, 10, 10, e->x - 20, e->y - 20);
+    crtui_widget_set_bounds(s->ctx, s->progress, 0, 110, e->x - 40, 14);
+  }
+  return CRTUI_EVENT_IGNORED;
+}
+
+static crtui_result input_at(scene* s, crtui_input_type type, int32_t x, int32_t y) {
+  crtui_input in;
+  memset(&in, 0, sizeof(in));
+  in.type = type;
+  in.window = s->win;
+  in.x = x;
+  in.y = y;
+  return crtui_context_send_input(s->ctx, &in);
+}
+
+static void test_interaction_render(void) {
+  scene s;
+  CHECK(build_scene(&s) == 0, "scene");
+  size_t stride = (size_t)WIDTH * 4u;
+  uint8_t* pixels = (uint8_t*)malloc(stride * HEIGHT);
+  crtui_window_render(s.ctx, s.win, pixels, stride, WIDTH, HEIGHT);
+  CHECK(rgb_at(pixels, stride, 70, 37) == COLOR_BG, "no focus ring before anything is focused");
+
+  /* Keyboard focus draws the ring just outside the widget. */
+  crtui_widget_focus(s.ctx, s.button);
+  crtui_window_render(s.ctx, s.win, pixels, stride, WIDTH, HEIGHT);
+  /* The ring sits outside the widget, so a child touching its parent's edge has
+   * that side clipped by the parent (the contract's clipping rule); the top
+   * edge, away from the container, shows it: rows 37 and 38 above the button. */
+  CHECK(rgb_at(pixels, stride, 70, 37) == COLOR_FOCUS_RING && rgb_at(pixels, stride, 70, 38) == COLOR_FOCUS_RING,
+        "a focused button has a 2 px ring just above it");
+  CHECK(rgb_at(pixels, stride, 16, 46) == COLOR_BUTTON, "the fill inside the ring is unchanged");
+  crtui_widget_focus(s.ctx, s.slider);
+  crtui_window_render(s.ctx, s.win, pixels, stride, WIDTH, HEIGHT);
+  CHECK(rgb_at(pixels, stride, 70, 37) == COLOR_BG, "moving focus removes the old ring");
+  CHECK(rgb_at(pixels, stride, 100, 87) == COLOR_FOCUS_RING && rgb_at(pixels, stride, 100, 88) == COLOR_FOCUS_RING,
+        "and draws it around the slider");
+
+  /* A pointer press darkens the button; the release restores it and activates. */
+  crtui_widget_focus(s.ctx, s.button);
+  input_at(&s, CRTUI_INPUT_POINTER_DOWN, 60, 50);
+  crtui_window_render(s.ctx, s.win, pixels, stride, WIDTH, HEIGHT);
+  CHECK(rgb_at(pixels, stride, 16, 46) == COLOR_PRESSED, "a pressed button is drawn darker");
+  input_at(&s, CRTUI_INPUT_POINTER_UP, 60, 50);
+  crtui_window_render(s.ctx, s.win, pixels, stride, WIDTH, HEIGHT);
+  CHECK(rgb_at(pixels, stride, 16, 46) == COLOR_BUTTON, "released: back to the normal fill");
+  input_at(&s, CRTUI_INPUT_POINTER_DOWN, 60, 50);
+  input_at(&s, CRTUI_INPUT_POINTER_CANCEL, 0, 0);
+  crtui_window_render(s.ctx, s.win, pixels, stride, WIDTH, HEIGHT);
+  CHECK(rgb_at(pixels, stride, 16, 46) == COLOR_BUTTON, "a cancelled press is no longer drawn pressed");
+
+  /* Dragging the slider moves its fill (abs x 10..210: 50% ends near x=110). */
+  input_at(&s, CRTUI_INPUT_POINTER_DOWN, 110, 96);
+  crtui_window_render(s.ctx, s.win, pixels, stride, WIDTH, HEIGHT);
+  CHECK(rgb_at(pixels, stride, 60, 96) == COLOR_SLIDER_FILL, "the slider fill follows a press at 50%");
+  CHECK(rgb_at(pixels, stride, 170, 96) == COLOR_TRACK, "and the track remains to the right");
+  input_at(&s, CRTUI_INPUT_POINTER_MOVE, 190, 300);
+  crtui_window_render(s.ctx, s.win, pixels, stride, WIDTH, HEIGHT);
+  CHECK(rgb_at(pixels, stride, 150, 96) == COLOR_SLIDER_FILL, "dragging right extends the fill");
+  input_at(&s, CRTUI_INPUT_POINTER_UP, 190, 300);
+  int32_t value = -1;
+  crtui_slider_get_value(s.ctx, s.slider, &value);
+  CHECK(value >= 88 && value <= 92, "the released drag left the slider near 90");
+  CHECK(rgb_at(pixels, stride, 100, 87) == COLOR_FOCUS_RING, "the dragged slider is focused, so it shows the ring");
+
+  /* Resize / re-layout: the application reacts to RESIZED, the renderer follows. */
+  crtui_widget_set_callback(s.ctx, s.win, relayout_on_resize, &s);
+  crtui_window_set_size(s.ctx, s.win, 480, 240, 1.0f);
+  uint8_t* wide = (uint8_t*)malloc((size_t)480 * 4u * 240);
+  CHECK(crtui_window_render(s.ctx, s.win, wide, 480 * 4u, 480, 240) == CRTUI_OK, "render at the new size");
+  CHECK(rgb_at(wide, 480 * 4u, 3, 3) == COLOR_BG && rgb_at(wide, 480 * 4u, 470, 230) == COLOR_BG, "new background");
+  CHECK(rgb_at(wide, 480 * 4u, 200, 127) == COLOR_PROGRESS_FILL, "the re-laid-out progress bar fills to 50% of its new width");
+  CHECK(rgb_at(wide, 480 * 4u, 300, 127) == COLOR_TRACK && rgb_at(wide, 480 * 4u, 440, 127) == COLOR_TRACK,
+        "and its track spans the new width");
+  free(wide);
+  free(pixels);
+  crtui_context_destroy(s.ctx);
+}
+
 static void test_lifecycle(void) {
   size_t stride = (size_t)WIDTH * 4u;
   uint8_t* pixels = (uint8_t*)malloc(stride * HEIGHT);
@@ -315,12 +404,14 @@ static void test_lifecycle(void) {
 
 int main(void) {
   test_pixels();
+  test_interaction_render();
   test_lifecycle();
   if (failures != 0) {
     fprintf(stderr, "crtui_render_test: %d failure(s)\n", failures);
     return 1;
   }
   printf("crtui_render_test: ok pixels=pass background=pass label=pass button=pass slider=pass progress=pass "
-         "rerender=pass stride=pass resize=pass lifecycle=pass\n");
+         "rerender=pass stride=pass resize=pass focus_ring=pass pressed=pass slider_drag=pass relayout=pass "
+         "lifecycle=pass\n");
   return 0;
 }
