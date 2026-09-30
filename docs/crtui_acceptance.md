@@ -1,8 +1,8 @@
 # crtui Acceptance (Stage `05-ui`)
 
 **Status: contract frozen (Tranche 0, all three hosts); LVGL first pixels
-(Tranche 1, all three hosts); input, focus and resize (Tranche 2) done on
-Windows/x64 2026-09-30.** The public contract in `libcrtui/include/crtui/ui.h` and the
+(Tranche 1) and input/focus/resize (Tranche 2) closed on all three hosts;
+the wrapper (Tranche 3) is done on Windows/x64 2026-09-30.** The public contract in `libcrtui/include/crtui/ui.h` and the
 rules in the table below are frozen and covered by a resource-free test.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
 surfaces and packaging behind that contract. Update the tranche sections with
@@ -67,6 +67,7 @@ the frozen contract; each is asserted by `crtui_contract_test`.
 | Events | Input enters through `crtui_context_send_input()`. The event goes to the target's callback, then bubbles to each ancestor up to the window; a callback returning `CRTUI_EVENT_HANDLED` stops the bubble; `event->target` stays the original target. `FOCUS_IN`/`FOCUS_OUT`/`RESIZED` do not bubble. Default actions run only if the event was not handled: Tab/Shift+Tab move focus, arrows move focus spatially (a focused slider consumes Left/Right to step; Up/Down still navigate -- revised in Tranche 2, see below), Enter/Space activate a button, wheel steps a slider, a press on a slider sets it and captures the pointer until the release. Programmatic changes emit no event. Input sent from inside a callback is queued and delivered after the current event finishes (FIFO), never nested; no callback fires for a destroyed widget |
 | Focus and input routing | One focus per context. Pointer/wheel goes to the topmost visible widget under the point (later siblings on top, children clipped to every ancestor); a press on a focusable widget focuses it, and releasing over the same button activates it. Key input goes to the focused widget of the addressed window, else the window. Traversal is tree pre-order over widgets that are focusable, enabled and visible (all ancestors too), Tab wraps. When the focused widget is destroyed, hidden or disabled, focus moves to the next eligible widget after it (wrapping), else clears; `FOCUS_OUT` is never sent to a destroyed widget. A disabled widget (or one under a disabled ancestor) receives nothing: the input is dropped, not passed through. A modal window (the most recently made modal wins) drops all input for every other window and refuses focus into them; making a window modal moves focus into it |
 | Geometry | Bounds are integer logical pixels relative to the parent. A window's size and DPI scale (physical = logical x scale, scale > 0) come from `crtui_window_set_size()`, which emits `RESIZED` (x,y = size, value = scale in percent) to the window. Hit-testing uses the clipped, visible area. Automatic layout arrives in Tranche 4; until then bounds are application-set and authoritative |
+| Binary surface | Only functions declared `CRTUI_API` are exported from the shared library (hidden visibility everywhere else): LVGL symbols are never visible to consumers -- see Tranche 3 |
 | Surfaces | `crtui_surface_view_create()` reserves the API and returns `CRTUI_ERROR_UNSUPPORTED` until Tranche 5. Frozen ownership rule: the view owns only position, size, clip, opacity, visibility, z-order, damage and hit-testing, never the producer's frame |
 | Errors | `crtui_result`: `0..-7` numerically identical to `crtmedia_result` (`OK`, `INVALID_ARGUMENT`, `UNSUPPORTED`, `WOULD_BLOCK`, `IO`, `TIMEOUT`, `CANCELLED`, `PROTOCOL`), plus `WRONG_THREAD = -8`, `INVALID_HANDLE = -9`, `STATE = -10`. A failed create always clears its output. No silent failure |
 
@@ -458,6 +459,57 @@ already covers the demo).
 
 The sample application calls no `lv_*` symbol. LVGL becomes a private
 dependency: not in installed headers, not in the public link line of the API.
+
+**Windows/x64 done 2026-09-30.**
+
+The application-facing surface was already LVGL-free at the header level; this
+tranche made the *binary* surface match and made both provable.
+
+- **A real finding: the shared library published LVGL.** `libcrtui.dll` was
+  exporting 2,286 `lv_*` functions plus LVGL's bundled helpers (`frogfs_decomp_raw`,
+  `load_kern`) next to its 35 `crtui_*` functions, because
+  `WINDOWS_EXPORT_ALL_SYMBOLS` exports everything (an ELF/Mach-O `.so`/`.dylib`
+  would have done the same by default visibility). So a consumer could have
+  called LVGL through the DLL even though no header was installed. Fixed with
+  explicit export control: `include/crtui/api.h` defines `CRTUI_API`
+  (`dllexport` / default visibility, only while building libcrtui; empty for
+  consumers), every public function in `ui.h`/`crtgfx.h` carries it, crtui and
+  LVGL are compiled `-fvisibility=hidden`, and `WINDOWS_EXPORT_ALL_SYMBOLS` is
+  OFF. `libcrtui.dll` now exports exactly the 35 declared `crtui_*` functions and
+  nothing else. (The `dllexport` definition is limited to the shared target on
+  Windows so it never lands in a consumer executable; the ELF/Mach-O visibility
+  attributes are reasoned, not yet run -- the Linux and macOS replays verify
+  them.)
+- **The sample application.** `examples/ui-basic` is the installed application
+  view: `main.c` (the same source as `crtui_window_demo`: a
+  Window/Container/Label/Button/Slider/Progress scene, crtgfx input through the
+  adapter, present through crtgfx), a standalone `CMakeLists.txt` that finds
+  only `crtui` and `crtgfx` (import libraries `crtui_dll`/`crtgfx_dll` on Windows,
+  static archives elsewhere) and names no LVGL header or library, and the
+  prebuilt `examples/bin/crtui_window_demo`. `verify_dist.py` requires all three
+  and rejects an `lv_*`/`LV_*`/`lvgl` include in the installed sample sources.
+- **`tools/check_crtui_privacy.py` (CTest `crtui_privacy_test_runs`).** With
+  llvm-nm/llvm-readobj: (1) no crtui header includes LVGL or uses an `lv_`
+  identifier (comments may say that LVGL is private); (2) the shared library
+  exports only `crtui_*` symbols, none `lv_*`, and every `CRTUI_API` function
+  the headers declare; (3) the sample application's object files reference no
+  `lv_*` symbol; (4) the sample source names no LVGL. Real result:
+  `crtui_privacy: ok declared=35 exports=35 lvgl_exports=0 objects=1 headers=3`.
+  Mutation-checked: a sample that calls `lv_obj_create` fails both the source
+  and the object check.
+- **Rebuilt externally from the packaged SDK.** The installed
+  `examples/ui-basic` was configured and built with the packaged
+  `crt-toolchain.cmake` against `dist/05-ui` alone (no repository headers or
+  libraries), linking only `libcrtui_dll` and `libcrtgfx_dll`; the resulting
+  `crtui_basic_example.exe` imports `libcrtui.dll` and `libcrtgfx.dll` (plus
+  KERNEL32/synch), passes the privacy tool against the packaged DLL and headers,
+  and `crtui_basic_example 30` reports `presented=30 pixel_check=pass
+  input_check=pass`.
+- Full in-tree `ctest` passes (one expected no-webcam skip), the default C-stage
+  preset stays 127/127, and `crt-ui-dist` verifies with the new checks.
+- Not yet covered: the Linux/macOS variants of the export control and of
+  `examples/ui-basic/CMakeLists.txt` (written, unverified), and the isolated
+  stage build that fetches LVGL and rebuilds this sample (Tranche 7).
 
 ### 4. Layout, styling, and the v1 widget set
 

@@ -1,5 +1,5 @@
 /* crtui window demo (Tranches 1-2): a Window > Container > Label/Button/Slider/
- * Progress scene, rendered by crtui's private LVGL software renderer into the
+ * Progress scene, rendered by crtui's software renderer into the
  * crtgfx window's software framebuffer and presented through the crtgfx window
  * path, with crtgfx input events (keyboard, pointer, wheel, resize) fed to crtui
  * through the crtui/crtgfx.h adapter.

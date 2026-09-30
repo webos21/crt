@@ -10,6 +10,37 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 3 closed on Windows/x64: LVGL is now genuinely private --
+  and the check found that it was not.** `docs/crtui_acceptance.md`'s Tranche 3
+  section has the full detail.
+
+  Finding: although no LVGL header is installed, `libcrtui.dll` exported 2,286
+  `lv_*` functions and LVGL's bundled helpers next to its 35 `crtui_*` functions
+  (`WINDOWS_EXPORT_ALL_SYMBOLS`; an ELF `.so` or Mach-O `.dylib` exports
+  everything by default too), so a consumer could still have called LVGL through
+  the library. Fix: `crtui/api.h` (`CRTUI_API`: `dllexport`/default visibility
+  only while building libcrtui, empty for consumers) on every public function,
+  `-fvisibility=hidden` for crtui and LVGL, `WINDOWS_EXPORT_ALL_SYMBOLS` OFF.
+  The DLL now exports exactly the 35 declared functions. The ELF/Mach-O
+  attributes are reasoned, not run on this host; the replays verify them.
+
+  Sample and proof: `examples/ui-basic` (installed `main.c`, a standalone
+  `CMakeLists.txt` that finds only crtui and crtgfx, and the prebuilt
+  `examples/bin/crtui_window_demo`); `verify_dist.py` requires them and rejects
+  LVGL references in the sample sources. New `tools/check_crtui_privacy.py`
+  (CTest `crtui_privacy_test_runs`): `crtui_privacy: ok declared=35 exports=35
+  lvgl_exports=0 objects=1 headers=3`, mutation-checked (a sample calling
+  `lv_obj_create` fails the source and the object check). The installed sample
+  was rebuilt externally from `dist/05-ui` alone, links only `libcrtui_dll` and
+  `libcrtgfx_dll`, imports `libcrtui.dll`/`libcrtgfx.dll`, passes the privacy
+  tool against the packaged DLL, and `crtui_basic_example 30` reports
+  `presented=30 pixel_check=pass input_check=pass`. Full in-tree `ctest` and the
+  127-test default preset pass; `crt-ui-dist` verifies. Building that external
+  example needs the isolated-stage builder's `runtime_env()` (e.g. `CRT_MKSH_EXE`)
+  -- a plain `cmake` configure against the toolchain file fails with
+  `CRT_MKSH_EXE is not set`, the same as for every other installed example.
+  macOS/arm64 and Linux replay is next.
+
 - **`crtui` Tranche 2 closed on Linux/x86_64 (native Intel host, Wayland)
   with no code change.** `docs/crtui_acceptance.md`'s Tranche 2 section has the
   full detail. `crtui_input_test` (8 groups), `crtui_contract_test` (13) and

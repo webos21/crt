@@ -83,8 +83,13 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   `crtui_window_demo`); verified with scripted input -- interactive real-device
   input is not automated on any host. Evidence in `HISTORY.md` and
   `docs/crtui_acceptance.md`.
-* [ ] **3. `crtui` wrapper (first green).** The sample calls no `lv_*` symbol;
-  LVGL is private.
+* [ ] **3. `crtui` wrapper (first green).** Windows/x64 done 2026-09-30,
+  recorded in `HISTORY.md`: `libcrtui.dll` no longer exports LVGL (was 2,286
+  `lv_*` symbols; now exactly the 35 `CRTUI_API` functions), the installed
+  `examples/ui-basic` uses crtui/crtgfx only and was rebuilt externally from the
+  packaged SDK, and `tools/check_crtui_privacy.py` (`crtui_privacy_test_runs`)
+  proves headers, exports, sample objects and sample source are LVGL-free.
+  macOS/arm64 and Linux replay next (they verify the ELF/Mach-O visibility side).
 * [ ] **4. Layout, styling, v1 widget set.** CRT-neutral properties only.
 * [ ] **5. External Surface view.** Producer-agnostic surface composition; the
   `06-web` prerequisite.

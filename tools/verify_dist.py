@@ -392,7 +392,19 @@ def main() -> None:
         # crtui: the public header and both libraries. No LVGL header may leak
         # into the installed SDK (LVGL is a private dependency, docs/crtui_
         # acceptance.md), so its absence is checked too.
-        require(dist / "include" / "crtui" / "ui.h")
+        for header in ("ui.h", "api.h", "crtgfx.h"):
+            require(dist / "include" / "crtui" / header)
+        # The installed application sample: source, standalone project, binary.
+        # It must be a pure crtui/crtgfx consumer -- naming LVGL in it would mean
+        # the private dependency leaked into the application-facing surface.
+        for relative in ("main.c", "CMakeLists.txt"):
+            require(dist / "examples" / "ui-basic" / relative)
+        require(dist / "examples" / "bin" / f"crtui_window_demo{suffix}")
+        for relative in ("main.c", "CMakeLists.txt"):
+            sample = (dist / "examples" / "ui-basic" / relative).read_text(encoding="utf-8")
+            code = re.sub(r"/\*.*?\*/", "", sample, flags=re.DOTALL)
+            if re.search(r"lv_[a-z0-9_]+|LV_[A-Z0-9_]+|#\s*include\s*[<\"][^>\"]*lvgl", code, re.IGNORECASE):
+                raise SystemExit(f"examples/ui-basic/{relative} references LVGL; it must use crtui/crtgfx only")
         require_any(dist / "lib", ("libcrtui.a",), "static crtui")
         require_any(dist / "lib", ("*crtui*dll*", "libcrtui.so*", "libcrtui.dylib"), "shared crtui")
         for leaked in ("lvgl", "lvgl.h", "lv_conf.h"):

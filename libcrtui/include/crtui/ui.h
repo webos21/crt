@@ -90,6 +90,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "crtui/api.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -192,68 +194,68 @@ typedef void (*crtui_post_fn)(void* user);
 /* ---- Context ------------------------------------------------------------ */
 
 /* Binds the calling thread as the UI thread. */
-crtui_result crtui_context_create(crtui_context** out_context);
-crtui_result crtui_context_destroy(crtui_context* context);
+CRTUI_API crtui_result crtui_context_create(crtui_context** out_context);
+CRTUI_API crtui_result crtui_context_destroy(crtui_context* context);
 
 /* The only thread-safe call. Queues `fn(user)` to run on the UI thread. */
-crtui_result crtui_context_post(crtui_context* context, crtui_post_fn fn, void* user);
+CRTUI_API crtui_result crtui_context_post(crtui_context* context, crtui_post_fn fn, void* user);
 
 /* Runs queued posted functions (FIFO), then queued input; sets *out_ran (may be
  * NULL) to the number of posted functions run. */
-crtui_result crtui_context_pump(crtui_context* context, size_t* out_ran);
+CRTUI_API crtui_result crtui_context_pump(crtui_context* context, size_t* out_ran);
 
-crtui_result crtui_context_send_input(crtui_context* context, const crtui_input* input);
+CRTUI_API crtui_result crtui_context_send_input(crtui_context* context, const crtui_input* input);
 
 /* ---- Widgets ------------------------------------------------------------ */
 
-crtui_result crtui_window_create(crtui_context* context, crtui_window* out_window);
-crtui_result crtui_container_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
-crtui_result crtui_text_create(crtui_context* context, crtui_widget parent, const char* utf8, crtui_widget* out_widget);
-crtui_result crtui_button_create(crtui_context* context, crtui_widget parent, const char* utf8, crtui_widget* out_widget);
-crtui_result crtui_slider_create(
+CRTUI_API crtui_result crtui_window_create(crtui_context* context, crtui_window* out_window);
+CRTUI_API crtui_result crtui_container_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_text_create(crtui_context* context, crtui_widget parent, const char* utf8, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_button_create(crtui_context* context, crtui_widget parent, const char* utf8, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_slider_create(
     crtui_context* context, crtui_widget parent, int32_t min_value, int32_t max_value, crtui_widget* out_widget);
 /* A progress bar over the fixed range 0..100 (initially 0). Not focusable. */
-crtui_result crtui_progress_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
-crtui_result crtui_progress_set_value(crtui_context* context, crtui_widget progress, int32_t value);
-crtui_result crtui_progress_get_value(crtui_context* context, crtui_widget progress, int32_t* out_value);
-crtui_result crtui_surface_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_progress_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_progress_set_value(crtui_context* context, crtui_widget progress, int32_t value);
+CRTUI_API crtui_result crtui_progress_get_value(crtui_context* context, crtui_widget progress, int32_t* out_value);
+CRTUI_API crtui_result crtui_surface_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
 
 /* Destroys `widget` and its whole subtree. A window's parent is none. */
-crtui_result crtui_widget_destroy(crtui_context* context, crtui_widget widget);
+CRTUI_API crtui_result crtui_widget_destroy(crtui_context* context, crtui_widget widget);
 
-crtui_result crtui_widget_get_kind(crtui_context* context, crtui_widget widget, crtui_widget_kind* out_kind);
-crtui_result crtui_widget_get_parent(crtui_context* context, crtui_widget widget, crtui_widget* out_parent);
+CRTUI_API crtui_result crtui_widget_get_kind(crtui_context* context, crtui_widget widget, crtui_widget_kind* out_kind);
+CRTUI_API crtui_result crtui_widget_get_parent(crtui_context* context, crtui_widget widget, crtui_widget* out_parent);
 
-crtui_result crtui_widget_set_bounds(
+CRTUI_API crtui_result crtui_widget_set_bounds(
     crtui_context* context, crtui_widget widget, int32_t x, int32_t y, int32_t width, int32_t height);
-crtui_result crtui_widget_get_bounds(
+CRTUI_API crtui_result crtui_widget_get_bounds(
     crtui_context* context, crtui_widget widget, int32_t* out_x, int32_t* out_y, int32_t* out_width,
     int32_t* out_height);
-crtui_result crtui_widget_set_visible(crtui_context* context, crtui_widget widget, int visible);
-crtui_result crtui_widget_set_enabled(crtui_context* context, crtui_widget widget, int enabled);
-crtui_result crtui_widget_set_focusable(crtui_context* context, crtui_widget widget, int focusable);
+CRTUI_API crtui_result crtui_widget_set_visible(crtui_context* context, crtui_widget widget, int visible);
+CRTUI_API crtui_result crtui_widget_set_enabled(crtui_context* context, crtui_widget widget, int enabled);
+CRTUI_API crtui_result crtui_widget_set_focusable(crtui_context* context, crtui_widget widget, int focusable);
 
 /* Text and button widgets only. get_text copies at most capacity-1 bytes plus
  * a NUL into buffer and sets *out_length (may be NULL) to the full length. */
-crtui_result crtui_widget_set_text(crtui_context* context, crtui_widget widget, const char* utf8);
-crtui_result crtui_widget_get_text(
+CRTUI_API crtui_result crtui_widget_set_text(crtui_context* context, crtui_widget widget, const char* utf8);
+CRTUI_API crtui_result crtui_widget_get_text(
     crtui_context* context, crtui_widget widget, char* buffer, size_t capacity, size_t* out_length);
 
 /* Sliders only. Programmatic changes clamp to [min, max] and do NOT emit
  * VALUE_CHANGED (only user input does). */
-crtui_result crtui_slider_set_value(crtui_context* context, crtui_widget slider, int32_t value);
-crtui_result crtui_slider_get_value(crtui_context* context, crtui_widget slider, int32_t* out_value);
+CRTUI_API crtui_result crtui_slider_set_value(crtui_context* context, crtui_widget slider, int32_t value);
+CRTUI_API crtui_result crtui_slider_get_value(crtui_context* context, crtui_widget slider, int32_t* out_value);
 
 /* One callback per widget; NULL clears it. */
-crtui_result crtui_widget_set_callback(crtui_context* context, crtui_widget widget, crtui_event_fn fn, void* user);
+CRTUI_API crtui_result crtui_widget_set_callback(crtui_context* context, crtui_widget widget, crtui_event_fn fn, void* user);
 
 /* ---- Windows ------------------------------------------------------------ */
 
-crtui_result crtui_window_set_size(
+CRTUI_API crtui_result crtui_window_set_size(
     crtui_context* context, crtui_window window, int32_t width, int32_t height, float dpi_scale);
-crtui_result crtui_window_get_size(
+CRTUI_API crtui_result crtui_window_get_size(
     crtui_context* context, crtui_window window, int32_t* out_width, int32_t* out_height, float* out_dpi_scale);
-crtui_result crtui_window_set_modal(crtui_context* context, crtui_window window, int modal);
+CRTUI_API crtui_result crtui_window_set_modal(crtui_context* context, crtui_window window, int modal);
 
 /* ---- Rendering (Tranche 1) ---------------------------------------------- */
 
@@ -265,15 +267,15 @@ crtui_result crtui_window_set_modal(crtui_context* context, crtui_window window,
  * this build has no renderer (crtui is built without LVGL); the headless model
  * works either way. The image is drawn by a private LVGL software renderer:
  * crtui never exposes LVGL, and crtgfx presentation is the caller's step. */
-crtui_result crtui_window_render(
+CRTUI_API crtui_result crtui_window_render(
     crtui_context* context, crtui_window window, void* pixels, size_t stride_bytes, int32_t width, int32_t height);
 
 /* ---- Focus and hit-testing ---------------------------------------------- */
 
-crtui_result crtui_widget_focus(crtui_context* context, crtui_widget widget);
+CRTUI_API crtui_result crtui_widget_focus(crtui_context* context, crtui_widget widget);
 /* CRTUI_ERROR_STATE (and *out_widget = CRTUI_INVALID_WIDGET) if nothing is focused. */
-crtui_result crtui_context_get_focus(crtui_context* context, crtui_widget* out_widget);
-crtui_result crtui_context_hit_test(
+CRTUI_API crtui_result crtui_context_get_focus(crtui_context* context, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_context_hit_test(
     crtui_context* context, crtui_window window, int32_t x, int32_t y, crtui_widget* out_widget);
 
 #ifdef __cplusplus

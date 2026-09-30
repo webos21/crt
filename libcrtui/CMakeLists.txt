@@ -30,7 +30,7 @@ if(CRTUI_ENABLE_LVGL)
   file(GLOB_RECURSE CRTUI_LVGL_SOURCES CONFIGURE_DEPENDS "${CRTUI_LVGL_ROOT}/src/*.c")
   set(CRTUI_LVGL_PRIVATE_SOURCES src/lvgl_backend.c)
   # Third-party code: no warnings-as-errors, LVGL reads only crtui's lv_conf.h.
-  set(CRTUI_LVGL_COMPILE_OPTIONS -w -DLV_CONF_INCLUDE_SIMPLE=1)
+  set(CRTUI_LVGL_COMPILE_OPTIONS -w -DLV_CONF_INCLUDE_SIMPLE=1 -fvisibility=hidden)
   if(CRT_TARGET_OS STREQUAL "windows")
     # Same reason as crtmedia's curl sources: this sysroot has no <windows.h>,
     # so the mingw predefined Win32 macros must not steer LVGL into it.
@@ -55,6 +55,13 @@ add_library(crtui STATIC
 if(CRTUI_ENABLE_LVGL)
   target_compile_definitions(crtui PRIVATE CRTUI_HAVE_LVGL=1)
 endif()
+# Private LVGL (Tranche 3): hidden by default, only CRTUI_API functions are
+# exported (see include/crtui/api.h). On Windows the dllexport attribute is
+# only wanted on the DLL, never on objects that land in a consumer's executable.
+target_compile_options(crtui PRIVATE -fvisibility=hidden)
+if(NOT CRT_TARGET_OS STREQUAL "windows")
+  target_compile_definitions(crtui PRIVATE CRTUI_BUILD_LIBRARY=1)
+endif()
 target_link_libraries(crtui PRIVATE crt_build_flags c m dl cxx)
 target_include_directories(crtui PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -75,6 +82,8 @@ add_library(crtui_shared SHARED
 if(CRTUI_ENABLE_LVGL)
   target_compile_definitions(crtui_shared PRIVATE CRTUI_HAVE_LVGL=1)
 endif()
+target_compile_options(crtui_shared PRIVATE -fvisibility=hidden)
+target_compile_definitions(crtui_shared PRIVATE CRTUI_BUILD_LIBRARY=1)
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(crtui_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
 endif()
@@ -89,7 +98,9 @@ set_target_properties(crtui_shared PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-  WINDOWS_EXPORT_ALL_SYMBOLS ON
+  # Exports come from CRTUI_API only: exporting everything would publish every
+  # LVGL symbol from the DLL.
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF
 )
 if(CRT_TARGET_OS STREQUAL "windows")
   set_target_properties(crtui_shared PROPERTIES
@@ -289,4 +300,40 @@ if(CRTUI_ENABLE_LVGL)
   endif()
   crt_link_startup_end_objects(crtui_window_demo)
   add_dependencies(crtui_window_demo c crt1 crtui)
+endif()
+
+# Installed sample (Tranche 3): examples/ui-basic is the application-level view
+# of crtui -- this same demo source, a standalone project that includes only
+# crtui and crtgfx headers, and the prebuilt binary.
+if(CRTUI_ENABLE_LVGL)
+  install(TARGETS crtui_window_demo
+    RUNTIME DESTINATION examples/bin COMPONENT crt-ui
+  )
+  install(FILES tools/window_demo.c
+    DESTINATION examples/ui-basic RENAME main.c COMPONENT crt-ui
+  )
+  install(FILES "${CMAKE_SOURCE_DIR}/examples/ui-basic/CMakeLists.txt"
+    DESTINATION examples/ui-basic COMPONENT crt-ui
+  )
+endif()
+
+# crtui_privacy_test: Tranche 3 -- LVGL stays private. Headers name no LVGL, the
+# shared library exports only crtui_* functions (every declared one), and the
+# sample application's own objects and source reference no lv_* symbol. Needs
+# llvm-nm/llvm-readobj from the compiler's LLVM directory.
+if(CRTUI_ENABLE_LVGL AND Python3_Interpreter_FOUND)
+  get_filename_component(CRTUI_LLVM_BIN "${CMAKE_C_COMPILER}" DIRECTORY)
+  add_test(NAME crtui_privacy_test_runs COMMAND
+    "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_crtui_privacy.py"
+      --llvm-bin "${CRTUI_LLVM_BIN}"
+      --headers "${CMAKE_CURRENT_SOURCE_DIR}/include"
+      --shared "$<TARGET_FILE:crtui_shared>"
+      --object "$<TARGET_OBJECTS:crtui_window_demo>"
+      --example-source "${CMAKE_CURRENT_SOURCE_DIR}/tools/window_demo.c"
+  )
+  set_tests_properties(crtui_privacy_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "crtui_privacy: ok"
+    TIMEOUT 60
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_privacy_test_runs)
 endif()

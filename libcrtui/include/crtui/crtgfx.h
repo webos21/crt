@@ -54,7 +54,7 @@ typedef struct crtui_crtgfx_state {
  *
  * Returns CRTUI_OK for handled and ignored events, or the error the crtui call
  * produced (for example CRTUI_ERROR_INVALID_HANDLE for a destroyed window). */
-crtui_result crtui_window_handle_crtgfx_event(
+CRTUI_API crtui_result crtui_window_handle_crtgfx_event(
     crtui_context* context, crtui_window window, crtui_crtgfx_state* state, const crtgfx_event* event);
 
 #ifdef __cplusplus
