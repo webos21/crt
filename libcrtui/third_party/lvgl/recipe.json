@@ -30,11 +30,12 @@
     ]
   },
   "import": {
-    "status": "pinned, not imported",
-    "planned_tranche": 1,
+    "status": "fetched at build time (Tranche 1), never vendored in the repository",
+    "fetch": "tools/fetch_lvgl.py (CMake target crtui-lvgl-fetch)",
+    "extracted_paths": ["src/", "include/", "LICENCE.txt", "lv_conf_template.h", "lvgl.h", "lvgl_private.h", "lv_version.h"],
+    "build_option": "CRTUI_ENABLE_LVGL (default OFF); crtui's own configuration is libcrtui/src/lvgl_conf/lv_conf.h",
     "notes": [
-      "Nothing from LVGL is vendored in Tranche 0: this file records the pin only.",
-      "The full archive is ~111 MB because it carries tests/, docs/, examples/ and demos/; Tranche 1 should import only what the build needs (src/, include/, LICENCE.txt, the lv_conf template) and record the import method in this file, the way libcrtgfx/third_party/skia/recipe.json records its sparse paths.",
+      "Tranche 1 imports LVGL privately: tools/fetch_lvgl.py downloads the archive, verifies size, SHA-256 and the commit recorded in the archive's pax header, and extracts only the paths above (28 MB of the 111 MB archive, which also carries tests/, docs/, examples/ and demos/). Nothing is committed to the repository.",
       "The archive hash is of GitHub's generated tarball as observed on 2026-09-30. GitHub can regenerate archives, so expected_commit is the authoritative pin; if the archive hash ever differs for the same commit, re-derive it and update this file rather than trusting either blindly.",
       "Do not patch LVGL's own source to make a build error go away. A build failure first means a missing CRT/PAL/C runtime surface (AGENTS.md porting loop); only build-configuration edits (lv_conf.h) belong in patches."
     ]

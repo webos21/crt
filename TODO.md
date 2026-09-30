@@ -71,9 +71,13 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   2026-09-30 on Windows/x64, macOS/arm64, and Linux/x86_64 (frozen `crtui/ui.h`,
   headless model, `crtui_contract_test`, the `05-ui` stage, LVGL v9.6.0 pinned
   but not imported); evidence in `HISTORY.md` and `docs/crtui_acceptance.md`.
-* [ ] **1. LVGL import and first pixels.** Software draw buffer through the
-  existing `crtgfx` present path; small Window/Column/Label/Button/Slider/
-  Progress demo.
+* [ ] **1. LVGL import and first pixels.** Windows/x64 done 2026-09-30,
+  recorded in `HISTORY.md`: LVGL v9.6.0 fetched/verified/extracted by
+  `tools/fetch_lvgl.py`, compiled privately into `libcrtui`
+  (`-DCRTUI_ENABLE_LVGL=ON`), rendered through a CRT display adapter
+  (`crtui_window_render()`, BGRA8888) and presented by crtgfx; `crtui_render_
+  test: ok ...` checks real pixels and a handle audit, `crtui_window_demo 30`
+  reports `presented=30 pixel_check=pass`. macOS/arm64 and Linux replay next.
 * [ ] **2. Input, focus, resize.** Pointer, keyboard (Tab/arrows/Enter/Space),
   wheel, touch where available; STB-style keyboard navigation from the start.
 * [ ] **3. `crtui` wrapper (first green).** The sample calls no `lv_*` symbol;

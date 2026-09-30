@@ -5,6 +5,8 @@
 
 #include "crtui/ui.h"
 
+#include "render_tree.h"
+
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +34,7 @@ typedef struct crtui_node {
   float dpi_scale;
   int modal;
   uint64_t modal_order;
+  crtui_lvgl_backend* backend; /* window only; created on first render */
 } crtui_node;
 
 typedef struct crtui_posted {
@@ -53,6 +56,7 @@ struct crtui_context {
 
   crtui_widget focus;
   crtui_widget pressed; /* widget that took the current pointer press */
+  uint64_t version;     /* bumped by every change a renderer could see */
   uint64_t modal_counter;
 
   crtui_input* input_queue;
@@ -85,6 +89,18 @@ static crtui_node* resolve(crtui_context* context, crtui_widget id) {
 
 static crtui_widget id_of(const crtui_context* context, const crtui_node* node) {
   return ((uint64_t)node->generation << 32) | (uint64_t)((size_t)(node - context->nodes) + 1);
+}
+
+static void touch(crtui_context* context) { ++context->version; }
+
+/* Frees a window's private renderer (a no-op in a build without LVGL). */
+static void release_backend(crtui_node* node) {
+#ifdef CRTUI_HAVE_LVGL
+  if (node->backend != NULL) {
+    crtui_lvgl_backend_destroy(node->backend);
+  }
+#endif
+  node->backend = NULL;
 }
 
 #define CRTUI_CHECK_CONTEXT(context)                       \
@@ -217,6 +233,7 @@ static crtui_result create_child(
     return result;
   }
   *out = id;
+  touch(context);
   if (out_node != NULL) {
     *out_node = resolve(context, id);
   }
@@ -529,6 +546,7 @@ static void process_input(crtui_context* context, const crtui_input* input) {
         if (next > focused_node->max_value) next = focused_node->max_value;
         if (next != focused_node->value) {
           focused_node->value = next;
+          touch(context);
           send_simple(context, CRTUI_EVENT_VALUE_CHANGED, focused, 0, 0, CRTUI_KEY_NONE, next, 1, NULL);
         }
       }
@@ -562,6 +580,7 @@ static void kill_subtree(crtui_context* context, crtui_widget id, int depth) {
   node->child_count = 0;
   node->child_capacity = 0;
   node->in_use = 0; /* ids into this node are invalid from here on */
+  release_backend(node);
   free(node->text);
   node->text = NULL;
   node->callback = NULL;
@@ -599,6 +618,7 @@ crtui_result crtui_context_destroy(crtui_context* context) {
   for (size_t i = 0; i < context->node_count; ++i) {
     crtui_node* node = &context->nodes[i];
     if (node->in_use) {
+      release_backend(node);
       free(node->text);
       free(node->children);
       node->in_use = 0;
@@ -701,6 +721,7 @@ crtui_result crtui_window_create(crtui_context* context, crtui_window* out_windo
   node->window_width = 0;
   node->window_height = 0;
   *out_window = id_of(context, node);
+  touch(context);
   return CRTUI_OK;
 }
 
@@ -786,6 +807,7 @@ crtui_result crtui_widget_destroy(crtui_context* context, crtui_widget widget) {
     }
   }
   kill_subtree(context, widget, 0);
+  touch(context);
   focus_snapshot_end(context, &snapshot);
   return CRTUI_OK;
 }
@@ -825,6 +847,7 @@ crtui_result crtui_widget_set_bounds(
   node->y = y;
   node->width = width;
   node->height = height;
+  touch(context);
   return CRTUI_OK;
 }
 
@@ -849,6 +872,7 @@ crtui_result crtui_widget_set_visible(crtui_context* context, crtui_widget widge
   crtui_focus_snapshot snapshot;
   focus_snapshot_begin(context, &snapshot);
   node->visible = visible != 0;
+  touch(context);
   focus_snapshot_end(context, &snapshot);
   return CRTUI_OK;
 }
@@ -859,6 +883,7 @@ crtui_result crtui_widget_set_enabled(crtui_context* context, crtui_widget widge
   crtui_focus_snapshot snapshot;
   focus_snapshot_begin(context, &snapshot);
   node->enabled = enabled != 0;
+  touch(context);
   focus_snapshot_end(context, &snapshot);
   return CRTUI_OK;
 }
@@ -888,6 +913,7 @@ crtui_result crtui_widget_set_text(crtui_context* context, crtui_widget widget, 
   }
   free(node->text);
   node->text = copy;
+  touch(context);
   return CRTUI_OK;
 }
 
@@ -919,6 +945,7 @@ crtui_result crtui_slider_set_value(crtui_context* context, crtui_widget slider,
   if (value < node->min_value) value = node->min_value;
   if (value > node->max_value) value = node->max_value;
   node->value = value;
+  touch(context);
   return CRTUI_OK;
 }
 
@@ -940,6 +967,125 @@ crtui_result crtui_widget_set_callback(crtui_context* context, crtui_widget widg
   return CRTUI_OK;
 }
 
+crtui_result crtui_progress_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  crtui_node* node = NULL;
+  crtui_result result = create_child(context, CRTUI_WIDGET_PROGRESS, parent, out_widget, &node);
+  if (result != CRTUI_OK) {
+    return result;
+  }
+  node->min_value = 0;
+  node->max_value = 100;
+  node->value = 0;
+  return CRTUI_OK;
+}
+
+crtui_result crtui_progress_set_value(crtui_context* context, crtui_widget progress, int32_t value) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, progress, node);
+  if (node->kind != CRTUI_WIDGET_PROGRESS) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  if (value < node->min_value) value = node->min_value;
+  if (value > node->max_value) value = node->max_value;
+  node->value = value;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_progress_get_value(crtui_context* context, crtui_widget progress, int32_t* out_value) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, progress, node);
+  if (node->kind != CRTUI_WIDGET_PROGRESS || out_value == NULL) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  *out_value = node->value;
+  return CRTUI_OK;
+}
+
+/* ---- rendering ---------------------------------------------------------- */
+
+#ifdef CRTUI_HAVE_LVGL
+typedef struct crtui_item_list {
+  crtui_render_item* items;
+  size_t count;
+  size_t capacity;
+} crtui_item_list;
+
+static int build_items(
+    crtui_context* context, crtui_widget id, int32_t parent_index, int parent_enabled, int depth,
+    crtui_item_list* list) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL || depth > CRTUI_MAX_DEPTH) {
+    return 0;
+  }
+  if (list->count == list->capacity) {
+    size_t capacity = list->capacity == 0 ? 32 : list->capacity * 2;
+    crtui_render_item* grown = (crtui_render_item*)realloc(list->items, capacity * sizeof(*grown));
+    if (grown == NULL) {
+      return -1;
+    }
+    list->items = grown;
+    list->capacity = capacity;
+  }
+  int32_t index = (int32_t)list->count++;
+  crtui_render_item* item = &list->items[index];
+  memset(item, 0, sizeof(*item));
+  item->kind = node->kind;
+  item->parent = parent_index;
+  item->visible = node->visible;
+  item->enabled = parent_enabled && node->enabled;
+  item->text = node->text;
+  item->value = node->value;
+  item->min_value = node->min_value;
+  item->max_value = node->max_value;
+  if (node->kind == CRTUI_WIDGET_WINDOW) {
+    item->x = 0;
+    item->y = 0;
+    item->width = node->window_width;
+    item->height = node->window_height;
+  } else {
+    item->x = node->x;
+    item->y = node->y;
+    item->width = node->width;
+    item->height = node->height;
+  }
+  int enabled = item->enabled;
+  for (size_t i = 0; i < node->child_count; ++i) {
+    /* `item` may move if the list grows, so it is not used past this point. */
+    if (build_items(context, node->children[i], index, enabled, depth + 1, list) != 0) {
+      return -1;
+    }
+    node = resolve(context, id);
+  }
+  return 0;
+}
+#endif
+
+crtui_result crtui_window_render(
+    crtui_context* context, crtui_window window, void* pixels, size_t stride_bytes, int32_t width, int32_t height) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, window, node);
+  if (node->kind != CRTUI_WIDGET_WINDOW || pixels == NULL || width <= 0 || height <= 0 ||
+      width != node->window_width || height != node->window_height || stride_bytes < (size_t)width * 4u) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+#ifndef CRTUI_HAVE_LVGL
+  return CRTUI_ERROR_UNSUPPORTED;
+#else
+  crtui_item_list list;
+  memset(&list, 0, sizeof(list));
+  if (build_items(context, window, -1, 1, 0, &list) != 0) {
+    free(list.items);
+    return CRTUI_ERROR_IO;
+  }
+  node = resolve(context, window);
+  crtui_result result = crtui_lvgl_render(&node->backend, list.items, list.count, context->version, pixels, stride_bytes);
+  free(list.items);
+  return result;
+#endif
+}
+
 /* ---- windows ------------------------------------------------------------ */
 
 crtui_result crtui_window_set_size(
@@ -952,6 +1098,7 @@ crtui_result crtui_window_set_size(
   node->window_width = width;
   node->window_height = height;
   node->dpi_scale = dpi_scale;
+  touch(context);
   send_simple(context, CRTUI_EVENT_RESIZED, window, width, height, CRTUI_KEY_NONE, (int32_t)(dpi_scale * 100.0f + 0.5f),
               0, NULL);
   return CRTUI_OK;

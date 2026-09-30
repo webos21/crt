@@ -123,7 +123,7 @@ state on that host, not a promise.
 | Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/Vulkan and macOS/Metal; measured no-CPU-readback GPU-copy fallback on Windows/D3D12. Lifecycle and isolated-package gates pass. |
 | Video encode and capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, and AVFoundation/VideoToolbox paths pass real capture, hardware/software encode, mux/decode-back, timing, lifecycle, and isolated-package acceptance. |
 | Network streaming | Verified | Verified | Verified | Bounded transport core; progressive HTTP input (Range and chunked); fragmented-MP4 HTTP upload with a hard memory bound; `Range`+`If-Range` reconnect that never splices a changed resource and never auto-resumes output; HTTPS with a caller-supplied CA and a correct-CA/wrong-CA/wrong-SAN matrix; lifecycle stress and isolated-package acceptance with an installed streaming consumer. Loopback/IP-literal fixtures; the resolver is still IPv4/UDP A-record only. |
-| Application UI (`crtui`, LVGL) | Planned | Planned | Contract + headless model verified (Tranche 0) | Stage `05-ui`; LVGL rendering not started; see [`docs/crtui_acceptance.md`](docs/crtui_acceptance.md). |
+| Application UI (`crtui`, LVGL) | Planned | Planned | Contract verified; LVGL software rendering verified on Windows (Tranche 1) | Stage `05-ui`; input/widgets/surfaces still to come; see [`docs/crtui_acceptance.md`](docs/crtui_acceptance.md). |
 | Web runtime (WebKit CRT Port) | Planned | Planned | Planned | Stage `06-web`, after `05-ui`; see [`docs/crtweb_acceptance.md`](docs/crtweb_acceptance.md). |
 
 Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2,

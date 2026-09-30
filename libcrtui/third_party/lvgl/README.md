@@ -1,8 +1,10 @@
-# LVGL provenance (pin only)
+# LVGL provenance
 
 `crtui` renders through LVGL as a **private** dependency. This directory holds
-the pin, not the source: LVGL is imported in Tranche 1 of
-[`docs/crtui_acceptance.md`](../../../docs/crtui_acceptance.md).
+the pin, not the source: `tools/fetch_lvgl.py` (CMake target `crtui-lvgl-fetch`)
+fetches, verifies and extracts it at build time, and `-DCRTUI_ENABLE_LVGL=ON`
+compiles it into `libcrtui` (Tranche 1 of
+[`docs/crtui_acceptance.md`](../../../docs/crtui_acceptance.md)).
 
 | Field | Value |
 | --- | --- |

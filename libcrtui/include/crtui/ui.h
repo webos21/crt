@@ -111,7 +111,8 @@ typedef enum crtui_widget_kind {
   CRTUI_WIDGET_TEXT = 3,
   CRTUI_WIDGET_BUTTON = 4,
   CRTUI_WIDGET_SLIDER = 5,
-  CRTUI_WIDGET_SURFACE_VIEW = 6
+  CRTUI_WIDGET_SURFACE_VIEW = 6,
+  CRTUI_WIDGET_PROGRESS = 7
 } crtui_widget_kind;
 
 typedef enum crtui_key {
@@ -198,6 +199,10 @@ crtui_result crtui_text_create(crtui_context* context, crtui_widget parent, cons
 crtui_result crtui_button_create(crtui_context* context, crtui_widget parent, const char* utf8, crtui_widget* out_widget);
 crtui_result crtui_slider_create(
     crtui_context* context, crtui_widget parent, int32_t min_value, int32_t max_value, crtui_widget* out_widget);
+/* A progress bar over the fixed range 0..100 (initially 0). Not focusable. */
+crtui_result crtui_progress_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+crtui_result crtui_progress_set_value(crtui_context* context, crtui_widget progress, int32_t value);
+crtui_result crtui_progress_get_value(crtui_context* context, crtui_widget progress, int32_t* out_value);
 crtui_result crtui_surface_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
 
 /* Destroys `widget` and its whole subtree. A window's parent is none. */
@@ -236,6 +241,19 @@ crtui_result crtui_window_set_size(
 crtui_result crtui_window_get_size(
     crtui_context* context, crtui_window window, int32_t* out_width, int32_t* out_height, float* out_dpi_scale);
 crtui_result crtui_window_set_modal(crtui_context* context, crtui_window window, int modal);
+
+/* ---- Rendering (Tranche 1) ---------------------------------------------- */
+
+/* Renders the window's current tree into `pixels` as BGRA8888 (bytes B,G,R,A --
+ * the crtgfx_pixel_format BGRA8888_PREMULTIPLIED layout; the window is opaque).
+ * `width`/`height` must equal the window's size (crtui_window_set_size(), DPI
+ * scale 1 for now) and stride_bytes must be at least width * 4. Every pixel of
+ * the buffer is overwritten. UI thread only. Returns CRTUI_ERROR_UNSUPPORTED if
+ * this build has no renderer (crtui is built without LVGL); the headless model
+ * works either way. The image is drawn by a private LVGL software renderer:
+ * crtui never exposes LVGL, and crtgfx presentation is the caller's step. */
+crtui_result crtui_window_render(
+    crtui_context* context, crtui_window window, void* pixels, size_t stride_bytes, int32_t width, int32_t height);
 
 /* ---- Focus and hit-testing ---------------------------------------------- */
 

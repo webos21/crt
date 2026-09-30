@@ -623,6 +623,31 @@ static void test_geometry(void) {
   end_scene(&s);
 }
 
+/* ---- 11. progress (Tranche 1 addition) ---------------------------------- */
+
+static void test_progress(void) {
+  scene s;
+  CHECK(build_scene(&s) == 0, "scene");
+  crtui_widget p = CRTUI_INVALID_WIDGET;
+  CHECK(crtui_progress_create(s.ctx, s.container, &p) == CRTUI_OK, "progress create");
+  crtui_widget_kind kind;
+  CHECK(crtui_widget_get_kind(s.ctx, p, &kind) == CRTUI_OK && kind == CRTUI_WIDGET_PROGRESS, "kind");
+  int32_t value = -1;
+  CHECK(crtui_progress_get_value(s.ctx, p, &value) == CRTUI_OK && value == 0, "starts at 0");
+  CHECK(crtui_progress_set_value(s.ctx, p, 250) == CRTUI_OK, "set");
+  crtui_progress_get_value(s.ctx, p, &value);
+  CHECK(value == 100, "clamped to 0..100");
+  crtui_progress_set_value(s.ctx, p, -5);
+  crtui_progress_get_value(s.ctx, p, &value);
+  CHECK(value == 0, "clamped at 0");
+  CHECK(crtui_widget_focus(s.ctx, p) == CRTUI_ERROR_STATE, "a progress bar is not focusable");
+  CHECK(crtui_progress_set_value(s.ctx, s.slider, 1) == CRTUI_ERROR_INVALID_ARGUMENT, "progress op on a slider");
+  CHECK(crtui_slider_get_value(s.ctx, p, &value) == CRTUI_ERROR_INVALID_ARGUMENT, "slider op on a progress bar");
+  CHECK(crtui_progress_create(s.ctx, s.text, &p) == CRTUI_ERROR_INVALID_ARGUMENT, "a text widget cannot hold it");
+  CHECK(crtui_progress_create(s.ctx, s.container, NULL) == CRTUI_ERROR_INVALID_ARGUMENT, "out NULL");
+  end_scene(&s);
+}
+
 int main(void) {
   test_errors();
   test_lifetime();
@@ -634,12 +659,13 @@ int main(void) {
   test_modal();
   test_hit_testing();
   test_geometry();
+  test_progress();
   if (failures != 0) {
     fprintf(stderr, "crtui_contract_test: %d failure(s)\n", failures);
     return 1;
   }
   printf(
       "crtui_contract_test: ok errors=pass lifetime=pass threads=pass events=pass keyboard_focus=pass "
-      "focus_recovery=pass reentrancy=pass modal=pass hit_test=pass geometry=pass\n");
+      "focus_recovery=pass reentrancy=pass modal=pass hit_test=pass geometry=pass progress=pass\n");
   return 0;
 }

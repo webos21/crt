@@ -10,6 +10,44 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 1 closed on Windows/x64: LVGL v9.6.0 is imported as a private
+  dependency and renders the first real pixels through a CRT display adapter
+  into crtgfx.** `docs/crtui_acceptance.md`'s Tranche 1 section has the full
+  detail.
+
+  Import: `tools/fetch_lvgl.py` verifies the pinned archive (size, SHA-256, and
+  that the commit in the archive's pax header equals the recipe's
+  `expected_commit`) and extracts only `src/`, `include/`, the licence, the conf
+  template and three root headers LVGL's own sources include (28 MB of 111 MB;
+  the first attempt missed the root `lvgl.h` and failed with
+  `'../../lvgl.h' file not found`). `-DCRTUI_ENABLE_LVGL=ON` (default OFF)
+  compiles all 483 LVGL sources into `libcrtui` static and shared with a CRT-
+  owned `lv_conf.h` (software draw only, no OS/GPU/drivers, default theme off,
+  assertions trap). They compiled on the CRT toolchain without any CRT/PAL
+  change; the only LVGL configuration problems were `abort()` being undeclared
+  in LVGL's assert path (solved with `__builtin_trap()`) and LVGL requiring the
+  config guard to be spelled `LV_CONF_H`.
+
+  Renderer: `crtui_window_render()` (public, additive; BGRA8888, the crtgfx
+  pixel layout) flattens the CRT model to a private render list and a private
+  LVGL backend mirrors it into objects, drawing a full frame into an internal
+  buffer and copying out with the caller's stride. Every widget is styled
+  explicitly by CRT code. New `CRTUI_WIDGET_PROGRESS`. Without LVGL the API
+  returns `CRTUI_ERROR_UNSUPPORTED`.
+
+  Evidence: `crtui_render_test: ok pixels=pass background=pass label=pass
+  button=pass slider=pass progress=pass rerender=pass stride=pass resize=pass
+  lifecycle=pass` (real pixel values for a `Window > Container > Label/Button/
+  Slider/Progress` scene, padded-stride and resize cases, and 40 create/render/
+  destroy cycles with `handles=77->77`); mutation-checked, and the rendered
+  frame was inspected. `crtui_window_demo 30` presents through a real crtgfx
+  window: `presented=30 pixel_check=pass`. Full in-tree `ctest` 164/164, default
+  C-stage preset 127/127, `crt-ui-dist` verifies with LVGL compiled in and no
+  LVGL header in the SDK. Note: test executables are not part of the default
+  `all` target, so build `crtui_render_test`/`crtui_contract_test` explicitly (or
+  a full test run silently uses stale binaries). macOS/arm64 and Linux replay is
+  next.
+
 - **`crtui` Tranche 0 closed on Linux/x86_64 (native Intel host) with no code
   change, plus one unrelated in-tree packaging finding.**
   `docs/crtui_acceptance.md`'s Tranche 0 section has the full detail.

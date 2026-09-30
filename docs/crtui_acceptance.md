@@ -1,7 +1,7 @@
 # crtui Acceptance (Stage `05-ui`)
 
-**Status: contract frozen (Tranche 0, Windows/x64 and macOS/arm64 2026-09-30); LVGL rendering
-is not started.** The public contract in `libcrtui/include/crtui/ui.h` and the
+**Status: contract frozen (Tranche 0, all three hosts); LVGL first pixels
+(Tranche 1) done on Windows/x64 2026-09-30.** The public contract in `libcrtui/include/crtui/ui.h` and the
 rules in the table below are frozen and covered by a resource-free test.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
 surfaces and packaging behind that contract. Update the tranche sections with
@@ -182,6 +182,72 @@ LVGL software draw buffer -> a CRT display adapter -> the existing
 `crtgfx`/window present path. No LVGL GPU backend. Acceptance: a
 `Window > Column > Label/Button/Slider/Progress` demo produces expected pixels
 and shuts down cleanly (no leaked handles/threads).
+
+**Windows/x64 done 2026-09-30.** (details below)
+
+LVGL v9.6.0 is imported as a private dependency and renders through a CRT
+display adapter into a caller-supplied buffer; crtgfx presents that buffer.
+
+- **Import.** `tools/fetch_lvgl.py` downloads the pinned archive (or reuses a
+  cached one), verifies its size and SHA-256, verifies that the commit recorded
+  in the archive's pax header equals `expected_commit`, and extracts only `src/`,
+  `include/`, `LICENCE.txt`, `lv_conf_template.h` and the three root headers
+  LVGL's own sources include (`lvgl.h`, `lvgl_private.h`, `lv_version.h`) into
+  `<build>/lvgl/lvgl-9.6.0` (28 MB of the 111 MB archive). Nothing in it is
+  patched. The `crtui-lvgl-fetch` CMake target runs it; `-DCRTUI_ENABLE_LVGL=ON`
+  (default OFF, like `CRTMEDIA_ENABLE_CURL`) then compiles all 483 LVGL sources
+  plus `src/lvgl_backend.c` into `libcrtui` (static and shared), with
+  `-DCRTUI_HAVE_LVGL`. A build without it keeps the headless model and returns
+  `CRTUI_ERROR_UNSUPPORTED` from `crtui_window_render()`.
+- **Configuration.** `libcrtui/src/lvgl_conf/lv_conf.h` is the only LVGL "patch"
+  (a configuration file): software draw unit only, no OS/thread integration, no
+  drivers/GPU backends, CRT `malloc` with LVGL's builtin string/sprintf, the
+  default theme disabled, assertions trap instead of hanging. The 483 sources
+  compile cleanly on the CRT toolchain (no CRT/PAL gap surfaced; the only
+  external symbols are `malloc`/`memcpy`-class libc calls).
+- **Display adapter.** `crtui_window_render(context, window, pixels, stride,
+  width, height)` (public, additive) renders the window's tree as BGRA8888 --
+  bytes B,G,R,A, exactly `CRTGFX_PIXEL_FORMAT_BGRA8888_PREMULTIPLIED`; the
+  window is opaque so premultiplication is a no-op. The model (core.c) flattens
+  the tree to a private render list (`render_tree.h`, no LVGL type) and
+  `lvgl_backend.c` mirrors it into LVGL objects, rebuilding only when the model
+  changed, drawing FULL-frame into an internal buffer and copying rows out with
+  the caller's stride. Every widget is styled explicitly (fixed default look:
+  window `#F0F0F0`, text `#202020`, button `#2D6CDF` with white text, disabled
+  `#B0B0B0`, slider/progress track `#C8C8C8`, slider fill `#2D6CDF`, knob
+  `#1E4FA8`, progress fill `#2ECC71`), so the look is CRT code, not an LVGL theme.
+  Also new in the contract: `CRTUI_WIDGET_PROGRESS` (`crtui_progress_create/
+  set_value/get_value`, range 0..100, not focusable). "Column" layout is
+  Tranche 4; the demo positions children by hand.
+- **`crtui_render_test`** renders `Window > Container > Label/Button/Slider/
+  Progress` at 320x200 and checks real pixels (never just "it ran"): background
+  and full-buffer overwrite, glyph pixels for the label, button fill and white
+  label text, slider fill vs. track around the knob, progress fill vs. track at
+  50% and 100%, disabled and hidden re-renders, a padded stride (same image,
+  padding untouched), resize, argument/thread errors. Then 40
+  create/render/destroy cycles with a native handle audit. Real result:
+
+  ```text
+  crtui_render_test: lifecycle cycles=40 handles=77->77 threads=-1->-1
+  crtui_render_test: ok pixels=pass background=pass label=pass button=pass
+      slider=pass progress=pass rerender=pass stride=pass resize=pass
+      lifecycle=pass
+  ```
+
+  Mutation-checked (changing the progress fill color fails 3 checks); the first
+  frame was also looked at (`CRTUI_RENDER_DUMP=<path>` writes a BMP).
+- **Present path (`crtui_window_demo <frames>`).** The same scene rendered into
+  a real crtgfx window's software framebuffer and presented with
+  `crtgfx_window_end_frame()`; on frame 0 it reads the framebuffer back and
+  checks the background and button pixels. Real result on Windows:
+  `crtui_window_demo: presented=30 pixel_check=pass`, exit 0.
+- Full in-tree `ctest`: 164/164 (one expected no-webcam skip); the default
+  C-stage preset excludes `crtui_*` and stays 127/127. `crt-ui-dist` still
+  verifies with LVGL compiled in (no LVGL header in the SDK).
+- Not yet covered (by design): input/focus/resize mapping (Tranche 2), the
+  wrapper-only sample and system-library-style install of LVGL (Tranche 3),
+  automatic layout and the v1 widget set (Tranche 4), isolated-stage packaging
+  of the fetched LVGL source (Tranche 7).
 
 ### 2. Input, focus, and resize
 
