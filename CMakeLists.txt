@@ -1511,6 +1511,11 @@ if(Python3_Interpreter_FOUND)
 
   # 05-ui: crtui (Tranche 0 ships the frozen contract and its headless model).
   add_custom_target(crt-ui-build DEPENDS crtui crtui_shared)
+  if(TARGET crtui_window_demo)
+    # The crt-ui install component ships the prebuilt sample, and test
+    # executables are not part of `all`: build it with the stage.
+    add_dependencies(crt-ui-build crtui_window_demo)
+  endif()
   add_custom_target(crt-ui-test DEPENDS crt-ui-build crtui_contract_test
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtui_.*_runs"
   )

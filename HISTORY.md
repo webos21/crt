@@ -10,6 +10,19 @@ substantive update.
 
 ## 2026-09-30
 
+- **`crtui` Tranche 3 closed on Linux/x86_64.** ELF visibility verified:
+  `libcrtui.so` exports exactly the 35 `crtui_*` functions; dropping
+  `-fvisibility=hidden` exports 2,286 `lv_*` symbols (same as DLL/dylib) and the
+  privacy test fails. Two gaps fixed: `check_crtui_privacy.py` now finds
+  Debian's versioned `llvm-nm-21`/`llvm-readobj-21`, and `crt-ui-build` now
+  depends on `crtui_window_demo` because the `crt-ui` install component ships it
+  (`crt-ui-dist` failed in a tree where the demo was not yet built). The
+  installed `examples/ui-basic` rebuilt from the packaged SDK ran 3/3
+  (`presented=30 pixel_check=pass input_check=pass`); a `lv_obj_create` sample
+  fails the privacy check. ctest 149/150 (sound-card test only), tooling 79/79.
+  Caveat: the options-default dist tree lacked `libxdg-shell-protocol.a`, so the
+  external rebuild borrowed it from the dev tree (logged in `TODO.md`).
+
 - **`crtui` Tranche 3 replayed on macOS/arm64: two real gaps found and fixed.**
   (1) `crtui_privacy_test_runs` could not find `llvm-nm` (Apple's clang shim);
   `tools/check_crtui_privacy.py` now falls back to `PATH`/`xcrun`. The Mach-O

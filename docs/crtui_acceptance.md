@@ -1,8 +1,8 @@
 # crtui Acceptance (Stage `05-ui`)
 
 **Status: contract frozen (Tranche 0, all three hosts); LVGL first pixels
-(Tranche 1) and input/focus/resize (Tranche 2) closed on all three hosts;
-the wrapper (Tranche 3) is done on Windows/x64 2026-09-30.** The public contract in `libcrtui/include/crtui/ui.h` and the
+(Tranche 1), input/focus/resize (Tranche 2) and the private-LVGL wrapper
+(Tranche 3) closed on all three hosts.** The public contract in `libcrtui/include/crtui/ui.h` and the
 rules in the table below are frozen and covered by a resource-free test.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
 surfaces and packaging behind that contract. Update the tranche sections with
@@ -457,10 +457,10 @@ already covers the demo).
 
 ### 3. `crtui` wrapper (first green)
 
+**Closed 2026-09-30 on Windows/x64, macOS/arm64, and Linux/x86_64.**
+
 The sample application calls no `lv_*` symbol. LVGL becomes a private
 dependency: not in installed headers, not in the public link line of the API.
-
-**Windows/x64 and macOS/arm64 done 2026-09-30.**
 
 The application-facing surface was already LVGL-free at the header level; this
 tranche made the *binary* surface match and made both provable.
@@ -551,8 +551,47 @@ tranche made the *binary* surface match and made both provable.
   (expected camera skip); `crtui_*`-excluding preset 110/110; tooling 79/79;
   `crt-ui-dist` verified.
 - Not covered here: the isolated stage build that rebuilds the sample
-  (Tranche 7). Linux replay remains (`examples/ui-basic`'s Linux link list is
-  still unverified).
+  (Tranche 7).
+
+**Tranche 3 replay (Linux/x86_64, native Intel host, 2026-09-30).** ELF export
+control worked as reasoned; two build/tooling gaps found and fixed.
+
+- **Visibility verified on ELF.** `libcrtui.so` exports exactly the 35 `crtui_*`
+  functions and nothing else. Mutation: removing `-fvisibility=hidden` from the
+  shared target and LVGL flags makes it export 2,286 `lv_*` symbols plus
+  `frogfs_decomp_raw`/`load_kern` (same count as the Windows DLL and Mach-O
+  dylib) and the privacy test fails; restored and green.
+- **Finding 1 -- privacy tool found no LLVM binutils.** Debian installs only
+  `llvm-nm-21`/`llvm-readobj-21` in `/usr/bin`, so `crtui_privacy_test_runs`
+  failed `llvm-nm not found in /usr/bin`. `tools/check_crtui_privacy.py` now
+  also tries versioned `/usr/bin/<tool>-N` and `/usr/lib/llvm-*/bin/<tool>`.
+  Result: `crtui_privacy: ok declared=35 exports=35 lvgl_exports=0 objects=1
+  headers=3`.
+- **Finding 2 -- `crt-ui-dist` did not build what it installs.** The `crt-ui`
+  install component ships `crtui_window_demo`, but test/demo executables are not
+  part of `all` and `crt-ui-build` depended only on `crtui crtui_shared`, so
+  `cmake --install --component crt-ui` failed with `cannot find
+  .../libcrtui/crtui_window_demo` in a tree where the demo was not already
+  built (the other hosts happened to have it). `crt-ui-build` now depends on
+  `crtui_window_demo`; `crt-ui-dist` then builds, packages and verifies
+  (`CRT distribution verified`).
+- **Sample rebuilt externally from the packaged SDK.** `examples/ui-basic`
+  configured with the packaged `crt-toolchain.cmake` against `dist/05-ui` alone,
+  linking the static `libcrtui.a`/`libcrtgfx.a` (Linux's Wayland link list
+  copied from gfx-simple worked unchanged); NEEDED is only the host
+  `libwayland-client.so.0`. `crtui_basic_example 30` ran 3/3: `presented=30
+  pixel_check=pass input_check=pass`. The privacy tool passes against the
+  packaged headers, `libcrtui.so`, the sample object and source; a sample calling
+  `lv_obj_create` fails both the object and source checks.
+- **Caveat.** This options-default `out/linux-ui-check` dist contained no
+  `libxdg-shell-protocol.a` (that tree never built Wayland), so the external
+  rebuild used a scratch copy of the SDK with the archive taken from the dev
+  tree's `dist/04-gfx-media`. Logged in `TODO.md`.
+- Full in-tree `ctest` 149/150 (only `crtmedia_playback_pipeline_test_runs`:
+  no sound card, pre-existing); `crtui_window_demo 30`: `presented=30
+  pixel_check=pass input_check=pass`; tooling 79/79.
+- Not covered here: the isolated stage build that rebuilds the sample
+  (Tranche 7).
 
 ### 4. Layout, styling, and the v1 widget set
 

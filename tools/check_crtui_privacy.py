@@ -40,6 +40,12 @@ def tool(llvm_bin: Path, name: str) -> str:
     if found is None and sys.platform == "darwin":
         result = subprocess.run(["xcrun", "--find", name], capture_output=True, text=True)
         found = result.stdout.strip() if result.returncode == 0 else None
+    if found is None:
+        # Debian/Ubuntu install only versioned names (llvm-nm-21) in /usr/bin
+        # and unversioned ones under /usr/lib/llvm-N/bin.
+        versioned = sorted(Path("/usr/bin").glob(f"{name}-[0-9]*"), reverse=True)
+        versioned += sorted(Path("/usr/lib").glob(f"llvm-*/bin/{name}"), reverse=True)
+        found = str(versioned[0]) if versioned else None
     if found:
         return found
     raise SystemExit(f"{name} not found in {llvm_bin}")

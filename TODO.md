@@ -83,14 +83,12 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   `crtui_window_demo`); verified with scripted input -- interactive real-device
   input is not automated on any host. Evidence in `HISTORY.md` and
   `docs/crtui_acceptance.md`.
-* [ ] **3. `crtui` wrapper (first green).** Windows/x64 done 2026-09-30,
-  recorded in `HISTORY.md`: `libcrtui.dll` no longer exports LVGL (was 2,286
-  `lv_*` symbols; now exactly the 35 `CRTUI_API` functions), the installed
-  `examples/ui-basic` uses crtui/crtgfx only and was rebuilt externally from the
-  packaged SDK, and `tools/check_crtui_privacy.py` (`crtui_privacy_test_runs`)
-  proves headers, exports, sample objects and sample source are LVGL-free.
-  macOS/arm64 replayed 2026-09-30 (Mach-O visibility verified; found and fixed a
-  libc-binding heap overflow in `libcrtui.dylib`); Linux replay next.
+* [x] **3. `crtui` wrapper (first green).** Closed 2026-09-30 on
+  Windows/x64, macOS/arm64, and Linux/x86_64: `libcrtui` exports exactly the 35
+  `CRTUI_API` functions (was 2,286 `lv_*` too), `examples/ui-basic` uses
+  crtui/crtgfx only and rebuilds from the packaged SDK, and
+  `crtui_privacy_test_runs` proves headers/exports/sample are LVGL-free;
+  evidence in `HISTORY.md` and `docs/crtui_acceptance.md`.
 * [ ] **4. Layout, styling, v1 widget set.** CRT-neutral properties only.
 * [ ] **5. External Surface view.** Producer-agnostic surface composition; the
   `06-web` prerequisite.
@@ -282,6 +280,13 @@ or host investigation supplies the required evidence.
   ship/declare the shared curl chain or document that the ordinary dist is
   options-OFF only; the isolated stage (static curl) is unaffected. Found
   2026-09-30 (`docs/crtui_acceptance.md`, Tranche 0 Linux replay).
+- The options-default Linux `crt-ui-dist` tree (`out/linux-ui-check`) packaged no
+  `libxdg-shell-protocol.a` (that tree never fetched/built Wayland), so
+  `examples/ui-basic` could not be rebuilt against its own SDK without borrowing the
+  archive from a Wayland-enabled tree. Determine whether a fresh checkout's
+  ordinary Linux dist chain always builds Wayland (then this tree was just
+  stale) or whether `crt-ui-dist` should depend on it. Found 2026-09-30
+  (`docs/crtui_acceptance.md`, Tranche 3 Linux replay).
 - Extend the resolver from its current synchronous UDP IPv4/A-record baseline
   when IPv6, TCP fallback, search domains, or caching becomes a consumer
   requirement.
