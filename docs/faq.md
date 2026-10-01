@@ -22,6 +22,11 @@ The primary target is a Linux-kernel embedded device: set-top boxes, HMIs,
 automotive IVI. Native desktop builds give those teams a fast development and
 debugging loop.
 
+Upper stages build on that foundation with native windows and input,
+Skia/GPU graphics, FFmpeg media, HTTP/HTTPS streaming, and the
+crtui application layer; a WebKit-based Web runtime is the next
+planned stage.
+
 ## Why a Bionic-shaped interface?
 
 Bionic is Android's libc, libm, libdl, and dynamic-linker stack, and it fits the

@@ -138,7 +138,7 @@ comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
    transport core, progressive HTTP input and fragmented-MP4 HTTP output,
    reconnect/discontinuity, HTTPS trust matrix, and isolated-package
    acceptance. See `crtmedia_networking_acceptance.md`.
-6. **Application UI (`05-ui`) — next.** Freeze the `crtui` contract, import
+6. **Application UI (`05-ui`) — In Progress.** Freeze the `crtui` contract, import
    LVGL behind it, wire CRT input/focus/resize, add the external-surface view
    and a media view over the zero-copy path, then close cross-host and
    isolated-package acceptance. Windows/x64 first (fast interactive

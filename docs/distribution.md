@@ -22,11 +22,12 @@ external toolchain contract.
 | `02-cxx` | `01-c` plus libc++, libc++abi, and libunwind | C++ applications and libraries |
 | `03-gfx-simple` | `02-cxx` plus one window, keyboard/mouse input, and a CPU-writable software framebuffer | Industrial HMI and simple native UI |
 | `04-gfx-media` | `03-gfx-simple` plus the GPU API, Skia CPU/GPU rendering, Vulkan/D3D12/Metal presentation, and FFmpeg media | accelerated UI and playback |
-| `05-ui` (in progress) | `04-gfx-media` plus `crtui` (frozen API and headless model so far; LVGL rendering and external-surface composition planned) | native application UI |
+| `05-ui` (in progress) | 04-gfx-media + crtui + private LVGL 9.6, software-rendered widget composition, input/focus/resize, CRT-owned wrapper; v1 widgets and external-surface composition still progressing. | native application UI |
 | `06-web` (planned) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
-The repository builds `05-ui` (contract and headless model, no LVGL yet) and
-nothing past it. The former `05-js`
+The repository builds 05-ui through the currently accepted crtui/LVGL
+tranches. It is not yet a release asset because final external-surface,
+MediaView and isolated-package closure remain open.  The former `05-js`
 skeleton (`libcrtjs`, no engine) and its `crt-js-*` targets were deleted on
 2026-09-29; the QuickJS plan behind it is retired
 ([`runtime_roadmap.md`](runtime_roadmap.md)). `05-ui` was created fresh by

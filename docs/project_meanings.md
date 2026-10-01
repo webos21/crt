@@ -32,11 +32,17 @@ embedded product stop at the capability level it needs. Every distribution
 uses an external host or board-vendor compiler; see
 [`distribution.md`](distribution.md).
 
-In short, the project is best described as:
+At the product level, CRT is best described as:
 
-> A Bionic-compatible OS Abstraction Runtime, or a Bionic-flavored Library OS/PAL,
-> for improving rebuild-based source portability of Linux/BSD/Android native code
-> across Linux, Windows, macOS, and Android.
+> A native cross-platform application runtime for embedded Linux
+> products, with first-class Linux, Windows, and macOS development
+> and execution hosts.
+
+Its technical foundation is:
+
+> A Bionic-compatible OS Abstraction Runtime / PAL that provides
+> rebuild-based source portability for the upper graphics, media,
+> networking, UI, and Web layers.
 
 ## Similar Projects And Prior Art
 
