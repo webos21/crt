@@ -3,8 +3,8 @@
 ## Goal
 
 The project aims to build a Bionic-based OS Abstraction Runtime that can be used
-on Linux, Windows, macOS, and Android. Its first visible form is a C Runtime
-Library, but the real target is broader than a simple libc port.
+on Linux, Windows, macOS. Its first visible form is a C Runtime Library, 
+but the real target is broader than a simple libc port.
 
 The runtime should expose a Bionic-compatible libc/API/ABI surface while hiding
 host OS differences behind explicit platform adaptation layers. If this low-level
@@ -102,8 +102,11 @@ It separates compatibility into two parts:
 
 This separation closely matches the desired shape of this project. The Bionic
 runtime would provide the Android/Linux-facing personality, while
-`platform/linux`, `platform/windows`, `platform/macos`, and `platform/android`
-would provide the host adaptation.
+`platform/linux`, `platform/windows`, `platform/macos` would provide 
+the host adaptation.
+
+Android/Bionic compatibility remains a source/API compatibility goal,
+not a current host backend.
 
 The idea is especially attractive for source portability. Many Linux, BSD, and
 Android native libraries depend on a familiar libc, pthreads, sockets, files,
@@ -137,7 +140,7 @@ The intended shape is:
   Skia, a Wayland-compatible compositor boundary, and a future Chromium Ozone
   backend path.
 - `libcrtmedia`: FFmpeg plus explicit codec, audio, and video libraries.
-- `crtui` (planned, `05-ui`): a CRT-owned application UI API with LVGL as a
+- `crtui` (in progress, `05-ui`): a CRT-owned application UI API with LVGL as a
   private implementation and an external-surface view for video and, later,
   a WebView.
 - `libcrtweb` (planned, `06-web`): a WebKit CRT Port (`PlatformCRT`), using

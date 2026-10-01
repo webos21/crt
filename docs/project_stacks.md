@@ -7,7 +7,7 @@ The base runtime for this project is Android Bionic libc.
 This choice is driven by both licensing and technical fit. The project is not
 trying to build a generic POSIX libc from scratch. It is trying to build a
 Bionic-compatible OS Abstraction Runtime/PAL that lets Linux, BSD, and Android
-native source code be rebuilt across Linux, Windows, macOS, and Android.
+native source code be rebuilt across Linux, Windows, and macOS.
 
 Because of that goal, Bionic is a better starting point than musl, newlib, or a
 generic embedded libc.
@@ -230,10 +230,15 @@ The recommended baseline is:
 - Tests: CTest.
 - Configuration: `CMakePresets.json` plus target-specific CMake toolchain files.
 
-This choice is made for portability and long-term scale. The project must support
-Linux, Windows, macOS, and Android across x86_64 and aarch64. Clang and LLD
-provide a relatively consistent target-triple, sysroot, freestanding,
-`-nostdlib`, and cross-compilation story across those hosts and targets.
+The current release and acceptance matrix covers Linux, Windows,
+and macOS across the supported architectures.
+
+Android/Bionic remains an API/source compatibility reference rather
+than a first-class CRT host target.
+
+Clang and LLD provide a relatively consistent target-triple, sysroot, 
+freestanding, `-nostdlib`, and cross-compilation story 
+across those hosts and targets.
 
 CMake is a conservative choice for a large C/C++ runtime project because it can
 generate Ninja, Make, Visual Studio, and Xcode projects; integrates with CTest;
@@ -260,12 +265,12 @@ cmake/
     windows-aarch64-clang.cmake
     macos-x86_64-clang.cmake
     macos-aarch64-clang.cmake
-    android-x86_64-clang.cmake
-    android-aarch64-clang.cmake
 
 CMakePresets.json
 CMakeLists.txt
 ```
+
+Future Android-host toolchains are outside the current release matrix.
 
 Secondary/vendor compiler validation should be added after the Clang build is
 stable. It is also a distribution acceptance test, because no compiler is
