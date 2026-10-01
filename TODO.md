@@ -95,7 +95,20 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   committed-text input, private LVGL rendering, and the installed sample all
   pass; evidence is in `HISTORY.md` and `docs/crtui_acceptance.md`.
 * [ ] **5. External Surface view.** Producer-agnostic surface composition; the
-  `06-web` prerequisite.
+  `06-web` prerequisite. Work it in explicit slices so a headless scene-model
+  result is not mistaken for real GPU composition:
+  * [x] **5A. Freeze the producer-neutral scene boundary (Windows first).**
+    Accepted on Windows/x64 2026-10-01: stable-id scene snapshot with layout,
+    clip, opacity, z-order and damage; detailed evidence is in `HISTORY.md` and
+    `docs/crtui_acceptance.md`.
+  * [x] **5B. Add the `crtgfx` external-surface/final-compositor boundary.**
+    Accepted on Windows/x64 2026-10-01: texture-backed synthetic producer,
+    exact plane-order/clip/opacity pixels and ownership/resize/damage checks,
+    plus 5/5 frames through a real D3D12 window; detailed evidence is in
+    `HISTORY.md` and `docs/crtui_acceptance.md`.
+  * [ ] **5C. Replay the unchanged contract and compositor on macOS/arm64 and
+    Linux**, recording native dependency/lifetime evidence before closing the
+    tranche. Media binding stays in Tranche 6.
 * [ ] **6. MediaView.** Zero-copy video composed in the final present, not via
   an LVGL image buffer.
 * [ ] **7. Cross-host and isolated-package closure.** Isolated `05-ui` build

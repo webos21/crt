@@ -99,11 +99,13 @@
  * color, a slider/progress fill, a switch's on track, a checkbox's mark).
  *
  * ---- External surfaces --------------------------------------------------
- * crtui_surface_view_create() reserves the API shape for producer-owned
- * surfaces (video now, a WebView in 06-web). It returns
- * CRTUI_ERROR_UNSUPPORTED until Tranche 5; the ownership rule is frozen now:
- * the view owns only position, size, clip, opacity, visibility, z-order,
- * damage and hit-testing, and never the producer's frame.
+ * A SurfaceView is the producer-neutral scene placeholder for video now and a
+ * WebView in 06-web. The view owns only position, size, clip, opacity,
+ * visibility, z-order, damage and hit-testing, never the producer's frame.
+ * crtui_window_get_surface_layers() exposes those properties; the application
+ * or final crtgfx compositor associates the stable view id with its own
+ * producer surface. Core libcrtui never retains, releases or dereferences that
+ * surface; the optional compositor adapter has an explicit callback contract.
  *
  * ---- Errors -------------------------------------------------------------
  * Every function that can fail returns crtui_result. The values 0..-7 are
@@ -138,6 +140,27 @@ typedef struct crtui_context crtui_context;
 typedef uint64_t crtui_widget;
 typedef crtui_widget crtui_window;
 #define CRTUI_INVALID_WIDGET ((crtui_widget)0)
+
+typedef struct crtui_rect {
+  int32_t x, y, width, height;
+} crtui_rect;
+
+/* One visible SurfaceView in final scene order. All rectangles are in window
+ * coordinates. `bounds` is the laid-out view; `clip` is bounds intersected with
+ * every ancestor and the window. `z_order` is the stable scene-tree preorder index
+ * (larger means later/on top). `opacity` includes every ancestor's style
+ * opacity. Damage is clipped to `clip`; it is advisory and remains set until
+ * crtui_surface_view_clear_damage(). */
+typedef struct crtui_surface_layer {
+  crtui_widget view;
+  crtui_rect bounds;
+  crtui_rect clip;
+  crtui_rect damage;
+  uint64_t damage_serial;
+  uint32_t z_order;
+  uint8_t opacity;
+  uint8_t has_damage;
+} crtui_surface_layer;
 
 typedef enum crtui_widget_kind {
   CRTUI_WIDGET_WINDOW = 1,
@@ -261,6 +284,17 @@ CRTUI_API crtui_result crtui_progress_create(crtui_context* context, crtui_widge
 CRTUI_API crtui_result crtui_progress_set_value(crtui_context* context, crtui_widget progress, int32_t value);
 CRTUI_API crtui_result crtui_progress_get_value(crtui_context* context, crtui_widget progress, int32_t* out_value);
 CRTUI_API crtui_result crtui_surface_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+/* Adds a view-local dirty rectangle (unioned with pending damage). Geometry or
+ * scene mutations conservatively mark the full view dirty. */
+CRTUI_API crtui_result crtui_surface_view_damage(
+    crtui_context* context, crtui_widget surface_view, int32_t x, int32_t y, int32_t width, int32_t height);
+CRTUI_API crtui_result crtui_surface_view_clear_damage(crtui_context* context, crtui_widget surface_view);
+/* Allocation-free two-call snapshot: pass layers=NULL/capacity=0 to query the
+ * required count. If capacity is too small, no entry is written,
+ * *out_count receives the required count, and CRTUI_WOULD_BLOCK is
+ * returned. UI thread only; the snapshot never acquires a producer frame. */
+CRTUI_API crtui_result crtui_window_get_surface_layers(
+    crtui_context* context, crtui_window window, crtui_surface_layer* layers, size_t capacity, size_t* out_count);
 
 /* Destroys `widget` and its whole subtree. A window's parent is none. */
 CRTUI_API crtui_result crtui_widget_destroy(crtui_context* context, crtui_widget widget);
@@ -426,6 +460,16 @@ CRTUI_API crtui_result crtui_text_input_get_caret(crtui_context* context, crtui_
  * crtui never exposes LVGL, and crtgfx presentation is the caller's step. */
 CRTUI_API crtui_result crtui_window_render(
     crtui_context* context, crtui_window window, void* pixels, size_t stride_bytes, int32_t width, int32_t height);
+
+/* Final-compositor primitive (Tranche 5B). Renders only widgets whose stable
+ * scene pre-order is in [z_begin, z_end). Geometry-only parents outside the
+ * interval are retained for positioning/clipping, while SurfaceViews are
+ * always holes: their producer pixels never enter LVGL. `transparent` clears
+ * the plane to transparent black; otherwise the window background is drawn
+ * when its z (0) is in range. Every output pixel is overwritten. */
+CRTUI_API crtui_result crtui_window_render_plane(
+    crtui_context* context, crtui_window window, uint32_t z_begin, uint32_t z_end, int transparent,
+    void* pixels, size_t stride_bytes, int32_t width, int32_t height);
 
 /* ---- Focus and hit-testing ---------------------------------------------- */
 

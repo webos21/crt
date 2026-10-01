@@ -38,4 +38,11 @@ crtui_result crtui_lvgl_render(
     crtui_lvgl_backend** backend, const crtui_render_item* items, size_t count, uint64_t version, void* pixels,
     size_t stride_bytes);
 
+/* Same renderer, restricted to the pre-order interval [z_begin, z_end).
+ * Items outside the interval remain as transparent geometry-only parents so
+ * LVGL preserves descendant coordinates and ancestor clipping. */
+crtui_result crtui_lvgl_render_plane(
+    crtui_lvgl_backend** backend, const crtui_render_item* items, size_t count, uint64_t version,
+    uint32_t z_begin, uint32_t z_end, int transparent, void* pixels, size_t stride_bytes);
+
 void crtui_lvgl_backend_destroy(crtui_lvgl_backend* backend);

@@ -52,6 +52,12 @@ typedef struct crtui_node {
   size_t caret;        /* TextInput: byte offset */
   uint8_t* image_pixels; /* Image: tightly packed BGRA8888 */
   int32_t image_width, image_height;
+  /* SurfaceView (Tranche 5): producer-independent damage state. The producer
+   * itself is deliberately not stored or owned by crtui. */
+  int surface_damage_full;
+  int surface_has_damage;
+  int32_t surface_damage[4]; /* view-local x, y, width, height */
+  uint64_t surface_damage_serial;
 } crtui_node;
 
 typedef struct crtui_posted {
@@ -110,7 +116,23 @@ static crtui_widget id_of(const crtui_context* context, const crtui_node* node) 
   return ((uint64_t)node->generation << 32) | (uint64_t)((size_t)(node - context->nodes) + 1);
 }
 
-static void touch(crtui_context* context) { ++context->version; }
+static void mark_surface_full(crtui_node* node) {
+  node->surface_damage_full = 1;
+  node->surface_has_damage = 1;
+  if (++node->surface_damage_serial == 0) ++node->surface_damage_serial;
+}
+
+static void touch(crtui_context* context) {
+  ++context->version;
+  /* Any scene mutation may move, clip, cover or reveal a SurfaceView. Full
+   * damage is conservative but correct; producer-only damage uses the focused
+   * API below and does not rebuild the LVGL widget plane. */
+  for (size_t i = 0; i < context->node_count; ++i) {
+    if (context->nodes[i].in_use && context->nodes[i].kind == CRTUI_WIDGET_SURFACE_VIEW) {
+      mark_surface_full(&context->nodes[i]);
+    }
+  }
+}
 
 static int is_container_kind(crtui_widget_kind kind) {
   return kind == CRTUI_WIDGET_WINDOW || kind == CRTUI_WIDGET_CONTAINER || kind == CRTUI_WIDGET_ROW ||
@@ -1320,14 +1342,144 @@ crtui_result crtui_slider_create(
 
 crtui_result crtui_surface_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
   CRTUI_CHECK_CONTEXT(context);
-  if (out_widget == NULL) {
+  return create_child(context, CRTUI_WIDGET_SURFACE_VIEW, parent, out_widget, NULL);
+}
+
+crtui_result crtui_surface_view_damage(
+    crtui_context* context, crtui_widget surface_view, int32_t x, int32_t y, int32_t width, int32_t height) {
+  CRTUI_CHECK_CONTEXT(context);
+  ensure_layout(context);
+  crtui_node* node = resolve(context, surface_view);
+  if (node == NULL) return CRTUI_ERROR_INVALID_HANDLE;
+  if (node->kind != CRTUI_WIDGET_SURFACE_VIEW || x < 0 || y < 0 || width <= 0 || height <= 0 ||
+      x >= node->width || y >= node->height) {
     return CRTUI_ERROR_INVALID_ARGUMENT;
   }
-  *out_widget = CRTUI_INVALID_WIDGET;
-  if (resolve(context, parent) == NULL) {
-    return CRTUI_ERROR_INVALID_HANDLE;
+  int64_t x1_64 = (int64_t)x + width;
+  int64_t y1_64 = (int64_t)y + height;
+  int32_t x1 = x1_64 > node->width ? node->width : (int32_t)x1_64;
+  int32_t y1 = y1_64 > node->height ? node->height : (int32_t)y1_64;
+  if (node->surface_damage_full) {
+    /* Full damage already contains this rectangle. Still advance the serial so
+     * a compositor can observe a newly submitted producer frame. */
+  } else if (!node->surface_has_damage) {
+    node->surface_damage[0] = x;
+    node->surface_damage[1] = y;
+    node->surface_damage[2] = x1 - x;
+    node->surface_damage[3] = y1 - y;
+    node->surface_has_damage = 1;
+  } else {
+    int32_t old_x1 = node->surface_damage[0] + node->surface_damage[2];
+    int32_t old_y1 = node->surface_damage[1] + node->surface_damage[3];
+    int32_t nx0 = x < node->surface_damage[0] ? x : node->surface_damage[0];
+    int32_t ny0 = y < node->surface_damage[1] ? y : node->surface_damage[1];
+    int32_t nx1 = x1 > old_x1 ? x1 : old_x1;
+    int32_t ny1 = y1 > old_y1 ? y1 : old_y1;
+    node->surface_damage[0] = nx0;
+    node->surface_damage[1] = ny0;
+    node->surface_damage[2] = nx1 - nx0;
+    node->surface_damage[3] = ny1 - ny0;
   }
-  return CRTUI_ERROR_UNSUPPORTED; /* Tranche 5 */
+  if (++node->surface_damage_serial == 0) ++node->surface_damage_serial;
+  return CRTUI_OK;
+}
+
+crtui_result crtui_surface_view_clear_damage(crtui_context* context, crtui_widget surface_view) {
+  CRTUI_CHECK_CONTEXT(context);
+  crtui_node* node = resolve(context, surface_view);
+  if (node == NULL) return CRTUI_ERROR_INVALID_HANDLE;
+  if (node->kind != CRTUI_WIDGET_SURFACE_VIEW) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->surface_damage_full = 0;
+  node->surface_has_damage = 0;
+  memset(node->surface_damage, 0, sizeof(node->surface_damage));
+  return CRTUI_OK;
+}
+
+static crtui_rect rect_intersection(crtui_rect a, crtui_rect b) {
+  int64_t ax1 = (int64_t)a.x + a.width;
+  int64_t ay1 = (int64_t)a.y + a.height;
+  int64_t bx1 = (int64_t)b.x + b.width;
+  int64_t by1 = (int64_t)b.y + b.height;
+  int32_t x0 = a.x > b.x ? a.x : b.x;
+  int32_t y0 = a.y > b.y ? a.y : b.y;
+  int64_t x1 = ax1 < bx1 ? ax1 : bx1;
+  int64_t y1 = ay1 < by1 ? ay1 : by1;
+  crtui_rect result = {x0, y0, x1 > x0 ? (int32_t)(x1 - x0) : 0, y1 > y0 ? (int32_t)(y1 - y0) : 0};
+  return result;
+}
+
+static void collect_surface_layers(
+    crtui_context* context, crtui_widget id, int32_t origin_x, int32_t origin_y, crtui_rect parent_clip,
+    uint32_t parent_opacity, int parent_visible, int depth, uint32_t* z_order,
+    crtui_surface_layer* layers, size_t* count) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL || depth > CRTUI_MAX_DEPTH) return;
+  crtui_rect bounds;
+  if (node->kind == CRTUI_WIDGET_WINDOW) {
+    bounds = (crtui_rect){0, 0, node->window_width, node->window_height};
+  } else {
+    bounds = (crtui_rect){origin_x + node->x, origin_y + node->y, node->width, node->height};
+  }
+  uint32_t z = (*z_order)++;
+  crtui_rect clip = rect_intersection(parent_clip, bounds);
+  int visible = parent_visible && node->visible && clip.width > 0 && clip.height > 0;
+  uint32_t own_opacity = (node->style.mask & CRTUI_STYLE_OPACITY) != 0 ? node->style.opacity : 255u;
+  uint32_t opacity = (parent_opacity * own_opacity + 127u) / 255u;
+  if (visible && node->kind == CRTUI_WIDGET_SURFACE_VIEW) {
+    crtui_surface_layer* layer = layers != NULL ? &layers[*count] : NULL;
+    if (layer != NULL) {
+      memset(layer, 0, sizeof(*layer));
+      layer->view = id;
+      layer->bounds = bounds;
+      layer->clip = clip;
+      layer->z_order = z;
+      layer->opacity = (uint8_t)opacity;
+      layer->damage_serial = node->surface_damage_serial;
+      if (node->surface_has_damage) {
+        crtui_rect local_damage = node->surface_damage_full
+                                      ? (crtui_rect){0, 0, node->width, node->height}
+                                      : (crtui_rect){node->surface_damage[0], node->surface_damage[1],
+                                                     node->surface_damage[2], node->surface_damage[3]};
+        local_damage.x += bounds.x;
+        local_damage.y += bounds.y;
+        layer->damage = rect_intersection(clip, local_damage);
+        layer->has_damage = layer->damage.width > 0 && layer->damage.height > 0;
+      }
+    }
+    ++*count;
+  }
+  for (size_t i = 0; i < node->child_count; ++i) {
+    collect_surface_layers(context, node->children[i], bounds.x, bounds.y, clip, opacity, visible, depth + 1,
+                           z_order, layers, count);
+    node = resolve(context, id);
+    if (node == NULL) return;
+  }
+}
+
+crtui_result crtui_window_get_surface_layers(
+    crtui_context* context, crtui_window window, crtui_surface_layer* layers, size_t capacity, size_t* out_count) {
+  CRTUI_CHECK_CONTEXT(context);
+  crtui_node* node = resolve(context, window);
+  if (node == NULL) return CRTUI_ERROR_INVALID_HANDLE;
+  if (node->kind != CRTUI_WIDGET_WINDOW || out_count == NULL || (layers == NULL && capacity != 0)) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  ensure_layout(context);
+  node = resolve(context, window);
+  crtui_rect window_clip = {0, 0, node->window_width, node->window_height};
+  size_t required = 0;
+  uint32_t z_order = 0;
+  collect_surface_layers(context, window, 0, 0, window_clip, 255u, 1, 0, &z_order, NULL, &required);
+  *out_count = required;
+  if (layers == NULL && capacity == 0) return CRTUI_OK;
+  if (capacity < required) return CRTUI_WOULD_BLOCK;
+  if (required == 0) return CRTUI_OK;
+  size_t written = 0;
+  z_order = 0;
+  collect_surface_layers(context, window, 0, 0, window_clip, 255u, 1, 0, &z_order, layers, &written);
+  return CRTUI_OK;
 }
 
 crtui_result crtui_widget_destroy(crtui_context* context, crtui_widget widget) {
@@ -1642,6 +1794,35 @@ crtui_result crtui_window_render(
   }
   node = resolve(context, window);
   crtui_result result = crtui_lvgl_render(&node->backend, list.items, list.count, context->version, pixels, stride_bytes);
+  free(list.items);
+  return result;
+#endif
+}
+
+crtui_result crtui_window_render_plane(
+    crtui_context* context, crtui_window window, uint32_t z_begin, uint32_t z_end, int transparent,
+    void* pixels, size_t stride_bytes, int32_t width, int32_t height) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, window, node);
+  if (node->kind != CRTUI_WIDGET_WINDOW || z_begin >= z_end || (transparent != 0 && transparent != 1) ||
+      pixels == NULL || width <= 0 || height <= 0 || width != node->window_width ||
+      height != node->window_height || stride_bytes < (size_t)width * 4u) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+#ifndef CRTUI_HAVE_LVGL
+  return CRTUI_ERROR_UNSUPPORTED;
+#else
+  ensure_layout(context);
+  crtui_item_list list;
+  memset(&list, 0, sizeof(list));
+  if (build_items(context, window, -1, 1, 0, &list) != 0) {
+    free(list.items);
+    return CRTUI_ERROR_IO;
+  }
+  node = resolve(context, window);
+  crtui_result result = crtui_lvgl_render_plane(
+      &node->backend, list.items, list.count, context->version, z_begin, z_end, transparent,
+      pixels, stride_bytes);
   free(list.items);
   return result;
 #endif

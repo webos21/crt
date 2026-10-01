@@ -129,6 +129,65 @@ install(DIRECTORY include/ DESTINATION include
   PATTERN ".gitkeep" EXCLUDE
 )
 
+# Tranche 5B: keep Skia/GPU out of plain libcrtui. This optional companion
+# owns only the final composition algorithm; producer frames remain borrowed
+# through crtui/skia.h's acquire/release boundary.
+if(CRTUI_ENABLE_LVGL AND TARGET crtgfx_skia AND TARGET crtgfx_gpu)
+  add_library(crtui_skia STATIC src/skia_compositor.cc)
+  target_link_libraries(crtui_skia PRIVATE crt_cxx_build_flags PUBLIC crtui crtgfx_skia)
+  target_include_directories(crtui_skia PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/libcrtgfx/include"
+    "${CRTGFX_SKIA_ROOT}"
+  )
+  if(CRT_TARGET_OS STREQUAL "windows")
+    target_compile_definitions(crtui_skia PRIVATE SK_BUILD_FOR_UNIX CRTGFX_HAVE_D3D12=1)
+    target_compile_options(crtui_skia PRIVATE
+      "-I${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim"
+      "-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}"
+      "-include" "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim/mingw_w64_compat.h"
+      "-Wno-pragma-pack" "-Wno-unused-value" "-Wno-ignored-attributes"
+      "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
+      "-isystem${CMAKE_SOURCE_DIR}/libc/include"
+    )
+    add_dependencies(crtui_skia crtgfx-mingw-w64-headers-fetch)
+  elseif(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+    target_compile_definitions(crtui_skia PRIVATE SK_USE_INTERNAL_VULKAN_HEADERS)
+  elseif(CRT_TARGET_OS STREQUAL "macos")
+    target_compile_definitions(crtui_skia PRIVATE CRTGFX_HAVE_METAL=1)
+  endif()
+  set_target_properties(crtui_skia PROPERTIES
+    OUTPUT_NAME crtui_skia
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  install(TARGETS crtui_skia ARCHIVE DESTINATION lib COMPONENT crt-ui)
+
+  add_executable(crtui_surface_compositor_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/surface_compositor_test.cc
+  )
+  target_link_libraries(crtui_surface_compositor_test PRIVATE
+    crt_cxx_build_flags crtui_skia crtgfx_skia crtmedia)
+  if(CRT_TARGET_OS STREQUAL "windows")
+    target_compile_definitions(crtui_surface_compositor_test PRIVATE CRTGFX_HAVE_D3D12=1)
+  elseif(CRT_TARGET_OS STREQUAL "linux")
+    target_compile_definitions(crtui_surface_compositor_test PRIVATE CRTGFX_HAVE_VULKAN=1 SK_USE_INTERNAL_VULKAN_HEADERS)
+  elseif(CRT_TARGET_OS STREQUAL "macos")
+    target_compile_definitions(crtui_surface_compositor_test PRIVATE CRTGFX_HAVE_METAL=1)
+  endif()
+  crt_wire_skia_executable(crtui_surface_compositor_test SKIP_MACOS_DEAD_STRIP)
+  crt_link_startup_end_objects(crtui_surface_compositor_test)
+  add_dependencies(crtui_surface_compositor_test cxx c crt1 crtui_skia crtgfx_skia)
+
+  add_test(NAME crtui_surface_compositor_test_runs COMMAND crtui_surface_compositor_test)
+  set_tests_properties(crtui_surface_compositor_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    PASS_REGULAR_EXPRESSION "crtui_surface_compositor_test: (ok|skipped)"
+    TIMEOUT 120
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_surface_compositor_test_runs)
+endif()
+
 # crtui_contract_test: the resource-free acceptance test for the frozen
 # Tranche 0 contract -- thread ownership, handle lifetime, event dispatch and
 # re-entrancy, focus and modal routing, hit-testing and clipping, geometry and
@@ -224,6 +283,54 @@ set_tests_properties(crtui_layout_test_runs PROPERTIES
   TIMEOUT 60
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_layout_test_runs)
+
+# crtui_surface_test: Tranche 5A -- the producer-neutral scene boundary for
+# external surfaces: layout-derived absolute geometry, ancestor clipping,
+# effective opacity, z-order, damage and hit-testing. Headless/LVGL-free; real
+# crtgfx final composition is the separate Tranche 5B gate.
+add_executable(crtui_surface_test
+  ${CRT_STARTUP_OBJECTS}
+  tests/surface_test.c
+)
+target_link_libraries(crtui_surface_test PRIVATE crt_build_flags c crtui)
+target_include_directories(crtui_surface_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtui_surface_test PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtui_surface_test PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtui_surface_test PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtui_surface_test PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtui_surface_test PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtui_surface_test PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtui_surface_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtui_surface_test)
+add_dependencies(crtui_surface_test c crt1 crtui)
+
+add_test(NAME crtui_surface_test_runs COMMAND crtui_surface_test)
+set_tests_properties(crtui_surface_test_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtui_surface_test: ok"
+  TIMEOUT 60
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_surface_test_runs)
 
 # crtui_input_test: Tranche 2 acceptance -- synthesized crtgfx_event values ->
 # crtui through the crtgfx adapter (keyboard, pointer, wheel, slider drag, resize

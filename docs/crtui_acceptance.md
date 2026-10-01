@@ -3,7 +3,9 @@
 **Status: contract frozen (Tranche 0, all three hosts); LVGL first pixels
 (Tranche 1), input/focus/resize (Tranche 2) and the private-LVGL wrapper
 (Tranche 3) closed on all three hosts; layout, styling and the v1 widget set
-(Tranche 4) closed on Windows/x64, macOS/arm64 and Linux/x86_64.**
+(Tranche 4) closed on Windows/x64, macOS/arm64 and Linux/x86_64; External
+Surface scene metadata (Tranche 5A) and real final composition (Tranche 5B)
+accepted on Windows/x64, with host replay (5C) open.**
 The public contract in `libcrtui/include/crtui/ui.h` and the rules in the table
 below are frozen and covered by resource-free tests.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
@@ -70,7 +72,7 @@ the frozen contract; each is asserted by `crtui_contract_test`.
 | Focus and input routing | One focus per context. Pointer/wheel goes to the topmost visible widget under the point (later siblings on top, children clipped to every ancestor); a press on a focusable widget focuses it, and releasing over the same button activates it. Key input goes to the focused widget of the addressed window, else the window. Traversal is tree pre-order over widgets that are focusable, enabled and visible (all ancestors too), Tab wraps. When the focused widget is destroyed, hidden or disabled, focus moves to the next eligible widget after it (wrapping), else clears; `FOCUS_OUT` is never sent to a destroyed widget. A disabled widget (or one under a disabled ancestor) receives nothing: the input is dropped, not passed through. A modal window (the most recently made modal wins) drops all input for every other window and refuses focus into them; making a window modal moves focus into it |
 | Geometry | Bounds are integer logical pixels relative to the parent. A window's size and DPI scale (physical = logical x scale, scale > 0) come from `crtui_window_set_size()`, which emits `RESIZED` (x,y = size, value = scale in percent). Hit-testing uses the clipped, visible area. Free Window/Container children use application-set bounds; Tranche 4 adds CRT-owned Row/Column/Stack layout, fill/grow/alignment/spacing, hidden-child reflow, and ScrollView/List offsets |
 | Binary surface | Only functions declared `CRTUI_API` are exported from the shared library (hidden visibility everywhere else): LVGL symbols are never visible to consumers -- see Tranche 3 |
-| Surfaces | `crtui_surface_view_create()` reserves the API and returns `CRTUI_ERROR_UNSUPPORTED` until Tranche 5. Frozen ownership rule: the view owns only position, size, clip, opacity, visibility, z-order, damage and hit-testing, never the producer's frame |
+| Surfaces | `crtui_surface_view_create()` creates the producer-neutral scene placeholder. The view owns only position, size, clip, opacity, visibility, scene z-order, damage and hit-testing, never the producer's frame. `crtui_window_get_surface_layers()` exposes those properties. The optional C++ `crtui_skia` companion maps each stable view id to a producer-owned `SkImage`, renders LVGL UI planes around it, and balances the producer's acquire/release callbacks; core `libcrtui` remains GPU- and producer-neutral |
 | Errors | `crtui_result`: `0..-7` numerically identical to `crtmedia_result` (`OK`, `INVALID_ARGUMENT`, `UNSUPPORTED`, `WOULD_BLOCK`, `IO`, `TIMEOUT`, `CANCELLED`, `PROTOCOL`), plus `WRONG_THREAD = -8`, `INVALID_HANDLE = -9`, `STATE = -10`. A failed create always clears its output. No silent failure |
 
 STB/HMI use means remote-style keyboard navigation (Tab/arrow/Enter/Space) is a
@@ -717,10 +719,65 @@ functional source change and closes Tranche 4 on all three hosts.
 
 ### 5. External Surface (the WebKit prerequisite)
 
-`crtui_surface_view` displays a producer-owned `crtgfx` external surface and
-owns only position, size, clip, opacity, visibility, z-order, damage, and
-input hit-testing. It does not know the producer. This is what lets a later
-WebView avoid being copied into an LVGL CPU framebuffer.
+`crtui_surface_view` represents where the final compositor displays a
+producer-owned `crtgfx` external surface and owns only position, size, clip,
+opacity, visibility, z-order, damage, and input hit-testing. It does not know
+the producer. This is what lets a later WebView avoid being copied into an LVGL
+CPU framebuffer.
+
+Work is split at the actual ownership boundary:
+
+1. **5A, producer-neutral scene snapshot (Windows/x64 accepted 2026-10-01).**
+   `crtui_surface_view_create()` creates a real widget. The allocation-free,
+   two-call `crtui_window_get_surface_layers()` snapshot returns only visible,
+   non-empty layers, in stable scene order, with a stable SurfaceView id,
+   window-space bounds, the intersection of every ancestor clip, effective
+   opacity multiplied through the ancestor chain, and pending damage. The
+   application/final compositor maps that id to its producer-owned surface;
+   `crtui` deliberately stores no producer pointer. Scene mutations
+   conservatively mark the whole view dirty; producer damage rectangles are
+   unioned, clipped at snapshot time and carry a monotonic serial until
+   `crtui_surface_view_clear_damage()` acknowledges them. The snapshot does not
+   allocate, acquire a frame, or call producer code. Insufficient caller
+   capacity returns `CRTUI_WOULD_BLOCK`, reports the required count and writes
+   no partial result.
+2. **5B, real final composition (Windows/x64 accepted 2026-10-01).** The
+   optional static `crtui_skia` companion is the final-compositor boundary;
+   plain `libcrtui` retains no Skia/GPU dependency. It snapshots SurfaceViews,
+   asks the application provider for one retained `SkImage` per visible layer,
+   draws that image directly on the GPU-backed target, and invokes the matching
+   release callback exactly once after the synchronous draw. LVGL renders only
+   the UI preorder ranges below and above each SurfaceView into transparent UI
+   planes. The producer image is never copied into LVGL or read back to the CPU.
+   `crtui_window_render_plane()` retains geometry-only placeholders outside its
+   range so descendant coordinates and ancestor clipping remain identical to
+   the complete scene.
+3. **5C, host replay (open).** Replay the unchanged contract/compositor on
+   macOS/arm64 and Linux before global closure. MediaView remains Tranche 6.
+
+**5A Windows evidence.** `crtui_surface_test` reports
+`create=pass geometry=pass clip=pass opacity=pass z=pass damage=pass
+hit_test=pass visibility=pass thread=pass`. The complete LVGL-enabled
+`crt-ui-test` is 6/6;
+the LVGL-OFF tree is 4/4. Export/privacy remains exact after adding three API
+functions: `declared=66 exports=66 lvgl_exports=0 objects=1 headers=3`. Full
+Windows CTest is 168/168 (one expected no-camera skip), and `crt-ui-dist`
+rebuilds/verifies the cumulative packaged `05-ui`; the package itself passes
+the same 66/66 privacy check.
+
+**5B Windows evidence.** `crtui_surface_compositor_test` creates a synthetic
+green GPU surface and verifies that its snapshot is texture-backed. Exact pixel
+readback proves red UI below the SurfaceView, the ancestor-clipped hole, 50%
+producer opacity over that UI, and blue UI above it. The same test exercises
+damage metadata and a 160x100 to 200x120 resize, with exactly one producer
+acquire and release per composition; a no-frame acquire returns
+`CRTUI_WOULD_BLOCK` without a release callback. Its interactive acceptance mode
+wrapped a real D3D12 swapchain as a Skia surface and presented 5/5 frames with
+balanced ownership. The Skia-enabled official `crt-ui-test` gate passes 7/7,
+including the new compositor test and all prior UI tests; shared-library privacy is
+`declared=67 exports=67 lvgl_exports=0 objects=1 headers=4`. This closes only
+5B on Windows: the same sources still require macOS/arm64 and Linux replay in
+5C.
 
 ### 6. MediaView
 

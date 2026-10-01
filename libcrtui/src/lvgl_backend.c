@@ -39,6 +39,8 @@ struct crtui_lvgl_backend {
   int32_t width, height;
   uint64_t version;
   int has_version;
+  uint32_t z_begin, z_end;
+  int transparent;
   /* Image widgets: descriptors and pixel copies LVGL points into. They live
    * from one rebuild to the next (LVGL may keep referring to a source between
    * frames) and are released only after the objects using them are gone. */
@@ -172,6 +174,18 @@ static void apply_style(lv_obj_t* obj, const crtui_render_item* item) {
                                                                        : LV_TEXT_ALIGN_LEFT;
     lv_obj_set_style_text_align(obj, align, LV_PART_MAIN);
   }
+}
+
+static lv_obj_t* create_placeholder(const crtui_render_item* item, lv_obj_t* parent) {
+  lv_obj_t* obj = lv_obj_create(parent);
+  if (obj == NULL) return NULL;
+  style_plain(obj, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_scrollable(obj, false);
+  lv_obj_set_pos(obj, item->x, item->y);
+  lv_obj_set_size(obj, item->width, item->height);
+  if (!item->visible) lv_obj_set_hidden(obj, true);
+  return obj;
 }
 
 static lv_obj_t* create_object(crtui_lvgl_backend* backend, const crtui_render_item* item, lv_obj_t* parent) {
@@ -327,7 +341,9 @@ static lv_obj_t* create_object(crtui_lvgl_backend* backend, const crtui_render_i
       }
       break;
     default:
-      break; /* surface views arrive in Tranche 5 */
+      /* SurfaceViews are final-compositor metadata, never LVGL objects: the
+       * producer's pixels must not pass through this software framebuffer. */
+      break;
   }
   if (obj != NULL) {
     apply_style(obj, item);
@@ -386,6 +402,13 @@ static crtui_result backend_resize(crtui_lvgl_backend* backend, int32_t width, i
 crtui_result crtui_lvgl_render(
     crtui_lvgl_backend** out_backend, const crtui_render_item* items, size_t count, uint64_t version, void* pixels,
     size_t stride_bytes) {
+  return crtui_lvgl_render_plane(
+      out_backend, items, count, version, 0, UINT32_MAX, 0, pixels, stride_bytes);
+}
+
+crtui_result crtui_lvgl_render_plane(
+    crtui_lvgl_backend** out_backend, const crtui_render_item* items, size_t count, uint64_t version,
+    uint32_t z_begin, uint32_t z_end, int transparent, void* pixels, size_t stride_bytes) {
   if (out_backend == NULL || items == NULL || count == 0 || pixels == NULL) {
     return CRTUI_ERROR_INVALID_ARGUMENT;
   }
@@ -405,14 +428,20 @@ crtui_result crtui_lvgl_render(
   if (result != CRTUI_OK) {
     return result;
   }
-  if (!backend->has_version || backend->version != version) {
+  if (!backend->has_version || backend->version != version || backend->z_begin != z_begin ||
+      backend->z_end != z_end || backend->transparent != transparent) {
     lv_display_set_default(backend->display);
     lv_obj_t* screen = lv_display_get_screen_active(backend->display);
     lv_obj_clean(screen);
     release_images(backend);
     style_plain(screen, LV_PART_MAIN);
-    style_fill(screen, CRTUI_COLOR_WINDOW_BG, LV_PART_MAIN);
+    if (!transparent && z_begin == 0 && z_end > 0) {
+      style_fill(screen, CRTUI_COLOR_WINDOW_BG, LV_PART_MAIN);
+    } else {
+      lv_obj_set_style_bg_opa(screen, LV_OPA_TRANSP, LV_PART_MAIN);
+    }
     lv_obj_set_scrollable(screen, false);
+    memset(backend->buffer, 0, backend->buffer_size);
     lv_obj_t** objects = (lv_obj_t**)calloc(count, sizeof(*objects));
     if (objects == NULL) {
       return CRTUI_ERROR_IO;
@@ -420,12 +449,18 @@ crtui_result crtui_lvgl_render(
     objects[0] = screen;
     for (size_t i = 1; i < count; ++i) {
       lv_obj_t* parent = items[i].parent >= 0 ? objects[items[i].parent] : screen;
-      objects[i] = parent != NULL ? create_object(backend, &items[i], parent) : NULL;
+      int in_plane = i >= z_begin && i < z_end && items[i].kind != CRTUI_WIDGET_SURFACE_VIEW;
+      objects[i] = parent == NULL ? NULL
+                                  : (in_plane ? create_object(backend, &items[i], parent)
+                                              : create_placeholder(&items[i], parent));
     }
     free(objects);
     lv_obj_invalidate(screen);
     lv_refr_now(backend->display);
     backend->version = version;
+    backend->z_begin = z_begin;
+    backend->z_end = z_end;
+    backend->transparent = transparent;
     backend->has_version = 1;
   }
   if (stride_bytes == (size_t)backend->width * 4u) {

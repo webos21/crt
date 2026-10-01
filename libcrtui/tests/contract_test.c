@@ -157,8 +157,11 @@ static void test_errors(void) {
   CHECK(out == CRTUI_INVALID_WIDGET, "failed create always clears *out");
   CHECK(crtui_button_create(s.ctx, (crtui_widget)0xdeadbeef, "x", &out) == CRTUI_ERROR_INVALID_HANDLE, "bogus parent");
   CHECK(crtui_slider_create(s.ctx, s.container, 5, 5, &out) == CRTUI_ERROR_INVALID_ARGUMENT, "slider min >= max");
-  CHECK(crtui_surface_view_create(s.ctx, s.container, &out) == CRTUI_ERROR_UNSUPPORTED,
-        "surface views are reserved until Tranche 5 (UNSUPPORTED, not a crash)");
+  CHECK(crtui_surface_view_create(s.ctx, s.container, &out) == CRTUI_OK,
+        "Tranche 5 SurfaceView is a real producer-neutral widget");
+  crtui_widget_kind surface_kind = 0;
+  CHECK(crtui_widget_get_kind(s.ctx, out, &surface_kind) == CRTUI_OK && surface_kind == CRTUI_WIDGET_SURFACE_VIEW,
+        "SurfaceView kind");
   CHECK(crtui_slider_set_value(s.ctx, s.button_a, 1) == CRTUI_ERROR_INVALID_ARGUMENT, "slider op on a button");
   CHECK(crtui_widget_set_text(s.ctx, s.slider, "x") == CRTUI_ERROR_INVALID_ARGUMENT, "text op on a slider");
   CHECK(crtui_widget_set_bounds(s.ctx, s.win, 0, 0, 1, 1) == CRTUI_ERROR_INVALID_ARGUMENT,

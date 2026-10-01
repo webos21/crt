@@ -10,6 +10,54 @@ substantive update.
 
 ## 2026-10-01
 
+- **`crtui` External Surface Tranche 5B accepted on Windows/x64: a real
+  texture-backed producer is now composed with CRT UI in a real GPU window.**
+  The optional static `crtui_skia` companion keeps Skia/GPU dependencies out of
+  core `libcrtui`. It consumes the producer-neutral 5A layer snapshot, renders
+  LVGL UI preorder ranges as opaque/transparent planes, draws each
+  producer-owned `SkImage` directly between those planes, and calls the
+  provider's matching release exactly once. Producer pixels are neither copied
+  through LVGL nor read back to the CPU. Geometry-only LVGL placeholders retain
+  the complete scene's coordinate and ancestor-clip behavior while
+  SurfaceViews remain holes.
+
+  The new `crtui_surface_compositor_test` uses a texture-backed synthetic GPU
+  producer. Exact pixel readback proves UI-below/surface/UI-above order,
+  ancestor clipping and 50% opacity; it also proves damage propagation, resize,
+  stable-id mapping, one acquire/release pair per frame, and the no-frame
+  `WOULD_BLOCK` path without a spurious release. Its real-window mode presented
+  5/5 frames through a D3D12 swapchain with balanced ownership.
+  The Skia-enabled official UI gate passes 7/7, and DLL privacy remains exact:
+  `declared=67 exports=67 lvgl_exports=0 objects=1 headers=4`. Tranche 5 remains
+  open only for unchanged macOS/arm64 and Linux replay (5C); MediaView remains
+  Tranche 6.
+
+- **`crtui` External Surface Tranche 5A accepted on Windows/x64: the
+  producer-neutral scene boundary is now real, without mislabelling metadata as
+  GPU display.** `crtui_surface_view_create()` now creates a normal opaque-id
+  widget that participates in CRT layout, clipping and hit-testing. The new
+  allocation-free `crtui_window_get_surface_layers()` snapshot exposes each
+  visible SurfaceView's stable id, scene preorder/z, absolute bounds,
+  ancestor-intersected clip and multiplicative effective opacity. Damage is
+  accumulated per view, clipped at snapshot time, carries a monotonic serial,
+  and remains explicit until the compositor clears it. `crtui` stores no
+  producer pointer and never acquires, retains, releases or dereferences a
+  producer frame; the final compositor maps the stable view id to its own
+  surface.
+
+  The new LVGL-free `crtui_surface_test` passes with
+  `create/geometry/clip/opacity/z/damage/hit_test/visibility/thread=pass`, including
+  capacity-query/no-partial-write and invalid-operation coverage. The complete
+  UI gate is 6/6 with LVGL ON and 4/4 in a fresh LVGL-OFF tree. DLL privacy
+  remains exact after the additive API: `declared=66 exports=66 lvgl_exports=0`.
+  Full Windows CTest is 168/168 (one expected no-camera skip); the cumulative
+  `crt-ui-dist` rebuilt and verified through packaged `05-ui`, whose installed
+  headers/DLL pass the same 66/66 privacy check. This deliberately does **not**
+  close Tranche 5: `crtgfx` still needs the real
+  final compositor that interleaves producer-owned GPU content with UI above
+  and below it without routing producer pixels through LVGL (TODO 5B), followed
+  by macOS/Linux replay (5C).
+
 - **`crtui` Tranche 4 closed on Linux/x86_64 and therefore on all three
   hosts.** The official LVGL-enabled UI gate passed 5/5 three consecutive
   times; a fresh `CRTUI_ENABLE_LVGL=OFF` tree passed layout/input 2/2. The real
