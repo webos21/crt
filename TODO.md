@@ -89,14 +89,11 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   crtui/crtgfx only and rebuilds from the packaged SDK, and
   `crtui_privacy_test_runs` proves headers/exports/sample are LVGL-free;
   evidence in `HISTORY.md` and `docs/crtui_acceptance.md`.
-* [ ] **4. Layout, styling, v1 widget set.** Windows/x64 implementation and
-  acceptance plus the macOS/arm64 replay completed 2026-10-01: CRT-owned
-  free/Row/Column/Stack layout,
+* [x] **4. Layout, styling, v1 widget set.** Closed 2026-10-01 on Windows/x64,
+  macOS/arm64, and Linux/x86_64: CRT-owned free/Row/Column/Stack layout,
   ScrollView/List, the CRT-neutral style mask, Image/Switch/Checkbox/TextInput,
   committed-text input, private LVGL rendering, and the installed sample all
-  pass. The layout path is allocation-free and `crt-ui-test` now builds every
-  executable it runs. Keep open for the Linux replay; evidence is in
-  `HISTORY.md` and `docs/crtui_acceptance.md`.
+  pass; evidence is in `HISTORY.md` and `docs/crtui_acceptance.md`.
 * [ ] **5. External Surface view.** Producer-agnostic surface composition; the
   `06-web` prerequisite.
 * [ ] **6. MediaView.** Zero-copy video composed in the final present, not via

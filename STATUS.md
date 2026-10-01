@@ -21,8 +21,7 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
   distributions then add C++, Simple Graphics, advanced Graphics/Media, and
   the in-progress `05-ui` stage under `out/<preset>/dist/`. `05-ui` now has a
   frozen contract, a headless model, private LVGL rendering, input/focus/resize,
-  and the Windows/x64- and macOS/arm64-accepted Tranche 4 layout/style/widget
-  set; the planned
+  and the all-three-host-accepted Tranche 4 layout/style/widget set; the planned
   `06-web` follows (the superseded `05-js`/`libcrtjs` skeleton was removed on
   2026-09-29).
 - No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
@@ -443,8 +442,8 @@ statuses, and exceptions are maintained in:
    through a crtgfx adapter) and Tranche 3 (LVGL made truly private: export
    control, an installed LVGL-free sample, a privacy check) are closed on all
    three hosts. Tranche 4 (CRT-owned layout, styling and the v1 widget set) is
-   accepted on Windows/x64 and macOS/arm64 (2026-10-01); replay it on Linux
-   before moving to External Surface. See `docs/crtui_acceptance.md`.
+   closed on Windows/x64, macOS/arm64 and Linux/x86_64 (2026-10-01). Implement
+   and accept Tranche 5 External Surface next. See `docs/crtui_acceptance.md`.
 2. After `05-ui`'s External Surface contract is accepted, begin `06-web`: a
    JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a
    Linux WPE reference baseline, then `PlatformCRT`. See

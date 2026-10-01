@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-10-01
 
+- **`crtui` Tranche 4 closed on Linux/x86_64 and therefore on all three
+  hosts.** The official LVGL-enabled UI gate passed 5/5 three consecutive
+  times; a fresh `CRTUI_ENABLE_LVGL=OFF` tree passed layout/input 2/2. The real
+  Wayland demo and an externally rebuilt sample using only packaged `05-ui`
+  each ran 3/3 with `presented=30 pixel_check=pass input_check=pass`. The
+  cumulative distribution verified through `05-ui`, including its generated
+  `libxdg-shell-protocol.a`; packaged privacy is `declared=63 exports=63
+  lvgl_exports=0 objects=1 headers=3`, and the sample's only dynamic host
+  dependency is `libwayland-client.so.0`.
+
+  Tooling is 79/79. Full CTest is 150/151: every `crtui` test and all other
+  tests pass except the previously recorded
+  `crtmedia_playback_pipeline_test_runs` wall-time check on this host, where
+  `aplay -l` still reports no sound cards. No functional source change was
+  needed for the Linux replay; the required clean-tree Wayland dependency
+  build followed the repository's documented build-then-reconfigure sequence.
+  Full evidence is in `docs/crtui_acceptance.md`; External Surface is next.
+
 - **`crtui` Tranche 4 replayed and accepted on macOS/arm64; a cumulative-stage
   build race was found and fixed.** The LVGL-enabled UI gate is 6/6; a fresh
   `CRTUI_ENABLE_LVGL=OFF` tree passes layout/input 2/2; direct layout, input,

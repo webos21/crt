@@ -3,7 +3,7 @@
 **Status: contract frozen (Tranche 0, all three hosts); LVGL first pixels
 (Tranche 1), input/focus/resize (Tranche 2) and the private-LVGL wrapper
 (Tranche 3) closed on all three hosts; layout, styling and the v1 widget set
-(Tranche 4) accepted on Windows/x64 and macOS/arm64, with Linux replay open.**
+(Tranche 4) closed on Windows/x64, macOS/arm64 and Linux/x86_64.**
 The public contract in `libcrtui/include/crtui/ui.h` and the rules in the table
 below are frozen and covered by resource-free tests.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
@@ -684,7 +684,36 @@ fixed.
   `crtmedia_capture_encode_lifecycle_test_runs` repeatedly fails its capture
   lifecycle cycle on this camera environment instead of taking its documented
   skip path. This is recorded as a host/media residual, not hidden as a UI
-  pass. Linux replay remains before global Tranche 4 closure.
+  pass.
+
+**Linux/x86_64 replay (2026-10-01).** The implementation replayed without a
+functional source change and closes Tranche 4 on all three hosts.
+
+- The official LVGL-enabled `crt-ui-test` gate is 5/5. It was repeated three
+  consecutive times; contract, layout, input, render and privacy all remained
+  green. Direct layout output reports
+  `column/row/main_align/stack/free/scroll/list/style/toggles/text_input/image`
+  all pass, and the extended input groups pass. Render covers all 17 groups
+  and its 40-cycle lifecycle remains `handles=5->5 threads=1->1`.
+- A fresh `CRTUI_ENABLE_LVGL=OFF` tree passed
+  `crtui_layout_test_runs` and `crtui_input_test_runs` (2/2), proving the
+  authoritative model/layout/input path remains independent of LVGL.
+- The in-tree Wayland demo ran three times for 30 frames with
+  `presented=30 pixel_check=pass input_check=pass`. After the documented clean
+  Linux sequence (`crtgfx-wayland-build`, reconfigure, then distribution),
+  `crt-ui-dist` generated and verified every cumulative stage through
+  `dist/05-ui`; the manifest and package contain the generated
+  `libxdg-shell-protocol.a` dependency.
+- The installed `examples/ui-basic` was configured and built in a fresh
+  directory using only packaged `dist/05-ui`, then ran 3/3 in real Wayland
+  windows with the same 30-frame result. Its only dynamic host dependency is
+  `libwayland-client.so.0`. Packaged privacy reports
+  `declared=63 exports=63 lvgl_exports=0 objects=1 headers=3`.
+- Tooling is 79/79. Full in-tree CTest is 150/151: all five crtui tests and all
+  other tests pass except the previously recorded independent
+  `crtmedia_playback_pipeline_test_runs` real-wall-time pacing check. A direct
+  rerun reproduced it and `aplay -l` still reports `no soundcards found`, so
+  this remains the known host/media residual rather than a UI failure.
 
 ### 5. External Surface (the WebKit prerequisite)
 
