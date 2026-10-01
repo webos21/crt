@@ -122,6 +122,7 @@ static int run_capture_cycle(
   if (capture == NULL) return 1;
 
   if (crtmedia_capture_start(capture) != CRTMEDIA_OK) {
+    fprintf(stderr, "crtmedia_capture_encode_lifecycle_test: capture start failed\n");
     crtmedia_capture_release(capture);
     return -1;
   }
@@ -191,9 +192,17 @@ static int run_capture_cycle(
   int no_frames_ever = 0;
   for (int index = 0; index < CAPTURE_FRAME_COUNT && !failed; ++index) {
     crtmedia_frame frame;
+    memset(&frame, 0, sizeof(frame));
     crtmedia_result r = crtmedia_capture_dequeue_frame(capture, DEQUEUE_TIMEOUT_MS, &frame);
     if (r != CRTMEDIA_OK || frame.timestamp_us <= last_capture_pts ||
-        frame.format != CRTMEDIA_PIXEL_FORMAT_YUV420P || frame.release == NULL) {
+        frame.format != CRTMEDIA_PIXEL_FORMAT_YUV420P || frame.release == NULL || frame.width != actual.width ||
+        frame.height != actual.height) {
+      fprintf(
+          stderr,
+          "crtmedia_capture_encode_lifecycle_test: capture frame failed index=%d result=%d timestamp=%lld "
+          "last=%lld format=%d release=%s\n",
+          index, (int)r, (long long)frame.timestamp_us, (long long)last_capture_pts, (int)frame.format,
+          frame.release != NULL ? "set" : "null");
       failed = 1;
       if (index == 0) no_frames_ever = 1;
       break;
@@ -203,14 +212,27 @@ static int run_capture_cycle(
     for (;;) {
       r = crtmedia_codec_queue_frame(encoder, &frame, CRTMEDIA_CODEC_BUFFER_FLAG_NONE);
       if (r == CRTMEDIA_OK) break;
-      if (r != CRTMEDIA_WOULD_BLOCK || drain_encoder(encoder, muxer, track, &encoder_eof, &encoded_packets) != 0) {
+      if (r != CRTMEDIA_WOULD_BLOCK) {
+        fprintf(
+            stderr,
+            "crtmedia_capture_encode_lifecycle_test: capture queue failed index=%d result=%d frame=%ux%u "
+            "configured=%ux%u\n",
+            index, (int)r, frame.width, frame.height, actual.width, actual.height);
+        failed = 1;
+        break;
+      }
+      if (drain_encoder(encoder, muxer, track, &encoder_eof, &encoded_packets) != 0) {
+        fprintf(stderr, "crtmedia_capture_encode_lifecycle_test: capture drain failed index=%d\n", index);
         failed = 1;
         break;
       }
     }
     crtmedia_frame_release(&frame);
     ++*frames_released;
-    if (!failed && drain_encoder(encoder, muxer, track, &encoder_eof, &encoded_packets) != 0) failed = 1;
+    if (!failed && drain_encoder(encoder, muxer, track, &encoder_eof, &encoded_packets) != 0) {
+      fprintf(stderr, "crtmedia_capture_encode_lifecycle_test: capture post-queue drain failed index=%d\n", index);
+      failed = 1;
+    }
   }
   CHECK(crtmedia_capture_stop(capture) == CRTMEDIA_OK, "stop capture");
   crtmedia_capture_release(capture);
@@ -234,6 +256,9 @@ static int run_capture_cycle(
     }
   }
   if (failed || encoded_packets != CAPTURE_FRAME_COUNT || crtmedia_muxer_finish(muxer) != CRTMEDIA_OK) {
+    fprintf(
+        stderr, "crtmedia_capture_encode_lifecycle_test: capture encode/mux failed failed=%d packets=%d\n",
+        failed, encoded_packets);
     crtmedia_muxer_release(muxer);
     crtmedia_codec_release(encoder);
     return -1;
@@ -474,6 +499,13 @@ int main(void) {
   for (int iteration = 0; iteration < ITERATIONS; ++iteration) {
     if (!capture_skip) {
       int r = run_capture_cycle(capture_output_path, &capture_frames, &capture_releases, &capture_decoded);
+      if (r < 0) {
+        fprintf(
+            stderr,
+            "crtmedia_capture_encode_lifecycle_test: capture iteration=%d failed frames=%lld releases=%lld "
+            "decoded=%lld\n",
+            iteration, (long long)capture_frames, (long long)capture_releases, (long long)capture_decoded);
+      }
       CHECK(r >= 0, "capture lifecycle cycle");
       if (r == 1) {
         capture_skip = 1;

@@ -5,7 +5,7 @@
 (Tranche 3) closed on all three hosts; layout, styling and the v1 widget set
 (Tranche 4) closed on Windows/x64, macOS/arm64 and Linux/x86_64; External
 Surface scene metadata (Tranche 5A) and real final composition (Tranche 5B)
-accepted on Windows/x64, with host replay (5C) open.**
+are accepted on Windows/x64 and macOS/arm64, with Linux replay (5C) open.**
 The public contract in `libcrtui/include/crtui/ui.h` and the rules in the table
 below are frozen and covered by resource-free tests.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
@@ -752,8 +752,9 @@ Work is split at the actual ownership boundary:
    `crtui_window_render_plane()` retains geometry-only placeholders outside its
    range so descendant coordinates and ancestor clipping remain identical to
    the complete scene.
-3. **5C, host replay (open).** Replay the unchanged contract/compositor on
-   macOS/arm64 and Linux before global closure. MediaView remains Tranche 6.
+3. **5C, host replay (macOS/arm64 accepted 2026-10-01; Linux open).** Replay
+   the unchanged contract/compositor on Linux before global closure. MediaView
+   remains Tranche 6.
 
 **5A Windows evidence.** `crtui_surface_test` reports
 `create=pass geometry=pass clip=pass opacity=pass z=pass damage=pass
@@ -775,9 +776,30 @@ acquire and release per composition; a no-frame acquire returns
 wrapped a real D3D12 swapchain as a Skia surface and presented 5/5 frames with
 balanced ownership. The Skia-enabled official `crt-ui-test` gate passes 7/7,
 including the new compositor test and all prior UI tests; shared-library privacy is
-`declared=67 exports=67 lvgl_exports=0 objects=1 headers=4`. This closes only
-5B on Windows: the same sources still require macOS/arm64 and Linux replay in
-5C.
+`declared=67 exports=67 lvgl_exports=0 objects=1 headers=4`. This closed 5B on
+Windows; the same sources were then replayed unchanged on macOS/arm64.
+
+**5A/5B macOS/arm64 replay evidence.** The official Skia-enabled
+`crt-ui-test` gate passes 8/8, including the macOS shared-contract guard and
+the compositor test. Direct `crtui_surface_test` output reports
+`create/geometry/clip/opacity/z/damage/hit_test/visibility/thread=pass`. A
+fresh `CRTUI_ENABLE_LVGL=OFF` build passes contract, layout, surface and input
+4/4, preserving the producer-neutral 5A boundary.
+
+The real Metal-window compositor mode presents 5/5 frames and reports
+`gpu/ordering/clip/opacity/damage/resize/ownership=pass`; producer ownership is
+balanced. Core `libcrtui.dylib` remains free of Skia, Metal and `crtgfx`
+dynamic dependencies, while privacy is exact at
+`declared=67 exports=67 lvgl_exports=0 objects=1 headers=4`. `crt-ui-dist`
+rebuilds and verifies cumulative `dist/05-ui`, installing the optional static
+`libcrtui_skia.a` companion and `crtui/skia.h` separately from core
+`libcrtui`.
+
+Tooling is 79/79. Every `crtui` test passed in the initial 159/160 full run;
+the sole failure was the independent AVFoundation lifecycle residual. The
+follow-up fixed that backend's queue ownership and dimension negotiation, and
+full in-tree CTest is now 160/160. No functional UI source change was required
+for the macOS replay. Linux remains before global Tranche 5 closure.
 
 ### 6. MediaView
 

@@ -444,8 +444,8 @@ statuses, and exceptions are maintained in:
    three hosts. Tranche 4 (CRT-owned layout, styling and the v1 widget set) is
    closed on Windows/x64, macOS/arm64 and Linux/x86_64 (2026-10-01). Tranche 5A's
    producer-neutral SurfaceView scene snapshot and Tranche 5B's real
-   GPU-producer/final-compositor boundary are accepted on Windows/x64. Replay
-   the unchanged compositor on macOS/arm64 and Linux (5C) before closing
+   GPU-producer/final-compositor boundary are accepted on Windows/x64 and
+   macOS/arm64. Replay the unchanged compositor on Linux (5C) before closing
    External Surface. See `docs/crtui_acceptance.md`.
 2. After `05-ui`'s External Surface contract is accepted, begin `06-web`: a
    JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a

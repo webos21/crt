@@ -70,26 +70,24 @@
  * `stringWithUTF8String:`/`numberWithInt:`/`dictionaryWithObject:forKey:`
  * return autoreleased objects, real Cocoa convention) is wrapped in one
  * explicit NSAutoreleasePool, matching window_cocoa.c's own established
- * per-call pool pattern -- the session and delegate objects this function
- * keeps beyond open() are both created via alloc+init (a real, +1 owned
+ * per-call pool pattern -- the session, output and delegate objects this
+ * function keeps beyond open() are created via alloc+init (a real, +1 owned
  * reference per Cocoa convention, matching every other real Cocoa object
  * this project's own macOS backends already retain this same way), so
- * draining the pool at the end of open() does not free either of them;
+ * draining the pool at the end of open() does not free them;
  * the device/input objects and every helper string/number/dictionary are
  * genuinely only used synchronously within open() (the session internally
  * retains its own input/output once added), so it is correct for the
  * pool to release them.
  *
- * Frame-rate negotiation is intentionally NOT implemented in this first
- * pass (out_actual.frame_rate simply echoes the request, matching
- * capture_v4l2.c's own honest fallback when its own VIDIOC_S_PARM
- * negotiation fails) -- a real CMTime-struct-by-value activeVideoMin/
- * MaxFrameDuration call was judged not worth its own unverified-ABI risk
- * for a field the acceptance gate does not check precisely. Every
- * delivered frame's actual width/height, unlike the advisory session-
- * preset-based out_actual, is always read directly from that frame's own
- * real CVPixelBuffer -- robust regardless of whatever the video pipeline
- * actually negotiates. */
+ * Frame-rate negotiation is intentionally not implemented yet
+ * (out_actual.frame_rate echoes the request, matching capture_v4l2.c's
+ * fallback when VIDIOC_S_PARM negotiation fails). Dimensions are different:
+ * the public capture contract promises negotiated dimensions, so open()
+ * uses the real AVCaptureSessionPreset constants together with the real
+ * kCVPixelBufferWidthKey/kCVPixelBufferHeightKey video-settings keys. Every
+ * delivered frame's dimensions are still read from its CVPixelBuffer and the
+ * lifecycle test verifies that those dimensions match the encoder contract. */
 
 #include "capture_internal.h"
 #include "capture_avfoundation_test_control.h"
@@ -109,6 +107,11 @@ typedef void* Ivar;
 typedef unsigned char BOOL;
 typedef unsigned long NSUInteger;
 
+extern id const AVCaptureSessionPreset352x288;
+extern id const AVCaptureSessionPreset640x480;
+extern id const AVCaptureSessionPreset1280x720;
+extern id const AVCaptureSessionPreset1920x1080;
+
 extern id objc_msgSend(id self, SEL op, ...);
 extern SEL sel_registerName(const char* name);
 extern id objc_getClass(const char* name);
@@ -124,6 +127,10 @@ extern void object_getInstanceVariable(id object, const char* name, void** out_v
 
 typedef uint32_t OSType;
 typedef int32_t CVReturn;
+
+extern const void* const kCVPixelBufferPixelFormatTypeKey;
+extern const void* const kCVPixelBufferWidthKey;
+extern const void* const kCVPixelBufferHeightKey;
 
 extern void* CMSampleBufferGetImageBuffer(void* sample_buffer);
 extern CVReturn CVPixelBufferLockBaseAddress(void* pixel_buffer, uint64_t lock_flags);
@@ -142,6 +149,7 @@ extern OSType CVPixelBufferGetPixelFormatType(void* pixel_buffer);
 #define CRT_CVPIXELBUFFER_LOCK_READONLY 1u
 
 extern void* dispatch_queue_create(const char* label, void* attr);
+extern void dispatch_sync_f(void* queue, void* context, void (*work)(void*));
 extern void dispatch_release(void* object);
 
 /* ================== Frame queue (delegate thread -> dequeue caller) ================== */
@@ -157,6 +165,7 @@ typedef struct crtmedia_avfoundation_queued_frame {
 
 typedef struct crtmedia_avfoundation_capture {
   id session;
+  id output;
   id delegate;
   void* dispatch_queue;
   int started;
@@ -171,6 +180,70 @@ typedef struct crtmedia_avfoundation_capture {
   int64_t timestamp_origin_us;
   int64_t last_timestamp_us;
 } crtmedia_avfoundation_capture;
+
+static void queued_frame_reset(crtmedia_avfoundation_queued_frame* frame) {
+  memset(frame, 0, sizeof(*frame));
+}
+
+static int queue_take_locked(
+    crtmedia_avfoundation_capture* capture, crtmedia_avfoundation_queued_frame* out_frame) {
+  crtmedia_avfoundation_queued_frame* slot;
+  if (capture->queue_count == 0) {
+    return 0;
+  }
+  slot = &capture->queue[capture->queue_head];
+  *out_frame = *slot;
+  queued_frame_reset(slot);
+  capture->queue_head = (capture->queue_head + 1u) % CRTMEDIA_AVF_QUEUE_CAPACITY;
+  --capture->queue_count;
+  return 1;
+}
+
+static void queue_clear_locked(crtmedia_avfoundation_capture* capture) {
+  while (capture->queue_count != 0) {
+    crtmedia_avfoundation_queued_frame* slot = &capture->queue[capture->queue_head];
+    free(slot->storage);
+    queued_frame_reset(slot);
+    capture->queue_head = (capture->queue_head + 1u) % CRTMEDIA_AVF_QUEUE_CAPACITY;
+    --capture->queue_count;
+  }
+  capture->queue_head = 0;
+}
+
+static void dispatch_barrier_noop(void* context) {
+  (void)context;
+}
+
+int crtmedia_avfoundation_queue_ownership_self_test(void) {
+  crtmedia_avfoundation_capture capture;
+  crtmedia_avfoundation_queued_frame taken;
+  uint8_t* first;
+  uint8_t* second;
+  memset(&capture, 0, sizeof(capture));
+  memset(&taken, 0, sizeof(taken));
+  first = (uint8_t*)malloc(1);
+  second = (uint8_t*)malloc(1);
+  if (first == NULL || second == NULL) {
+    free(first);
+    free(second);
+    return 0;
+  }
+  capture.queue_head = 3;
+  capture.queue_count = 2;
+  capture.queue[3].storage = first;
+  capture.queue[0].storage = second;
+  if (!queue_take_locked(&capture, &taken) || taken.storage != first || capture.queue[3].storage != NULL ||
+      capture.queue_head != 0 || capture.queue_count != 1) {
+    free(taken.storage);
+    queue_clear_locked(&capture);
+    return 0;
+  }
+  free(taken.storage);
+  taken.storage = NULL;
+  queue_clear_locked(&capture);
+  return capture.queue_head == 0 && capture.queue_count == 0 && capture.queue[0].storage == NULL &&
+         capture.queue[3].storage == NULL;
+}
 
 static int64_t now_us(void) {
   struct timespec ts;
@@ -326,6 +399,7 @@ static void capture_output_callback(id self, SEL cmd, id output, void* sample_bu
      * this function's own top comment. */
     uint32_t oldest = capture->queue_head;
     free(capture->queue[oldest].storage);
+    queued_frame_reset(&capture->queue[oldest]);
     capture->queue_head = (capture->queue_head + 1u) % CRTMEDIA_AVF_QUEUE_CAPACITY;
     --capture->queue_count;
   }
@@ -393,24 +467,39 @@ crtmedia_result crtmedia_capture_backend_enumerate(
 }
 
 static void release_backend(crtmedia_avfoundation_capture* capture) {
-  uint32_t index;
   if (capture == NULL) {
     return;
   }
   if (capture->session != NULL) {
     if (capture->started) {
       ((void (*)(id, SEL))objc_msgSend)(capture->session, sel_registerName("stopRunning"));
+      capture->started = 0;
     }
+  }
+  if (capture->output != NULL) {
+    ((void (*)(id, SEL, id, void*))objc_msgSend)(
+        capture->output, sel_registerName("setSampleBufferDelegate:queue:"), NULL, NULL);
+  }
+  if (capture->dispatch_queue != NULL) {
+    dispatch_sync_f(capture->dispatch_queue, NULL, dispatch_barrier_noop);
+  }
+  if (capture->delegate != NULL) {
+    object_setInstanceVariable(capture->delegate, "_capture", NULL);
+  }
+  pthread_mutex_lock(&capture->lock);
+  queue_clear_locked(capture);
+  pthread_mutex_unlock(&capture->lock);
+  if (capture->session != NULL) {
     ((void (*)(id, SEL))objc_msgSend)(capture->session, sel_registerName("release"));
+  }
+  if (capture->output != NULL) {
+    ((void (*)(id, SEL))objc_msgSend)(capture->output, sel_registerName("release"));
   }
   if (capture->delegate != NULL) {
     ((void (*)(id, SEL))objc_msgSend)(capture->delegate, sel_registerName("release"));
   }
   if (capture->dispatch_queue != NULL) {
     dispatch_release(capture->dispatch_queue);
-  }
-  for (index = 0; index < CRTMEDIA_AVF_QUEUE_CAPACITY; ++index) {
-    free(capture->queue[(capture->queue_head + index) % CRTMEDIA_AVF_QUEUE_CAPACITY].storage);
   }
   pthread_cond_destroy(&capture->not_empty);
   pthread_mutex_destroy(&capture->lock);
@@ -423,12 +512,11 @@ crtmedia_result crtmedia_capture_backend_open(
   static const struct {
     uint32_t width;
     uint32_t height;
-    const char* preset;
   } presets[] = {
-      {352, 288, "AVCaptureSessionPreset352x288"},
-      {640, 480, "AVCaptureSessionPreset640x480"},
-      {1280, 720, "AVCaptureSessionPreset1280x720"},
-      {1920, 1080, "AVCaptureSessionPreset1920x1080"},
+      {352, 288},
+      {640, 480},
+      {1280, 720},
+      {1920, 1080},
   };
   uint32_t requested_width = requested != NULL && requested->width != 0 ? requested->width : 640u;
   uint32_t requested_height = requested != NULL && requested->height != 0 ? requested->height : 480u;
@@ -444,8 +532,9 @@ crtmedia_result crtmedia_capture_backend_open(
   id output;
   id delegate;
   id preset_string;
-  id pixel_format_key;
   id pixel_format_value;
+  id width_value;
+  id height_value;
   id video_settings;
   BOOL can_add;
 
@@ -499,8 +588,26 @@ crtmedia_result crtmedia_capture_backend_open(
 
   session = ((id (*)(id, SEL))objc_msgSend)((id)objc_getClass("AVCaptureSession"), sel_registerName("alloc"));
   session = ((id (*)(id, SEL))objc_msgSend)(session, sel_registerName("init"));
-  preset_string = ((id (*)(id, SEL, const char*))objc_msgSend)(
-      (id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), presets[preset_index].preset);
+  switch (preset_index) {
+    case 0:
+      preset_string = AVCaptureSessionPreset352x288;
+      break;
+    case 2:
+      preset_string = AVCaptureSessionPreset1280x720;
+      break;
+    case 3:
+      preset_string = AVCaptureSessionPreset1920x1080;
+      break;
+    default:
+      preset_string = AVCaptureSessionPreset640x480;
+      break;
+  }
+  if (!((BOOL (*)(id, SEL, id))objc_msgSend)(session, sel_registerName("canSetSessionPreset:"), preset_string)) {
+    ((void (*)(id, SEL))objc_msgSend)(session, sel_registerName("release"));
+    ((void (*)(id, SEL))objc_msgSend)(pool, sel_registerName("release"));
+    release_backend(capture);
+    return CRTMEDIA_ERROR_UNSUPPORTED;
+  }
   ((void (*)(id, SEL, id))objc_msgSend)(session, sel_registerName("setSessionPreset:"), preset_string);
   can_add = ((BOOL (*)(id, SEL, id))objc_msgSend)(session, sel_registerName("canAddInput:"), input);
   if (!can_add) {
@@ -513,13 +620,21 @@ crtmedia_result crtmedia_capture_backend_open(
 
   output = ((id (*)(id, SEL))objc_msgSend)((id)objc_getClass("AVCaptureVideoDataOutput"), sel_registerName("alloc"));
   output = ((id (*)(id, SEL))objc_msgSend)(output, sel_registerName("init"));
-  pixel_format_key = ((id (*)(id, SEL, const char*))objc_msgSend)(
-      (id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), "PixelFormatType");
   pixel_format_value = ((id (*)(id, SEL, int))objc_msgSend)(
       (id)objc_getClass("NSNumber"), sel_registerName("numberWithInt:"), (int)CRT_CVPIXELFORMAT_420V);
-  video_settings = ((id (*)(id, SEL, id, id))objc_msgSend)(
-      (id)objc_getClass("NSDictionary"), sel_registerName("dictionaryWithObject:forKey:"), pixel_format_value,
-      pixel_format_key);
+  width_value = ((id (*)(id, SEL, unsigned int))objc_msgSend)(
+      (id)objc_getClass("NSNumber"), sel_registerName("numberWithUnsignedInt:"), presets[preset_index].width);
+  height_value = ((id (*)(id, SEL, unsigned int))objc_msgSend)(
+      (id)objc_getClass("NSNumber"), sel_registerName("numberWithUnsignedInt:"), presets[preset_index].height);
+  video_settings = ((id (*)(id, SEL))objc_msgSend)(
+      (id)objc_getClass("NSMutableDictionary"), sel_registerName("dictionary"));
+  ((void (*)(id, SEL, id, id))objc_msgSend)(
+      video_settings, sel_registerName("setObject:forKey:"), pixel_format_value,
+      (id)kCVPixelBufferPixelFormatTypeKey);
+  ((void (*)(id, SEL, id, id))objc_msgSend)(
+      video_settings, sel_registerName("setObject:forKey:"), width_value, (id)kCVPixelBufferWidthKey);
+  ((void (*)(id, SEL, id, id))objc_msgSend)(
+      video_settings, sel_registerName("setObject:forKey:"), height_value, (id)kCVPixelBufferHeightKey);
   ((void (*)(id, SEL, id))objc_msgSend)(output, sel_registerName("setVideoSettings:"), video_settings);
   ((void (*)(id, SEL, BOOL))objc_msgSend)(output, sel_registerName("setAlwaysDiscardsLateVideoFrames:"), (BOOL)1);
 
@@ -531,18 +646,18 @@ crtmedia_result crtmedia_capture_backend_open(
   ((void (*)(id, SEL, id, void*))objc_msgSend)(
       output, sel_registerName("setSampleBufferDelegate:queue:"), delegate, capture->dispatch_queue);
 
+  capture->session = session;
+  capture->output = output;
+  capture->delegate = delegate;
+
   can_add = ((BOOL (*)(id, SEL, id))objc_msgSend)(session, sel_registerName("canAddOutput:"), output);
   if (!can_add) {
-    ((void (*)(id, SEL))objc_msgSend)(delegate, sel_registerName("release"));
-    ((void (*)(id, SEL))objc_msgSend)(session, sel_registerName("release"));
     ((void (*)(id, SEL))objc_msgSend)(pool, sel_registerName("release"));
     release_backend(capture);
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
   ((void (*)(id, SEL, id))objc_msgSend)(session, sel_registerName("addOutput:"), output);
 
-  capture->session = session;
-  capture->delegate = delegate;
   ((void (*)(id, SEL))objc_msgSend)(pool, sel_registerName("release"));
 
   out_actual->width = presets[preset_index].width;
@@ -559,6 +674,7 @@ crtmedia_result crtmedia_capture_backend_start(void* backend) {
     return CRTMEDIA_OK;
   }
   pthread_mutex_lock(&capture->lock);
+  queue_clear_locked(capture);
   capture->have_timestamp_origin = 0;
   capture->last_timestamp_us = -1;
   pthread_mutex_unlock(&capture->lock);
@@ -596,9 +712,7 @@ crtmedia_result crtmedia_capture_backend_dequeue(void* backend, int timeout_ms, 
     pthread_mutex_unlock(&capture->lock);
     return wait_result == 0 ? CRTMEDIA_WOULD_BLOCK : CRTMEDIA_WOULD_BLOCK;
   }
-  queued = capture->queue[capture->queue_head];
-  capture->queue_head = (capture->queue_head + 1u) % CRTMEDIA_AVF_QUEUE_CAPACITY;
-  --capture->queue_count;
+  (void)queue_take_locked(capture, &queued);
   pthread_mutex_unlock(&capture->lock);
 
   out_frame->format = CRTMEDIA_PIXEL_FORMAT_YUV420P;
@@ -631,6 +745,12 @@ crtmedia_result crtmedia_capture_backend_stop(void* backend) {
   }
   ((void (*)(id, SEL))objc_msgSend)(capture->session, sel_registerName("stopRunning"));
   capture->started = 0;
+  if (capture->dispatch_queue != NULL) {
+    dispatch_sync_f(capture->dispatch_queue, NULL, dispatch_barrier_noop);
+  }
+  pthread_mutex_lock(&capture->lock);
+  queue_clear_locked(capture);
+  pthread_mutex_unlock(&capture->lock);
   return CRTMEDIA_OK;
 }
 

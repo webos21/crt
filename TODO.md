@@ -106,9 +106,10 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
     exact plane-order/clip/opacity pixels and ownership/resize/damage checks,
     plus 5/5 frames through a real D3D12 window; detailed evidence is in
     `HISTORY.md` and `docs/crtui_acceptance.md`.
-  * [ ] **5C. Replay the unchanged contract and compositor on macOS/arm64 and
-    Linux**, recording native dependency/lifetime evidence before closing the
-    tranche. Media binding stays in Tranche 6.
+  * [ ] **5C. Replay the unchanged contract and compositor on the remaining
+    hosts.** macOS/arm64 was accepted unchanged on 2026-10-01, including real
+    Metal presentation and balanced producer ownership. Linux replay remains
+    before closing the tranche. Media binding stays in Tranche 6.
 * [ ] **6. MediaView.** Zero-copy video composed in the final present, not via
   an LVGL image buffer.
 * [ ] **7. Cross-host and isolated-package closure.** Isolated `05-ui` build

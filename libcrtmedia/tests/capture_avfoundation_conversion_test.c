@@ -65,7 +65,8 @@ int main(void) {
   CHECK(crtmedia_avfoundation_convert_nv12_to_yuv420p(y_tight, 4, uv_tight, 4, 0, 2, &frame) ==
             CRTMEDIA_ERROR_INVALID_ARGUMENT,
         "reject a zero width");
+  CHECK(crtmedia_avfoundation_queue_ownership_self_test(), "queue ownership transfer");
 
-  printf("crtmedia_capture_avfoundation_conversion_test: ok\n");
+  printf("crtmedia_capture_avfoundation_conversion_test: ok queue_ownership=pass\n");
   return 0;
 }

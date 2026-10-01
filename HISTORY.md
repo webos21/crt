@@ -10,6 +10,41 @@ substantive update.
 
 ## 2026-10-01
 
+- **The macOS AVFoundation capture lifecycle residual is fixed and the full
+  suite is green.** Two independent defects had been hidden by the earlier
+  no-camera authorization path. First, dequeue transferred a queued frame's
+  storage to the caller without clearing the slot, so backend teardown could
+  free caller-released storage again. Queue take/drop/clear now make ownership
+  transfer explicit; release detaches the sample-buffer delegate, drains its
+  dispatch queue and only then destroys capture state. A resource-free queue
+  ownership regression runs with the existing AVFoundation conversion test.
+
+  Second, the backend synthesized AVFoundation preset and pixel-buffer keys as
+  strings. It consequently reported 640x480 while this camera delivered
+  1920x1080, and the lifecycle encoder rejected its first frame. The PAL now
+  uses the framework's real `AVCaptureSessionPreset*` and CoreVideo
+  `kCVPixelBuffer*Key` ABI symbols and explicitly requests the negotiated
+  dimensions. The real lifecycle gate passes all 15 capture and 15
+  VideoToolbox cycles: 450 captured/released/decoded frames and 1,500 hardware
+  encoded/released/decoded frames. Full macOS CTest is 160/160.
+
+- **`crtui` External Surface Tranche 5 replayed and accepted unchanged on
+  macOS/arm64.** The official Skia-enabled UI gate passes 8/8, and a fresh
+  `CRTUI_ENABLE_LVGL=OFF` tree passes contract/layout/surface/input 4/4. The
+  real Metal-window compositor presented 5/5 frames with
+  `gpu/ordering/clip/opacity/damage/resize/ownership=pass` and balanced
+  producer ownership. Core `libcrtui.dylib` has no Skia, Metal or `crtgfx`
+  dynamic dependency; privacy remains exact at
+  `declared=67 exports=67 lvgl_exports=0 objects=1 headers=4`.
+
+  `crt-ui-dist` rebuilt and verified cumulative `dist/05-ui`, with the
+  optional `libcrtui_skia.a` and `crtui/skia.h` installed separately from core
+  `libcrtui`. Tooling is 79/79. The initial UI replay exposed only the
+  independent macOS camera lifecycle residual; the AVFoundation ownership and
+  negotiation fix recorded above then made full CTest 160/160. No functional
+  UI source change was needed. Linux replay remains before global Tranche 5
+  closure.
+
 - **`crtui` External Surface Tranche 5B accepted on Windows/x64: a real
   texture-backed producer is now composed with CRT UI in a real GPU window.**
   The optional static `crtui_skia` companion keeps Skia/GPU dependencies out of

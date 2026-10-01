@@ -581,6 +581,32 @@ against the freshly packaged SDK, `verify_dist.py` passed, and the SDK
 published atomically. Full in-tree `ctest`, re-confirmed after these
 CMake/prerequisite changes: 145/145.
 
+**macOS/arm64 lifecycle follow-up, resolved 2026-10-01.** A later run with
+camera access available exposed two defects that the earlier honest
+first-frame skip could not exercise. The AVFoundation queue handed a frame's
+storage to the caller but left the same pointer in its ring slot; backend
+teardown then attempted to free all slots, including storage already released
+by the caller. Queue take/drop/clear now encode the ownership transfer by
+clearing moved slots, and teardown detaches the sample-buffer delegate, drains
+the dispatch queue, clears only still-owned frames, then releases the native
+objects. The resource-free AVFoundation conversion test now also exercises
+this queue ownership rule.
+
+The second defect was negotiation: the backend built session-preset and
+CoreVideo dictionary keys from ad-hoc strings, reported 640x480 through
+`out_actual`, but received 1920x1080 buffers from the real camera. The software
+encoder correctly rejected that mismatch. The PAL now references the real
+`AVCaptureSessionPreset*`, `kCVPixelBufferPixelFormatTypeKey`,
+`kCVPixelBufferWidthKey` and `kCVPixelBufferHeightKey` framework symbols and
+requests the selected dimensions explicitly. This keeps the public
+`out_actual` contract honest without exposing host headers or changing the
+cross-host API.
+
+The unchanged lifecycle workload now reports
+`capture_iterations=15 capture_frames=450 capture_releases=450
+capture_decoded=450 hw_iterations=15 hw_samples=1500 hw_releases=1500
+hw_decoded=1500`. Full macOS CTest is 160/160.
+
 **Linux/x86_64 replay, done 2026-09-28.** `crtmedia_timing_discontinuity_
 test` needed no changes and reproduced the identical result: `crtmedia_
 timing_discontinuity_test: ok frames=20 gap1_us=66666 gap2_us=500000`.

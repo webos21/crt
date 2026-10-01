@@ -244,9 +244,14 @@ Already accepted across all three hosts:
 - private-LVGL wrapper boundary
 - installed `ui-basic` consumer
 
-The v1 layout/style/widget tranche is accepted on Windows/x64 and macOS/arm64 and is being replayed on Linux.
+The v1 layout/style/widget tranche is accepted on Windows/x64, macOS/arm64,
+and Linux/x86_64. The producer-neutral SurfaceView scene boundary and real
+GPU final compositor are accepted on Windows/x64 and macOS/arm64; Linux replay
+remains before the external-surface tranche closes.
 
-Next major UI work includes external-surface composition so media and the future WebView can remain GPU-backed instead of being copied through an LVGL CPU framebuffer.
+Current UI work is closing the unchanged external-surface compositor on Linux,
+then connecting MediaView without copying GPU-backed frames through an LVGL
+CPU framebuffer.
 
 See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
 

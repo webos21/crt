@@ -13,3 +13,8 @@
 crtmedia_result crtmedia_avfoundation_convert_nv12_to_yuv420p(
     const uint8_t* y_plane, size_t y_stride, const uint8_t* uv_plane, size_t uv_stride, uint32_t width,
     uint32_t height, crtmedia_frame* out_frame);
+
+/* Exercises the queue's transfer-of-ownership rule without requiring a
+ * camera. A dequeued slot must be empty before the caller-owned frame storage
+ * is released, and backend cleanup must release only frames still queued. */
+int crtmedia_avfoundation_queue_ownership_self_test(void);
