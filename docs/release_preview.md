@@ -13,8 +13,8 @@ works today, see the README and [`STATUS.md`](../STATUS.md).
 
 That preview is positioned as the first public developer preview of the CRT
 Graphics/Media SDK stage (`04-gfx-media`).
-Later stages (`05-ui`, `06-web`) do not exist yet and are not part of the
-preview.
+The later `05-ui` and `06-web` stages did not exist in that preview
+and were not included in its assets.
 
 ## What a release contains
 
