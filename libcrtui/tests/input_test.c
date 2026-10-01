@@ -25,7 +25,11 @@ static int failures = 0;
 /* Linux evdev keycodes, as crtgfx defines them. */
 enum {
   K_ESC = 1,
+  K_BACKSPACE = 14,
   K_A = 30,
+  K_HOME = 102,
+  K_END = 107,
+  K_DELETE = 111,
   K_TAB = 15,
   K_ENTER = 28,
   K_SPACE = 57,
@@ -359,17 +363,107 @@ static void test_errors(void) {
   end(&a);
 }
 
+/* ---- Tranche 4: text entry, toggles and scrolling through the adapter --------- */
+
+static void text_event(app* a, const char* utf8) {
+  crtgfx_event e;
+  memset(&e, 0, sizeof(e));
+  e.type = CRTGFX_EVENT_TEXT;
+  strncpy(e.data.text.utf8, utf8, sizeof(e.data.text.utf8) - 1);
+  feed(a, &e);
+}
+
+static void text_is(app* a, crtui_widget w, const char* expected, const char* message) {
+  char buffer[256];
+  size_t length = 0;
+  crtui_widget_get_text(a->ctx, w, buffer, sizeof(buffer), &length);
+  CHECK(strcmp(buffer, expected) == 0, message);
+}
+
+static void test_v1_input(void) {
+  app a;
+  CHECK(build(&a) == 0, "app");
+  crtui_widget input, sw, list, rows[6];
+  crtui_text_input_create(a.ctx, a.win, "", &input);
+  crtui_widget_set_bounds(a.ctx, input, 20, 120, 200, 26);
+  crtui_switch_create(a.ctx, a.win, &sw);
+  crtui_widget_set_bounds(a.ctx, sw, 240, 120, 50, 24);
+  crtui_list_create(a.ctx, a.win, &list);
+  crtui_widget_set_bounds(a.ctx, list, 20, 150, 120, 48);
+  for (int i = 0; i < 6; ++i) crtui_list_add_item(a.ctx, list, "row", &rows[i]);
+
+  /* Typing: TEXT events reach the focused text input; editing keys use evdev codes. */
+  text_event(&a, "x");
+  text_is(&a, input, "", "text with nothing focused goes nowhere");
+  click(&a, 60, 130);
+  text_event(&a, "h");
+  text_event(&a, "i");
+  text_is(&a, input, "hi", "clicking a text input focuses it; TEXT events type into it");
+  tap(&a, K_HOME, 0);
+  text_event(&a, "o");
+  text_is(&a, input, "ohi", "Home moves the caret to the start");
+  tap(&a, K_END, 0);
+  tap(&a, K_BACKSPACE, 0);
+  text_is(&a, input, "oh", "Backspace deletes before the caret");
+  tap(&a, K_HOME, 0);
+  tap(&a, K_DELETE, 0);
+  text_is(&a, input, "h", "Delete deletes after it");
+  text_event(&a, "\xC3\xA9");
+  text_is(&a, input, "\xC3\xA9h", "a UTF-8 character typed through crtgfx TEXT is inserted whole");
+  tap(&a, K_LEFT, 0);
+  crtui_widget f = CRTUI_INVALID_WIDGET;
+  crtui_context_get_focus(a.ctx, &f);
+  CHECK(f == input, "Left stays in the text input (it moves the caret)");
+  int activations = a.activate_a + a.activate_b;
+  tap(&a, K_ENTER, 0);
+  crtui_context_get_focus(a.ctx, &f);
+  CHECK(f == input && a.activate_a + a.activate_b == activations, "Enter submits without leaving the field");
+  tap(&a, K_TAB, 0);
+  crtui_context_get_focus(a.ctx, &f);
+  CHECK(f == sw || f == rows[0], "Tab moves on to the next focusable widget");
+
+  /* Switch: click and Space. */
+  int checked = -1;
+  click(&a, 250, 130);
+  crtui_toggle_get_checked(a.ctx, sw, &checked);
+  CHECK(checked == 1, "a left click toggles a switch");
+  tap(&a, K_SPACE, 0);
+  crtui_toggle_get_checked(a.ctx, sw, &checked);
+  CHECK(checked == 0, "Space toggles it back");
+  button(&a, 1, CRTGFX_POINTER_BUTTON_RIGHT, 250, 130);
+  button(&a, 0, CRTGFX_POINTER_BUTTON_RIGHT, 250, 130);
+  crtui_toggle_get_checked(a.ctx, sw, &checked);
+  CHECK(checked == 0, "a right click does not toggle");
+
+  /* Scrolling: the wheel over the list, with crtgfx's dy passed through. */
+  int32_t offset = -1, content = -1;
+  crtui_scroll_view_get_offset(a.ctx, list, &offset, &content);
+  CHECK(offset == 0 && content == 192, "six 32 px rows make 192 px of content in a 48 px list");
+  motion(&a, 60, 170);
+  scroll(&a, -10.0);
+  crtui_scroll_view_get_offset(a.ctx, list, &offset, NULL);
+  CHECK(offset == 24, "a negative scroll moves the content up by one notch");
+  scroll(&a, 10.0);
+  crtui_scroll_view_get_offset(a.ctx, list, &offset, NULL);
+  CHECK(offset == 0, "and a positive one moves it back");
+  crtui_widget_focus(a.ctx, rows[5]);
+  crtui_scroll_view_get_offset(a.ctx, list, &offset, NULL);
+  CHECK(offset == 144, "keyboard focus scrolls the focused row into view");
+  end(&a);
+}
+
 int main(void) {
   test_keyboard();
   test_pointer();
   test_resize();
   test_focus_loss_and_recovery();
   test_errors();
+  test_v1_input();
   if (failures != 0) {
     fprintf(stderr, "crtui_input_test: %d failure(s)\n", failures);
     return 1;
   }
   printf("crtui_input_test: ok keyboard=pass pointer=pass slider_drag=pass wheel=pass resize=pass "
-         "focus_loss=pass recovery=pass errors=pass\n");
+         "focus_loss=pass recovery=pass errors=pass text_input=pass toggles=pass scroll=pass\n");
   return 0;
 }

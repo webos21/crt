@@ -2,8 +2,10 @@
 
 **Status: contract frozen (Tranche 0, all three hosts); LVGL first pixels
 (Tranche 1), input/focus/resize (Tranche 2) and the private-LVGL wrapper
-(Tranche 3) closed on all three hosts.** The public contract in `libcrtui/include/crtui/ui.h` and the
-rules in the table below are frozen and covered by a resource-free test.
+(Tranche 3) closed on all three hosts; layout, styling and the v1 widget set
+(Tranche 4) accepted on Windows/x64, with macOS/arm64 and Linux replay open.**
+The public contract in `libcrtui/include/crtui/ui.h` and the rules in the table
+below are frozen and covered by resource-free tests.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
 surfaces and packaging behind that contract. Update the tranche sections with
 evidence as each closes, in the same way `crtmedia_encode_capture_acceptance.md`
@@ -66,7 +68,7 @@ the frozen contract; each is asserted by `crtui_contract_test`.
 | Lifetime | A parent owns its children; destroying a widget destroys its whole subtree at once and every id in it is invalid from that moment (`CRTUI_ERROR_INVALID_HANDLE`), including from inside a callback. A reused slot never yields an equal id. No reparenting in v1. `crtui_context_destroy()` destroys all widgets and discards posted functions that never ran. Callback `user` pointers are borrowed |
 | Events | Input enters through `crtui_context_send_input()`. The event goes to the target's callback, then bubbles to each ancestor up to the window; a callback returning `CRTUI_EVENT_HANDLED` stops the bubble; `event->target` stays the original target. `FOCUS_IN`/`FOCUS_OUT`/`RESIZED` do not bubble. Default actions run only if the event was not handled: Tab/Shift+Tab move focus, arrows move focus spatially (a focused slider consumes Left/Right to step; Up/Down still navigate -- revised in Tranche 2, see below), Enter/Space activate a button, wheel steps a slider, a press on a slider sets it and captures the pointer until the release. Programmatic changes emit no event. Input sent from inside a callback is queued and delivered after the current event finishes (FIFO), never nested; no callback fires for a destroyed widget |
 | Focus and input routing | One focus per context. Pointer/wheel goes to the topmost visible widget under the point (later siblings on top, children clipped to every ancestor); a press on a focusable widget focuses it, and releasing over the same button activates it. Key input goes to the focused widget of the addressed window, else the window. Traversal is tree pre-order over widgets that are focusable, enabled and visible (all ancestors too), Tab wraps. When the focused widget is destroyed, hidden or disabled, focus moves to the next eligible widget after it (wrapping), else clears; `FOCUS_OUT` is never sent to a destroyed widget. A disabled widget (or one under a disabled ancestor) receives nothing: the input is dropped, not passed through. A modal window (the most recently made modal wins) drops all input for every other window and refuses focus into them; making a window modal moves focus into it |
-| Geometry | Bounds are integer logical pixels relative to the parent. A window's size and DPI scale (physical = logical x scale, scale > 0) come from `crtui_window_set_size()`, which emits `RESIZED` (x,y = size, value = scale in percent) to the window. Hit-testing uses the clipped, visible area. Automatic layout arrives in Tranche 4; until then bounds are application-set and authoritative |
+| Geometry | Bounds are integer logical pixels relative to the parent. A window's size and DPI scale (physical = logical x scale, scale > 0) come from `crtui_window_set_size()`, which emits `RESIZED` (x,y = size, value = scale in percent). Hit-testing uses the clipped, visible area. Free Window/Container children use application-set bounds; Tranche 4 adds CRT-owned Row/Column/Stack layout, fill/grow/alignment/spacing, hidden-child reflow, and ScrollView/List offsets |
 | Binary surface | Only functions declared `CRTUI_API` are exported from the shared library (hidden visibility everywhere else): LVGL symbols are never visible to consumers -- see Tranche 3 |
 | Surfaces | `crtui_surface_view_create()` reserves the API and returns `CRTUI_ERROR_UNSUPPORTED` until Tranche 5. Frozen ownership rule: the view owns only position, size, clip, opacity, visibility, z-order, damage and hit-testing, never the producer's frame |
 | Errors | `crtui_result`: `0..-7` numerically identical to `crtmedia_result` (`OK`, `INVALID_ARGUMENT`, `UNSUPPORTED`, `WOULD_BLOCK`, `IO`, `TIMEOUT`, `CANCELLED`, `PROTOCOL`), plus `WRONG_THREAD = -8`, `INVALID_HANDLE = -9`, `STATE = -10`. A failed create always clears its output. No silent failure |
@@ -599,6 +601,56 @@ Window/Screen, Container, Row, Column, Stack, Text, Button, Image, Slider,
 Progress, Switch, Checkbox, List/ScrollView, TextInput. A CRT-neutral property
 set only: size, margin, padding, alignment, background, foreground, font,
 border, opacity. Do not re-export LVGL's style API.
+
+**Windows/x64 result (2026-10-01).** Implementation and first-host acceptance
+are complete; macOS/arm64 and Linux replay remain before this tranche closes.
+
+- `crtui/ui.h` adds only CRT-owned enums, structs and opaque widget ids: free,
+  Row, Column and Stack layout; `CRTUI_SIZE_FILL`, grow, margin, padding, gap,
+  main/cross-axis alignment; and a style mask for RGB background/foreground/
+  border, border width, radius, opacity, three font sizes and text alignment.
+  No LVGL type or constant crosses the public boundary. Image copies caller
+  BGRA pixels; Switch/Checkbox share a checked contract; ScrollView/List own a
+  clamped vertical offset; TextInput owns UTF-8 text, a byte-boundary caret,
+  placeholder, edit keys and committed-text input.
+- Layout is lazy but authoritative before bounds reads, hit-testing, input and
+  rendering. Hidden children release their space, resizing reflows the tree,
+  focus scrolls a child into view, and children remain clipped to ancestors.
+  The flex implementation deliberately uses allocation-free multi-pass
+  traversal: an allocator failure can no longer silently skip layout, preserving
+  the frozen no-silent-failure rule.
+- `lvgl_backend.c` mirrors the private render list into LVGL objects and maps
+  the CRT style/widget state to real pixels. LVGL's 12/14/20 px fonts are
+  private build inputs. `crtui_privacy_test_runs` reports
+  `declared=63 exports=63 lvgl_exports=0`: the larger public surface is the
+  additive Tranche 4 contract, while LVGL remains absent from headers, exports,
+  sample source and sample objects.
+- `crtui_layout_test` covers free/Row/Column/Stack placement, grow/alignment/
+  spacing, hidden-child reflow, resize, ScrollView/List clipping and focus,
+  style validation, toggles, UTF-8 TextInput editing and copied Image data. It
+  passes both the LVGL-enabled build and a fresh `CRTUI_ENABLE_LVGL=OFF` build:
+  `column=pass row=pass main_align=pass stack=pass free=pass scroll=pass
+  list=pass style=pass toggles=pass text_input=pass image=pass`.
+- The existing input and render gates were extended rather than replaced.
+  `crtui_input_test` adds TextInput, toggle and scroll behavior;
+  `crtui_render_test` adds real-pixel checks for layout, style and every v1
+  widget and retains 40 create/render/destroy cycles. The official
+  `crt-ui-test` target now depends on `crtui_layout_test`, `crtui_input_test`,
+  the conditional renderer test and the macOS shared-contract test before it
+  runs CTest, fixing the same clean-tree missing-executable class encountered
+  in earlier gfx/media targets. Result: crtui 5/5.
+- `crtui_window_demo` and installed `examples/ui-basic` now contain no manual
+  child coordinates: a Column/Row tree lays out Button/Switch/Checkbox, Slider,
+  Progress and TextInput, follows resize automatically, and accepts committed
+  text through the crtgfx adapter. The real Win32 run reports
+  `presented=30 pixel_check=pass input_check=pass`.
+- Full Windows CTest is 167/167 with the expected no-camera skip. `crt-ui-dist`
+  rebuilt and verified `dist/05-ui`; its installed sample was then configured
+  and built in a fresh directory using only the packaged toolchain/SDK and ran
+  against the packaged DLLs with the same 30-frame result. This host required
+  the manifest-declared external `CRT_WINDOWS_SDK_LIBPATH` because it was not a
+  Visual Studio Developer shell; that is a build-host prerequisite, not a
+  bundled SDK dependency.
 
 ### 5. External Surface (the WebKit prerequisite)
 

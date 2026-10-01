@@ -9,11 +9,15 @@
  * documents for every host. */
 enum {
   EVDEV_KEY_ESC = 1,
+  EVDEV_KEY_BACKSPACE = 14,
   EVDEV_KEY_TAB = 15,
   EVDEV_KEY_ENTER = 28,
   EVDEV_KEY_SPACE = 57,
   EVDEV_KEY_KPENTER = 96,
   EVDEV_KEY_UP = 103,
+  EVDEV_KEY_HOME = 102,
+  EVDEV_KEY_END = 107,
+  EVDEV_KEY_DELETE = 111,
   EVDEV_KEY_LEFT = 105,
   EVDEV_KEY_RIGHT = 106,
   EVDEV_KEY_DOWN = 108
@@ -38,6 +42,14 @@ static crtui_key map_key(uint32_t keycode) {
       return CRTUI_KEY_DOWN;
     case EVDEV_KEY_ESC:
       return CRTUI_KEY_ESCAPE;
+    case EVDEV_KEY_BACKSPACE:
+      return CRTUI_KEY_BACKSPACE;
+    case EVDEV_KEY_DELETE:
+      return CRTUI_KEY_DELETE;
+    case EVDEV_KEY_HOME:
+      return CRTUI_KEY_HOME;
+    case EVDEV_KEY_END:
+      return CRTUI_KEY_END;
     default:
       return CRTUI_KEY_NONE;
   }
@@ -91,6 +103,17 @@ crtui_result crtui_window_handle_crtgfx_event(
       input.window = window;
       input.key = key;
       input.modifiers = (event->data.key.modifiers & CRTGFX_MOD_SHIFT) != 0 ? CRTUI_MOD_SHIFT : 0u;
+      return crtui_context_send_input(context, &input);
+    }
+    case CRTGFX_EVENT_TEXT: {
+      crtui_input input;
+      memset(&input, 0, sizeof(input));
+      input.type = CRTUI_INPUT_TEXT;
+      input.window = window;
+      /* crtgfx guarantees NUL-termination within its 8 bytes; copy defensively. */
+      size_t length = 0;
+      while (length < sizeof(input.text) - 1 && event->data.text.utf8[length] != '\0') ++length;
+      memcpy(input.text, event->data.text.utf8, length);
       return crtui_context_send_input(context, &input);
     }
     case CRTGFX_EVENT_POINTER_MOTION:

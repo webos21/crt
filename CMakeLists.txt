@@ -1517,8 +1517,15 @@ if(Python3_Interpreter_FOUND)
     add_dependencies(crt-ui-build crtui_window_demo)
   endif()
   add_custom_target(crt-ui-test DEPENDS crt-ui-build crtui_contract_test
+    crtui_layout_test crtui_input_test
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtui_.*_runs"
   )
+  if(TARGET crtui_render_test)
+    add_dependencies(crt-ui-test crtui_render_test)
+  endif()
+  if(TARGET crtui_contract_shared_test)
+    add_dependencies(crt-ui-test crtui_contract_shared_test)
+  endif()
   add_custom_target(crt-ui-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"

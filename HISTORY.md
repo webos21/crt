@@ -8,6 +8,30 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-01
+
+- **`crtui` Tranche 4 implemented and accepted on Windows/x64: CRT-owned
+  layout, styling and the v1 widget set.** Added free/Row/Column/Stack layout
+  with fill/grow/margin/padding/gap/alignment, ScrollView/List, the narrow style
+  mask, Image, Switch, Checkbox and single-line TextInput, including committed
+  text and editing keys through the crtgfx adapter. The private LVGL renderer
+  maps these states to real pixels while the shared DLL still exports only the
+  63 declared `crtui_*` functions (`lvgl_exports=0`). The layout engine was
+  tightened before acceptance to use allocation-free multi-pass flex traversal,
+  so OOM cannot silently leave geometry stale.
+
+  New `crtui_layout_test` passes with LVGL both ON and OFF; input/render gates
+  cover the new behavior and real pixels, including 40 lifecycle cycles. Fixed
+  `crt-ui-test` to build every executable it invokes (layout/input, conditional
+  render, and the macOS shared-contract test) before CTest. Windows results:
+  crtui 5/5, full CTest 167/167 with one expected no-camera skip, real Win32
+  `crtui_window_demo 30` green, and `crt-ui-dist` verified. The installed
+  `examples/ui-basic` was rebuilt in a fresh directory from packaged `05-ui`
+  only and ran against its packaged DLLs:
+  `presented=30 pixel_check=pass input_check=pass`. macOS/arm64 and Linux replay
+  remain open before global Tranche 4 closure; full evidence is in
+  `docs/crtui_acceptance.md`.
+
 ## 2026-09-30
 
 - **`crtui` Tranche 3 closed on Linux/x86_64.** ELF visibility verified:

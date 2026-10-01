@@ -68,12 +68,35 @@
  * traversal order (wrapping), else clears; FOCUS_OUT goes only to a widget that
  * still exists.
  *
- * ---- Geometry -----------------------------------------------------------
+ * ---- Geometry and layout ------------------------------------------------
  * Bounds are integers in logical pixels, relative to the parent. A window's
  * content size and DPI scale (physical = logical * scale) are set by
- * crtui_window_set_size(), which emits RESIZED. Automatic layout is a later
- * tranche; until then bounds are authoritative and only ever set by the
- * application.
+ * crtui_window_set_size(), which emits RESIZED.
+ * Containers come in four layouts. A plain Container (and a Window) is *free*:
+ * children sit where crtui_widget_set_bounds() puts them. Row and Column are
+ * flex boxes (main axis horizontal/vertical), and Stack overlays its children.
+ * In a flex box or a Stack the parent owns each child's position; the child's
+ * set_bounds/set_size width and height are its *size request*, where
+ * CRTUI_SIZE_FILL means "fill the parent's padded content box on that axis". A
+ * child's `grow` weight shares the space left on the main axis; its alignment
+ * places or stretches it across the axis; margin surrounds it; the container's
+ * padding insets the content box, `gap` separates children and `main_align`
+ * distributes leftover main-axis space. Hidden children take no space. A free
+ * container honors FILL too (the child then snaps to the content box on that
+ * axis). Layout runs lazily before anything reads geometry (bounds queries,
+ * hit-testing, input routing, rendering), so it is always current and a window
+ * resize re-lays out the whole tree by itself. A ScrollView (and a List, a
+ * ScrollView of buttons) is a vertical flex box whose content may exceed its
+ * height: the wheel scrolls it, focusing a child scrolls it into view, and its
+ * offset is clamped to the content.
+ *
+ * ---- Style --------------------------------------------------------------
+ * A small CRT-neutral property set -- background, foreground, border color and
+ * width, corner radius, opacity, font size, text alignment -- set through
+ * crtui_widget_set_style(); unset properties keep the CRT default look. No
+ * renderer style type is exposed. Per widget, background is the main fill (a
+ * slider/progress track, a switch's off track) and foreground is the accent (text
+ * color, a slider/progress fill, a switch's on track, a checkbox's mark).
  *
  * ---- External surfaces --------------------------------------------------
  * crtui_surface_view_create() reserves the API shape for producer-owned
@@ -123,7 +146,16 @@ typedef enum crtui_widget_kind {
   CRTUI_WIDGET_BUTTON = 4,
   CRTUI_WIDGET_SLIDER = 5,
   CRTUI_WIDGET_SURFACE_VIEW = 6,
-  CRTUI_WIDGET_PROGRESS = 7
+  CRTUI_WIDGET_PROGRESS = 7,
+  CRTUI_WIDGET_ROW = 8,
+  CRTUI_WIDGET_COLUMN = 9,
+  CRTUI_WIDGET_STACK = 10,
+  CRTUI_WIDGET_IMAGE = 11,
+  CRTUI_WIDGET_SWITCH = 12,
+  CRTUI_WIDGET_CHECKBOX = 13,
+  CRTUI_WIDGET_SCROLL_VIEW = 14,
+  CRTUI_WIDGET_LIST = 15,
+  CRTUI_WIDGET_TEXT_INPUT = 16
 } crtui_widget_kind;
 
 typedef enum crtui_key {
@@ -135,7 +167,11 @@ typedef enum crtui_key {
   CRTUI_KEY_RIGHT,
   CRTUI_KEY_UP,
   CRTUI_KEY_DOWN,
-  CRTUI_KEY_ESCAPE
+  CRTUI_KEY_ESCAPE,
+  CRTUI_KEY_BACKSPACE,
+  CRTUI_KEY_DELETE,
+  CRTUI_KEY_HOME,
+  CRTUI_KEY_END
 } crtui_key;
 
 #define CRTUI_MOD_SHIFT 1u
@@ -150,7 +186,10 @@ typedef enum crtui_input_type {
   /* The pointer interaction was interrupted (window lost keyboard focus, touch
    * cancelled): an in-progress press or slider drag ends without activating
    * anything and without changing the slider. Carries no position. */
-  CRTUI_INPUT_POINTER_CANCEL
+  CRTUI_INPUT_POINTER_CANCEL,
+  /* Committed text (one UTF-8 character/grapheme in crtui_input::text). Goes to
+   * the focused widget of the window; a TextInput inserts it at its caret. */
+  CRTUI_INPUT_TEXT
 } crtui_input_type;
 
 typedef struct crtui_input {
@@ -160,6 +199,7 @@ typedef struct crtui_input {
   int32_t wheel_delta;
   crtui_key key;
   uint32_t modifiers;
+  char text[8]; /* CRTUI_INPUT_TEXT: NUL-terminated UTF-8 */
 } crtui_input;
 
 typedef enum crtui_event_type {
@@ -173,7 +213,9 @@ typedef enum crtui_event_type {
   CRTUI_EVENT_FOCUS_OUT,
   CRTUI_EVENT_ACTIVATE,
   CRTUI_EVENT_VALUE_CHANGED,
-  CRTUI_EVENT_RESIZED
+  CRTUI_EVENT_RESIZED,
+  /* A user edit changed a TextInput's text (value = new length in bytes). */
+  CRTUI_EVENT_TEXT_CHANGED
 } crtui_event_type;
 
 typedef struct crtui_event {
@@ -256,6 +298,121 @@ CRTUI_API crtui_result crtui_window_set_size(
 CRTUI_API crtui_result crtui_window_get_size(
     crtui_context* context, crtui_window window, int32_t* out_width, int32_t* out_height, float* out_dpi_scale);
 CRTUI_API crtui_result crtui_window_set_modal(crtui_context* context, crtui_window window, int modal);
+
+/* ---- Layout, style and the v1 widget set (Tranche 4) ---------------------- */
+
+#define CRTUI_SIZE_FILL ((int32_t)-1)
+
+typedef enum crtui_align {
+  CRTUI_ALIGN_START = 0,
+  CRTUI_ALIGN_CENTER = 1,
+  CRTUI_ALIGN_END = 2,
+  CRTUI_ALIGN_STRETCH = 3
+} crtui_align;
+
+typedef enum crtui_main_align {
+  CRTUI_MAIN_START = 0,
+  CRTUI_MAIN_CENTER = 1,
+  CRTUI_MAIN_END = 2,
+  CRTUI_MAIN_SPACE_BETWEEN = 3
+} crtui_main_align;
+
+typedef enum crtui_font {
+  CRTUI_FONT_DEFAULT = 0, /* 14 px */
+  CRTUI_FONT_SMALL = 1,   /* 12 px */
+  CRTUI_FONT_LARGE = 2    /* 20 px */
+} crtui_font;
+
+typedef enum crtui_text_align {
+  CRTUI_TEXT_ALIGN_START = 0,
+  CRTUI_TEXT_ALIGN_CENTER = 1,
+  CRTUI_TEXT_ALIGN_END = 2
+} crtui_text_align;
+
+enum {
+  CRTUI_STYLE_BACKGROUND = 1u << 0,
+  CRTUI_STYLE_FOREGROUND = 1u << 1,
+  CRTUI_STYLE_BORDER_COLOR = 1u << 2,
+  CRTUI_STYLE_BORDER_WIDTH = 1u << 3,
+  CRTUI_STYLE_RADIUS = 1u << 4,
+  CRTUI_STYLE_OPACITY = 1u << 5,
+  CRTUI_STYLE_FONT = 1u << 6,
+  CRTUI_STYLE_TEXT_ALIGN = 1u << 7
+};
+
+/* Colors are 0xRRGGBB; opacity is 0 (transparent) to 255 (opaque). `mask` says
+ * which fields are set: set_style() applies only those and leaves the rest of the
+ * widget's style alone; get_style() reports the widget's current overrides. */
+typedef struct crtui_style {
+  uint32_t mask;
+  uint32_t background_rgb;
+  uint32_t foreground_rgb;
+  uint32_t border_rgb;
+  int32_t border_width;
+  int32_t radius;
+  uint8_t opacity;
+  crtui_font font;
+  crtui_text_align text_align;
+} crtui_style;
+
+CRTUI_API crtui_result crtui_row_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_column_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_stack_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+
+/* Size request (CRTUI_SIZE_FILL allowed) without touching the position. */
+CRTUI_API crtui_result crtui_widget_set_size(crtui_context* context, crtui_widget widget, int32_t width, int32_t height);
+CRTUI_API crtui_result crtui_widget_set_margin(
+    crtui_context* context, crtui_widget widget, int32_t left, int32_t top, int32_t right, int32_t bottom);
+/* Containers only (Window, Container, Row, Column, Stack, ScrollView, List). */
+CRTUI_API crtui_result crtui_container_set_padding(
+    crtui_context* context, crtui_widget container, int32_t left, int32_t top, int32_t right, int32_t bottom);
+CRTUI_API crtui_result crtui_container_set_gap(crtui_context* context, crtui_widget container, int32_t gap);
+CRTUI_API crtui_result crtui_container_set_main_align(
+    crtui_context* context, crtui_widget container, crtui_main_align main_align);
+/* How the parent places this widget: in a Row `vertical` is the cross axis, in a
+ * Column `horizontal` is; a Stack uses both. A free container ignores it. */
+CRTUI_API crtui_result crtui_widget_set_alignment(
+    crtui_context* context, crtui_widget widget, crtui_align horizontal, crtui_align vertical);
+/* Flex weight along the parent's main axis (0 = none). */
+CRTUI_API crtui_result crtui_widget_set_grow(crtui_context* context, crtui_widget widget, int32_t grow);
+
+CRTUI_API crtui_result crtui_widget_set_style(crtui_context* context, crtui_widget widget, const crtui_style* style);
+CRTUI_API crtui_result crtui_widget_get_style(crtui_context* context, crtui_widget widget, crtui_style* out_style);
+CRTUI_API crtui_result crtui_widget_clear_style(crtui_context* context, crtui_widget widget);
+
+/* Image: the pixels are copied (BGRA8888, straight alpha) and stretched to the
+ * widget's size. */
+CRTUI_API crtui_result crtui_image_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_image_set_pixels(
+    crtui_context* context, crtui_widget image, const void* bgra, int32_t width, int32_t height, size_t stride_bytes);
+
+/* Switch and Checkbox share the checked state. Toggled by a click, Enter or
+ * Space; a user toggle emits VALUE_CHANGED (0/1), set_checked() does not. */
+CRTUI_API crtui_result crtui_switch_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_checkbox_create(
+    crtui_context* context, crtui_widget parent, const char* utf8, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_toggle_set_checked(crtui_context* context, crtui_widget toggle, int checked);
+CRTUI_API crtui_result crtui_toggle_get_checked(crtui_context* context, crtui_widget toggle, int* out_checked);
+
+/* ScrollView / List: vertical scrolling. The offset is in pixels, clamped to
+ * [0, content_height - height]. A List item is a full-width Button row. */
+CRTUI_API crtui_result crtui_scroll_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_list_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_list_add_item(
+    crtui_context* context, crtui_widget list, const char* utf8, crtui_widget* out_item);
+CRTUI_API crtui_result crtui_scroll_view_set_offset(crtui_context* context, crtui_widget scroll_view, int32_t offset);
+CRTUI_API crtui_result crtui_scroll_view_get_offset(
+    crtui_context* context, crtui_widget scroll_view, int32_t* out_offset, int32_t* out_content_height);
+
+/* Single-line text entry. set_text/get_text read and write its content (the
+ * caret moves to the end on set_text). The caret is a byte offset on a UTF-8
+ * character boundary. Typing (CRTUI_INPUT_TEXT), Backspace, Delete, Left/Right,
+ * Home/End edit it and emit TEXT_CHANGED; Enter emits ACTIVATE ("submit"). */
+CRTUI_API crtui_result crtui_text_input_create(
+    crtui_context* context, crtui_widget parent, const char* initial_utf8, crtui_widget* out_widget);
+CRTUI_API crtui_result crtui_text_input_set_placeholder(crtui_context* context, crtui_widget text_input, const char* utf8);
+CRTUI_API crtui_result crtui_text_input_set_caret(crtui_context* context, crtui_widget text_input, size_t byte_offset);
+CRTUI_API crtui_result crtui_text_input_get_caret(crtui_context* context, crtui_widget text_input, size_t* out_byte_offset);
 
 /* ---- Rendering (Tranche 1) ---------------------------------------------- */
 

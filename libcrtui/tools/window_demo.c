@@ -1,12 +1,14 @@
-/* crtui window demo (Tranches 1-2): a Window > Container > Label/Button/Slider/
- * Progress scene, rendered by crtui's software renderer into the
- * crtgfx window's software framebuffer and presented through the crtgfx window
- * path, with crtgfx input events (keyboard, pointer, wheel, resize) fed to crtui
+/* crtui window demo (Tranches 1-4): a Column lays out a label, a Row of
+ * Button / Switch / Checkbox, a Slider, a Progress bar and a TextInput -- no
+ * manual coordinates; the layout engine places everything and follows window
+ * resizes -- rendered by the crtui software renderer into the crtgfx window
+ * software framebuffer and presented through the crtgfx window path, with
+ * crtgfx input events (keyboard, text, pointer, wheel, resize) fed to crtui
  * through the crtui/crtgfx.h adapter.
  *
  * Usage: crtui_window_demo [frame_limit]
- *   no limit    interactive: Tab/arrows/Enter/Space, mouse clicks and drags on
- *               the slider, the wheel, and window resizing all work.
+ *   no limit    interactive: Tab/arrows/Enter/Space, typing into the text
+ *               field, mouse clicks and drags, the wheel, and resizing all work.
  *   with limit  automated: a fixed script of synthetic events (crtgfx's own
  *               test-injection hook, the same queue real events use) drives
  *               the same path, and the run prints
@@ -28,10 +30,9 @@
 typedef struct demo {
   crtui_context* ctx;
   crtui_window window;
-  crtui_widget column, label, button, slider, progress;
+  crtui_widget column, label, row, button, toggle, check, slider, progress, input;
   crtui_crtgfx_state input_state;
   int activations;
-  int32_t width, height;
 } demo;
 
 static int on_event(crtui_widget current, const crtui_event* event, void* user) {
@@ -39,31 +40,73 @@ static int on_event(crtui_widget current, const crtui_event* event, void* user) 
   (void)current;
   if (event->type == CRTUI_EVENT_ACTIVATE && event->target == d->button) { /* bubbled up to the window callback */
     ++d->activations;
-  } else if (event->type == CRTUI_EVENT_RESIZED) {
-    /* The application's own re-layout: the widgets follow the window width. */
-    crtui_widget_set_bounds(d->ctx, d->column, 20, 20, event->x - 40, event->y - 40);
-    crtui_widget_set_bounds(d->ctx, d->slider, 0, 100, event->x - 80, 14);
-    crtui_widget_set_bounds(d->ctx, d->progress, 0, 140, event->x - 80, 16);
   }
   return CRTUI_EVENT_IGNORED;
 }
 
 static int demo_build(demo* d, int32_t width, int32_t height) {
+  crtui_style large;
   memset(d, 0, sizeof(*d));
-  d->width = width;
-  d->height = height;
   if (crtui_context_create(&d->ctx) != CRTUI_OK) return -1;
   if (crtui_window_create(d->ctx, &d->window) != CRTUI_OK) return -1;
-  if (crtui_container_create(d->ctx, d->window, &d->column) != CRTUI_OK) return -1;
-  if (crtui_text_create(d->ctx, d->column, "crtui on crtgfx", &d->label) != CRTUI_OK) return -1;
-  crtui_widget_set_bounds(d->ctx, d->label, 0, 0, 240, 24);
-  if (crtui_button_create(d->ctx, d->column, "Button", &d->button) != CRTUI_OK) return -1;
-  crtui_widget_set_bounds(d->ctx, d->button, 0, 40, 140, 36);
-  if (crtui_slider_create(d->ctx, d->column, 0, 100, &d->slider) != CRTUI_OK) return -1;
-  if (crtui_progress_create(d->ctx, d->column, &d->progress) != CRTUI_OK) return -1;
+  crtui_window_set_size(d->ctx, d->window, width, height, 1.0f);
   crtui_widget_set_callback(d->ctx, d->window, on_event, d);
-  /* Sizing the window emits RESIZED, whose handler lays the widgets out. */
-  return crtui_window_set_size(d->ctx, d->window, width, height, 1.0f) == CRTUI_OK ? 0 : -1;
+
+  crtui_column_create(d->ctx, d->window, &d->column);
+  crtui_widget_set_size(d->ctx, d->column, CRTUI_SIZE_FILL, CRTUI_SIZE_FILL);
+  crtui_container_set_padding(d->ctx, d->column, 20, 20, 20, 20);
+  crtui_container_set_gap(d->ctx, d->column, 12);
+
+  crtui_text_create(d->ctx, d->column, "crtui on crtgfx", &d->label);
+  crtui_widget_set_size(d->ctx, d->label, CRTUI_SIZE_FILL, 24);
+  memset(&large, 0, sizeof(large));
+  large.mask = CRTUI_STYLE_FONT;
+  large.font = CRTUI_FONT_LARGE;
+  crtui_widget_set_style(d->ctx, d->label, &large);
+
+  crtui_row_create(d->ctx, d->column, &d->row);
+  crtui_widget_set_size(d->ctx, d->row, CRTUI_SIZE_FILL, 36);
+  crtui_container_set_gap(d->ctx, d->row, 12);
+  crtui_button_create(d->ctx, d->row, "Button", &d->button);
+  crtui_widget_set_size(d->ctx, d->button, 140, 36);
+  crtui_switch_create(d->ctx, d->row, &d->toggle);
+  crtui_widget_set_size(d->ctx, d->toggle, 50, 24);
+  crtui_widget_set_alignment(d->ctx, d->toggle, CRTUI_ALIGN_START, CRTUI_ALIGN_CENTER);
+  crtui_checkbox_create(d->ctx, d->row, "Option", &d->check);
+  crtui_widget_set_size(d->ctx, d->check, 120, 24);
+  crtui_widget_set_alignment(d->ctx, d->check, CRTUI_ALIGN_START, CRTUI_ALIGN_CENTER);
+
+  crtui_slider_create(d->ctx, d->column, 0, 100, &d->slider);
+  crtui_widget_set_size(d->ctx, d->slider, CRTUI_SIZE_FILL, 14);
+  crtui_progress_create(d->ctx, d->column, &d->progress);
+  crtui_widget_set_size(d->ctx, d->progress, CRTUI_SIZE_FILL, 16);
+  crtui_text_input_create(d->ctx, d->column, "", &d->input);
+  crtui_widget_set_size(d->ctx, d->input, CRTUI_SIZE_FILL, 28);
+  crtui_text_input_set_placeholder(d->ctx, d->input, "Type here");
+  return 0;
+}
+
+/* Window-space center of a widget (bounds are parent-relative). */
+static void center_of(demo* d, crtui_widget w, double* x, double* y) {
+  int32_t bx, by, bw, bh;
+  double ox = 0, oy = 0;
+  crtui_widget cursor = w;
+  int first = 1;
+  while (cursor != CRTUI_INVALID_WIDGET && cursor != d->window) {
+    crtui_widget parent = CRTUI_INVALID_WIDGET;
+    crtui_widget_get_bounds(d->ctx, cursor, &bx, &by, &bw, &bh);
+    if (first) {
+      ox += bw / 2;
+      oy += bh / 2;
+      first = 0;
+    }
+    ox += bx;
+    oy += by;
+    crtui_widget_get_parent(d->ctx, cursor, &parent);
+    cursor = parent;
+  }
+  *x = ox;
+  *y = oy;
 }
 
 static uint32_t rgb_at(const crtgfx_framebuffer* fb, uint32_t x, uint32_t y) {
@@ -72,7 +115,7 @@ static uint32_t rgb_at(const crtgfx_framebuffer* fb, uint32_t x, uint32_t y) {
 }
 
 static void inject(crtgfx_window* window, crtgfx_event_type type, uint32_t keycode, double x, double y, double dy,
-                   uint32_t button) {
+                   uint32_t button, const char* text) {
   crtgfx_event e;
   memset(&e, 0, sizeof(e));
   e.type = type;
@@ -80,6 +123,9 @@ static void inject(crtgfx_window* window, crtgfx_event_type type, uint32_t keyco
     case CRTGFX_EVENT_KEY_DOWN:
     case CRTGFX_EVENT_KEY_UP:
       e.data.key.keycode = keycode;
+      break;
+    case CRTGFX_EVENT_TEXT:
+      strncpy(e.data.text.utf8, text, sizeof(e.data.text.utf8) - 1);
       break;
     case CRTGFX_EVENT_POINTER_MOTION:
       e.data.pointer_motion.x = x;
@@ -98,6 +144,12 @@ static void inject(crtgfx_window* window, crtgfx_event_type type, uint32_t keyco
       break;
   }
   crtgfx_window_inject_event(window, &e);
+}
+
+static void inject_click(crtgfx_window* window, double x, double y) {
+  inject(window, CRTGFX_EVENT_POINTER_MOTION, 0, x, y, 0, 0, NULL);
+  inject(window, CRTGFX_EVENT_POINTER_BUTTON_DOWN, 0, x, y, 0, CRTGFX_POINTER_BUTTON_LEFT, NULL);
+  inject(window, CRTGFX_EVENT_POINTER_BUTTON_UP, 0, x, y, 0, CRTGFX_POINTER_BUTTON_LEFT, NULL);
 }
 
 int main(int argc, char** argv) {
@@ -122,6 +174,8 @@ int main(int argc, char** argv) {
   int32_t slider_after_click = -1;
   int32_t slider_after_wheel = -1;
   int focus_after_tab = 0;
+  int switch_after_click = 0;
+  char typed[16] = "";
   while (!crtgfx_window_should_close(window) && (frame_limit == 0 || frame < frame_limit)) {
     crtgfx_framebuffer fb;
     if (crtgfx_window_begin_frame(window, &fb) != CRTGFX_OK) {
@@ -133,38 +187,50 @@ int main(int argc, char** argv) {
       failed = 1;
       break;
     }
-    if (d.width != (int32_t)fb.width || d.height != (int32_t)fb.height) {
-      /* The framebuffer changed before the RESIZE event was polled. */
-      d.width = (int32_t)fb.width;
-      d.height = (int32_t)fb.height;
-      crtui_window_set_size(d.ctx, d.window, d.width, d.height, 1.0f);
+    {
+      /* The framebuffer may change before the RESIZE event is polled; the layout
+       * engine re-lays out the whole tree by itself. */
+      int32_t w, h;
+      float scale;
+      crtui_window_get_size(d.ctx, d.window, &w, &h, &scale);
+      if (w != (int32_t)fb.width || h != (int32_t)fb.height) {
+        crtui_window_set_size(d.ctx, d.window, (int32_t)fb.width, (int32_t)fb.height, scale);
+      }
     }
 
     if (frame_limit != 0) {
-      /* Scripted input. Coordinates follow the layout above: the column starts at
-       * (20,20); the button is at (20,60) 140x36, the slider at (20,120) wide. */
+      /* Scripted input; click targets are computed from the laid-out bounds. */
+      double x, y;
       if (frame == 2) {
-        inject(window, CRTGFX_EVENT_KEY_DOWN, 15 /* Tab */, 0, 0, 0, 0);
-        inject(window, CRTGFX_EVENT_KEY_UP, 15, 0, 0, 0, 0);
+        inject(window, CRTGFX_EVENT_KEY_DOWN, 15 /* Tab */, 0, 0, 0, 0, NULL);
+        inject(window, CRTGFX_EVENT_KEY_UP, 15, 0, 0, 0, 0, NULL);
       } else if (frame == 4) {
         crtui_widget f = CRTUI_INVALID_WIDGET;
         crtui_context_get_focus(d.ctx, &f);
         focus_after_tab = f == d.button;
-        inject(window, CRTGFX_EVENT_KEY_DOWN, 28 /* Enter */, 0, 0, 0, 0);
-        inject(window, CRTGFX_EVENT_KEY_UP, 28, 0, 0, 0, 0);
+        inject(window, CRTGFX_EVENT_KEY_DOWN, 28 /* Enter */, 0, 0, 0, 0, NULL);
+        inject(window, CRTGFX_EVENT_KEY_UP, 28, 0, 0, 0, 0, NULL);
       } else if (frame == 6) {
-        inject(window, CRTGFX_EVENT_POINTER_MOTION, 30, 70, 0, 0, 0);
-        inject(window, CRTGFX_EVENT_POINTER_BUTTON_DOWN, 0, 30, 70, 0, CRTGFX_POINTER_BUTTON_LEFT);
-        inject(window, CRTGFX_EVENT_POINTER_BUTTON_UP, 0, 30, 70, 0, CRTGFX_POINTER_BUTTON_LEFT);
+        center_of(&d, d.toggle, &x, &y);
+        inject_click(window, x, y);
       } else if (frame == 8) {
-        inject(window, CRTGFX_EVENT_POINTER_MOTION, 200, 127, 0, 0, 0);
-        inject(window, CRTGFX_EVENT_POINTER_BUTTON_DOWN, 0, 200, 127, 0, CRTGFX_POINTER_BUTTON_LEFT);
-        inject(window, CRTGFX_EVENT_POINTER_BUTTON_UP, 0, 200, 127, 0, CRTGFX_POINTER_BUTTON_LEFT);
+        int checked = 0;
+        crtui_toggle_get_checked(d.ctx, d.toggle, &checked);
+        switch_after_click = checked;
+        center_of(&d, d.slider, &x, &y);
+        inject_click(window, x, y);
       } else if (frame == 10) {
         crtui_slider_get_value(d.ctx, d.slider, &slider_after_click);
-        inject(window, CRTGFX_EVENT_POINTER_SCROLL, 0, 0, 0, 10.0, 0);
+        inject(window, CRTGFX_EVENT_POINTER_SCROLL, 0, 0, 0, 10.0, 0, NULL);
       } else if (frame == 12) {
         crtui_slider_get_value(d.ctx, d.slider, &slider_after_wheel);
+        center_of(&d, d.input, &x, &y);
+        inject_click(window, x, y);
+        inject(window, CRTGFX_EVENT_TEXT, 0, 0, 0, 0, 0, "h");
+        inject(window, CRTGFX_EVENT_TEXT, 0, 0, 0, 0, 0, "i");
+      } else if (frame == 14) {
+        size_t length = 0;
+        crtui_widget_get_text(d.ctx, d.input, typed, sizeof(typed), &length);
       }
     }
 
@@ -183,8 +249,11 @@ int main(int argc, char** argv) {
     }
     if (frame == 0) {
       /* Window background and button fill, read back from the framebuffer that is
-       * about to be presented (button: column (20,20) + (0,40), so (26,66)). */
-      pixel_check = rgb_at(&fb, 3, 3) == BACKGROUND_RGB && rgb_at(&fb, 26, 66) == BUTTON_RGB;
+       * about to be presented. */
+      double bx, by;
+      center_of(&d, d.button, &bx, &by);
+      pixel_check = rgb_at(&fb, 3, 3) == BACKGROUND_RGB &&
+                    rgb_at(&fb, (uint32_t)bx - 60, (uint32_t)by - 14) == BUTTON_RGB;
     }
     crtgfx_window_end_frame(window);
     ++frame;
@@ -192,13 +261,17 @@ int main(int argc, char** argv) {
   }
   int input_check = 0;
   if (frame_limit != 0) {
-    /* Tab focused the button; Enter activated it; the click on the slider set it near
-     * the pointer (x=200 of a slider from 20 wide (width-80)); the wheel stepped it by one. */
-    input_check = focus_after_tab && d.activations >= 1 && slider_after_click > 10 &&
-                  slider_after_wheel == slider_after_click + 1;
+    /* Tab focused the button and Enter activated it; a click flipped the switch; a
+     * click on the slider set it near the pointer and the wheel stepped it by one;
+     * a click on the text field focused it and TEXT events typed "hi". */
+    input_check = focus_after_tab && d.activations >= 1 && switch_after_click == 1 && slider_after_click > 10 &&
+                  slider_after_wheel == slider_after_click + 1 && strcmp(typed, "hi") == 0;
     if (!input_check) {
-      fprintf(stderr, "crtui_window_demo: focus_after_tab=%d activations=%d slider_after_click=%d slider_after_wheel=%d\n",
-              focus_after_tab, d.activations, (int)slider_after_click, (int)slider_after_wheel);
+      fprintf(stderr,
+              "crtui_window_demo: focus_after_tab=%d activations=%d switch=%d slider_after_click=%d "
+              "slider_after_wheel=%d typed=\"%s\"\n",
+              focus_after_tab, d.activations, switch_after_click, (int)slider_after_click, (int)slider_after_wheel,
+              typed);
     }
   }
   if (d.ctx != NULL) crtui_context_destroy(d.ctx);

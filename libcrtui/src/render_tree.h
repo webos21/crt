@@ -21,6 +21,11 @@ typedef struct crtui_render_item {
   int32_t value, min_value, max_value;
   int focused; /* this widget holds the context focus */
   int pressed; /* a pointer press is in progress on this widget */
+  crtui_style style;         /* the widget's style overrides (mask says which) */
+  const char* placeholder;   /* TextInput, borrowed, may be NULL */
+  int32_t caret;             /* TextInput: caret as a byte offset */
+  const uint8_t* image_pixels; /* Image: BGRA8888 straight alpha, tightly packed, borrowed */
+  int32_t image_width, image_height;
 } crtui_render_item;
 
 typedef struct crtui_lvgl_backend crtui_lvgl_backend;

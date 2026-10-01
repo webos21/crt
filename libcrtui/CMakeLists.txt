@@ -177,6 +177,54 @@ set_tests_properties(crtui_contract_test_runs PROPERTIES
 )
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_contract_test_runs)
 
+# crtui_layout_test: Tranche 4 acceptance -- the CRT-owned layout engine (Row,
+# Column, Stack, free containers, grow/align/margin/padding/gap/main_align,
+# ScrollView and List), the style properties, and the v1 widget behaviors
+# (Switch, Checkbox, TextInput, Image), against the headless model. LVGL-free.
+add_executable(crtui_layout_test
+  ${CRT_STARTUP_OBJECTS}
+  tests/layout_test.c
+)
+target_link_libraries(crtui_layout_test PRIVATE crt_build_flags c crtui)
+target_include_directories(crtui_layout_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/libc/include"
+)
+target_link_libraries(crtui_layout_test PRIVATE crt_compiler_rt_builtins)
+target_link_options(crtui_layout_test PRIVATE
+  -nostdlib
+  -nostartfiles
+  -nodefaultlibs
+)
+if(CRT_TARGET_OS STREQUAL "macos")
+  target_link_options(crtui_layout_test PRIVATE
+    -Wl,-e,_start
+    -Wl,-dead_strip
+  )
+  target_link_libraries(crtui_layout_test PRIVATE System)
+elseif(CRT_TARGET_OS STREQUAL "linux")
+  target_link_options(crtui_layout_test PRIVATE
+    -Wl,-e,_start
+    -Wl,--gc-sections
+  )
+elseif(CRT_TARGET_OS STREQUAL "windows")
+  target_link_options(crtui_layout_test PRIVATE
+    -Wl,/entry:mainCRTStartup
+    -Wl,/subsystem:console
+    -Wl,/OPT:REF
+  )
+  target_link_libraries(crtui_layout_test PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
+endif()
+crt_link_startup_end_objects(crtui_layout_test)
+add_dependencies(crtui_layout_test c crt1 crtui)
+
+add_test(NAME crtui_layout_test_runs COMMAND crtui_layout_test)
+set_tests_properties(crtui_layout_test_runs PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  PASS_REGULAR_EXPRESSION "crtui_layout_test: ok"
+  TIMEOUT 60
+)
+set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_layout_test_runs)
+
 # crtui_input_test: Tranche 2 acceptance -- synthesized crtgfx_event values ->
 # crtui through the crtgfx adapter (keyboard, pointer, wheel, slider drag, resize
 # and re-layout, focus loss and recovery). Headless and LVGL-free, so it runs on

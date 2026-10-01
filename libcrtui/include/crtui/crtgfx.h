@@ -32,9 +32,11 @@ typedef struct crtui_crtgfx_state {
  *
  *   KEY_DOWN / KEY_UP          -> crtui key input (Linux evdev keycodes, as
  *                                 crtgfx defines them: Tab, Enter/KP Enter,
- *                                 Space, arrows, Escape; Shift is carried);
- *                                 any other key is ignored (text input is a
- *                                 later tranche, so TEXT is ignored too)
+ *                                 Space, arrows, Escape, Backspace, Delete,
+ *                                 Home, End; Shift is carried); any other key
+ *                                 is ignored
+ *   TEXT                       -> CRTUI_INPUT_TEXT: the committed UTF-8 text goes
+ *                                 to a focused TextInput
  *   POINTER_MOTION             -> POINTER_MOVE at the (rounded) position
  *   POINTER_BUTTON_DOWN / UP   -> POINTER_DOWN / UP for the LEFT button only;
  *                                 other buttons are ignored
@@ -48,7 +50,7 @@ typedef struct crtui_crtgfx_state {
  *                                 and the new scale (emits RESIZED)
  *   FOCUS_OUT                  -> CRTUI_INPUT_POINTER_CANCEL: an in-progress
  *                                 press or slider drag ends without activating
- *   FOCUS_IN, TEXT, EXPOSE, CLOSE_REQUESTED, FRAME_COMPLETE, NONE
+ *   FOCUS_IN, EXPOSE, CLOSE_REQUESTED, FRAME_COMPLETE, NONE
  *                              -> ignored (returns CRTUI_OK); closing and pacing
  *                                 stay the application's job
  *

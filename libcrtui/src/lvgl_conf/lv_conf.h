@@ -45,7 +45,9 @@
 #define LV_USE_ASSERT_MALLOC 1
 #define LV_ASSERT_HANDLER __builtin_trap();
 
+#define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 #endif /* LV_CONF_H */

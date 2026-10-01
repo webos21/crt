@@ -361,6 +361,204 @@ static void test_interaction_render(void) {
   crtui_context_destroy(s.ctx);
 }
 
+/* ---- Tranche 4: layout, style and the v1 widgets, as real pixels -------------- */
+
+typedef struct v1_scene {
+  crtui_context* ctx;
+  crtui_window win;
+  crtui_widget col, title, row, sw, cb, go, input, img, prog, list, items[4];
+} v1_scene;
+
+/* 320x240 window, a Column with 10 px padding and 8 px gap; absolute layout:
+ *   title (10,10)  300x24    row (10,42) 300x32 [switch 50x24 | checkbox 120x24 | button grow]
+ *   input (10,82) 300x28     image (10,118) 32x32    progress (10,158) 300x14
+ *   list  (10,180) 300x50 (4 rows of 32) */
+static void build_v1(v1_scene* v) {
+  memset(v, 0, sizeof(*v));
+  crtui_context_create(&v->ctx);
+  crtui_window_create(v->ctx, &v->win);
+  crtui_window_set_size(v->ctx, v->win, 320, 240, 1.0f);
+  crtui_column_create(v->ctx, v->win, &v->col);
+  crtui_widget_set_size(v->ctx, v->col, CRTUI_SIZE_FILL, CRTUI_SIZE_FILL);
+  crtui_container_set_padding(v->ctx, v->col, 10, 10, 10, 10);
+  crtui_container_set_gap(v->ctx, v->col, 8);
+
+  crtui_text_create(v->ctx, v->col, "Title", &v->title);
+  crtui_widget_set_size(v->ctx, v->title, 300, 24);
+  crtui_style st;
+  memset(&st, 0, sizeof(st));
+  st.mask = CRTUI_STYLE_BACKGROUND | CRTUI_STYLE_FOREGROUND | CRTUI_STYLE_OPACITY | CRTUI_STYLE_FONT;
+  st.background_rgb = 0x000000;
+  st.foreground_rgb = 0xFF0000;
+  st.opacity = 128;
+  st.font = CRTUI_FONT_LARGE;
+  crtui_widget_set_style(v->ctx, v->title, &st);
+
+  crtui_row_create(v->ctx, v->col, &v->row);
+  crtui_widget_set_size(v->ctx, v->row, CRTUI_SIZE_FILL, 32);
+  crtui_container_set_gap(v->ctx, v->row, 8);
+  crtui_switch_create(v->ctx, v->row, &v->sw);
+  crtui_widget_set_size(v->ctx, v->sw, 50, 24);
+  crtui_toggle_set_checked(v->ctx, v->sw, 1);
+  crtui_checkbox_create(v->ctx, v->row, "Opt", &v->cb);
+  crtui_widget_set_size(v->ctx, v->cb, 120, 24);
+  crtui_toggle_set_checked(v->ctx, v->cb, 1);
+  crtui_button_create(v->ctx, v->row, "Go", &v->go);
+  crtui_widget_set_size(v->ctx, v->go, 0, 32);
+  crtui_widget_set_grow(v->ctx, v->go, 1);
+  memset(&st, 0, sizeof(st));
+  st.mask = CRTUI_STYLE_BACKGROUND | CRTUI_STYLE_RADIUS;
+  st.background_rgb = 0x8E44AD;
+  st.radius = 0;
+  crtui_widget_set_style(v->ctx, v->go, &st);
+
+  crtui_text_input_create(v->ctx, v->col, "hello", &v->input);
+  crtui_widget_set_size(v->ctx, v->input, CRTUI_SIZE_FILL, 28);
+  crtui_text_input_set_placeholder(v->ctx, v->input, "Type here");
+
+  crtui_image_create(v->ctx, v->col, &v->img);
+  /* An 8x8 source of four 4x4 quadrants (B,G,R,A), stretched 4x to 32x32. The
+   * quadrant centers stay pure colors even though the scaler interpolates. */
+  uint8_t px[8 * 8 * 4];
+  static const uint8_t quadrant[4][4] = {
+      {0x00, 0x00, 0xFF, 0xFF}, /* top-left: red */
+      {0x00, 0xFF, 0x00, 0xFF}, /* top-right: green */
+      {0xFF, 0x00, 0x00, 0xFF}, /* bottom-left: blue */
+      {0xFF, 0xFF, 0xFF, 0xFF}  /* bottom-right: white */
+  };
+  for (int yy = 0; yy < 8; ++yy)
+    for (int xx = 0; xx < 8; ++xx)
+      memcpy(px + ((size_t)yy * 8 + xx) * 4, quadrant[(yy / 4) * 2 + xx / 4], 4);
+  crtui_image_set_pixels(v->ctx, v->img, px, 8, 8, 32);
+  crtui_widget_set_size(v->ctx, v->img, 32, 32);
+
+  crtui_progress_create(v->ctx, v->col, &v->prog);
+  crtui_widget_set_size(v->ctx, v->prog, CRTUI_SIZE_FILL, 14);
+  crtui_progress_set_value(v->ctx, v->prog, 50);
+  memset(&st, 0, sizeof(st));
+  st.mask = CRTUI_STYLE_BACKGROUND | CRTUI_STYLE_FOREGROUND;
+  st.background_rgb = 0x000000;
+  st.foreground_rgb = 0xFFFF00;
+  crtui_widget_set_style(v->ctx, v->prog, &st);
+
+  crtui_list_create(v->ctx, v->col, &v->list);
+  crtui_widget_set_size(v->ctx, v->list, CRTUI_SIZE_FILL, 50);
+  static const uint32_t row_colors[4] = {0xE74C3C, 0x27AE60, 0x2980B9, 0xF1C40F};
+  for (int i = 0; i < 4; ++i) {
+    crtui_list_add_item(v->ctx, v->list, "row", &v->items[i]);
+    memset(&st, 0, sizeof(st));
+    st.mask = CRTUI_STYLE_BACKGROUND | CRTUI_STYLE_RADIUS;
+    st.background_rgb = row_colors[i];
+    st.radius = 0;
+    crtui_widget_set_style(v->ctx, v->items[i], &st);
+  }
+}
+
+static int near_rgb(uint32_t a, uint32_t b, int tolerance) { return channel_close(a, b, tolerance); }
+
+static int count_color(const uint8_t* pixels, size_t stride, int x0, int y0, int x1, int y1, uint32_t rgb, int tol) {
+  int n = 0;
+  for (int y = y0; y < y1; ++y)
+    for (int x = x0; x < x1; ++x)
+      if (near_rgb(rgb_at(pixels, stride, x, y), rgb, tol)) ++n;
+  return n;
+}
+
+static void test_v1_render(void) {
+  v1_scene v;
+  build_v1(&v);
+  const int W = 320, H = 240;
+  size_t stride = (size_t)W * 4u;
+  uint8_t* px = (uint8_t*)malloc(stride * H);
+  CHECK(crtui_window_render(v.ctx, v.win, px, stride, W, H) == CRTUI_OK, "render the v1 scene");
+  if (getenv("CRTUI_RENDER_DUMP_V1") != NULL) {
+    FILE* f = fopen(getenv("CRTUI_RENDER_DUMP_V1"), "wb");
+    if (f != NULL) {
+      uint32_t image_size = (uint32_t)(W * 4 * H), file_size = 54 + image_size, offset = 54, dib = 40;
+      int32_t w = W, h = -H;
+      uint16_t planes = 1, bits = 32;
+      uint8_t header[54];
+      memset(header, 0, sizeof(header));
+      header[0] = 'B';
+      header[1] = 'M';
+      memcpy(header + 2, &file_size, 4);
+      memcpy(header + 10, &offset, 4);
+      memcpy(header + 14, &dib, 4);
+      memcpy(header + 18, &w, 4);
+      memcpy(header + 22, &h, 4);
+      memcpy(header + 26, &planes, 2);
+      memcpy(header + 28, &bits, 2);
+      memcpy(header + 34, &image_size, 4);
+      fwrite(header, 1, sizeof(header), f);
+      fwrite(px, 1, stride * H, f);
+      fclose(f);
+    }
+  }
+
+  /* Layout: where the Column put things (asserted on the model, then on pixels). */
+  int32_t x, y, w, h;
+  crtui_widget_get_bounds(v.ctx, v.go, &x, &y, &w, &h);
+  CHECK(x == 186 && w == 114 && h == 32, "the grow button takes what the switch and checkbox leave (300 - 50 - 120 - 16)");
+  crtui_widget_get_bounds(v.ctx, v.list, &x, &y, &w, &h);
+  CHECK(y == 180 && w == 300 && h == 50, "the list sits at the end of the column (10 + 24 + 8 + 32 + 8 + 28 + 8 + 32 + 8 + 14 + 8)");
+
+  /* Style: background, radius, foreground, opacity. */
+  CHECK(near_rgb(rgb_at(px, stride, 200, 60), 0x8E44AD, 2), "a styled button uses the requested background (radius 0: corner too)");
+  CHECK(near_rgb(rgb_at(px, stride, 197, 44), 0x8E44AD, 2), "a radius-0 button has a square corner");
+  CHECK(near_rgb(rgb_at(px, stride, 300, 20), 0x787878, 4), "50% opacity black over the window background is mid gray");
+  CHECK(count_not_bg(px, stride, 10, 10, 90, 34) > 100, "the large title text and its fill were drawn");
+  CHECK(near_rgb(rgb_at(px, stride, 100, 165), 0xFFFF00, 2) && near_rgb(rgb_at(px, stride, 250, 165), 0x000000, 2),
+        "progress: styled fill and track");
+
+  /* Switch and checkbox. */
+  CHECK(near_rgb(rgb_at(px, stride, 16, 54), 0x2D6CDF, 2), "a checked switch shows its on-track color");
+  CHECK(near_rgb(rgb_at(px, stride, 47, 54), 0xFFFFFF, 30), "with the knob at the right end");
+  CHECK(count_color(px, stride, 68, 42, 92, 66, 0x2D6CDF, 6) >= 60, "a checked checkbox shows a filled box");
+
+  /* Text input. */
+  CHECK(near_rgb(rgb_at(px, stride, 300, 96), 0xFFFFFF, 2), "text input background is white");
+  CHECK(near_rgb(rgb_at(px, stride, 150, 82), 0xA0A0A0, 6), "and has the 1 px border");
+  CHECK(count_not_bg(px, stride, 14, 86, 70, 108) > 30, "the entered text was drawn");
+
+  /* Image: four quadrants of an 8x8 source stretched to 32x32. */
+  CHECK(near_rgb(rgb_at(px, stride, 18, 126), 0xFF0000, 12), "image top-left");
+  CHECK(near_rgb(rgb_at(px, stride, 34, 126), 0x00FF00, 12), "image top-right");
+  CHECK(near_rgb(rgb_at(px, stride, 18, 142), 0x0000FF, 12), "image bottom-left");
+  CHECK(near_rgb(rgb_at(px, stride, 34, 142), 0xFFFFFF, 12), "image bottom-right");
+
+  /* List: rows stack, are clipped by the list, and scroll. */
+  CHECK(near_rgb(rgb_at(px, stride, 100, 186), 0xE74C3C, 2), "list row 1");
+  CHECK(near_rgb(rgb_at(px, stride, 100, 215), 0x27AE60, 2), "list row 2");
+  CHECK(near_rgb(rgb_at(px, stride, 100, 232), 0xF0F0F0, 2), "the list clips: nothing below its 50 px");
+  crtui_scroll_view_set_offset(v.ctx, v.list, 32);
+  crtui_window_render(v.ctx, v.win, px, stride, W, H);
+  CHECK(near_rgb(rgb_at(px, stride, 100, 186), 0x27AE60, 2), "after scrolling by a row, row 2 is on top");
+  CHECK(near_rgb(rgb_at(px, stride, 100, 216), 0x2980B9, 2), "and row 3 follows");
+  CHECK(near_rgb(rgb_at(px, stride, 100, 175), 0xF0F0F0, 2), "content scrolled above the list is clipped, not painted over the gap");
+
+  /* State changes reach the pixels. */
+  crtui_toggle_set_checked(v.ctx, v.sw, 0);
+  crtui_window_render(v.ctx, v.win, px, stride, W, H);
+  CHECK(near_rgb(rgb_at(px, stride, 52, 54), 0xC8C8C8, 2), "an unchecked switch shows the off track (knob now at the left)");
+  crtui_widget_set_visible(v.ctx, v.row, 0);
+  crtui_window_render(v.ctx, v.win, px, stride, W, H);
+  CHECK(near_rgb(rgb_at(px, stride, 200, 60), 0xFFFFFF, 2), "hiding the row hides the button and the column re-flows: the text input is there now");
+  /* Hidden row releases its space: the text input moves up by 32 + 8. */
+  crtui_widget_get_bounds(v.ctx, v.input, &x, &y, &w, &h);
+  CHECK(y == 42, "the hidden row gives its space back to the column");
+
+  /* Resize: the column stretches the input and progress bar. */
+  crtui_window_set_size(v.ctx, v.win, 400, 240, 1.0f);
+  uint8_t* wide = (uint8_t*)malloc((size_t)400 * 4u * 240);
+  CHECK(crtui_window_render(v.ctx, v.win, wide, 400 * 4u, 400, 240) == CRTUI_OK, "render after resize");
+  crtui_widget_get_bounds(v.ctx, v.prog, &x, &y, &w, &h);
+  CHECK(w == 380, "a FILL child follows the window width by itself");
+  free(wide);
+
+  free(px);
+  crtui_context_destroy(v.ctx);
+}
+
 static void test_lifecycle(void) {
   size_t stride = (size_t)WIDTH * 4u;
   uint8_t* pixels = (uint8_t*)malloc(stride * HEIGHT);
@@ -405,6 +603,7 @@ static void test_lifecycle(void) {
 int main(void) {
   test_pixels();
   test_interaction_render();
+  test_v1_render();
   test_lifecycle();
   if (failures != 0) {
     fprintf(stderr, "crtui_render_test: %d failure(s)\n", failures);
@@ -412,6 +611,6 @@ int main(void) {
   }
   printf("crtui_render_test: ok pixels=pass background=pass label=pass button=pass slider=pass progress=pass "
          "rerender=pass stride=pass resize=pass focus_ring=pass pressed=pass slider_drag=pass relayout=pass "
-         "lifecycle=pass\n");
+         "v1_layout=pass v1_style=pass v1_widgets=pass lifecycle=pass\n");
   return 0;
 }

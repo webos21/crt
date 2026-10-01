@@ -12,6 +12,8 @@
 #include <string.h>
 
 #define CRTUI_MAX_DEPTH 64
+#define CRTUI_MAX_TEXT_INPUT 1024
+#define CRTUI_SCROLL_STEP 24
 
 typedef struct crtui_node {
   uint32_t generation; /* never 0 once used; bumped on destroy */
@@ -35,6 +37,21 @@ typedef struct crtui_node {
   int modal;
   uint64_t modal_order;
   crtui_lvgl_backend* backend; /* window only; created on first render */
+  /* Layout (Tranche 4). x,y,width,height above are the *resolved* geometry; the
+   * request is what the application asked for (CRTUI_SIZE_FILL allowed). */
+  int32_t req_width, req_height;
+  int32_t margin[4];  /* left, top, right, bottom */
+  int32_t padding[4]; /* containers: left, top, right, bottom */
+  int32_t gap;
+  crtui_main_align main_align;
+  int32_t grow;
+  crtui_align align_h, align_v;
+  int32_t scroll_y, content_height; /* ScrollView / List */
+  crtui_style style;
+  char* placeholder;   /* TextInput */
+  size_t caret;        /* TextInput: byte offset */
+  uint8_t* image_pixels; /* Image: tightly packed BGRA8888 */
+  int32_t image_width, image_height;
 } crtui_node;
 
 typedef struct crtui_posted {
@@ -58,6 +75,7 @@ struct crtui_context {
   crtui_widget pressed; /* widget that took the current pointer press */
   crtui_widget capture; /* slider currently capturing the pointer */
   uint64_t version;     /* bumped by every change a renderer could see */
+  uint64_t layout_version; /* the version the last layout pass ran for */
   uint64_t modal_counter;
 
   crtui_input* input_queue;
@@ -93,6 +111,22 @@ static crtui_widget id_of(const crtui_context* context, const crtui_node* node) 
 }
 
 static void touch(crtui_context* context) { ++context->version; }
+
+static int is_container_kind(crtui_widget_kind kind) {
+  return kind == CRTUI_WIDGET_WINDOW || kind == CRTUI_WIDGET_CONTAINER || kind == CRTUI_WIDGET_ROW ||
+         kind == CRTUI_WIDGET_COLUMN || kind == CRTUI_WIDGET_STACK || kind == CRTUI_WIDGET_SCROLL_VIEW ||
+         kind == CRTUI_WIDGET_LIST;
+}
+
+static int is_scrolling_kind(crtui_widget_kind kind) {
+  return kind == CRTUI_WIDGET_SCROLL_VIEW || kind == CRTUI_WIDGET_LIST;
+}
+
+static int32_t max0(int32_t value) { return value < 0 ? 0 : value; }
+
+static void ensure_layout(crtui_context* context);
+static void scroll_into_view(crtui_context* context, crtui_widget id);
+static int abs_rect(crtui_context* context, crtui_widget id, int32_t* x, int32_t* y, int32_t* w, int32_t* h);
 
 /* Frees a window's private renderer (a no-op in a build without LVGL). */
 static void release_backend(crtui_node* node) {
@@ -185,7 +219,8 @@ static crtui_result alloc_node(crtui_context* context, crtui_widget_kind kind, c
   node->parent = parent;
   node->visible = 1;
   node->enabled = 1;
-  node->focusable = (kind == CRTUI_WIDGET_BUTTON || kind == CRTUI_WIDGET_SLIDER);
+  node->focusable = (kind == CRTUI_WIDGET_BUTTON || kind == CRTUI_WIDGET_SLIDER || kind == CRTUI_WIDGET_SWITCH ||
+                     kind == CRTUI_WIDGET_CHECKBOX || kind == CRTUI_WIDGET_TEXT_INPUT);
   node->dpi_scale = 1.0f;
   *out = node;
   return CRTUI_OK;
@@ -219,7 +254,7 @@ static crtui_result create_child(
   if (parent == NULL) {
     return CRTUI_ERROR_INVALID_HANDLE;
   }
-  if (parent->kind != CRTUI_WIDGET_WINDOW && parent->kind != CRTUI_WIDGET_CONTAINER) {
+  if (!is_container_kind(parent->kind)) {
     return CRTUI_ERROR_INVALID_ARGUMENT; /* only windows and containers hold children */
   }
   crtui_node* node = NULL;
@@ -285,6 +320,9 @@ static void set_focus_internal(crtui_context* context, crtui_widget next) {
   }
   context->focus = next;
   touch(context);
+  if (next != CRTUI_INVALID_WIDGET) {
+    scroll_into_view(context, next);
+  }
   if (previous != CRTUI_INVALID_WIDGET && resolve(context, previous) != NULL) {
     crtui_event out;
     memset(&out, 0, sizeof(out));
@@ -390,6 +428,224 @@ static void deliver(crtui_context* context, crtui_widget target, const crtui_eve
   }
 }
 
+/* ---- layout ------------------------------------------------------------- */
+
+static void layout_node(crtui_context* context, crtui_widget id, int depth);
+
+/* Free layout (Window, Container): children keep their own x,y; a FILL request
+ * snaps that axis to the padded content box. */
+static void layout_free(crtui_context* context, crtui_node* node, int32_t cw, int32_t ch) {
+  for (size_t i = 0; i < node->child_count; ++i) {
+    crtui_node* c = resolve(context, node->children[i]);
+    if (c == NULL) continue;
+    if (c->req_width == CRTUI_SIZE_FILL) {
+      c->width = max0(cw - c->margin[0] - c->margin[2]);
+      c->x = node->padding[0] + c->margin[0];
+    } else {
+      c->width = c->req_width;
+    }
+    if (c->req_height == CRTUI_SIZE_FILL) {
+      c->height = max0(ch - c->margin[1] - c->margin[3]);
+      c->y = node->padding[1] + c->margin[1];
+    } else {
+      c->height = c->req_height;
+    }
+  }
+}
+
+static int32_t align_offset(crtui_align align, int32_t room, int32_t size) {
+  if (align == CRTUI_ALIGN_CENTER) return (room - size) / 2;
+  if (align == CRTUI_ALIGN_END) return room - size;
+  return 0; /* START and STRETCH */
+}
+
+static void layout_stack(crtui_context* context, crtui_node* node, int32_t cw, int32_t ch) {
+  for (size_t i = 0; i < node->child_count; ++i) {
+    crtui_node* c = resolve(context, node->children[i]);
+    if (c == NULL || !c->visible) continue;
+    int32_t room_w = max0(cw - c->margin[0] - c->margin[2]);
+    int32_t room_h = max0(ch - c->margin[1] - c->margin[3]);
+    c->width = (c->req_width == CRTUI_SIZE_FILL || c->align_h == CRTUI_ALIGN_STRETCH) ? room_w : max0(c->req_width);
+    c->height = (c->req_height == CRTUI_SIZE_FILL || c->align_v == CRTUI_ALIGN_STRETCH) ? room_h : max0(c->req_height);
+    c->x = node->padding[0] + c->margin[0] + align_offset(c->align_h, room_w, c->width);
+    c->y = node->padding[1] + c->margin[1] + align_offset(c->align_v, room_h, c->height);
+  }
+}
+
+/* Flex layout along one axis. `scrolling`: the main axis is unbounded (grow is
+ * ignored), content_height is recorded and the scroll offset applied. */
+static void layout_flex(crtui_context* context, crtui_node* node, int horizontal, int scrolling, int32_t cw, int32_t ch) {
+  size_t count = 0;
+  int32_t main_avail = horizontal ? cw : ch;
+  int32_t cross_avail = horizontal ? ch : cw;
+  int32_t pad_main_start = horizontal ? node->padding[0] : node->padding[1];
+  int32_t pad_main_end = horizontal ? node->padding[2] : node->padding[3];
+  int32_t pad_cross_start = horizontal ? node->padding[1] : node->padding[0];
+
+  int64_t total = 0;
+  int64_t grow_sum = 0;
+  crtui_widget last_grow = CRTUI_INVALID_WIDGET;
+  for (size_t i = 0; i < node->child_count; ++i) {
+    crtui_node* c = resolve(context, node->children[i]);
+    if (c == NULL || !c->visible) continue;
+    ++count;
+    int32_t req = horizontal ? c->req_width : c->req_height;
+    int32_t grow = c->grow;
+    if (req == CRTUI_SIZE_FILL && grow == 0) grow = 1;
+    if (scrolling) grow = 0;
+    total += max0(req) + (horizontal ? c->margin[0] + c->margin[2] : c->margin[1] + c->margin[3]);
+    if (grow > 0) {
+      grow_sum += grow;
+      last_grow = node->children[i];
+    }
+  }
+  int64_t gaps = count > 1 ? (int64_t)(count - 1) * node->gap : 0;
+  int64_t remaining = (int64_t)main_avail - total - gaps;
+  if (scrolling || remaining < 0) remaining = 0;
+  int64_t used = total + gaps + ((grow_sum > 0 && !scrolling) ? remaining : 0);
+  int64_t free_space = scrolling ? 0 : (main_avail > used ? main_avail - used : 0);
+  int64_t offset = 0;
+  int64_t extra_gap = 0;
+  if (node->main_align == CRTUI_MAIN_CENTER) offset = free_space / 2;
+  else if (node->main_align == CRTUI_MAIN_END) offset = free_space;
+  else if (node->main_align == CRTUI_MAIN_SPACE_BETWEEN && count > 1) extra_gap = free_space / (int64_t)(count - 1);
+
+  if (scrolling) {
+    int64_t content = (int64_t)pad_main_start + total + gaps + pad_main_end;
+    node->content_height = (int32_t)content;
+    int32_t max_scroll = max0(node->content_height - node->height);
+    if (node->scroll_y > max_scroll) node->scroll_y = max_scroll;
+    if (node->scroll_y < 0) node->scroll_y = 0;
+  }
+  int64_t pos = (int64_t)pad_main_start + offset;
+  int64_t given = 0;
+  for (size_t i = 0; i < node->child_count; ++i) {
+    crtui_node* c = resolve(context, node->children[i]);
+    if (c == NULL || !c->visible) continue;
+    int32_t m_main_s = horizontal ? c->margin[0] : c->margin[1];
+    int32_t m_main_e = horizontal ? c->margin[2] : c->margin[3];
+    int32_t m_cross_s = horizontal ? c->margin[1] : c->margin[0];
+    int32_t m_cross_e = horizontal ? c->margin[3] : c->margin[2];
+    crtui_align align = horizontal ? c->align_v : c->align_h;
+    int32_t req_cross = horizontal ? c->req_height : c->req_width;
+    int32_t cross_room = max0(cross_avail - m_cross_s - m_cross_e);
+    int32_t cross_size = (align == CRTUI_ALIGN_STRETCH || req_cross == CRTUI_SIZE_FILL) ? cross_room : max0(req_cross);
+    int32_t cross_pos = pad_cross_start + m_cross_s + align_offset(align, cross_room, cross_size);
+    int32_t main_pos = (int32_t)(pos + m_main_s);
+    int32_t req_main = horizontal ? c->req_width : c->req_height;
+    int32_t main_size = max0(req_main);
+    int32_t grow = c->grow;
+    if (req_main == CRTUI_SIZE_FILL && grow == 0) grow = 1;
+    if (scrolling) grow = 0;
+    if (grow > 0 && remaining > 0) {
+      int64_t extra = node->children[i] == last_grow ? remaining - given : remaining * grow / grow_sum;
+      main_size += (int32_t)extra;
+      given += extra;
+    }
+    if (scrolling) main_pos -= node->scroll_y;
+    if (horizontal) {
+      c->x = main_pos;
+      c->y = cross_pos;
+      c->width = main_size;
+      c->height = cross_size;
+    } else {
+      c->x = cross_pos;
+      c->y = main_pos;
+      c->width = cross_size;
+      c->height = main_size;
+    }
+    pos += m_main_s + main_size + m_main_e + node->gap + extra_gap;
+  }
+}
+
+static void layout_node(crtui_context* context, crtui_widget id, int depth) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL || depth > CRTUI_MAX_DEPTH || !is_container_kind(node->kind)) {
+    return;
+  }
+  int32_t w = node->kind == CRTUI_WIDGET_WINDOW ? node->window_width : node->width;
+  int32_t h = node->kind == CRTUI_WIDGET_WINDOW ? node->window_height : node->height;
+  int32_t cw = max0(w - node->padding[0] - node->padding[2]);
+  int32_t ch = max0(h - node->padding[1] - node->padding[3]);
+  switch (node->kind) {
+    case CRTUI_WIDGET_ROW:
+      layout_flex(context, node, 1, 0, cw, ch);
+      break;
+    case CRTUI_WIDGET_COLUMN:
+      layout_flex(context, node, 0, 0, cw, ch);
+      break;
+    case CRTUI_WIDGET_SCROLL_VIEW:
+    case CRTUI_WIDGET_LIST:
+      layout_flex(context, node, 0, 1, cw, ch);
+      break;
+    case CRTUI_WIDGET_STACK:
+      layout_stack(context, node, cw, ch);
+      break;
+    default:
+      layout_free(context, node, cw, ch);
+      break;
+  }
+  for (size_t i = 0; i < node->child_count; ++i) {
+    layout_node(context, node->children[i], depth + 1);
+    node = resolve(context, id); /* nothing reallocates during layout; belt and braces */
+    if (node == NULL) return;
+  }
+}
+
+static void ensure_layout(crtui_context* context) {
+  if (context->layout_version == context->version) {
+    return;
+  }
+  context->layout_version = context->version;
+  for (size_t i = 0; i < context->node_count; ++i) {
+    crtui_node* node = &context->nodes[i];
+    if (node->in_use && node->kind == CRTUI_WIDGET_WINDOW) {
+      layout_node(context, id_of(context, node), 0);
+    }
+  }
+}
+
+static crtui_widget scroll_ancestor(crtui_context* context, crtui_widget id) {
+  for (int depth = 0; depth < CRTUI_MAX_DEPTH + 2 && id != CRTUI_INVALID_WIDGET; ++depth) {
+    crtui_node* node = resolve(context, id);
+    if (node == NULL) return CRTUI_INVALID_WIDGET;
+    if (is_scrolling_kind(node->kind)) return id;
+    id = node->parent;
+  }
+  return CRTUI_INVALID_WIDGET;
+}
+
+/* Moves a scroll view's offset by `delta` pixels, clamped to its content. */
+static void scroll_by(crtui_context* context, crtui_widget scroller, int32_t delta) {
+  crtui_node* node = resolve(context, scroller);
+  if (node == NULL || !is_scrolling_kind(node->kind)) return;
+  ensure_layout(context);
+  node = resolve(context, scroller);
+  int32_t max_scroll = max0(node->content_height - node->height);
+  int32_t next = node->scroll_y + delta;
+  if (next > max_scroll) next = max_scroll;
+  if (next < 0) next = 0;
+  if (next != node->scroll_y) {
+    node->scroll_y = next;
+    touch(context);
+  }
+}
+
+static void scroll_into_view(crtui_context* context, crtui_widget id) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL) return;
+  crtui_widget scroller = scroll_ancestor(context, node->parent);
+  if (scroller == CRTUI_INVALID_WIDGET) return;
+  ensure_layout(context);
+  int32_t wx, wy, ww, wh, sx, sy, sw, sh;
+  if (abs_rect(context, id, &wx, &wy, &ww, &wh) != 0 || abs_rect(context, scroller, &sx, &sy, &sw, &sh) != 0) return;
+  if (wy < sy) {
+    scroll_by(context, scroller, wy - sy);
+  } else if (wy + wh > sy + sh) {
+    scroll_by(context, scroller, (wy + wh) - (sy + sh));
+  }
+}
+
 static int hit_recurse(
     crtui_context* context, crtui_widget id, int32_t px, int32_t py, int32_t origin_x, int32_t origin_y,
     int32_t clip_x0, int32_t clip_y0, int32_t clip_x1, int32_t clip_y1, int depth, crtui_widget* out) {
@@ -416,6 +672,7 @@ static int hit_recurse(
 }
 
 static crtui_widget hit_test_internal(crtui_context* context, crtui_widget window, int32_t x, int32_t y) {
+  ensure_layout(context);
   crtui_node* node = resolve(context, window);
   if (node == NULL || node->kind != CRTUI_WIDGET_WINDOW || !node->visible) {
     return CRTUI_INVALID_WIDGET;
@@ -594,13 +851,116 @@ static void focus_navigate(crtui_context* context, crtui_widget window, crtui_ke
   }
 }
 
+static void toggle_user_flip(crtui_context* context, crtui_widget id) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL || (node->kind != CRTUI_WIDGET_SWITCH && node->kind != CRTUI_WIDGET_CHECKBOX)) return;
+  node->value = node->value ? 0 : 1;
+  touch(context);
+  send_simple(context, CRTUI_EVENT_VALUE_CHANGED, id, 0, 0, CRTUI_KEY_NONE, node->value, 1, NULL);
+}
+
+static size_t utf8_prev_index(const char* s, size_t i) {
+  if (i == 0) return 0;
+  --i;
+  while (i > 0 && ((unsigned char)s[i] & 0xC0u) == 0x80u) --i;
+  return i;
+}
+
+static size_t utf8_next_index(const char* s, size_t length, size_t i) {
+  if (i >= length) return length;
+  ++i;
+  while (i < length && ((unsigned char)s[i] & 0xC0u) == 0x80u) ++i;
+  return i;
+}
+
+/* Replaces `remove` bytes at `pos` with `insert`; the caret lands after the
+ * insertion. Emits TEXT_CHANGED (bubbling) with the new length. */
+static void text_input_replace(
+    crtui_context* context, crtui_widget id, size_t pos, size_t remove, const char* insert, size_t insert_length) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL || node->kind != CRTUI_WIDGET_TEXT_INPUT || node->text == NULL) return;
+  size_t length = strlen(node->text);
+  if (pos > length || remove > length - pos) return;
+  size_t new_length = length - remove + insert_length;
+  if (new_length > CRTUI_MAX_TEXT_INPUT) return;
+  char* grown = (char*)malloc(new_length + 1);
+  if (grown == NULL) return;
+  memcpy(grown, node->text, pos);
+  if (insert_length > 0) memcpy(grown + pos, insert, insert_length);
+  memcpy(grown + pos + insert_length, node->text + pos + remove, length - pos - remove);
+  grown[new_length] = '\0';
+  free(node->text);
+  node->text = grown;
+  node->caret = pos + insert_length;
+  touch(context);
+  send_simple(context, CRTUI_EVENT_TEXT_CHANGED, id, 0, 0, CRTUI_KEY_NONE, (int32_t)new_length, 1, NULL);
+}
+
+/* Default key handling for a focused TextInput. Returns 1 if the key was
+ * consumed; Tab, Up and Down are left to focus navigation. */
+static int text_input_key(crtui_context* context, crtui_widget id, crtui_key key) {
+  crtui_node* node = resolve(context, id);
+  if (node == NULL || node->text == NULL) return 0;
+  size_t length = strlen(node->text);
+  switch (key) {
+    case CRTUI_KEY_LEFT:
+      node->caret = utf8_prev_index(node->text, node->caret);
+      touch(context);
+      return 1;
+    case CRTUI_KEY_RIGHT:
+      node->caret = utf8_next_index(node->text, length, node->caret);
+      touch(context);
+      return 1;
+    case CRTUI_KEY_HOME:
+      node->caret = 0;
+      touch(context);
+      return 1;
+    case CRTUI_KEY_END:
+      node->caret = length;
+      touch(context);
+      return 1;
+    case CRTUI_KEY_BACKSPACE: {
+      size_t start = utf8_prev_index(node->text, node->caret);
+      if (start < node->caret) text_input_replace(context, id, start, node->caret - start, "", 0);
+      return 1;
+    }
+    case CRTUI_KEY_DELETE: {
+      size_t end = utf8_next_index(node->text, length, node->caret);
+      if (end > node->caret) text_input_replace(context, id, node->caret, end - node->caret, "", 0);
+      return 1;
+    }
+    case CRTUI_KEY_ENTER:
+      send_simple(context, CRTUI_EVENT_ACTIVATE, id, 0, 0, CRTUI_KEY_NONE, 0, 1, NULL);
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 static void process_input(crtui_context* context, const crtui_input* input) {
+  ensure_layout(context);
   crtui_widget window = input->window;
   crtui_node* window_node = resolve(context, window);
   if (window_node == NULL || window_node->kind != CRTUI_WIDGET_WINDOW || !window_permitted(context, window)) {
     return; /* window gone, or a modal window blocks it: dropped */
   }
   switch (input->type) {
+    case CRTUI_INPUT_TEXT: {
+      crtui_widget focused = context->focus;
+      crtui_node* node = resolve(context, focused);
+      if (node == NULL || node->kind != CRTUI_WIDGET_TEXT_INPUT || window_of(context, focused) != window ||
+          !chain_visible_enabled(context, focused, 1)) {
+        return;
+      }
+      size_t length = 0;
+      while (length < sizeof(input->text) && input->text[length] != '\0') ++length;
+      if (length == 0 || length >= sizeof(input->text) || (unsigned char)input->text[0] < 0x20u ||
+          (unsigned char)input->text[0] == 0x7fu) {
+        return; /* empty, unterminated, or a control character: not text */
+      }
+      text_input_replace(context, focused, node->caret, 0, input->text, length);
+      return;
+    }
     case CRTUI_INPUT_POINTER_CANCEL:
       context->capture = CRTUI_INVALID_WIDGET;
       set_pressed(context, CRTUI_INVALID_WIDGET);
@@ -654,6 +1014,9 @@ static void process_input(crtui_context* context, const crtui_input* input) {
         crtui_node* node = resolve(context, target);
         if (pressed == target && node != NULL && node->kind == CRTUI_WIDGET_BUTTON) {
           send_simple(context, CRTUI_EVENT_ACTIVATE, target, input->x, input->y, CRTUI_KEY_NONE, 0, 1, NULL);
+        } else if (pressed == target && node != NULL &&
+                   (node->kind == CRTUI_WIDGET_SWITCH || node->kind == CRTUI_WIDGET_CHECKBOX)) {
+          toggle_user_flip(context, target);
         }
       } else if (input->type == CRTUI_INPUT_POINTER_MOVE) {
         send_simple(context, CRTUI_EVENT_POINTER_MOVE, target, input->x, input->y, CRTUI_KEY_NONE, 0, 1, NULL);
@@ -664,6 +1027,11 @@ static void process_input(crtui_context* context, const crtui_input* input) {
         crtui_node* node = resolve(context, target);
         if (!handled && node != NULL && node->kind == CRTUI_WIDGET_SLIDER && input->wheel_delta != 0) {
           slider_user_set(context, target, node->value + (input->wheel_delta > 0 ? 1 : -1));
+        } else if (!handled && input->wheel_delta != 0) {
+          crtui_widget scroller = scroll_ancestor(context, target);
+          if (scroller != CRTUI_INVALID_WIDGET) {
+            scroll_by(context, scroller, input->wheel_delta > 0 ? -CRTUI_SCROLL_STEP : CRTUI_SCROLL_STEP);
+          }
         }
       }
       return;
@@ -692,9 +1060,15 @@ static void process_input(crtui_context* context, const crtui_input* input) {
       }
       if (input->key == CRTUI_KEY_TAB) {
         focus_move(context, window, (input->modifiers & CRTUI_MOD_SHIFT) != 0);
+      } else if (focused_node != NULL && focused_node->kind == CRTUI_WIDGET_TEXT_INPUT &&
+                 text_input_key(context, focused, input->key)) {
+        /* consumed by the text input (caret, editing, submit) */
       } else if ((input->key == CRTUI_KEY_ENTER || input->key == CRTUI_KEY_SPACE) && focused_node != NULL &&
                  focused_node->kind == CRTUI_WIDGET_BUTTON) {
         send_simple(context, CRTUI_EVENT_ACTIVATE, focused, 0, 0, CRTUI_KEY_NONE, 0, 1, NULL);
+      } else if ((input->key == CRTUI_KEY_ENTER || input->key == CRTUI_KEY_SPACE) && focused_node != NULL &&
+                 (focused_node->kind == CRTUI_WIDGET_SWITCH || focused_node->kind == CRTUI_WIDGET_CHECKBOX)) {
+        toggle_user_flip(context, focused);
       } else if (input->key == CRTUI_KEY_LEFT || input->key == CRTUI_KEY_RIGHT || input->key == CRTUI_KEY_UP ||
                  input->key == CRTUI_KEY_DOWN) {
         if (focused_node != NULL && focused_node->kind == CRTUI_WIDGET_SLIDER &&
@@ -737,6 +1111,10 @@ static void kill_subtree(crtui_context* context, crtui_widget id, int depth) {
   release_backend(node);
   free(node->text);
   node->text = NULL;
+  free(node->placeholder);
+  node->placeholder = NULL;
+  free(node->image_pixels);
+  node->image_pixels = NULL;
   node->callback = NULL;
   if (context->focus == id) {
     context->focus = CRTUI_INVALID_WIDGET;
@@ -777,6 +1155,8 @@ crtui_result crtui_context_destroy(crtui_context* context) {
     if (node->in_use) {
       release_backend(node);
       free(node->text);
+      free(node->placeholder);
+      free(node->image_pixels);
       free(node->children);
       node->in_use = 0;
     }
@@ -889,8 +1269,11 @@ crtui_result crtui_container_create(crtui_context* context, crtui_widget parent,
 
 static crtui_result create_text_like(
     crtui_context* context, crtui_widget_kind kind, crtui_widget parent, const char* utf8, crtui_widget* out) {
+  if (out != NULL) {
+    *out = CRTUI_INVALID_WIDGET;
+  }
   CRTUI_CHECK_CONTEXT(context);
-  if (utf8 == NULL) {
+  if (utf8 == NULL || (kind == CRTUI_WIDGET_TEXT_INPUT && strlen(utf8) > CRTUI_MAX_TEXT_INPUT)) {
     return CRTUI_ERROR_INVALID_ARGUMENT;
   }
   crtui_node* node = NULL;
@@ -899,6 +1282,9 @@ static crtui_result create_text_like(
     return result;
   }
   node->text = strdup(utf8);
+  if (node->text != NULL) {
+    node->caret = strlen(node->text); /* TextInput: caret at the end of the initial text */
+  }
   if (node->text == NULL) {
     crtui_widget_destroy(context, *out);
     *out = CRTUI_INVALID_WIDGET;
@@ -997,13 +1383,16 @@ crtui_result crtui_widget_set_bounds(
     crtui_context* context, crtui_widget widget, int32_t x, int32_t y, int32_t width, int32_t height) {
   CRTUI_CHECK_CONTEXT(context);
   CRTUI_RESOLVE(context, widget, node);
-  if (width < 0 || height < 0 || node->kind == CRTUI_WIDGET_WINDOW) {
+  if ((width < 0 && width != CRTUI_SIZE_FILL) || (height < 0 && height != CRTUI_SIZE_FILL) ||
+      node->kind == CRTUI_WIDGET_WINDOW) {
     return CRTUI_ERROR_INVALID_ARGUMENT; /* windows are sized with crtui_window_set_size() */
   }
   node->x = x;
   node->y = y;
-  node->width = width;
-  node->height = height;
+  node->req_width = width;
+  node->req_height = height;
+  node->width = width < 0 ? 0 : width;
+  node->height = height < 0 ? 0 : height;
   touch(context);
   return CRTUI_OK;
 }
@@ -1012,6 +1401,7 @@ crtui_result crtui_widget_get_bounds(
     crtui_context* context, crtui_widget widget, int32_t* out_x, int32_t* out_y, int32_t* out_width,
     int32_t* out_height) {
   CRTUI_CHECK_CONTEXT(context);
+  ensure_layout(context);
   CRTUI_RESOLVE(context, widget, node);
   if (out_x == NULL || out_y == NULL || out_width == NULL || out_height == NULL) {
     return CRTUI_ERROR_INVALID_ARGUMENT;
@@ -1061,7 +1451,11 @@ crtui_result crtui_widget_set_focusable(crtui_context* context, crtui_widget wid
 crtui_result crtui_widget_set_text(crtui_context* context, crtui_widget widget, const char* utf8) {
   CRTUI_CHECK_CONTEXT(context);
   CRTUI_RESOLVE(context, widget, node);
-  if (utf8 == NULL || (node->kind != CRTUI_WIDGET_TEXT && node->kind != CRTUI_WIDGET_BUTTON)) {
+  if (utf8 == NULL || (node->kind != CRTUI_WIDGET_TEXT && node->kind != CRTUI_WIDGET_BUTTON &&
+                       node->kind != CRTUI_WIDGET_CHECKBOX && node->kind != CRTUI_WIDGET_TEXT_INPUT)) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  if (node->kind == CRTUI_WIDGET_TEXT_INPUT && strlen(utf8) > CRTUI_MAX_TEXT_INPUT) {
     return CRTUI_ERROR_INVALID_ARGUMENT;
   }
   char* copy = strdup(utf8);
@@ -1070,6 +1464,7 @@ crtui_result crtui_widget_set_text(crtui_context* context, crtui_widget widget, 
   }
   free(node->text);
   node->text = copy;
+  node->caret = strlen(copy);
   touch(context);
   return CRTUI_OK;
 }
@@ -1198,6 +1593,12 @@ static int build_items(
   item->max_value = node->max_value;
   item->focused = context->focus == id;
   item->pressed = context->pressed == id;
+  item->style = node->style;
+  item->placeholder = node->placeholder;
+  item->caret = (int32_t)node->caret;
+  item->image_pixels = node->image_pixels;
+  item->image_width = node->image_width;
+  item->image_height = node->image_height;
   if (node->kind == CRTUI_WIDGET_WINDOW) {
     item->x = 0;
     item->y = 0;
@@ -1232,6 +1633,7 @@ crtui_result crtui_window_render(
 #ifndef CRTUI_HAVE_LVGL
   return CRTUI_ERROR_UNSUPPORTED;
 #else
+  ensure_layout(context);
   crtui_item_list list;
   memset(&list, 0, sizeof(list));
   if (build_items(context, window, -1, 1, 0, &list) != 0) {
@@ -1243,6 +1645,339 @@ crtui_result crtui_window_render(
   free(list.items);
   return result;
 #endif
+}
+
+/* ---- layout, style and the v1 widget set (Tranche 4) ---------------------- */
+
+crtui_result crtui_row_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  return create_child(context, CRTUI_WIDGET_ROW, parent, out_widget, NULL);
+}
+
+crtui_result crtui_column_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  return create_child(context, CRTUI_WIDGET_COLUMN, parent, out_widget, NULL);
+}
+
+crtui_result crtui_stack_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  return create_child(context, CRTUI_WIDGET_STACK, parent, out_widget, NULL);
+}
+
+crtui_result crtui_widget_set_size(crtui_context* context, crtui_widget widget, int32_t width, int32_t height) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, widget, node);
+  if ((width < 0 && width != CRTUI_SIZE_FILL) || (height < 0 && height != CRTUI_SIZE_FILL) ||
+      node->kind == CRTUI_WIDGET_WINDOW) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->req_width = width;
+  node->req_height = height;
+  node->width = width < 0 ? 0 : width;
+  node->height = height < 0 ? 0 : height;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_widget_set_margin(
+    crtui_context* context, crtui_widget widget, int32_t left, int32_t top, int32_t right, int32_t bottom) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, widget, node);
+  if (left < 0 || top < 0 || right < 0 || bottom < 0 || node->kind == CRTUI_WIDGET_WINDOW) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->margin[0] = left;
+  node->margin[1] = top;
+  node->margin[2] = right;
+  node->margin[3] = bottom;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_container_set_padding(
+    crtui_context* context, crtui_widget container, int32_t left, int32_t top, int32_t right, int32_t bottom) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, container, node);
+  if (left < 0 || top < 0 || right < 0 || bottom < 0 || !is_container_kind(node->kind)) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->padding[0] = left;
+  node->padding[1] = top;
+  node->padding[2] = right;
+  node->padding[3] = bottom;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_container_set_gap(crtui_context* context, crtui_widget container, int32_t gap) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, container, node);
+  if (gap < 0 || !is_container_kind(node->kind)) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->gap = gap;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_container_set_main_align(crtui_context* context, crtui_widget container, crtui_main_align main_align) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, container, node);
+  if (main_align < CRTUI_MAIN_START || main_align > CRTUI_MAIN_SPACE_BETWEEN || !is_container_kind(node->kind)) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->main_align = main_align;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_widget_set_alignment(
+    crtui_context* context, crtui_widget widget, crtui_align horizontal, crtui_align vertical) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, widget, node);
+  if (horizontal < CRTUI_ALIGN_START || horizontal > CRTUI_ALIGN_STRETCH || vertical < CRTUI_ALIGN_START ||
+      vertical > CRTUI_ALIGN_STRETCH || node->kind == CRTUI_WIDGET_WINDOW) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->align_h = horizontal;
+  node->align_v = vertical;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_widget_set_grow(crtui_context* context, crtui_widget widget, int32_t grow) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, widget, node);
+  if (grow < 0 || node->kind == CRTUI_WIDGET_WINDOW) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->grow = grow;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_widget_set_style(crtui_context* context, crtui_widget widget, const crtui_style* style) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, widget, node);
+  if (style == NULL) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  uint32_t known = CRTUI_STYLE_BACKGROUND | CRTUI_STYLE_FOREGROUND | CRTUI_STYLE_BORDER_COLOR |
+                   CRTUI_STYLE_BORDER_WIDTH | CRTUI_STYLE_RADIUS | CRTUI_STYLE_OPACITY | CRTUI_STYLE_FONT |
+                   CRTUI_STYLE_TEXT_ALIGN;
+  if ((style->mask & ~known) != 0 || ((style->mask & CRTUI_STYLE_BORDER_WIDTH) != 0 && style->border_width < 0) ||
+      ((style->mask & CRTUI_STYLE_RADIUS) != 0 && style->radius < 0) ||
+      ((style->mask & CRTUI_STYLE_FONT) != 0 && (style->font < CRTUI_FONT_DEFAULT || style->font > CRTUI_FONT_LARGE)) ||
+      ((style->mask & CRTUI_STYLE_TEXT_ALIGN) != 0 &&
+       (style->text_align < CRTUI_TEXT_ALIGN_START || style->text_align > CRTUI_TEXT_ALIGN_END))) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  if ((style->mask & CRTUI_STYLE_BACKGROUND) != 0) node->style.background_rgb = style->background_rgb & 0xFFFFFFu;
+  if ((style->mask & CRTUI_STYLE_FOREGROUND) != 0) node->style.foreground_rgb = style->foreground_rgb & 0xFFFFFFu;
+  if ((style->mask & CRTUI_STYLE_BORDER_COLOR) != 0) node->style.border_rgb = style->border_rgb & 0xFFFFFFu;
+  if ((style->mask & CRTUI_STYLE_BORDER_WIDTH) != 0) node->style.border_width = style->border_width;
+  if ((style->mask & CRTUI_STYLE_RADIUS) != 0) node->style.radius = style->radius;
+  if ((style->mask & CRTUI_STYLE_OPACITY) != 0) node->style.opacity = style->opacity;
+  if ((style->mask & CRTUI_STYLE_FONT) != 0) node->style.font = style->font;
+  if ((style->mask & CRTUI_STYLE_TEXT_ALIGN) != 0) node->style.text_align = style->text_align;
+  node->style.mask |= style->mask;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_widget_get_style(crtui_context* context, crtui_widget widget, crtui_style* out_style) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, widget, node);
+  if (out_style == NULL) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  *out_style = node->style;
+  return CRTUI_OK;
+}
+
+crtui_result crtui_widget_clear_style(crtui_context* context, crtui_widget widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, widget, node);
+  memset(&node->style, 0, sizeof(node->style));
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_image_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  return create_child(context, CRTUI_WIDGET_IMAGE, parent, out_widget, NULL);
+}
+
+crtui_result crtui_image_set_pixels(
+    crtui_context* context, crtui_widget image, const void* bgra, int32_t width, int32_t height, size_t stride_bytes) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, image, node);
+  if (node->kind != CRTUI_WIDGET_IMAGE || bgra == NULL || width <= 0 || height <= 0 || width > 4096 || height > 4096 ||
+      stride_bytes < (size_t)width * 4u) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  size_t row = (size_t)width * 4u;
+  uint8_t* copy = (uint8_t*)malloc(row * (size_t)height);
+  if (copy == NULL) {
+    return CRTUI_ERROR_IO;
+  }
+  for (int32_t y = 0; y < height; ++y) {
+    memcpy(copy + (size_t)y * row, (const uint8_t*)bgra + (size_t)y * stride_bytes, row);
+  }
+  free(node->image_pixels);
+  node->image_pixels = copy;
+  node->image_width = width;
+  node->image_height = height;
+  if (node->req_width == 0 && node->req_height == 0) {
+    node->req_width = width;
+    node->req_height = height;
+    node->width = width;
+    node->height = height;
+  }
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_switch_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  return create_child(context, CRTUI_WIDGET_SWITCH, parent, out_widget, NULL);
+}
+
+crtui_result crtui_checkbox_create(
+    crtui_context* context, crtui_widget parent, const char* utf8, crtui_widget* out_widget) {
+  return create_text_like(context, CRTUI_WIDGET_CHECKBOX, parent, utf8, out_widget);
+}
+
+crtui_result crtui_toggle_set_checked(crtui_context* context, crtui_widget toggle, int checked) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, toggle, node);
+  if (node->kind != CRTUI_WIDGET_SWITCH && node->kind != CRTUI_WIDGET_CHECKBOX) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  node->value = checked ? 1 : 0;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_toggle_get_checked(crtui_context* context, crtui_widget toggle, int* out_checked) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, toggle, node);
+  if ((node->kind != CRTUI_WIDGET_SWITCH && node->kind != CRTUI_WIDGET_CHECKBOX) || out_checked == NULL) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  *out_checked = node->value != 0;
+  return CRTUI_OK;
+}
+
+crtui_result crtui_scroll_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  return create_child(context, CRTUI_WIDGET_SCROLL_VIEW, parent, out_widget, NULL);
+}
+
+crtui_result crtui_list_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  return create_child(context, CRTUI_WIDGET_LIST, parent, out_widget, NULL);
+}
+
+crtui_result crtui_list_add_item(crtui_context* context, crtui_widget list, const char* utf8, crtui_widget* out_item) {
+  if (out_item != NULL) {
+    *out_item = CRTUI_INVALID_WIDGET;
+  }
+  CRTUI_CHECK_CONTEXT(context);
+  crtui_node* parent = resolve(context, list);
+  if (parent == NULL) {
+    return CRTUI_ERROR_INVALID_HANDLE;
+  }
+  if (parent->kind != CRTUI_WIDGET_LIST) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  crtui_result result = create_text_like(context, CRTUI_WIDGET_BUTTON, list, utf8, out_item);
+  if (result != CRTUI_OK) {
+    return result;
+  }
+  crtui_node* item = resolve(context, *out_item);
+  item->req_height = 32;
+  item->height = 32;
+  item->align_h = CRTUI_ALIGN_STRETCH;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_scroll_view_set_offset(crtui_context* context, crtui_widget scroll_view, int32_t offset) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, scroll_view, node);
+  if (!is_scrolling_kind(node->kind)) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  ensure_layout(context);
+  node = resolve(context, scroll_view);
+  int32_t max_scroll = max0(node->content_height - node->height);
+  if (offset > max_scroll) offset = max_scroll;
+  if (offset < 0) offset = 0;
+  node->scroll_y = offset;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_scroll_view_get_offset(
+    crtui_context* context, crtui_widget scroll_view, int32_t* out_offset, int32_t* out_content_height) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, scroll_view, node);
+  if (!is_scrolling_kind(node->kind) || out_offset == NULL) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  ensure_layout(context);
+  node = resolve(context, scroll_view);
+  *out_offset = node->scroll_y;
+  if (out_content_height != NULL) *out_content_height = node->content_height;
+  return CRTUI_OK;
+}
+
+crtui_result crtui_text_input_create(
+    crtui_context* context, crtui_widget parent, const char* initial_utf8, crtui_widget* out_widget) {
+  return create_text_like(context, CRTUI_WIDGET_TEXT_INPUT, parent, initial_utf8, out_widget);
+}
+
+crtui_result crtui_text_input_set_placeholder(crtui_context* context, crtui_widget text_input, const char* utf8) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, text_input, node);
+  if (node->kind != CRTUI_WIDGET_TEXT_INPUT) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  char* copy = utf8 != NULL ? strdup(utf8) : NULL;
+  if (utf8 != NULL && copy == NULL) {
+    return CRTUI_ERROR_IO;
+  }
+  free(node->placeholder);
+  node->placeholder = copy;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_text_input_set_caret(crtui_context* context, crtui_widget text_input, size_t byte_offset) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, text_input, node);
+  if (node->kind != CRTUI_WIDGET_TEXT_INPUT || node->text == NULL) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  size_t length = strlen(node->text);
+  if (byte_offset > length) byte_offset = length;
+  while (byte_offset > 0 && byte_offset < length && ((unsigned char)node->text[byte_offset] & 0xC0u) == 0x80u) {
+    --byte_offset; /* never inside a UTF-8 character */
+  }
+  node->caret = byte_offset;
+  touch(context);
+  return CRTUI_OK;
+}
+
+crtui_result crtui_text_input_get_caret(crtui_context* context, crtui_widget text_input, size_t* out_byte_offset) {
+  CRTUI_CHECK_CONTEXT(context);
+  CRTUI_RESOLVE(context, text_input, node);
+  if (node->kind != CRTUI_WIDGET_TEXT_INPUT || out_byte_offset == NULL) {
+    return CRTUI_ERROR_INVALID_ARGUMENT;
+  }
+  *out_byte_offset = node->caret;
+  return CRTUI_OK;
 }
 
 /* ---- windows ------------------------------------------------------------ */

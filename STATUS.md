@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-09-29**.
+Last synchronized with the source tree and git history: **2026-10-01**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -18,10 +18,12 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
   Linux, macOS, and Windows. It is not a glibc binary-compatibility layer, a
   WSL/container replacement, or an Android APK runtime.
 - The default workflow builds and tests only the C stage. Explicit cumulative
-  distributions then add C++, Simple Graphics, and advanced Graphics/Media
-  under `out/<preset>/dist/`; `05-ui` (contract and headless model only so far)
-  and the planned `06-web` follow (the superseded `05-js`/`libcrtjs` skeleton
-  was removed on 2026-09-29).
+  distributions then add C++, Simple Graphics, advanced Graphics/Media, and
+  the in-progress `05-ui` stage under `out/<preset>/dist/`. `05-ui` now has a
+  frozen contract, a headless model, private LVGL rendering, input/focus/resize,
+  and the Windows-accepted Tranche 4 layout/style/widget set; the planned
+  `06-web` follows (the superseded `05-js`/`libcrtjs` skeleton was removed on
+  2026-09-29).
 - No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
   provide the host or vendor toolchain; CRT supplies the staged sysroot,
   startup/runtime objects, wrappers, configuration, and manifest.
@@ -427,8 +429,8 @@ statuses, and exceptions are maintained in:
   and realtime/WebRTC remain open. FFmpeg is still intentionally file-only
   (`--disable-network`); network I/O goes through the CRT-owned transport.
 - No JavaScript engine exists and `libcrtjs` is gone; QuickJS is no longer
-  planned as a stage. The `05-ui` (`crtui`/LVGL) and `06-web` (WebKit) stages
-  are not started.
+  planned as a stage. The `05-ui` (`crtui`/LVGL) stage is in progress;
+  `06-web` (WebKit) is not started.
 
 ## Next Priorities
 
@@ -437,10 +439,11 @@ statuses, and exceptions are maintained in:
    on all three hosts. Tranche 1 (LVGL v9.6.0 imported privately, software
    rendering through a CRT display adapter into crtgfx) is done on Windows/x64
    (2026-09-30) and closed on all three hosts; Tranche 2 (input, focus and resize
-   through a crtgfx adapter) is closed on all three hosts; Tranche 3 (LVGL made
-   truly private: export control, an installed LVGL-free sample, a privacy check)
-   is done on Windows/x64 (2026-09-30), so next are its macOS/arm64 and Linux
-   replays, then layout and the v1 widget set. See `docs/crtui_acceptance.md`.
+   through a crtgfx adapter) and Tranche 3 (LVGL made truly private: export
+   control, an installed LVGL-free sample, a privacy check) are closed on all
+   three hosts. Tranche 4 (CRT-owned layout, styling and the v1 widget set) is
+   accepted on Windows/x64 (2026-10-01); replay it on macOS/arm64 and Linux
+   before moving to External Surface. See `docs/crtui_acceptance.md`.
 2. After `05-ui`'s External Surface contract is accepted, begin `06-web`: a
    JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a
    Linux WPE reference baseline, then `PlatformCRT`. See

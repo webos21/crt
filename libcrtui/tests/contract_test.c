@@ -163,7 +163,7 @@ static void test_errors(void) {
   CHECK(crtui_widget_set_text(s.ctx, s.slider, "x") == CRTUI_ERROR_INVALID_ARGUMENT, "text op on a slider");
   CHECK(crtui_widget_set_bounds(s.ctx, s.win, 0, 0, 1, 1) == CRTUI_ERROR_INVALID_ARGUMENT,
         "windows are sized with crtui_window_set_size()");
-  CHECK(crtui_widget_set_bounds(s.ctx, s.container, 0, 0, -1, 1) == CRTUI_ERROR_INVALID_ARGUMENT, "negative size");
+  CHECK(crtui_widget_set_bounds(s.ctx, s.container, 0, 0, -2, 1) == CRTUI_ERROR_INVALID_ARGUMENT, "negative size");
   CHECK(crtui_context_get_focus(s.ctx, &out) == CRTUI_ERROR_STATE && out == CRTUI_INVALID_WIDGET,
         "no focus -> STATE");
 
