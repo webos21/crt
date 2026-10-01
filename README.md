@@ -1,354 +1,479 @@
 # CRT
 
-**Linux-style C/C++ software. Native on Linux, Windows and macOS.**
+**Build embedded Linux applications on the desktop. Run them natively everywhere.**
 
-Same source model. Native executables. Native GPUs. No VM or container.
+CRT is a native cross-platform application runtime for **Linux, Windows, and macOS**.
 
-CRT is a Bionic-compatible cross-platform C runtime and Platform Adaptation
-Layer (PAL). It lets Linux/BSD/Android-style native libraries and applications
-be rebuilt from the same source as native Linux, Windows, and macOS
-executables.
+It provides a common C/C++ runtime and platform layer, then builds upward into native windows, GPU graphics, media, networking, application UI, and eventually a WebKit-based Web runtime.
 
-The primary target is a Linux-kernel embedded device: set-top boxes,
-Raspberry-Pi-class consoles, industrial HMIs, and automotive IVI systems.
-Native desktop builds provide a fast development and debugging loop and can
-also be shipped as desktop applications.
+**Same source model. Native executables. Native GPUs. No VM, container, or translation layer.**
 
-CRT is pre-1.0 developer software under active development. The current
-milestone is the `04-gfx-media` stage (see [Where It Stands](#where-it-stands));
-interfaces may still change, and it is not a production-ready `1.0`.
+The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-Pi-class consoles, industrial HMIs, smart displays, and automotive IVI systems. Windows and macOS are first-class native development and execution hosts, not emulation environments.
 
-## Architecture
+> CRT is pre-1.0 developer software under active development.  
+> The current upper-runtime milestone is **`05-ui`**, which adds `crtui` and LVGL-based application widgets. The planned **`06-web`** stage follows with JavaScriptCore, WebCore, WebKit, `PlatformCRT`, and `WebView`.
+
+[Roadmap](docs/runtime_roadmap.md) ·
+[Current Status](STATUS.md) ·
+[Work Queue](TODO.md) ·
+[History](HISTORY.md) ·
+[Releases](https://github.com/webos21/crt/releases)
+
+---
+
+## What CRT Is Becoming
+
+CRT started as a Bionic-compatible C/C++ portability runtime.
+
+That foundation now supports a broader goal:
+
+> **One native application stack for embedded Linux, Windows, and macOS.**
 
 ```text
-Application
-    |
-    v
-Skia / FFmpeg
-    |
-    v
-CRT C++ Runtime
-    |
-    v
-Bionic-compatible CRT / PAL
-    |
-    +-----------+-----------+
-    |           |           |
-  Linux       Windows      macOS
- Wayland       Win32       Cocoa
- Vulkan        D3D12       Metal
+                         Application
+                              |
+                            crtui
+                              |
+              +---------------+---------------+
+              |               |               |
+           Widgets         VideoView        WebView
+              |               |               |
+            LVGL           crtmedia         crtweb
+                              |               |
+                            FFmpeg          WebKit
+              |               |               |
+              +---------------+---------------+
+                              |
+                            crtgfx
+                              |
+                             Skia
+                              |
+                    +---------+---------+
+                    |         |         |
+                  Vulkan    D3D12     Metal
+                    |         |         |
+                    +---------+---------+
+                              |
+                     CRT C/C++ Runtime
+                              |
+                  Bionic-compatible PAL
+                              |
+                    +---------+---------+
+                    |         |         |
+                  Linux     Windows    macOS
 ```
 
-An application is rebuilt from the same source against CRT's Bionic-shaped
-headers and libraries. Each host's PAL adapter reaches the native window
-system, GPU API, and audio/video services directly, so the result is an
-ordinary native executable rather than something running inside a VM,
-container, or translation layer.
+Today, the lower and middle layers are already working across all three hosts:
+
+- Bionic-shaped libc/libm/libdl and imported libc++ runtime
+- native windows and input
+- Skia CPU and GPU rendering
+- Vulkan, D3D12, and Metal presentation
+- software and hardware media decode
+- zero-copy or measured GPU-copy decoded-texture interop
+- camera capture and hardware/software encode
+- HTTP/HTTPS streaming with bounded buffering and reconnect
+- the first `crtui` application widgets
+
+The Web runtime remains roadmap work and is not claimed as implemented.
+
+---
+
+## Why CRT?
+
+Embedded software often begins on Linux, but development, debugging, simulation, and companion applications frequently need to run elsewhere.
+
+Traditionally that means maintaining different platform ports, running a VM or container, or adopting a large application framework that owns the entire stack.
+
+CRT takes a different approach.
+
+### Native everywhere
+
+Applications are rebuilt from the same source as ordinary native executables.
+
+```text
+Linux source model
+       |
+       +----> native Linux executable
+       |
+       +----> native Windows executable
+       |
+       +----> native macOS executable
+```
+
+There is no Linux VM on Windows, no container requirement, and no binary translation layer.
+
+### The portability work lives below the application
+
+Files, sockets, threads, TLS, memory mapping, process primitives, dynamic loading, startup, C++, graphics, media, and networking differ significantly between operating systems.
+
+CRT absorbs those differences behind a Bionic-shaped runtime and a small host PAL so applications and upstream libraries do not each solve them again.
+
+### Embedded Linux remains the center of gravity
+
+Windows and macOS are not the product definition.
+
+They are first-class native hosts that make it possible to develop, test, debug, demonstrate, and sometimes ship the same application code away from the embedded target.
+
+### Rebuild, do not emulate
+
+CRT is source portability, not binary compatibility.
+
+You compile with Clang/LLVM against a CRT sysroot and produce a native executable for the target host.
+
+CRT is **not**:
+
+- Android APK compatibility
+- glibc binary compatibility
+- a VM or container
+- Wine/WSL-style binary execution
+- an Electron clone
+- a complete Qt/GTK replacement
+- production-ready `1.0`
+
+For comparisons with other approaches, see the [FAQ](docs/faq.md).
+
+---
+
+## What You Can Build Today
+
+The currently accepted runtime is already suitable for native graphics/media/network experiments and embedded-style application development.
+
+Examples include:
+
+- video and streaming clients
+- media dashboards
+- camera/capture applications
+- HMI and control-panel prototypes
+- native GPU visualization
+- STB/TV-style interfaces
+- cross-platform desktop development frontends for embedded products
+
+`crtui` is now extending that base into a real application-facing widget layer.
+
+The planned `06-web` stage will add an embedded Web runtime rather than making Web technology a prerequisite for the native stack.
+
+---
+
+## Current Roadmap
+
+```text
+01-c
+  C runtime / PAL
+      |
+02-cxx
+  C++ runtime
+      |
+03-gfx-simple
+  window / input / software framebuffer
+      |
+04-gfx-media
+  Skia / GPU / media / networking
+      |
+05-ui                         <-- current upper-runtime work
+  crtui / LVGL / widgets
+  external-surface composition
+      |
+06-web                        <-- planned
+  JavaScriptCore
+  WebCore
+  WebKit
+  PlatformCRT
+  crtweb / WebView
+```
+
+Major completed upper-runtime milestones:
+
+```text
+Hardware Decode
+      |
+Zero-copy Decoded Textures
+      |
+Encode & Capture
+      |
+Networking & Streaming
+      |
+Application UI       <-- current
+      |
+Web Runtime          <-- planned
+```
+
+WebRTC, WebGPU, EME/DRM, and other large Web capabilities are intentionally consumer-driven follow-ups rather than prerequisites for the WebKit bring-up.
+
+See [docs/runtime_roadmap.md](docs/runtime_roadmap.md) for the dependency order and stage policy.
+
+---
 
 ## Where It Stands
 
-- **Current milestone: `04-gfx-media`.** libc/libm/libdl, the imported
-  libc++/libc++abi/libunwind runtime, native window and input, Skia CPU and
-  GPU rendering over Vulkan, D3D12, and Metal, FFmpeg software media, and native
-  audio sinks are implemented, and the predecessor-only
-  `03-gfx-simple -> 04-gfx-media` stage build is verified on Windows, macOS,
-  and Linux/aarch64. The Linux/aarch64 acceptance host is a VM whose Vulkan
-  device is virtio-gpu/lavapipe rather than a physical GPU; host details and
-  limits are in [`STATUS.md`](STATUS.md).
-- **Hardware H.264 decode is verified on all three platforms.** VideoToolbox
-  (macOS/arm64), D3D11VA (Windows/x64), and VA-API (Linux/x86_64, a physical
-  Intel GPU) all decode real hardware frames into the CPU-resident
-  `crtmedia_frame`, with software decode as the default and the fallback.
-- **Network streaming is verified on all three platforms.** A bounded,
-  cancellable transport core, progressive HTTP input, fragmented-MP4 HTTP
-  output, bounded reconnect, and HTTPS with an explicit trust policy pass on
-  Linux, Windows, and macOS, with FFmpeg's own network stack left disabled.
-- **`05-ui` is in progress; `06-web` remains roadmap.** `crtui` keeps LVGL
-  behind a CRT-owned API. Its contract, private software renderer,
-  input/focus/resize path, and the Windows/macOS-accepted
-  layout/style/v1-widget set are implemented; external-surface composition for
-  video and later a WebView remains. A WebKit-based web runtime follows.
-  The old `libcrtjs`/`05-js` skeleton was removed from the repository
-  (2026-09-29) and QuickJS is no longer planned as a stage; `05-ui` is created
-  fresh by `crtui` Tranche 0. See
-  [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
+### `04-gfx-media`: accepted cross-host foundation
 
-The per-capability matrix is under [What Already Works](#what-already-works).
-The exact evidence, per-port results, and open work are in
-[`STATUS.md`](STATUS.md), [`docs/porting_status.md`](docs/porting_status.md),
-and [`TODO.md`](TODO.md). To try it from source, see
-[Prerequisites](#prerequisites), [Build](#build), and
-[Using A Distribution](#using-a-distribution).
+The graphics/media/networking foundation is verified on Linux, Windows, and macOS.
+
+It includes:
+
+- native window/input
+- Skia CPU raster and text
+- live Skia GPU presentation
+- Vulkan / D3D12 / Metal
+- FFmpeg software decode
+- H.264 hardware decode
+- decoded GPU texture interop
+- capture and encode
+- mux/decode-back validation
+- progressive HTTP input
+- fragmented-MP4 HTTP output
+- bounded back-pressure
+- reconnect without unsafe byte-stream splicing
+- HTTPS with explicit trust policy
+
+### `05-ui`: in progress
+
+`crtui` is a CRT-owned application API.
+
+LVGL is an implementation dependency, not part of the public CRT ABI.
+
+Already accepted across all three hosts:
+
+- frozen `crtui` public contract
+- LVGL 9.6.0 software rendering through a CRT display adapter
+- pointer and keyboard input
+- spatial focus navigation
+- slider drag/wheel interaction
+- resize handling
+- private-LVGL wrapper boundary
+- installed `ui-basic` consumer
+
+The v1 layout/style/widget tranche is accepted on Windows/x64 and macOS/arm64 and is being replayed on Linux.
+
+Next major UI work includes external-surface composition so media and the future WebView can remain GPU-backed instead of being copied through an LVGL CPU framebuffer.
+
+See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
+
+### `06-web`: planned
+
+The Web stage is planned around a **WebKit CRT Port**, not around porting WPE unchanged to every OS.
+
+The intended architecture is:
+
+```text
+JavaScriptCore
+WebCore
+WebKit
+     |
+ PlatformCRT
+     |
+ +---+---------+-------------+
+ |             |             |
+CRT PAL      crtgfx       crtmedia
+ |             |             |
+ +--------- CRT Network -----+
+```
+
+WPE WebKit is the Linux reference port during bring-up. The final target is one CRT-facing Web runtime and `WebView` API across Linux, Windows, and macOS.
+
+See:
+
+- [docs/crtweb_acceptance.md](docs/crtweb_acceptance.md)
+- [docs/crtweb_porting.md](docs/crtweb_porting.md)
+
+---
 
 ## Demo
 
-Windows: the `media-player` example (1280x720, about 20 seconds).
+Current recorded demo: Windows 11/x64 `media-player` example.
 
 https://github.com/user-attachments/assets/a60ff1ae-c260-4aaa-a140-8095ac95f7c0
 
-Recorded on Windows 11/x64. `crtmedia_player_demo.exe` is launched from
-Explorer, in the `examples\bin` folder of an isolated option-ON `04-gfx-media`
-SDK; it decodes the bundled test clip with FFmpeg and shows it (colour bars) in
-a native Win32 window, which is then closed. This demo draws through the
-window's CPU framebuffer, so it shows native window creation and FFmpeg
-decode/playback only -- not Skia, GPU presentation, text rendering, input, or
-resize. It is one host: the same application recorded on Linux and macOS is
-still to do (see [`TODO.md`](TODO.md)).
+The existing clip demonstrates native process/window creation and FFmpeg playback from an isolated `04-gfx-media` SDK.
 
-## What Already Works
+It predates `crtui` and therefore is **not** the final application-runtime showcase.
 
-This is the evidence-based snapshot behind the claims above. Each cell is the
-state on that host, not a promise.
+The next representative demo is intended to combine, from the same source:
 
-- **Verified**: implemented, and an automated test or recorded acceptance run
-  passed on that host.
-- **Partial**: implemented and exercised, with a gap on that host stated in the
-  last column.
-- **In progress**: work under way, not accepted yet.
-- **Planned**: not started, or skeleton only.
+```text
+native window
++ crtui widgets
++ GPU presentation
++ streaming media
++ VideoView
++ input / focus / resize
+```
 
-| Capability | Linux | Windows | macOS | Evidence and limits |
+on Linux, Windows, and macOS.
+
+That is the point where CRT's application-runtime direction becomes visible in a single application rather than as separate subsystem tests.
+
+---
+
+## Capability Snapshot
+
+Each cell describes evidence on that host, not a future promise.
+
+- **Verified** — implementation plus automated or recorded acceptance passed.
+- **Partial** — implemented and exercised, with a documented limitation.
+- **In progress** — current work, not yet fully accepted.
+- **Planned** — not implemented.
+
+| Capability | Linux | Windows | macOS | Notes |
 | --- | --- | --- | --- | --- |
-| libc / libm (startup, stdio, files, processes, signals) | Verified | Verified | Verified | Bionic-shaped headers and ABI; full in-tree `ctest` suite. |
-| libdl | Partial | Verified | Verified | `dlopen`/`dlsym` use `LoadLibrary` on Windows and dyld on macOS. Linux supports `dlopen(NULL)`, `dladdr`, `dl_iterate_phdr` and reports loading real libraries as unsupported (a CRT-owned loader is deferred). |
-| libc++ / libc++abi / libunwind | Verified | Verified | Verified | Imported runtime; static and shared smoke tests including RTTI and exceptions. libunwind is project-built on Linux and Windows; macOS uses libSystem's unwinder. |
-| pthread | Verified | Verified | Verified | `pthread_*` tests: mutexes, condition variables, barriers, attributes, thread-specific data, process-shared. |
-| Sockets and DNS | Verified | Verified | Verified | `socket_network_test`, `dns_*`; libcurl + mbedTLS HTTP and HTTPS round trips to a real server on all three hosts. IPv4/UDP A-record resolver only (no IPv6, TCP fallback, or caching). |
-| mmap | Verified | Verified | Verified | `mman_test`. |
-| Thread-local storage | Verified | Verified | Verified | `pthread_tls_test`. (TLS as in HTTPS is covered by the sockets row.) |
-| Native window and input | Verified | Verified | Verified | Wayland (`xdg-shell`), Win32, Cocoa; keyboard, pointer, resize, close, DPI. Linux needs a reachable compositor; WSLg is useful evidence but differs from a desktop compositor. |
-| Skia CPU raster and text | Verified | Verified | Verified | Skia m148 plus FreeType text through the software frame. |
-| Skia GPU (Ganesh) | Verified | Verified | Verified | Vulkan / D3D12 / Metal live presentation with pixel-exact and mid-stream resize checks. Linux is now also verified on a physical GPU (Intel UHD 630, native Ubuntu desktop, 2026-09-22): `resize_frame=2 pixel_check=pass post_resize_present=pass clean_exit=pass`. Earlier VM evidence (virtio-gpu/lavapipe) remains valid for the aarch64 acceptance host. |
-| FFmpeg software media | Verified | Verified | Verified | Opt-in, narrow LGPL build: MOV/MP4/M4A, WAV, MP3 demux; H.264, AAC, MP3, PCM software decode; player and playback-pipeline tests. |
-| Native audio output | Partial | Verified | Verified | WASAPI, CoreAudio, and ALSA or PulseAudio. Linux real-device behavior is environment dependent; WSLg's PulseAudio bridge is recorded as stopping to respond after about a second of continuous audio. |
-| Hardware H.264 decode (frames delivered to CPU) | Verified | Verified | Verified | D3D11VA on Windows, VideoToolbox on macOS, and VA-API on Linux (physical Intel GPU, native Ubuntu desktop) all deliver real hardware frames; software decode stays the default and the fallback. |
-| Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/Vulkan and macOS/Metal; measured no-CPU-readback GPU-copy fallback on Windows/D3D12. Lifecycle and isolated-package gates pass. |
-| Video encode and capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, and AVFoundation/VideoToolbox paths pass real capture, hardware/software encode, mux/decode-back, timing, lifecycle, and isolated-package acceptance. |
-| Network streaming | Verified | Verified | Verified | Bounded transport core; progressive HTTP input (Range and chunked); fragmented-MP4 HTTP upload with a hard memory bound; `Range`+`If-Range` reconnect that never splices a changed resource and never auto-resumes output; HTTPS with a caller-supplied CA and a correct-CA/wrong-CA/wrong-SAN matrix; lifecycle stress and isolated-package acceptance with an installed streaming consumer. Loopback/IP-literal fixtures; the resolver is still IPv4/UDP A-record only. |
-| Application UI (`crtui`, LVGL) | In progress | In progress | In progress | Stage `05-ui`: Tranches 0-1 are closed on all three hosts (frozen `crtui` contract; LVGL v9.6.0 software rendering through a CRT display adapter, presented by crtgfx). Tranche 2 (crtgfx input adapter, spatial focus navigation, slider drag/wheel, resize) and Tranche 3 (LVGL private: only declared `crtui_*` functions are exported; installed `examples/ui-basic`) are closed on all three hosts. Tranche 4 (CRT-owned layout/style plus Image, Switch, Checkbox, List/ScrollView and TextInput) is accepted on Windows/x64 and macOS/arm64 and awaits Linux replay; external surfaces and the isolated package remain; see [`docs/crtui_acceptance.md`](docs/crtui_acceptance.md). |
-| Web runtime (WebKit CRT Port) | Planned | Planned | Planned | Stage `06-web`, after `05-ui`; see [`docs/crtweb_acceptance.md`](docs/crtweb_acceptance.md). |
+| libc / libm | Verified | Verified | Verified | Bionic-shaped public surface; full runtime tests. |
+| libdl | Partial | Verified | Verified | Linux real-library loading through a CRT-owned loader remains deferred. |
+| libc++ / libc++abi / libunwind | Verified | Verified | Verified | Static/shared smoke, RTTI, exceptions. |
+| pthread | Verified | Verified | Verified | Mutex, condvar, barrier, attributes, TLS, process-shared coverage. |
+| Sockets / DNS | Verified | Verified | Verified | Real HTTP/HTTPS through CRT sockets + libcurl/mbedTLS. Resolver remains IPv4/UDP A-record only. |
+| mmap / TLS | Verified | Verified | Verified | Runtime memory mapping and thread-local storage tests. |
+| Native window / input | Verified | Verified | Verified | Wayland, Win32, Cocoa; keyboard, pointer, resize, DPI. |
+| Skia CPU raster / text | Verified | Verified | Verified | Skia m148 + FreeType. |
+| Skia GPU presentation | Verified | Verified | Verified | Vulkan / D3D12 / Metal with pixel and resize checks. |
+| FFmpeg software media | Verified | Verified | Verified | Narrow LGPL configuration. |
+| Native audio output | Partial | Verified | Verified | ALSA/PulseAudio, WASAPI, CoreAudio; Linux real-device behavior is environment-dependent. |
+| Hardware H.264 decode | Verified | Verified | Verified | VA-API, D3D11VA, VideoToolbox. |
+| Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/macOS; measured no-CPU-readback GPU-copy fallback on Windows. |
+| Video encode / capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, AVFoundation/VideoToolbox. |
+| Network streaming | Verified | Verified | Verified | Bounded HTTP/HTTPS input/output, reconnect, lifecycle and package acceptance. |
+| Application UI (`crtui`) | In progress | In progress | In progress | Core contract/input/wrapper accepted on all hosts; v1 widget replay still progressing. |
+| Web runtime (`crtweb`) | Planned | Planned | Planned | WebKit CRT Port after `05-ui`. |
 
-Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2,
-plus a native (non-VM, non-WSL) x86_64 desktop with a physical Intel GPU used
-for the hardware-decode and physical-GPU Skia evidence above (2026-09-22);
-Windows is x86_64; macOS is arm64 (Apple Silicon).
+The authoritative detailed evidence lives in [STATUS.md](STATUS.md), [HISTORY.md](HISTORY.md), and the subsystem acceptance documents.
 
-The latest cross-host upper-runtime evidence is the 2026-09-27..29 zero-copy,
-Encode and capture, and Networking and streaming closure: host lifecycle tests
-plus fresh isolated `04-gfx-media` builds passed on Windows/x64, macOS/arm64,
-and Linux/x86_64.
-Exact suite counts, environment-specific skips, and Linux/aarch64 acceptance
-runs stay in [`HISTORY.md`](HISTORY.md) and [`STATUS.md`](STATUS.md), which is
-authoritative if it and this table ever disagree.
+---
 
-## Hardware Decode Status
+## Native Graphics
 
-CRT can decode H.264 on the platform's hardware decoder and hand each frame to
-your code as a CPU-resident `crtmedia_frame`. It is opt-in, and software decode
-is always the default and the fallback. The additive GPU-frame path is also
-accepted: VideoToolbox/Metal and VA-API/Vulkan import decoder storage directly,
-while D3D11VA/D3D12 uses the documented GPU-copy fallback without CPU
-readback. Ownership/lifecycle and packaged-stage evidence is recorded in
-[`docs/crtmedia_zero_copy_decode_acceptance.md`](docs/crtmedia_zero_copy_decode_acceptance.md).
+CRT does not hide every host behind a software renderer.
 
-| Host | Backend | Status |
-| --- | --- | --- |
-| macOS/arm64 | VideoToolbox | **Verified.** Real hardware frames, CPU transfer, clean end of stream, decoder flush/reuse, and 15 repeated create/decode/release cycles, all on hardware. |
-| Windows/x64 | D3D11VA | **Verified** on a physical Intel GPU: the same checks, plus a GPU video-decode engine counter that reads zero when idle and non-zero while decoding. |
-| Linux/x86_64 | VA-API | **Verified** on a physical Intel GPU (native Ubuntu desktop, not a VM or WSL2, 2026-09-22): the same checks -- real hardware frames, CPU transfer, clean EOS, flush/reuse, and 15 repeated create/decode/release cycles, all on hardware. |
+The advanced graphics stage uses each platform's native GPU API:
 
-Earlier Linux attempts hit environment limits, not a software graphics/media
-runtime defect: the aarch64 VM's Mesa driver exposes no H.264 decode
-entrypoint, and under WSL2 on an Intel GPU a real decode deadlocks inside
-Intel's own WSL video driver even with a plain FFmpeg that does not involve
-CRT. Neither counted as Linux hardware-decode evidence; closing it needed a
-native Linux host with a working VA-API H.264 decoder, which is now recorded.
+```text
+Linux       -> Vulkan
+Windows     -> D3D12
+macOS       -> Metal
+                 |
+                 v
+                Skia
+```
 
-All three hosts now verify the same H.264 fixture through a real hardware
-decoder. Per-host evidence and the exact result format are in
-[`docs/crtmedia_hardware_decode_acceptance.md`](docs/crtmedia_hardware_decode_acceptance.md).
+The same public CRT graphics layer drives each backend.
+
+Acceptance includes live presentation, pixel comparison, and resize behavior rather than compile-only validation.
+
+---
+
+## Hardware Media
+
+Hardware H.264 decode is accepted on all three host families:
+
+| Host | Decoder |
+| --- | --- |
+| Linux/x86_64 | VA-API |
+| Windows/x64 | D3D11VA |
+| macOS/arm64 | VideoToolbox |
+
+The CPU-resident frame path remains available and software decode remains the fallback.
+
+An additive GPU-frame path also exists:
+
+```text
+Linux
+VA-API -> dma-buf/Vulkan -> Skia
+             direct zero-copy
+
+macOS
+VideoToolbox -> CVPixelBuffer/Metal -> Skia
+             direct zero-copy
+
+Windows
+D3D11VA -> GPU-copy interop -> D3D12 -> Skia
+             no CPU readback
+```
+
+See:
+
+- [Hardware decode acceptance](docs/crtmedia_hardware_decode_acceptance.md)
+- [Zero-copy decode acceptance](docs/crtmedia_zero_copy_decode_acceptance.md)
+- [Encode and capture acceptance](docs/crtmedia_encode_capture_acceptance.md)
+- [Networking acceptance](docs/crtmedia_networking_acceptance.md)
+
+---
 
 ## Portability Proof
 
-The portability claim is tested by rebuilding real upstream software through the
-CRT sysroot with its own `configure`/`make` (or GN) flow and then running it.
-Each port is a pinned, SHA-256-checked recipe under
-[`porting/recipes/`](porting/recipes/), with a recorded result per host.
+CRT's portability claim is tested by rebuilding real upstream software against the CRT sysroot and then running it.
 
-| Upstream | Version | Linux / Windows / macOS | What runs |
+Recipes are pinned and checksum-verified under [`porting/recipes/`](porting/recipes/).
+
+| Upstream | Version | Linux / Windows / macOS | Evidence |
 | --- | --- | --- | --- |
-| zlib | 1.3.1 | static + shared pass on all three | Real compress/decompress round trip against both builds. |
-| libpng | 1.6.57 | static + shared pass on all three | libpng create/write/destroy paths against both builds. |
-| SQLite | 3.53.4 | amalgamation build pass on all three | Amalgamation builds without upstream source patching; recipe-level smoke and link checks only. |
-| bzip2 | 1.0.8 | static + shared pass on all three | Compress/decompress round trip against both builds. |
-| xz / liblzma | 5.8.3 | static + shared pass on all three | Compress/decompress round trip at the maximum preset (9, extreme) with CRC64 against both builds. |
-| PCRE2 | 10.47 | static + shared pass on all three | 8-bit regular-expression matching against both builds. |
-| mbedTLS | 3.6.7 | static + shared pass on all three | SHA-256 known-answer check and AES-128-CBC encrypt/decrypt round trip. |
-| curl (libcurl) | 8.21.0 | static + shared pass on all three | Real HTTP and HTTPS requests through libcurl, zlib, mbedTLS, DNS, and sockets. |
-| FreeType | 2.14.3 | static + shared pass on all three | Glyph rasterization from a bundled font; also feeds Skia text. |
-| FFmpeg | 8.1.2 | configure/make port, pass on all three | Narrow LGPL build; `libcrtmedia` demux, software decode, and playback tests, plus hardware H.264 decode on Linux, Windows, and macOS. |
-| Skia | m148 | GN build against the CRT sysroot and imported libc++, pass on all three | CPU raster and text; Ganesh GPU presentation over Vulkan, D3D12, and Metal (see the Linux caveat above). |
+| zlib | 1.3.1 | pass | Static/shared compress/decompress round trip. |
+| libpng | 1.6.57 | pass | Static/shared image create/write/destroy paths. |
+| SQLite | 3.53.4 | pass | Amalgamation build and recipe/link smoke. |
+| bzip2 | 1.0.8 | pass | Static/shared round trip. |
+| xz / liblzma | 5.8.3 | pass | Maximum-preset round trip with CRC64. |
+| PCRE2 | 10.47 | pass | 8-bit regex matching. |
+| mbedTLS | 3.6.7 | pass | SHA-256 and AES-128-CBC known-answer/round-trip tests. |
+| curl | 8.21.0 | pass | Real HTTP and HTTPS over CRT sockets/DNS. |
+| FreeType | 2.14.3 | pass | Glyph rasterization; also used by Skia text. |
+| FFmpeg | 8.1.2 | pass | Demux/decode/playback plus platform hardware decode. |
+| Skia | m148 | pass | CPU text/raster and native GPU presentation. |
 
-libffi and expat also pass on all three hosts, and the toolchain `make` builds
-from the same sysroot (a manual pass); per-port detail is in
-[`docs/porting_status.md`](docs/porting_status.md).
+libffi and expat also pass on all three hosts.
 
-Runtime evidence, beyond "it compiles":
+The rule is important:
 
-- **curl**: real HTTP and HTTPS round trips to a public server (`example.com`),
-  not a loopback test, over CRT's sockets, resolver, and non-blocking file
-  descriptors, for both static and shared libcurl. These tests need network
-  access.
-- **Skia**: live native presentation with a machine-checkable pixel comparison
-  (`SkSurface::readPixels()` against a shared reference scene), including a
-  scripted mid-stream resize, on the Vulkan, D3D12, and Metal backends.
-- **FFmpeg**: a real H.264 MP4 fixture demuxed and decoded frame by frame, and a
-  WAV fixture decoded to an exact known sample count.
+> Do not patch upstream source merely to hide a missing CRT API.
 
-Upstream source is not patched to hide a missing CRT surface; the missing
-Bionic-compatible behavior is implemented in CRT instead. Most recipes carry no
-source patch. The exceptions are recorded with their reasons in each recipe: a
-header guard for Windows constructor sections in xz, mbedTLS configuration and
-Makefile edits, FreeType build-script fixes (paths with spaces, Mach-O
-archives), and FFmpeg build-script edits for the Windows D3D11VA probes and macOS
-VideoToolbox. Skia carries no source patch, only a build-time GN interpreter
-pin.
+When an upstream library expects Linux/Bionic behavior, CRT implements that behavior at the runtime/PAL boundary whenever practical.
 
-To reproduce a result on your host:
+Per-port details are in [docs/porting_status.md](docs/porting_status.md).
+
+To reproduce a recipe:
 
 ```sh
 cmake --build --preset <preset> --target port-test-<name>
 cmake --build --preset <preset> --target port-test-recipes
 ```
 
-## Why CRT?
-
-Native Linux, BSD, and Android-style code is only as portable as the porting work
-behind it: files, sockets, threads, thread-local storage, memory mapping, dynamic
-loading, and startup differ on every host, and each project repeats that work.
-CRT does it once, in a Bionic-shaped libc and C++ runtime over a small per-host
-PAL, so the same source rebuilds as a native Linux, Windows, or macOS
-executable.
-
-- **Why Bionic-shaped?** Bionic is Android's real libc stack, permissively
-  licensed, and already defines the API/ABI surface, syscall wrappers, and
-  kernel-header flow that Linux/Android-style code expects. CRT aims for
-  Bionic-compatible source portability, not generic POSIX conformance.
-- **Rebuild, not translate.** You compile your source with your own Clang/LLD
-  toolchain against a CRT sysroot. That is not binary compatibility, not a VM,
-  and not a container; a CRT distribution never bundles a compiler.
-- **What CRT is not.** Not Android APK compatibility, not an Electron clone, not
-  full POSIX or glibc compatibility, and not a production-ready `1.0`.
-
-For comparisons with musl, SDL, Qt, WSL, Wine, Cosmopolitan, and Android/Bionic,
-see the [FAQ](docs/faq.md).
-
-## Scope
-
-CRT owns the low-level portability boundary: files, sockets, threads, TLS,
-memory mapping, clocks, signals, process basics, dynamic-loading policy,
-startup objects, libc/libm/libdl, and the C++ runtime. Higher layers add a
-window/input/software-framebuffer API, accelerated graphics and media, and
-(planned) an application UI layer and a WebKit-based Web runtime.
-
-The compatibility model is source rebuilding against a Bionic-shaped public
-surface. CRT does not aim to run unmodified glibc binaries or APKs, reproduce
-Android Framework, provide a container/VM, or directly port Qt, GTK,
-Enlightenment, Chromium, or Electron.
-
-The `linker/` directory is retained for a possible future CRT-owned loader,
-but linker implementation is outside the current roadmap.
+---
 
 ## Staged Runtime
 
-CRT is built and verified as cumulative distributions:
+CRT is built as cumulative SDK stages.
 
-| Stage | Advertised surface |
+| Stage | Surface |
 | --- | --- |
-| `01-c` | libc/libm/libdl, startup, shell, mksh, toybox, awk, make |
-| `02-cxx` | `01-c` + libc++/libc++abi/libunwind |
-| `03-gfx-simple` | `02-cxx` + window, keyboard/mouse, software framebuffer |
-| `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg |
-| `05-ui` (in progress) | `04-gfx-media` + `crtui` (frozen contract, private LVGL software rendering, input/focus/resize on all hosts; layout/style/v1 widgets accepted on Windows and macOS, awaiting Linux replay; external-surface composition planned) |
-| `06-web` (planned) | `05-ui` + JavaScriptCore/WebKit web runtime and WebView |
+| `01-c` | libc/libm/libdl, startup, shell, mksh, Toybox, awk, make |
+| `02-cxx` | `01-c` + libc++ / libc++abi / libunwind |
+| `03-gfx-simple` | `02-cxx` + native window/input/software framebuffer |
+| `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg, media/networking |
+| `05-ui` | `04-gfx-media` + `crtui`, LVGL-backed widgets, application composition |
+| `06-web` | planned: `05-ui` + JavaScriptCore/WebCore/WebKit, `PlatformCRT`, `crtweb`/WebView |
 
-Simple Graphics deliberately excludes Skia CPU raster/text and Skia GPU. Its
-drawing surface is the CPU-writable framebuffer in `crtgfx/window.h`.
+A later stage is expected to contain everything from the preceding stage.
 
-The normal repository build proves that every later binary package inherits
-the preceding installed `dist` tree. The stronger source-stage boundary is
-also implemented: a packaged predecessor SDK fetches a SHA-256-pinned CRT
-GitHub Release source asset and builds/tests the next stage without using the
-repository build tree. The complete predecessor-only chain through the
-option-ON `03-gfx-simple -> 04-gfx-media` transition is verified on Windows,
-macOS, and native Linux/aarch64. Linux passes the cold-cache Skia presentation
-matrix with Vulkan validation both disabled and enabled, distribution
-verification, and atomic publication. The cumulative `05-ui` package exists;
-its stronger predecessor-only isolated source transition is deliberately left
-for crtui Tranche 7, and the `06-web` transition has not been added. Full
-details, artifact layout, package naming, and acceptance rules are in
-[`docs/distribution.md`](docs/distribution.md).
+The stronger release gate is a predecessor-only source-stage build:
 
-The repository builds `05-ui` with the frozen `crtui` API and headless model,
-and with LVGL software rendering when configured with `-DCRTUI_ENABLE_LVGL=ON`
-(default off; the pinned LVGL source is fetched, not bundled); `06-web` is planned. The ordinary developer preset keeps Skia and FFmpeg disabled by default;
-release-grade `04-gfx-media` acceptance uses the separate option-ON isolated
-stage path.
-
-## Prerequisites
-
-All hosts need Git, CMake 3.25+, Ninja, Python 3, Clang, LLD, and suitable
-archive tools. These are build-machine prerequisites, not distribution
-contents.
-
-### Linux
-
-For Debian/Ubuntu, a representative base setup is:
-
-```sh
-sudo apt install git cmake ninja-build python3 clang lld compiler-rt
+```text
+installed previous SDK
+        |
+        v
+fresh next-stage source
+        |
+        v
+build + test + package
 ```
 
-Simple Graphics additionally needs a running Wayland compositor and the
-Wayland/xkbcommon runtime. Advanced graphics normally adds:
+This prevents a repository build tree from silently satisfying undeclared dependencies.
 
-```sh
-sudo apt install libvulkan-dev libwayland-dev mesa-vulkan-drivers vulkan-tools
-```
+See [docs/distribution.md](docs/distribution.md).
 
-`mesa-vulkan-drivers` may be replaced with the GPU vendor's Vulkan ICD. The
-Linux FFmpeg recipe enables VA-API hardware H.264 decode unconditionally;
-building `libcrtmedia` with `CRTMEDIA_ENABLE_FFMPEG=ON` needs `libva-dev`,
-`libva2`, `libva-drm2`, `pkg-config`, and a vendor VA driver (e.g.
-`intel-media-va-driver-non-free` on Intel), plus `dpkg-dev` and optional
-`vainfo` for the isolated `04-gfx-media` distribution build's own real-host-
-library lookups. Embedded images should satisfy the same capabilities with
-board-vendor packages rather than copying desktop package lists.
-
-### Windows 11
-
-Install Git, CMake, Ninja, Python, LLVM for Windows, and a Windows 10/11 SDK.
-Run CMake from a shell where the SDK import libraries are discoverable. The
-CRT Windows target is `*-w64-mingw32` for the common Itanium ABI lane even
-though the host SDK supplies the native system and graphics import libraries.
-
-Windows **Developer Mode must be enabled** for every supported CRT build and
-porting environment. CRT deliberately implements Bionic/POSIX `symlink()` as
-a real Windows filesystem symbolic link, and source extraction plus GNU-style
-build/install steps rely on dangling, relative, and SONAME-style links. CRT
-does not emulate these links as Cygwin marker files, MSYS shortcut files, or
-MSYS2 deep copies. A Windows run without Developer Mode is outside the
-supported build contract and may fail with `EPERM` or a host permission error
-when it first creates a symbolic link.
-
-### macOS
-
-Install Xcode Command Line Tools, CMake, Ninja, and Python 3. Metal and the
-required system frameworks come from the platform SDK.
+---
 
 ## Build
 
-The default workflow configures, builds, and tests only the C stage:
+CRT uses CMake presets.
+
+The default workflow builds/tests the C stage:
 
 ```sh
 cmake --workflow --preset linux-host-ninja-debug
@@ -356,7 +481,7 @@ cmake --workflow --preset macos-host-ninja-debug
 cmake --workflow --preset windows-host-ninja-debug
 ```
 
-Focused stage commands use the matching build preset:
+Focused stage targets use the corresponding build preset:
 
 ```sh
 cmake --build --preset <preset> --target crt-c-build
@@ -380,89 +505,252 @@ cmake --build --preset <preset> --target crt-ui-test
 cmake --build --preset <preset> --target crt-ui-dist
 ```
 
-The outputs are cumulative directories and archives under
-`out/<preset>/dist/`. A later `*-dist` target builds preceding stages as
-dependencies. This dependency establishes cumulative package contents; the
-source-stage bootstrap commands described under
-[Release Engineering And Source Stages](#release-engineering-and-source-stages)
-will separately verify that a freshly extracted predecessor SDK can produce
-the next stage without reading repository headers, libraries, or build
-outputs.
+Outputs are cumulative SDK trees and archives under:
 
-A stage is a self-contained sysroot for its advertised surface. Its
-`include/`, `lib/`, and Windows `bin/` directories therefore include the
-redistributable headers, link artifacts, and `.so`/`.dylib`/`.dll` runtime
-files of external libraries required by that stage, not only CRT-owned files.
-OS frameworks/system libraries and device-specific GPU/video drivers are
-documented manifest prerequisites instead of silently copied or assumed. The
-exact transitive packaging and licensing rule is in
-[`docs/distribution.md`](docs/distribution.md).
+```text
+out/<preset>/dist/
+```
 
-Advanced graphics must be configured with a completed imported libc++ and
-Skia build. The existing `crtgfx-skia-fetch`, `crtgfx-skia-configure`,
-`crtgfx-skia-build`, and `crtgfx-skia-smoke` targets retain that explicit
-bring-up path. FFmpeg remains controlled by `CRTMEDIA_ENABLE_FFMPEG`.
+---
+
+## Prerequisites
+
+All development hosts need:
+
+- Git
+- CMake 3.25+
+- Ninja
+- Python 3
+- Clang/LLVM
+- LLD
+- suitable archive tools
+
+These are build-machine prerequisites, not files bundled into a CRT distribution.
+
+### Linux
+
+For Debian/Ubuntu, a representative base setup is:
+
+```sh
+sudo apt install git cmake ninja-build python3 clang lld compiler-rt
+```
+
+Simple Graphics also needs a running Wayland compositor and the Wayland/xkbcommon runtime.
+
+Advanced graphics typically adds:
+
+```sh
+sudo apt install libvulkan-dev libwayland-dev mesa-vulkan-drivers vulkan-tools
+```
+
+A vendor Vulkan ICD may replace Mesa.
+
+The Linux FFmpeg/VA-API path also requires the appropriate VA libraries, headers, and vendor driver on the host.
+
+Embedded images should satisfy these capabilities through the board/vendor platform rather than blindly copying desktop package lists.
+
+### Windows 11
+
+Install:
+
+- Git
+- CMake
+- Ninja
+- Python
+- LLVM for Windows
+- Windows 10/11 SDK
+
+Run CMake from an environment where the SDK import libraries are discoverable.
+
+Windows **Developer Mode must be enabled** for supported CRT development because CRT uses real filesystem symbolic links for the Bionic/POSIX `symlink()` model and for GNU-style source/build/install flows.
+
+### macOS
+
+Install:
+
+- Xcode Command Line Tools
+- CMake
+- Ninja
+- Python 3
+
+Metal and required system frameworks come from the platform SDK.
+
+---
 
 ## Using A Distribution
 
-Select a stage, then provide the external compiler tools:
+Select a stage and provide an external toolchain:
 
 ```sh
 export CRT_CC=/path/to/clang
 export CRT_CXX=/path/to/clang++
 export CRT_AR=/path/to/llvm-ar
 export CRT_RANLIB=/path/to/llvm-ranlib
+
 . out/<preset>/dist/02-cxx/activate.sh
 ```
 
-On Windows use `call out\<preset>\dist\02-cxx\activate.cmd`. CMake consumers
-may use the packaged `crt-toolchain.cmake`, which selects the packaged wrappers.
-An embedded vendor toolchain that cannot use those Clang-compatible wrappers
-should remain authoritative and consume CRT's packaged sysroot directly.
-The Windows activation script discovers the SDK import-library directory from
-a Developer Command Prompt, or accepts an explicit `CRT_WINDOWS_SDK_LIBPATH`.
+On Windows:
 
-The in-repository wrappers `tools/crt-cc` and `tools/crt-c++` enforce the
-freestanding/sysroot/default-runtime boundary. Every stage also packages
-optional Python port fetch/build drivers, pinned recipes, tests/shims, and the
-examples appropriate to that stage. Configure/make work runs through the
-packaged CRT mksh and Toybox tools; MSYS and Git Bash are not distribution
-prerequisites. Upstream sources are not patched merely to hide a missing CRT
-surface; the missing Bionic API/type/symbol/behavior is implemented in CRT
-first.
+```bat
+call out\<preset>\dist\02-cxx\activate.cmd
+```
+
+CMake consumers can use the packaged:
+
+```text
+crt-toolchain.cmake
+```
+
+CRT distributions do **not** bundle a compiler or linker.
+
+An embedded vendor toolchain remains authoritative when required and can consume the packaged CRT sysroot directly.
+
+The packaged wrappers enforce the runtime/sysroot boundary, while porting helpers, recipes, tests, and stage-specific examples are shipped with the relevant SDK.
+
+---
 
 ## Toolchain Policy
 
-Clang/LLVM, LLD, and compiler-rt are the primary development toolchain, but
-CRT distributions **never bundle a compiler or linker**. Embedded devices use
-their vendor/dedicated toolchain. A distribution contains the CRT sysroot,
-startup objects, runtime libraries, wrappers, CMake configuration, and a
-manifest that records the external toolchain contract.
+The primary development toolchain is:
 
-The Windows C++ lane uses the Bionic/Itanium ABI and project-built libunwind.
-Windows C++ exceptions are compiled as DWARF CFI (`-fdwarf-exceptions`) rather
-than depending on the OS-owned SEH unwind engine. See
-[`docs/cxx_runtime.md`](docs/cxx_runtime.md).
-
-## Release Engineering And Source Stages
-
-Release engineering creates an OS-qualified upper-stage source asset and its
-recipe only after the component sources have been fetched at their pinned
-revisions. For example:
-
-```sh
-python3 tools/create_stage_source.py --root . --stage 02-cxx \
-  --target-os <linux|macos|windows> \
-  --source-root out/<preset>/external/llvm-runtimes \
-  --output-dir out/<preset>/stage-sources --release-tag <tag>
+```text
+Clang / LLVM
+LLD
+compiler-rt
 ```
 
-The command emits a deterministic source archive plus a recipe containing its
-target OS, exact byte size, CRT commit, and SHA-256. Asset names include the
-target OS because source payloads differ by backend. After the asset and recipe
-are published, an extracted predecessor SDK consumes them with its packaged
-`tools/crt-stage-build.py`; a local `--asset` override is available for
-pre-publication acceptance without weakening digest verification.
+The C++ runtime is imported and built as part of CRT's staged runtime.
+
+On Windows, CRT uses the Bionic/Itanium ABI lane and project-built libunwind. C++ exceptions use DWARF CFI rather than depending on the native Windows SEH C++ ABI.
+
+See [docs/cxx_runtime.md](docs/cxx_runtime.md).
+
+---
+
+## Porting Philosophy
+
+CRT aims for **Bionic-compatible source portability**, not generic POSIX completeness.
+
+Why Bionic-shaped?
+
+- it is the libc surface used by Android
+- it already models Linux-kernel APIs expected by a large body of native software
+- its upstream code base is suitable as a portability reference
+- it provides a concrete API/ABI target rather than an undefined "Unix-like" compatibility goal
+
+Host adaptation stays below that public surface.
+
+```text
+upstream native source
+        |
+   Bionic-shaped API
+        |
+       CRT
+        |
+ +------+------+------+
+ |             |      |
+Linux       Windows  macOS
+```
+
+A CRT port should prefer implementing the missing runtime behavior over adding source patches to every upstream consumer.
+
+---
+
+## Application UI
+
+`crtui` is deliberately **not the LVGL API**.
+
+Applications target CRT-owned types and behavior:
+
+```text
+Application
+    |
+  crtui
+    |
+  LVGL
+    |
+ crtgfx
+```
+
+This keeps LVGL private and leaves room for CRT-native media/external-surface widgets.
+
+The initial widget set is intentionally small and application-oriented:
+
+- window/screen
+- container
+- row/column
+- text
+- button
+- image
+- slider
+- progress
+- switch
+- checkbox
+- list/scroll view
+- text input
+
+The critical next architecture boundary is the external surface:
+
+```text
+                 crtui scene
+                     |
+        +------------+------------+
+        |            |            |
+      Widgets     VideoView    future WebView
+        |            |            |
+      LVGL        crtmedia      WebKit
+        |            |            |
+        +------------+------------+
+                     |
+                   crtgfx
+```
+
+This allows video and Web content to stay GPU-backed instead of being copied into an LVGL CPU framebuffer.
+
+See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
+
+---
+
+## Planned Web Runtime
+
+The planned Web layer is a **WebKit CRT Port**.
+
+The goal is not to expose WPE or WebKit types directly to applications.
+
+Applications will eventually use a CRT-owned surface such as:
+
+```text
+crtweb runtime
+crtweb view
+crtui WebView
+```
+
+while WebKit is integrated through `PlatformCRT`.
+
+Initial WebKit work is planned around:
+
+1. pinned WebKit/JSC provenance and license policy
+2. JavaScriptCore/JSCOnly bring-up
+3. Linux WPE reference baseline
+4. `PlatformCRT` graphics/input integration
+5. `libcrtweb` and WebView
+6. WebKit multi-process lifecycle
+7. Windows/x64
+8. macOS/arm64
+9. gradual replacement of reference network/media backends with CRT subsystems
+10. packaging, security, lifecycle, and license closure
+
+QuickJS is no longer a runtime stage prerequisite.
+
+WebRTC is also intentionally deferred until an actual Web/application consumer requires it.
+
+See:
+
+- [docs/crtweb_acceptance.md](docs/crtweb_acceptance.md)
+- [docs/crtweb_porting.md](docs/crtweb_porting.md)
+
+---
 
 ## Repository Layout
 
@@ -471,41 +759,109 @@ include/          Bionic-compatible public headers
 libc/             libc, PAL, startup, OS/architecture backends
 libm/             math runtime
 libdl/            dynamic-loading API and host backends
-libstdc++/        bootstrap ABI shim and imported libc++ build integration
-shell/            tiny shell, mksh, toybox, and awk
-libcrtgfx/        window/input/framebuffer and advanced Skia/GPU integration
-libcrtmedia/      media runtime and optional FFmpeg integration
-libcrtui/         application UI API (crtui) -- Tranche 0 contract and headless model
-porting/recipes/  upstream porting test recipes
-tools/            wrappers, rootfs/dist builders, porting automation
-libc/tests/       libc, PAL, shell-level, ABI, and integration tests
-libstdc++/tests/  C/C++ ABI-boundary tests
-libcrtgfx/tests/  window, input, software, GPU, and Skia tests
-libcrtmedia/tests/ frame, codec, player, audio, and FFmpeg tests
-docs/             design, policy, roadmap, and verification documents
+libstdc++/        bootstrap ABI shim and imported libc++ integration
+shell/            tiny shell, mksh, Toybox, awk
+libcrtgfx/        window/input/framebuffer and Skia/GPU integration
+libcrtmedia/      media, capture/encode, streaming and FFmpeg integration
+libcrtui/         application-facing UI API and LVGL adapter
+porting/recipes/  pinned upstream porting recipes
+tools/            wrappers, builders, packaging and porting automation
+libc/tests/       libc/PAL/shell/ABI/integration tests
+libstdc++/tests/  C++ ABI-boundary tests
+libcrtgfx/tests/  window/input/software/GPU/Skia tests
+libcrtmedia/tests/ media/codec/audio/capture/network tests
+docs/             design, policy, roadmap and acceptance records
 ```
 
-## Core Documents
+`libcrtweb/` and the `06-web` source stage are planned and should not be read as existing implementation until that stage begins.
 
+---
+
+## Documentation
+
+Start here:
+
+- [Runtime roadmap](docs/runtime_roadmap.md)
+- [Current status](STATUS.md)
+- [Current work queue](TODO.md)
+- [History](HISTORY.md)
 - [FAQ](docs/faq.md)
 - [Project meaning](docs/project_meanings.md)
-- [Stack and toolchain policy](docs/project_stacks.md)
-- [Distribution stages](docs/distribution.md) and the
-  [developer-preview release contract](docs/release_preview.md)
-- [Runtime roadmap](docs/runtime_roadmap.md), with the planned
-  [crtui](docs/crtui_acceptance.md) and [crtweb](docs/crtweb_acceptance.md)
-  stage contracts
-- [Networking acceptance](docs/crtmedia_networking_acceptance.md) and
-  [Encode and capture acceptance](docs/crtmedia_encode_capture_acceptance.md)
-- [C++ runtime](docs/cxx_runtime.md)
+
+Runtime/application layers:
+
+- [crtui acceptance](docs/crtui_acceptance.md)
+- [crtweb acceptance](docs/crtweb_acceptance.md)
+- [crtweb porting plan](docs/crtweb_porting.md)
 - [Graphics API policy](docs/libcrtgfx_api_policy.md)
 - [Media API policy](docs/libcrtmedia_api_policy.md)
+- [Hardware decode acceptance](docs/crtmedia_hardware_decode_acceptance.md)
+- [Zero-copy decode acceptance](docs/crtmedia_zero_copy_decode_acceptance.md)
+- [Encode and capture acceptance](docs/crtmedia_encode_capture_acceptance.md)
+- [Networking acceptance](docs/crtmedia_networking_acceptance.md)
+
+Build/distribution:
+
+- [Distribution stages](docs/distribution.md)
+- [Developer preview release contract](docs/release_preview.md)
 - [Sysroot porting](docs/sysroot_ports.md)
-- [Current status](STATUS.md), [work queue](TODO.md), and [history](HISTORY.md)
+- [C++ runtime](docs/cxx_runtime.md)
+- [Porting status](docs/porting_status.md)
+
+---
+
+## Project Status
+
+CRT is a developer-preview project.
+
+The important distinction is between what works today and where the architecture is heading.
+
+### Verified today
+
+```text
+C/C++ runtime
+native windows/input
+Skia CPU/GPU
+Vulkan / D3D12 / Metal
+software + hardware media
+zero-copy/GPU interop
+capture + encode
+network streaming
+```
+
+### In progress
+
+```text
+crtui
+LVGL-backed application widgets
+external-surface composition
+```
+
+### Planned
+
+```text
+WebKit CRT Port
+crtweb / WebView
+```
+
+Claims in this README are intentionally evidence-based.
+
+If this file and the detailed status records disagree, [STATUS.md](STATUS.md) and the corresponding acceptance document are authoritative.
+
+---
 
 ## License And Provenance
 
-Project-owned code and imported upstream families retain their applicable
-license and provenance records. Bionic/OpenBSD imports are tracked under
-`third_party/`; external runtime, graphics, media, shell, and porting sources
-have project-owned recipe or import metadata next to their integration.
+CRT contains project-owned code plus imported and externally built upstream components.
+
+Each component retains its applicable license and provenance requirements.
+
+Bionic/OpenBSD-derived imports are tracked under `third_party/`. External runtime, graphics, media, UI, shell, and porting dependencies have project-owned recipe/import metadata alongside their integration.
+
+The planned WebKit stage will keep WebKit/JSC/WebCore provenance and license obligations explicit and separate from CRT-owned platform adapter code.
+
+---
+
+## In One Sentence
+
+> **CRT is a native application runtime for embedded Linux products that lets the same C/C++ application stack run directly on Linux, Windows, and macOS — from the runtime and GPU up through media, networking, UI, and, next, the Web.**
