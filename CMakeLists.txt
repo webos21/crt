@@ -1364,6 +1364,13 @@ if(Python3_Interpreter_FOUND)
       DEPENDS ${CRT_LIBCXX_DIST_DEPENDS} crt-stage-03-source
       USES_TERMINAL
     )
+    # Both targets publish the cumulative C++ SDK at CRT_LIBCXX_SYSROOT.
+    # Serialize the writers: otherwise a distribution build can remove and
+    # replace dist/02-cxx while a concurrent sysroot refresh (or one of its
+    # consumers) is using libc++.a/libc++abi.a. Keep crt-libcxx-sysroot as the
+    # lightweight standalone entry point, then let the release-grade dist
+    # publisher add its recipe/archive/verification metadata.
+    add_dependencies(crt-libcxx-dist crt-libcxx-sysroot)
 
     # Backend-boundary Tranche 6: one bounded, cross-host acceptance entry
     # point for PR CI and local release checks. crt-libcxx-dist supplies a
@@ -1491,8 +1498,23 @@ if(Python3_Interpreter_FOUND)
     DEPENDS crt-media-build
     USES_TERMINAL
   )
-  set(CRT_GFX_MEDIA_BUILD_DEPENDS crt-gfx-build crt-media-build)
+  # The media stage's packaged Skia demo consumes CRT_LIBCXX_SYSROOT
+  # (dist/02-cxx). Keep the cumulative predecessor ahead of that direct
+  # consumer, and do not let either stage-04 aggregate complete before it:
+  # even with the two C++ SDK publishers serialized, an unordered consumer can
+  # observe their dist/02-cxx replacement while linking. A real macOS
+  # Tranche 4 replay exposed exactly that race in
+  # crtgfx_skia_gpu_window_demo. add_dependencies provides the required target
+  # ordering to Ninja; merely adding crt-gfx-simple-dist to the list below
+  # would still leave all list entries eligible to run in parallel.
+  add_dependencies(crt-gfx-build crt-gfx-simple-dist)
+  add_dependencies(crt-media-build crt-gfx-simple-dist)
+  set(CRT_GFX_MEDIA_BUILD_DEPENDS
+    crt-gfx-build
+    crt-media-build
+  )
   if(TARGET crtgfx_skia_gpu_window_demo)
+    add_dependencies(crtgfx_skia_gpu_window_demo crt-gfx-simple-dist)
     list(APPEND CRT_GFX_MEDIA_BUILD_DEPENDS crtgfx_skia_gpu_window_demo)
   endif()
   add_custom_target(crt-gfx-media-build DEPENDS ${CRT_GFX_MEDIA_BUILD_DEPENDS})

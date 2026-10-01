@@ -3,7 +3,7 @@
 **Status: contract frozen (Tranche 0, all three hosts); LVGL first pixels
 (Tranche 1), input/focus/resize (Tranche 2) and the private-LVGL wrapper
 (Tranche 3) closed on all three hosts; layout, styling and the v1 widget set
-(Tranche 4) accepted on Windows/x64, with macOS/arm64 and Linux replay open.**
+(Tranche 4) accepted on Windows/x64 and macOS/arm64, with Linux replay open.**
 The public contract in `libcrtui/include/crtui/ui.h` and the rules in the table
 below are frozen and covered by resource-free tests.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
@@ -603,7 +603,8 @@ set only: size, margin, padding, alignment, background, foreground, font,
 border, opacity. Do not re-export LVGL's style API.
 
 **Windows/x64 result (2026-10-01).** Implementation and first-host acceptance
-are complete; macOS/arm64 and Linux replay remain before this tranche closes.
+are complete; macOS/arm64 and Linux replay remained before this tranche could
+close globally.
 
 - `crtui/ui.h` adds only CRT-owned enums, structs and opaque widget ids: free,
   Row, Column and Stack layout; `CRTUI_SIZE_FILL`, grow, margin, padding, gap,
@@ -651,6 +652,39 @@ are complete; macOS/arm64 and Linux replay remain before this tranche closes.
   the manifest-declared external `CRT_WINDOWS_SDK_LIBPATH` because it was not a
   Visual Studio Developer shell; that is a build-host prerequisite, not a
   bundled SDK dependency.
+
+**macOS/arm64 replay (2026-10-01).** The implementation replayed without a
+functional UI change; one cumulative-distribution build race was exposed and
+fixed.
+
+- The official LVGL-enabled `crt-ui-test` gate is 6/6, including the macOS
+  shared-contract guard. Direct output covers every Tranche 4 group:
+  `column/row/main_align/stack/free/scroll/list/style/toggles/text_input/image`
+  all pass, the extended input groups pass, and render lifecycle remains
+  `cycles=40 handles=4->4 threads=-1->-1`.
+- A fresh `CRTUI_ENABLE_LVGL=OFF` tree built and passed both
+  `crtui_layout_test_runs` and `crtui_input_test_runs` (2/2), proving that the
+  authoritative model/layout/input path remains independent of LVGL.
+- Both the in-tree demo and an externally configured sample built only from
+  packaged `dist/05-ui` ran in real Cocoa windows for 30 frames and reported
+  `presented=30 pixel_check=pass input_check=pass`. The packaged privacy check
+  reports `declared=63 exports=63 lvgl_exports=0 objects=1 headers=3`.
+- The first `crt-ui-dist` attempt exposed a real dependency race: the stage-04
+  graphics/media build and stage-03 cumulative predecessor were sibling jobs,
+  so `crt-libcxx-sysroot` and `crt-libcxx-dist` could refresh `dist/02-cxx`
+  while `crtgfx_skia_gpu_window_demo` linked, temporarily removing
+  `libc++.a`/`libc++abi.a`. The two `dist/02-cxx` publishers are now serialized
+  (`crt-libcxx-sysroot`, then the release-grade `crt-libcxx-dist`), and the
+  stage-04 aggregate plus its Skia demo wait for the complete, verified
+  `crt-gfx-simple-dist` predecessor. Repeated full distribution runs then
+  generated and verified every cumulative stage through `dist/05-ui` without
+  the race.
+- Tooling is 79/79. Full in-tree CTest is 157/158: all six crtui tests and all
+  other tests pass, while the known independent
+  `crtmedia_capture_encode_lifecycle_test_runs` repeatedly fails its capture
+  lifecycle cycle on this camera environment instead of taking its documented
+  skip path. This is recorded as a host/media residual, not hidden as a UI
+  pass. Linux replay remains before global Tranche 4 closure.
 
 ### 5. External Surface (the WebKit prerequisite)
 

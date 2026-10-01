@@ -65,9 +65,9 @@ container, or translation layer.
   Linux, Windows, and macOS, with FFmpeg's own network stack left disabled.
 - **`05-ui` is in progress; `06-web` remains roadmap.** `crtui` keeps LVGL
   behind a CRT-owned API. Its contract, private software renderer,
-  input/focus/resize path, and the Windows-accepted layout/style/v1-widget set
-  are implemented; external-surface composition for video and later a WebView
-  remains. A WebKit-based web runtime follows.
+  input/focus/resize path, and the Windows/macOS-accepted
+  layout/style/v1-widget set are implemented; external-surface composition for
+  video and later a WebView remains. A WebKit-based web runtime follows.
   The old `libcrtjs`/`05-js` skeleton was removed from the repository
   (2026-09-29) and QuickJS is no longer planned as a stage; `05-ui` is created
   fresh by `crtui` Tranche 0. See
@@ -125,7 +125,7 @@ state on that host, not a promise.
 | Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/Vulkan and macOS/Metal; measured no-CPU-readback GPU-copy fallback on Windows/D3D12. Lifecycle and isolated-package gates pass. |
 | Video encode and capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, and AVFoundation/VideoToolbox paths pass real capture, hardware/software encode, mux/decode-back, timing, lifecycle, and isolated-package acceptance. |
 | Network streaming | Verified | Verified | Verified | Bounded transport core; progressive HTTP input (Range and chunked); fragmented-MP4 HTTP upload with a hard memory bound; `Range`+`If-Range` reconnect that never splices a changed resource and never auto-resumes output; HTTPS with a caller-supplied CA and a correct-CA/wrong-CA/wrong-SAN matrix; lifecycle stress and isolated-package acceptance with an installed streaming consumer. Loopback/IP-literal fixtures; the resolver is still IPv4/UDP A-record only. |
-| Application UI (`crtui`, LVGL) | In progress | In progress | In progress | Stage `05-ui`: Tranches 0-1 are closed on all three hosts (frozen `crtui` contract; LVGL v9.6.0 software rendering through a CRT display adapter, presented by crtgfx). Tranche 2 (crtgfx input adapter, spatial focus navigation, slider drag/wheel, resize) and Tranche 3 (LVGL private: only declared `crtui_*` functions are exported; installed `examples/ui-basic`) are closed on all three hosts. Tranche 4 (CRT-owned layout/style plus Image, Switch, Checkbox, List/ScrollView and TextInput) is accepted on Windows/x64 and awaits macOS/Linux replay; external surfaces and the isolated package remain; see [`docs/crtui_acceptance.md`](docs/crtui_acceptance.md). |
+| Application UI (`crtui`, LVGL) | In progress | In progress | In progress | Stage `05-ui`: Tranches 0-1 are closed on all three hosts (frozen `crtui` contract; LVGL v9.6.0 software rendering through a CRT display adapter, presented by crtgfx). Tranche 2 (crtgfx input adapter, spatial focus navigation, slider drag/wheel, resize) and Tranche 3 (LVGL private: only declared `crtui_*` functions are exported; installed `examples/ui-basic`) are closed on all three hosts. Tranche 4 (CRT-owned layout/style plus Image, Switch, Checkbox, List/ScrollView and TextInput) is accepted on Windows/x64 and macOS/arm64 and awaits Linux replay; external surfaces and the isolated package remain; see [`docs/crtui_acceptance.md`](docs/crtui_acceptance.md). |
 | Web runtime (WebKit CRT Port) | Planned | Planned | Planned | Stage `06-web`, after `05-ui`; see [`docs/crtweb_acceptance.md`](docs/crtweb_acceptance.md). |
 
 Hosts: Linux is an aarch64 VM (the acceptance host) plus x86_64 under WSL2,
@@ -269,7 +269,7 @@ CRT is built and verified as cumulative distributions:
 | `02-cxx` | `01-c` + libc++/libc++abi/libunwind |
 | `03-gfx-simple` | `02-cxx` + window, keyboard/mouse, software framebuffer |
 | `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg |
-| `05-ui` (in progress) | `04-gfx-media` + `crtui` (frozen contract, private LVGL software rendering, input/focus/resize on all hosts; layout/style/v1 widgets accepted on Windows and awaiting replay; external-surface composition planned) |
+| `05-ui` (in progress) | `04-gfx-media` + `crtui` (frozen contract, private LVGL software rendering, input/focus/resize on all hosts; layout/style/v1 widgets accepted on Windows and macOS, awaiting Linux replay; external-surface composition planned) |
 | `06-web` (planned) | `05-ui` + JavaScriptCore/WebKit web runtime and WebView |
 
 Simple Graphics deliberately excludes Skia CPU raster/text and Skia GPU. Its

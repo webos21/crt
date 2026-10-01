@@ -10,6 +10,25 @@ substantive update.
 
 ## 2026-10-01
 
+- **`crtui` Tranche 4 replayed and accepted on macOS/arm64; a cumulative-stage
+  build race was found and fixed.** The LVGL-enabled UI gate is 6/6; a fresh
+  `CRTUI_ENABLE_LVGL=OFF` tree passes layout/input 2/2; direct layout, input,
+  render and 40-cycle lifecycle coverage all pass. The in-tree demo and an
+  externally rebuilt packaged `05-ui` sample both ran in real Cocoa windows
+  with `presented=30 pixel_check=pass input_check=pass`; packaged privacy is
+  `declared=63 exports=63 lvgl_exports=0 objects=1 headers=3`.
+
+  The first `crt-ui-dist` run caught a real parallel race: stage-03 dist and
+  stage-04 build were siblings, allowing two libc++ staging targets to refresh
+  `dist/02-cxx` while a Skia demo linked. The two C++ SDK publishers are now
+  serialized, and the stage-04 aggregate/direct Skia consumer waits for the
+  complete verified `crt-gfx-simple-dist` predecessor; repeated full runs then
+  built and verified every cumulative stage through `05-ui`. Tooling is 79/79.
+  Full CTest is 157/158: only the known AVFoundation capture/encode lifecycle
+  test fails repeatedly on this camera environment; all six crtui tests pass.
+  Linux replay remains before global Tranche 4 closure; full evidence is in
+  `docs/crtui_acceptance.md`.
+
 - **`crtui` Tranche 4 implemented and accepted on Windows/x64: CRT-owned
   layout, styling and the v1 widget set.** Added free/Row/Column/Stack layout
   with fill/grow/margin/padding/gap/alignment, ScrollView/List, the narrow style
