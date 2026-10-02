@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-10-02
 
+- **Interrupted libc++ runtime sparse fetches now recover instead of poisoning
+  later builds.** A pulled Windows/x64 working copy failed `crt-c-dist` with
+  `libunwind: checkout_subdir 'libunwind' not found`: the
+  `.clone-libunwind` cache still contained valid Git metadata, sparse rules and
+  the pinned commit, but every sparse worktree file was missing. The fetch
+  driver had treated `clone_dir` existence as proof that clone/fetch/checkout
+  had completed, so every retry reused the incomplete cache and failed before
+  it could repair it.
+
+  `tools/crt-libcxx-build.py` now validates an existing clone cache,
+  re-establishes the requested cone-mode sparse paths, force-checks out an
+  already-cached 40-character pinned commit when available, fetches only when
+  that commit is absent, and removes non-Git/incomplete cache paths before
+  recloning. The forced checkout is intentional: `git sparse-checkout
+  reapply` restores skip-worktree policy but does not recreate tracked files
+  that have been deleted from the worktree. A local-repository regression test
+  now deletes all three sparse trees while preserving clone metadata and
+  proves that the next fetch reconstructs `libunwind`, `cmake` and
+  `runtimes/cmake`; it is registered in CTest. Verified on Windows/x64:
+  `crt-libcxx-fetch` repaired the real damaged cache, the libc++ fetch and
+  predecessor tests pass 2/2, and the originally failing `crt-c-dist` command
+  completes through `CRT distribution verified`.
+
 - **`crtui` External Surface Tranche 5 closed on all three hosts after the
   unchanged Linux/x86_64 replay and a clean-distribution dependency fix.** The
   Skia-enabled official UI gate passes 7/7 and stayed green for three
