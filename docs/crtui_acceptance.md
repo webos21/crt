@@ -831,9 +831,44 @@ closed on Windows/x64, macOS/arm64 and Linux/x86_64.
 ### 6. MediaView
 
 Connect the accepted zero-copy path (`crtmedia` GPU frame -> Skia image ->
-`crtgfx` surface) to a `VideoView` widget without passing pixels through an
+`crtgfx` surface) to a `MediaView` widget without passing pixels through an
 LVGL image buffer. UI and video are composed in the final present, not merged
-earlier.
+earlier. Three slices: 6A contract, 6B Windows real-media acceptance, 6C replay
+on macOS/arm64 and Linux/x86_64.
+
+**6A, frozen contract (Windows/x64 accepted 2026-10-02).**
+
+1. `crtui_media_view_create()` makes a distinct `CRTUI_WIDGET_MEDIA_VIEW`. It
+   follows the SurfaceView scene rules exactly (bounds, clip, ancestor opacity,
+   z-order, visibility, damage, hit-testing) and appears in
+   `crtui_window_get_surface_layers()`. Core `libcrtui` stores no decoder, frame,
+   GPU or Skia object, so it stays producer-neutral.
+2. The optional static C++ companion `crtui_skia_media` (`crtui/skia_media.h`)
+   owns one current imported image per MediaView. `submit()` hands a
+   `crtmedia_gpu_frame` to the existing `crtgfx_skia_import_media_frame()`:
+   success moves frame ownership into the image and clears the frame; failure
+   leaves the frame untouched. A non-GPU (CPU) frame is rejected with
+   `CRTUI_ERROR_INVALID_ARGUMENT` and is never labelled zero-copy.
+3. Replacing or clearing a view releases the previous image only after any
+   in-flight compositor acquire has released its temporary reference. `clear()`
+   damages the view; composing a MediaView with no frame returns
+   `CRTUI_WOULD_BLOCK` without a release callback. `crtui_skia_media` is
+   installed separately; core and `crtui_skia` do not link `crtmedia`.
+
+**6B Windows evidence.** `crtui_media_view_test` decodes the real H.264 fixture
+through the hardware-preferring decoder and submits each GPU frame to a
+MediaView. The offscreen run reports `backend=d3d12 interop=gpu-copy
+gpu_frames=5 cpu_frames=0 releases=5` and
+`frames/texture/composition/damage/ownership=pass`, covering UI planes above and
+below the video, a 320x180 to 360x200 resize, replacement, clear and destroy
+with every decoder frame released exactly once. `interop=gpu-copy` is the
+honest Windows classification (GPU-resident copy, not shared-handle
+zero-copy). Passing a frame count presents the same path in a real D3D12 window:
+5/5 frames, `gpu_frames=5 cpu_frames=0 releases=5`.
+
+A defect found while accepting: the test's cleared-view check built its empty
+target at the pre-resize size, so `crtui_skia_compose()` correctly rejected the
+size mismatch. The test now reads the current window size.
 
 ### 7. Cross-host and isolated-package closure
 

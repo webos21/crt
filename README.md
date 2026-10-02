@@ -249,9 +249,9 @@ and Linux/x86_64. The producer-neutral SurfaceView scene boundary and real
 GPU final compositor are accepted on Windows/x64 and macOS/arm64; Linux replay
 remains before the external-surface tranche closes.
 
-Current UI work is closing the unchanged external-surface compositor on Linux,
-then connecting MediaView without copying GPU-backed frames through an LVGL
-CPU framebuffer.
+Current UI work is replaying MediaView (GPU video frames composed in the final
+present, never copied through an LVGL CPU framebuffer) on macOS and Linux; it
+is accepted on Windows/x64.
 
 See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
 

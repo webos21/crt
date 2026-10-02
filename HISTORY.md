@@ -10,6 +10,31 @@ substantive update.
 
 ## 2026-10-02
 
+- **`crtui` MediaView Tranches 6A/6B accepted on Windows/x64.** Core `libcrtui`
+  gained `crtui_media_view_create()` / `CRTUI_WIDGET_MEDIA_VIEW`, a distinct
+  widget that follows the SurfaceView scene rules (clip, ancestor opacity,
+  z-order, damage, hit-testing) and appears in the external-surface snapshot;
+  core still holds no decoder, frame, GPU or Skia object. The optional static
+  C++ companion `crtui_skia_media` (`crtui/skia_media.h`) owns one imported image
+  per MediaView through `crtgfx_skia_import_media_frame()`: success moves frame
+  ownership, failure leaves the frame untouched, CPU frames are rejected rather
+  than labelled zero-copy, and replace/clear/destroy release after any
+  in-flight compositor reference. The Skia compile settings shared by the two
+  companions were folded into one CMake function.
+
+  `crtui_media_view_test` decodes the real H.264 fixture through the
+  hardware-preferring decoder: `backend=d3d12 interop=gpu-copy gpu_frames=5
+  cpu_frames=0 releases=5` with UI composed below and above the video, a resize,
+  replacement and clear, and the same path presents 5/5 frames in a real D3D12
+  window. The first run failed on the test's own cleared-view check, which built
+  its empty target at the pre-resize size and was correctly rejected by
+  `crtui_skia_compose()`; the test now uses the current window size. The Skia-
+  enabled `crt-ui-test` gate is 8/8, privacy is exact at `declared=68
+  exports=68 lvgl_exports=0 objects=1 headers=5`, and full Windows CTest is
+  177/177 (one expected no-camera skip). This machine had no Skia build, so the
+  pinned Skia was fetched and built (834 steps) with `crtgfx-skia-build` and
+  `CRT_USE_IMPORTED_LIBCXX=ON`. Tranche 6C (macOS, Linux) remains.
+
 - **Interrupted libc++ runtime sparse fetches now recover instead of poisoning
   later builds.** A pulled Windows/x64 working copy failed `crt-c-dist` with
   `libunwind: checkout_subdir 'libunwind' not found`: the

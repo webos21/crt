@@ -116,6 +116,10 @@ static crtui_widget id_of(const crtui_context* context, const crtui_node* node) 
   return ((uint64_t)node->generation << 32) | (uint64_t)((size_t)(node - context->nodes) + 1);
 }
 
+static int is_surface_kind(crtui_widget_kind kind) {
+  return kind == CRTUI_WIDGET_SURFACE_VIEW || kind == CRTUI_WIDGET_MEDIA_VIEW;
+}
+
 static void mark_surface_full(crtui_node* node) {
   node->surface_damage_full = 1;
   node->surface_has_damage = 1;
@@ -128,7 +132,7 @@ static void touch(crtui_context* context) {
    * damage is conservative but correct; producer-only damage uses the focused
    * API below and does not rebuild the LVGL widget plane. */
   for (size_t i = 0; i < context->node_count; ++i) {
-    if (context->nodes[i].in_use && context->nodes[i].kind == CRTUI_WIDGET_SURFACE_VIEW) {
+    if (context->nodes[i].in_use && is_surface_kind(context->nodes[i].kind)) {
       mark_surface_full(&context->nodes[i]);
     }
   }
@@ -1345,13 +1349,18 @@ crtui_result crtui_surface_view_create(crtui_context* context, crtui_widget pare
   return create_child(context, CRTUI_WIDGET_SURFACE_VIEW, parent, out_widget, NULL);
 }
 
+crtui_result crtui_media_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget) {
+  CRTUI_CHECK_CONTEXT(context);
+  return create_child(context, CRTUI_WIDGET_MEDIA_VIEW, parent, out_widget, NULL);
+}
+
 crtui_result crtui_surface_view_damage(
     crtui_context* context, crtui_widget surface_view, int32_t x, int32_t y, int32_t width, int32_t height) {
   CRTUI_CHECK_CONTEXT(context);
   ensure_layout(context);
   crtui_node* node = resolve(context, surface_view);
   if (node == NULL) return CRTUI_ERROR_INVALID_HANDLE;
-  if (node->kind != CRTUI_WIDGET_SURFACE_VIEW || x < 0 || y < 0 || width <= 0 || height <= 0 ||
+  if (!is_surface_kind(node->kind) || x < 0 || y < 0 || width <= 0 || height <= 0 ||
       x >= node->width || y >= node->height) {
     return CRTUI_ERROR_INVALID_ARGUMENT;
   }
@@ -1388,7 +1397,7 @@ crtui_result crtui_surface_view_clear_damage(crtui_context* context, crtui_widge
   CRTUI_CHECK_CONTEXT(context);
   crtui_node* node = resolve(context, surface_view);
   if (node == NULL) return CRTUI_ERROR_INVALID_HANDLE;
-  if (node->kind != CRTUI_WIDGET_SURFACE_VIEW) {
+  if (!is_surface_kind(node->kind)) {
     return CRTUI_ERROR_INVALID_ARGUMENT;
   }
   node->surface_damage_full = 0;
@@ -1427,7 +1436,7 @@ static void collect_surface_layers(
   int visible = parent_visible && node->visible && clip.width > 0 && clip.height > 0;
   uint32_t own_opacity = (node->style.mask & CRTUI_STYLE_OPACITY) != 0 ? node->style.opacity : 255u;
   uint32_t opacity = (parent_opacity * own_opacity + 127u) / 255u;
-  if (visible && node->kind == CRTUI_WIDGET_SURFACE_VIEW) {
+  if (visible && is_surface_kind(node->kind)) {
     crtui_surface_layer* layer = layers != NULL ? &layers[*count] : NULL;
     if (layer != NULL) {
       memset(layer, 0, sizeof(*layer));

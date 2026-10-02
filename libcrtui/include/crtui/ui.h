@@ -99,8 +99,9 @@
  * color, a slider/progress fill, a switch's on track, a checkbox's mark).
  *
  * ---- External surfaces --------------------------------------------------
- * A SurfaceView is the producer-neutral scene placeholder for video now and a
- * WebView in 06-web. The view owns only position, size, clip, opacity,
+ * SurfaceView is the generic producer-neutral scene placeholder; MediaView is
+ * its video-specific sibling and WebView arrives in 06-web. A view owns only
+ * position, size, clip, opacity,
  * visibility, z-order, damage and hit-testing, never the producer's frame.
  * crtui_window_get_surface_layers() exposes those properties; the application
  * or final crtgfx compositor associates the stable view id with its own
@@ -145,7 +146,7 @@ typedef struct crtui_rect {
   int32_t x, y, width, height;
 } crtui_rect;
 
-/* One visible SurfaceView in final scene order. All rectangles are in window
+/* One visible SurfaceView or MediaView in final scene order. All rectangles are in window
  * coordinates. `bounds` is the laid-out view; `clip` is bounds intersected with
  * every ancestor and the window. `z_order` is the stable scene-tree preorder index
  * (larger means later/on top). `opacity` includes every ancestor's style
@@ -178,7 +179,8 @@ typedef enum crtui_widget_kind {
   CRTUI_WIDGET_CHECKBOX = 13,
   CRTUI_WIDGET_SCROLL_VIEW = 14,
   CRTUI_WIDGET_LIST = 15,
-  CRTUI_WIDGET_TEXT_INPUT = 16
+  CRTUI_WIDGET_TEXT_INPUT = 16,
+  CRTUI_WIDGET_MEDIA_VIEW = 17
 } crtui_widget_kind;
 
 typedef enum crtui_key {
@@ -284,6 +286,10 @@ CRTUI_API crtui_result crtui_progress_create(crtui_context* context, crtui_widge
 CRTUI_API crtui_result crtui_progress_set_value(crtui_context* context, crtui_widget progress, int32_t value);
 CRTUI_API crtui_result crtui_progress_get_value(crtui_context* context, crtui_widget progress, int32_t* out_value);
 CRTUI_API crtui_result crtui_surface_view_create(crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
+/* Video-specific external surface. Core libcrtui still stores no decoder,
+ * frame, GPU or Skia object; crtui/skia_media.h provides the optional binding. */
+CRTUI_API crtui_result crtui_media_view_create(
+    crtui_context* context, crtui_widget parent, crtui_widget* out_widget);
 /* Adds a view-local dirty rectangle (unioned with pending damage). Geometry or
  * scene mutations conservatively mark the full view dirty. */
 CRTUI_API crtui_result crtui_surface_view_damage(

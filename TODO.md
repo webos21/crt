@@ -113,7 +113,17 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
     on 2026-10-02, including real Metal/Wayland-Vulkan presentation and
     balanced producer ownership. Media binding stays in Tranche 6.
 * [ ] **6. MediaView.** Zero-copy video composed in the final present, not via
-  an LVGL image buffer.
+  an LVGL image buffer. Work in three explicit slices:
+  * [x] **6A. Freeze the producer-neutral MediaView and binding contract.**
+    Accepted on Windows/x64 2026-10-02 (`CRTUI_WIDGET_MEDIA_VIEW`, optional
+    `crtui_skia_media`); evidence in `docs/crtui_acceptance.md`.
+  * [x] **6B. Windows/x64 real-media acceptance.** Accepted 2026-10-02: real
+    H.264 decode, 5 GPU frames/0 CPU frames, balanced release, 5/5 frames in a
+    real D3D12 window; evidence in `docs/crtui_acceptance.md`.
+  * [ ] **6C. Replay unchanged on macOS/arm64 and Linux/x86_64.** Record
+    Metal/VideoToolbox and Vulkan/VA-API interop/lifetime evidence before
+    closing Tranche 6; CPU-frame fallback must remain honest, never labelled
+    zero-copy.
 * [ ] **7. Cross-host and isolated-package closure.** Isolated `05-ui` build
   from the installed `04-gfx-media` SDK; update `tools/create_stage_source.py`
   and `tools/crt_dist_prerequisites.py` in the same change.

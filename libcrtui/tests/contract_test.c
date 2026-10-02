@@ -162,6 +162,10 @@ static void test_errors(void) {
   crtui_widget_kind surface_kind = 0;
   CHECK(crtui_widget_get_kind(s.ctx, out, &surface_kind) == CRTUI_OK && surface_kind == CRTUI_WIDGET_SURFACE_VIEW,
         "SurfaceView kind");
+  CHECK(crtui_media_view_create(s.ctx, s.container, &out) == CRTUI_OK,
+        "Tranche 6 MediaView is a real producer-neutral widget");
+  CHECK(crtui_widget_get_kind(s.ctx, out, &surface_kind) == CRTUI_OK && surface_kind == CRTUI_WIDGET_MEDIA_VIEW,
+        "MediaView kind");
   CHECK(crtui_slider_set_value(s.ctx, s.button_a, 1) == CRTUI_ERROR_INVALID_ARGUMENT, "slider op on a button");
   CHECK(crtui_widget_set_text(s.ctx, s.slider, "x") == CRTUI_ERROR_INVALID_ARGUMENT, "text op on a slider");
   CHECK(crtui_widget_set_bounds(s.ctx, s.win, 0, 0, 1, 1) == CRTUI_ERROR_INVALID_ARGUMENT,

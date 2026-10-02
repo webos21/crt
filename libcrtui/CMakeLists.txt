@@ -133,34 +133,63 @@ install(DIRECTORY include/ DESTINATION include
 # owns only the final composition algorithm; producer frames remain borrowed
 # through crtui/skia.h's acquire/release boundary.
 if(CRTUI_ENABLE_LVGL AND TARGET crtgfx_skia AND TARGET crtgfx_gpu)
+  function(crtui_configure_skia_compile target_name)
+    target_link_libraries(${target_name} PRIVATE crt_cxx_build_flags)
+    target_include_directories(${target_name} PRIVATE
+      "${CMAKE_SOURCE_DIR}/libcrtgfx/include"
+      "${CRTGFX_SKIA_ROOT}"
+    )
+    if(CRT_TARGET_OS STREQUAL "windows")
+      target_compile_definitions(${target_name} PRIVATE SK_BUILD_FOR_UNIX CRTGFX_HAVE_D3D12=1)
+      target_compile_options(${target_name} PRIVATE
+        "-I${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim"
+        "-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}"
+        "-include" "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim/mingw_w64_compat.h"
+        "-Wno-pragma-pack" "-Wno-unused-value" "-Wno-ignored-attributes"
+        "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
+        "-isystem${CMAKE_SOURCE_DIR}/libc/include"
+      )
+      add_dependencies(${target_name} crtgfx-mingw-w64-headers-fetch)
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      target_compile_definitions(${target_name} PRIVATE
+        CRTGFX_HAVE_VULKAN=1 SK_USE_INTERNAL_VULKAN_HEADERS)
+    elseif(CRT_TARGET_OS STREQUAL "macos")
+      target_compile_definitions(${target_name} PRIVATE CRTGFX_HAVE_METAL=1)
+    endif()
+  endfunction()
+
   add_library(crtui_skia STATIC src/skia_compositor.cc)
-  target_link_libraries(crtui_skia PRIVATE crt_cxx_build_flags PUBLIC crtui crtgfx_skia)
+  target_link_libraries(crtui_skia PUBLIC crtui crtgfx_skia)
   target_include_directories(crtui_skia PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_SOURCE_DIR}/libcrtgfx/include"
     "${CRTGFX_SKIA_ROOT}"
   )
-  if(CRT_TARGET_OS STREQUAL "windows")
-    target_compile_definitions(crtui_skia PRIVATE SK_BUILD_FOR_UNIX CRTGFX_HAVE_D3D12=1)
-    target_compile_options(crtui_skia PRIVATE
-      "-I${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim"
-      "-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}"
-      "-include" "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim/mingw_w64_compat.h"
-      "-Wno-pragma-pack" "-Wno-unused-value" "-Wno-ignored-attributes"
-      "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
-      "-isystem${CMAKE_SOURCE_DIR}/libc/include"
-    )
-    add_dependencies(crtui_skia crtgfx-mingw-w64-headers-fetch)
-  elseif(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
-    target_compile_definitions(crtui_skia PRIVATE SK_USE_INTERNAL_VULKAN_HEADERS)
-  elseif(CRT_TARGET_OS STREQUAL "macos")
-    target_compile_definitions(crtui_skia PRIVATE CRTGFX_HAVE_METAL=1)
-  endif()
+  crtui_configure_skia_compile(crtui_skia)
   set_target_properties(crtui_skia PROPERTIES
     OUTPUT_NAME crtui_skia
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   )
   install(TARGETS crtui_skia ARCHIVE DESTINATION lib COMPONENT crt-ui)
+
+  # Tranche 6: the media-specific companion owns current imported images for
+  # MediaViews. Core crtui and the generic final compositor stay media-free.
+  add_library(crtui_skia_media STATIC src/skia_media_provider.cc)
+  target_link_libraries(crtui_skia_media PUBLIC
+    crtui_skia crtgfx_skia crtmedia)
+  target_include_directories(crtui_skia_media PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/libcrtgfx/include"
+    "${CMAKE_SOURCE_DIR}/libcrtmedia/include"
+    "${CRTGFX_SKIA_ROOT}"
+  )
+  crtui_configure_skia_compile(crtui_skia_media)
+  set_target_properties(crtui_skia_media PROPERTIES
+    OUTPUT_NAME crtui_skia_media
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
+  add_dependencies(crtui_skia_media cxx c crtui_skia crtgfx_skia crtmedia)
+  install(TARGETS crtui_skia_media ARCHIVE DESTINATION lib COMPONENT crt-ui)
 
   add_executable(crtui_surface_compositor_test
     ${CRT_STARTUP_OBJECTS}
@@ -186,6 +215,39 @@ if(CRTUI_ENABLE_LVGL AND TARGET crtgfx_skia AND TARGET crtgfx_gpu)
     TIMEOUT 120
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_surface_compositor_test_runs)
+
+  if(CRTMEDIA_ENABLE_FFMPEG)
+    add_executable(crtui_media_view_test
+      ${CRT_STARTUP_OBJECTS}
+      tests/media_view_test.cc
+    )
+    target_link_libraries(crtui_media_view_test PRIVATE
+      crt_cxx_build_flags crtui_skia_media crtui_skia crtgfx_skia crtmedia)
+    target_compile_definitions(crtui_media_view_test PRIVATE
+      CRTMEDIA_TEST_VIDEO_PATH="${CMAKE_SOURCE_DIR}/libcrtmedia/assets/test_video.mp4"
+    )
+    if(CRT_TARGET_OS STREQUAL "windows")
+      target_compile_definitions(crtui_media_view_test PRIVATE CRTGFX_HAVE_D3D12=1)
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      target_compile_definitions(crtui_media_view_test PRIVATE
+        CRTGFX_HAVE_VULKAN=1 SK_USE_INTERNAL_VULKAN_HEADERS)
+    elseif(CRT_TARGET_OS STREQUAL "macos")
+      target_compile_definitions(crtui_media_view_test PRIVATE CRTGFX_HAVE_METAL=1)
+    endif()
+    crt_wire_skia_executable(crtui_media_view_test SKIP_MACOS_DEAD_STRIP)
+    crt_link_startup_end_objects(crtui_media_view_test)
+    add_dependencies(crtui_media_view_test
+      cxx c crt1 crtui_skia_media crtgfx_skia crtmedia)
+
+    add_test(NAME crtui_media_view_test_runs COMMAND crtui_media_view_test)
+    set_tests_properties(crtui_media_view_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      PASS_REGULAR_EXPRESSION "crtui_media_view_test: (ok|skipped)"
+      TIMEOUT 120
+    )
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
+      crtui_media_view_test_runs)
+  endif()
 endif()
 
 # crtui_contract_test: the resource-free acceptance test for the frozen

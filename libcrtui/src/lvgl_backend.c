@@ -449,7 +449,9 @@ crtui_result crtui_lvgl_render_plane(
     objects[0] = screen;
     for (size_t i = 1; i < count; ++i) {
       lv_obj_t* parent = items[i].parent >= 0 ? objects[items[i].parent] : screen;
-      int in_plane = i >= z_begin && i < z_end && items[i].kind != CRTUI_WIDGET_SURFACE_VIEW;
+      int is_external_surface =
+          items[i].kind == CRTUI_WIDGET_SURFACE_VIEW || items[i].kind == CRTUI_WIDGET_MEDIA_VIEW;
+      int in_plane = i >= z_begin && i < z_end && !is_external_surface;
       objects[i] = parent == NULL ? NULL
                                   : (in_plane ? create_object(backend, &items[i], parent)
                                               : create_placeholder(&items[i], parent));
