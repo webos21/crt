@@ -8,6 +8,31 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-02
+
+- **`crtui` External Surface Tranche 5 closed on all three hosts after the
+  unchanged Linux/x86_64 replay and a clean-distribution dependency fix.** The
+  Skia-enabled official UI gate passes 7/7 and stayed green for three
+  consecutive runs; the fresh LVGL-OFF contract/layout/surface/input gate is
+  4/4. A real Wayland/Vulkan window presented 5/5 frames three times with
+  `gpu/ordering/clip/opacity/damage/resize/ownership=pass` and balanced
+  producer ownership. Core `libcrtui.so` retains no Skia, Vulkan or `crtgfx`
+  dynamic dependency, and package privacy is exact at
+  `declared=67 exports=67 lvgl_exports=0 objects=1 headers=4`.
+
+  The clean cumulative replay found that `crt-gfx` installed
+  `libcrtgfx_skia.so` without any aggregate target building it: the existing
+  Skia window demo only links the static bridge. `crt-gfx-media-build` now
+  explicitly builds `crtgfx_skia_shared` after `crt-gfx-simple-dist`. A new
+  build directory then generated and verified every cumulative distribution
+  stage through `05-ui` without a manual target invocation, including the
+  optional `libcrtui_skia.a` and `crtui/skia.h`. Tooling is 79/79. The full
+  feature-enabled CTest result is 158/159; every `crtui` test passes, and the
+  sole failure is the already-recorded independent playback wall-time residual
+  on this no-sound-device host. With Windows/x64, macOS/arm64 and Linux/x86_64
+  accepted, the External Surface contract now unblocks `06-web`; media binding
+  remains Tranche 6.
+
 ## 2026-10-01
 
 - **The macOS AVFoundation capture lifecycle residual is fixed and the full

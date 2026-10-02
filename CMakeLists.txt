@@ -1517,6 +1517,15 @@ if(Python3_Interpreter_FOUND)
     add_dependencies(crtgfx_skia_gpu_window_demo crt-gfx-simple-dist)
     list(APPEND CRT_GFX_MEDIA_BUILD_DEPENDS crtgfx_skia_gpu_window_demo)
   endif()
+  if(TARGET crtgfx_skia_shared)
+    # The crt-gfx install component ships both Skia bridge variants, but the
+    # window demo above only links the static one.  A clean crt-ui-dist thus
+    # reached the stage-04 install without ever producing the shared bridge
+    # (Linux Tranche 5 replay, 2026-10-02).  Build every installed artifact
+    # explicitly, after the cumulative C++/gfx-simple SDK is complete.
+    add_dependencies(crtgfx_skia_shared crt-gfx-simple-dist)
+    list(APPEND CRT_GFX_MEDIA_BUILD_DEPENDS crtgfx_skia_shared)
+  endif()
   add_custom_target(crt-gfx-media-build DEPENDS ${CRT_GFX_MEDIA_BUILD_DEPENDS})
   add_custom_target(crt-gfx-media-test DEPENDS crt-gfx-test crt-media-test)
   add_custom_target(crt-gfx-media-dist

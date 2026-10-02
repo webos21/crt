@@ -4,8 +4,8 @@
 (Tranche 1), input/focus/resize (Tranche 2) and the private-LVGL wrapper
 (Tranche 3) closed on all three hosts; layout, styling and the v1 widget set
 (Tranche 4) closed on Windows/x64, macOS/arm64 and Linux/x86_64; External
-Surface scene metadata (Tranche 5A) and real final composition (Tranche 5B)
-are accepted on Windows/x64 and macOS/arm64, with Linux replay (5C) open.**
+Surface scene metadata, real final composition and host replay (Tranche 5)
+closed on all three hosts.**
 The public contract in `libcrtui/include/crtui/ui.h` and the rules in the table
 below are frozen and covered by resource-free tests.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
@@ -752,9 +752,9 @@ Work is split at the actual ownership boundary:
    `crtui_window_render_plane()` retains geometry-only placeholders outside its
    range so descendant coordinates and ancestor clipping remain identical to
    the complete scene.
-3. **5C, host replay (macOS/arm64 accepted 2026-10-01; Linux open).** Replay
-   the unchanged contract/compositor on Linux before global closure. MediaView
-   remains Tranche 6.
+3. **5C, host replay (macOS/arm64 accepted 2026-10-01; Linux/x86_64 accepted
+   2026-10-02).** The unchanged contract/compositor is accepted on both
+   remaining hosts, closing Tranche 5 globally. MediaView remains Tranche 6.
 
 **5A Windows evidence.** `crtui_surface_test` reports
 `create=pass geometry=pass clip=pass opacity=pass z=pass damage=pass
@@ -799,7 +799,34 @@ Tooling is 79/79. Every `crtui` test passed in the initial 159/160 full run;
 the sole failure was the independent AVFoundation lifecycle residual. The
 follow-up fixed that backend's queue ownership and dimension negotiation, and
 full in-tree CTest is now 160/160. No functional UI source change was required
-for the macOS replay. Linux remains before global Tranche 5 closure.
+for the macOS replay.
+
+**5A/5B Linux/x86_64 replay evidence.** The unchanged Skia-enabled official
+`crt-ui-test` gate passes 7/7 and remained green for three consecutive runs. A
+fresh LVGL-OFF tree passes contract, layout, surface and input 4/4. Direct
+surface output reports
+`create/geometry/clip/opacity/z/damage/hit_test/visibility/thread=pass`.
+
+The real Wayland/Vulkan compositor presented 5/5 frames in three consecutive
+runs and reported `gpu/ordering/clip/opacity/damage/resize/ownership=pass`,
+with balanced producer ownership. Core `libcrtui.so` has only the CRT
+`libm.so`, `libdl.so`, `libc++.so` and `libc.so` dependencies; it has no Skia,
+Vulkan or `crtgfx` dynamic dependency. Privacy remains exact at
+`declared=67 exports=67 lvgl_exports=0 objects=1 headers=4`.
+
+The first clean cumulative distribution replay exposed a real build-graph
+defect: the `crt-gfx` install component shipped `crtgfx_skia_shared`, while no
+stage-04 aggregate built it because the Skia window demo links only the static
+bridge. `crt-gfx-media-build` now explicitly builds the shared bridge after
+`crt-gfx-simple-dist`. From a new build directory, the documented libc++ and
+Wayland setup followed by `crt-ui-dist` builds `libcrtgfx_skia.so` without a
+manual target invocation and verifies every cumulative stage through
+`dist/05-ui`. The package installs the optional static `libcrtui_skia.a` and
+`crtui/skia.h` separately from core `libcrtui`. Tooling is 79/79. The full
+feature-enabled in-tree CTest replay is 158/159: all seven `crtui` tests and
+all other tests pass except the previously recorded, independent playback
+wall-time residual on this host with no sound device. Tranche 5 is therefore
+closed on Windows/x64, macOS/arm64 and Linux/x86_64.
 
 ### 6. MediaView
 

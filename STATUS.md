@@ -429,8 +429,9 @@ statuses, and exceptions are maintained in:
   and realtime/WebRTC remain open. FFmpeg is still intentionally file-only
   (`--disable-network`); network I/O goes through the CRT-owned transport.
 - No JavaScript engine exists and `libcrtjs` is gone; QuickJS is no longer
-  planned as a stage. The `05-ui` (`crtui`/LVGL) stage is in progress;
-  `06-web` (WebKit) is not started.
+  planned as a stage. The `05-ui` (`crtui`/LVGL) stage is in progress, with
+  External Surface closed on all three hosts; `06-web` (WebKit) is unblocked
+  but not started.
 
 ## Next Priorities
 
@@ -442,12 +443,12 @@ statuses, and exceptions are maintained in:
    through a crtgfx adapter) and Tranche 3 (LVGL made truly private: export
    control, an installed LVGL-free sample, a privacy check) are closed on all
    three hosts. Tranche 4 (CRT-owned layout, styling and the v1 widget set) is
-   closed on Windows/x64, macOS/arm64 and Linux/x86_64 (2026-10-01). Tranche 5A's
-   producer-neutral SurfaceView scene snapshot and Tranche 5B's real
-   GPU-producer/final-compositor boundary are accepted on Windows/x64 and
-   macOS/arm64. Replay the unchanged compositor on Linux (5C) before closing
-   External Surface. See `docs/crtui_acceptance.md`.
-2. After `05-ui`'s External Surface contract is accepted, begin `06-web`: a
+   closed on Windows/x64, macOS/arm64 and Linux/x86_64 (2026-10-01). Tranche 5
+   (producer-neutral SurfaceView metadata and real GPU final composition) is
+   closed on all three hosts as of 2026-10-02. Continue with Tranche 6
+   MediaView and Tranche 7 isolated-package closure. See
+   `docs/crtui_acceptance.md`.
+2. Begin the now-unblocked `06-web`: a
    JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a
    Linux WPE reference baseline, then `PlatformCRT`. See
    `docs/crtweb_acceptance.md` and `docs/crtweb_porting.md`.

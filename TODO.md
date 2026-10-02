@@ -94,9 +94,11 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   ScrollView/List, the CRT-neutral style mask, Image/Switch/Checkbox/TextInput,
   committed-text input, private LVGL rendering, and the installed sample all
   pass; evidence is in `HISTORY.md` and `docs/crtui_acceptance.md`.
-* [ ] **5. External Surface view.** Producer-agnostic surface composition; the
-  `06-web` prerequisite. Work it in explicit slices so a headless scene-model
-  result is not mistaken for real GPU composition:
+* [x] **5. External Surface view.** Closed 2026-10-02 on Windows/x64,
+  macOS/arm64, and Linux/x86_64: producer-agnostic scene metadata and real GPU
+  final composition, including balanced producer ownership in a native window.
+  This is the accepted `06-web` prerequisite; evidence is in `HISTORY.md` and
+  `docs/crtui_acceptance.md`.
   * [x] **5A. Freeze the producer-neutral scene boundary (Windows first).**
     Accepted on Windows/x64 2026-10-01: stable-id scene snapshot with layout,
     clip, opacity, z-order and damage; detailed evidence is in `HISTORY.md` and
@@ -106,10 +108,10 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
     exact plane-order/clip/opacity pixels and ownership/resize/damage checks,
     plus 5/5 frames through a real D3D12 window; detailed evidence is in
     `HISTORY.md` and `docs/crtui_acceptance.md`.
-  * [ ] **5C. Replay the unchanged contract and compositor on the remaining
-    hosts.** macOS/arm64 was accepted unchanged on 2026-10-01, including real
-    Metal presentation and balanced producer ownership. Linux replay remains
-    before closing the tranche. Media binding stays in Tranche 6.
+  * [x] **5C. Replay the unchanged contract and compositor on the remaining
+    hosts.** macOS/arm64 was accepted unchanged on 2026-10-01 and Linux/x86_64
+    on 2026-10-02, including real Metal/Wayland-Vulkan presentation and
+    balanced producer ownership. Media binding stays in Tranche 6.
 * [ ] **6. MediaView.** Zero-copy video composed in the final present, not via
   an LVGL image buffer.
 * [ ] **7. Cross-host and isolated-package closure.** Isolated `05-ui` build
@@ -128,17 +130,18 @@ leave Scudo conditional. Hardware video decode, Zero-copy decoded textures,
 Encode and capture, and Networking and streaming are all closed on
 Linux/x86_64, macOS/arm64, and Windows/x64 (`HISTORY.md`, 2026-09-22..29; full
 tranche-by-tranche detail in `docs/crtmedia_encode_capture_acceptance.md` and
-`docs/crtmedia_networking_acceptance.md`). The Application UI stage
-(`05-ui`) is promoted into `In Progress` above; the remaining roadmap item
-stays here until its External Surface contract is accepted.
+`docs/crtmedia_networking_acceptance.md`). The Application UI stage (`05-ui`)
+is in progress above; its accepted External Surface contract now unblocks the
+remaining roadmap item, which stays here until implementation begins.
 
 1. **Web Runtime (`06-web`): the WebKit CRT Port.** JavaScriptCore/JSCOnly
    bring-up (Linux first, early three-host replay), a Linux WPE reference
    baseline, `PlatformCRT` graphics/input, `libcrtweb` and the WebView,
    multi-process lifecycle, Windows and macOS replay, CRT subsystem
-   substitution, GPU integration, and distribution/security closure. Starts
-   only after `05-ui`'s External Surface contract is accepted. Detail belongs
-   in `docs/crtweb_acceptance.md` and `docs/crtweb_porting.md`, not here.
+   substitution, GPU integration, and distribution/security closure. The
+   accepted `05-ui` External Surface contract now permits this work to start.
+   Detail belongs in `docs/crtweb_acceptance.md` and
+   `docs/crtweb_porting.md`, not here.
 
 Deferred (not gates; see `docs/runtime_roadmap.md`): WebRTC, QuickJS (unless a
 non-WebKit lightweight runtime becomes a real product requirement), WebGPU,
