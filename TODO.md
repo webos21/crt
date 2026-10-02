@@ -120,7 +120,9 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   * [x] **6B. Windows/x64 real-media acceptance.** Accepted 2026-10-02: real
     H.264 decode, 5 GPU frames/0 CPU frames, balanced release, 5/5 frames in a
     real D3D12 window; evidence in `docs/crtui_acceptance.md`.
-  * [ ] **6C. Replay unchanged on macOS/arm64 and Linux/x86_64.** Record
+  * [ ] **6C. Replay unchanged on macOS/arm64 and Linux/x86_64.** macOS/arm64
+    accepted unchanged 2026-10-02 (Metal/VideoToolbox, `interop=zero-copy`,
+    5 GPU frames/0 CPU, balanced release, real window); Linux remains. Record
     Metal/VideoToolbox and Vulkan/VA-API interop/lifetime evidence before
     closing Tranche 6; CPU-frame fallback must remain honest, never labelled
     zero-copy.

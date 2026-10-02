@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-10-02
 
+- **`crtui` Tranche 6C replayed on macOS/arm64 with no change.**
+  `crtui_media_view_test` decodes the real H.264 fixture with VideoToolbox and
+  composes it in the final Metal present: `backend=metal interop=zero-copy
+  gpu_frames=5 cpu_frames=0 releases=5`, byte-identical over five runs, and 5/5
+  frames in a real Cocoa window. The replaced-image-release mutation fails the
+  ownership check. Full ctest 162/162 (expected camera skip), tooling 80/80,
+  `crt-ui-dist` verified with `libcrtui_skia_media.a` installed. Linux replay is
+  next.
+
 - **`crtui` MediaView Tranches 6A/6B accepted on Windows/x64.** Core `libcrtui`
   gained `crtui_media_view_create()` / `CRTUI_WIDGET_MEDIA_VIEW`, a distinct
   widget that follows the SurfaceView scene rules (clip, ancestor opacity,

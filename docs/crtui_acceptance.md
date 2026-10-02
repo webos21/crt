@@ -870,6 +870,34 @@ A defect found while accepting: the test's cleared-view check built its empty
 target at the pre-resize size, so `crtui_skia_compose()` correctly rejected the
 size mismatch. The test now reads the current window size.
 
+**6C macOS/arm64 replay (2026-10-02).** Accepted unchanged: no source,
+CMake or test change was needed.
+
+- `crtui_media_view_test` decodes the real H.264 fixture through
+  VideoToolbox and submits each GPU frame to a MediaView. Offscreen:
+  `backend=metal interop=zero-copy gpu_frames=5 cpu_frames=0 releases=5` and
+  `frames/texture/composition/damage/ownership=pass`. Output is byte-identical
+  over five runs. Unlike Windows (`gpu-copy`), the macOS path is classified
+  `zero-copy`, as classified by the existing `crtgfx_skia_import_media_frame()`
+  Metal import of the VideoToolbox frame (the classification is that function's
+  and the test's own; this replay did not independently audit the GPU path), and
+  no CPU frame was used (`cpu_frames=0`).
+- Passing a frame count presents the same path in a real Cocoa/Metal window:
+  `crtui_media_view_test 5` reports `window backend=metal interop=zero-copy
+  gpu_frames=5 cpu_frames=0 releases=5`, exit 0.
+- Mutation check: skipping the release of the replaced image in
+  `crtui_skia_media_provider_submit()` fails the ownership check (`releases=1`
+  instead of 5, exit 1); reverted and re-confirmed green (`git diff` clean).
+  (The final summary line of a failing run still prints the fixed text
+  `frames=pass ...` after `FAILED`; the `FAILED` line and exit code are the
+  verdict.)
+- Full in-tree `ctest` 162/162 (expected camera-authorization skip); the nine
+  `crtui_*` tests pass (also through `crt-ui-test`); the `crtui_*`-excluding
+  preset 110/110; tooling 80/80. `crt-ui-dist` verifies and installs
+  `libcrtui_skia_media.a` and `crtui/skia_media.h` with no LVGL file in the SDK.
+- Not covered here: Linux/x86_64 (Vulkan/VA-API) replay, which closes 6C, and
+  the isolated-stage packaging of `crtui_skia_media` (Tranche 7).
+
 ### 7. Cross-host and isolated-package closure
 
 Windows/x64, then macOS/arm64, then Linux. Stage acceptance builds `05-ui` in
