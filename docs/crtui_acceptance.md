@@ -888,9 +888,10 @@ CMake or test change was needed.
 - Mutation check: skipping the release of the replaced image in
   `crtui_skia_media_provider_submit()` fails the ownership check (`releases=1`
   instead of 5, exit 1); reverted and re-confirmed green (`git diff` clean).
-  (The final summary line of a failing run still prints the fixed text
-  `frames=pass ...` after `FAILED`; the `FAILED` line and exit code are the
-  verdict.)
+  (That mutation exposed a misleading summary: a failing run still printed the
+  fixed `frames=pass ...` groups after `FAILED`. `crtui_media_view_test` and
+  `crtui_surface_compositor_test` now print `FAILED (see the failed checks
+  above)` and the group list only on success; re-mutated and confirmed.)
 - Full in-tree `ctest` 162/162 (expected camera-authorization skip); the nine
   `crtui_*` tests pass (also through `crt-ui-test`); the `crtui_*`-excluding
   preset 110/110; tooling 80/80. `crt-ui-dist` verifies and installs

@@ -244,7 +244,10 @@ extern "C" int main(int argc, char** argv) {
   producer.image.reset();
   context.reset();
   crtgfx_gpu_device_release(device);
-  printf("crtui_surface_compositor_test: %s gpu=pass ordering=pass clip=pass opacity=pass damage=pass resize=pass ownership=pass\n",
-         ok && failures == 0 ? "ok" : "FAILED");
-  return ok && failures == 0 ? 0 : 1;
+  if (!ok || failures != 0) {
+    printf("crtui_surface_compositor_test: FAILED (see the failed checks above)\n");
+    return 1;
+  }
+  printf("crtui_surface_compositor_test: ok gpu=pass ordering=pass clip=pass opacity=pass damage=pass resize=pass ownership=pass\n");
+  return 0;
 }

@@ -444,7 +444,10 @@ extern "C" int main(int argc, char** argv) {
   }
   context.reset();
   crtgfx_gpu_device_release(device);
-  printf("crtui_media_view_test: %s frames=pass texture=pass composition=pass damage=pass ownership=pass\n",
-         ok && failures == 0 ? "ok" : "FAILED");
-  return ok && failures == 0 ? 0 : 1;
+  if (!ok || failures != 0) {
+    printf("crtui_media_view_test: FAILED (see the failed checks above)\n");
+    return 1;
+  }
+  printf("crtui_media_view_test: ok frames=pass texture=pass composition=pass damage=pass ownership=pass\n");
+  return 0;
 }
