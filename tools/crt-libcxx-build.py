@@ -242,6 +242,34 @@ def run(args, cwd=None, env=None, label=None):
         progress(f"done {label}")
 
 
+def is_git_worktree(path: Path) -> bool:
+    """Return whether an existing fetch cache is a usable Git worktree."""
+    if not path.is_dir():
+        return False
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=path,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def local_pinned_commit_available(clone_dir: Path, ref: str) -> bool:
+    """Allow interrupted sparse checkouts to recover without the network."""
+    if re.fullmatch(r"[0-9a-fA-F]{40}", ref) is None:
+        return False
+    result = subprocess.run(
+        ["git", "cat-file", "-e", f"{ref}^{{commit}}"],
+        cwd=clone_dir,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def load_recipes(recipe_root):
     """Loads every <recipe_root>/<name>/recipe.json, keyed by its "name"
     field (which must match the containing directory name -- a simple
@@ -343,29 +371,42 @@ def fetch_recipe(recipe, source_root, rebuild=False):
         # alone is not a substitute for --depth 1: it only defers file
         # *content*, never trims the *commit graph* itself.
         if clone_dir.exists() and rebuild:
-            shutil.rmtree(clone_dir)
+            if clone_dir.is_dir():
+                shutil.rmtree(clone_dir)
+            else:
+                clone_dir.unlink()
+        elif clone_dir.exists() and not is_git_worktree(clone_dir):
+            progress(f"{recipe['name']}: removing incomplete clone cache: {clone_dir}")
+            if clone_dir.is_dir():
+                shutil.rmtree(clone_dir)
+            else:
+                clone_dir.unlink()
+
+        cloned = False
         if not clone_dir.exists():
             run(
                 ["git", "clone", "--filter=blob:none", "--no-checkout", "--depth", "1",
                  source["repository"], str(clone_dir)],
                 label=f"{recipe['name']}: clone (sparse)",
             )
-            run(["git", "sparse-checkout", "init", "--cone"], cwd=clone_dir)
-            run(["git", "sparse-checkout", "set"] + sparse_paths, cwd=clone_dir)
+            cloned = True
+
+        # A previous clone/fetch/checkout can be interrupted after clone_dir
+        # is created but before its sparse worktree is materialized.  Always
+        # re-establish the requested sparse rules when checkout_dir is absent;
+        # clone_dir's mere existence is not proof of a completed fetch.
+        run(["git", "sparse-checkout", "init", "--cone"], cwd=clone_dir)
+        run(["git", "sparse-checkout", "set"] + sparse_paths, cwd=clone_dir)
+        if not cloned and local_pinned_commit_available(clone_dir, ref):
+            progress(f"{recipe['name']}: recovering sparse checkout from cached commit {ref}")
+            run(["git", "checkout", "--force", "--detach", ref], cwd=clone_dir)
+        else:
             run(["git", "fetch", "--depth", "1", "origin", ref], cwd=clone_dir)
-            run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=clone_dir)
-            # The initial sparse-checkout rules are installed while the
-            # clone still points at its default-branch tip.  A later
-            # detached checkout of the recipe's pinned SHA can therefore
-            # leave newly requested paths marked skip-worktree rather than
-            # materializing them (observed for libcxxabi on Windows).  Reapply
-            # after that checkout so the rules are evaluated against the
-            # actual pinned tree we are about to copy and build.
-            run(["git", "sparse-checkout", "reapply"], cwd=clone_dir)
-        elif rebuild:
-            run(["git", "fetch", "--depth", "1", "origin", ref], cwd=clone_dir)
-            run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=clone_dir)
-            run(["git", "sparse-checkout", "reapply"], cwd=clone_dir)
+            run(["git", "checkout", "--force", "--detach", "FETCH_HEAD"], cwd=clone_dir)
+        # The sparse rules may have been installed against another tree, or
+        # the worktree files may have been removed by an interrupted fetch.
+        # Reapply after selecting the pinned tree so both cases self-heal.
+        run(["git", "sparse-checkout", "reapply"], cwd=clone_dir)
         checkout_subdir = source.get("checkout_subdir")
         if not checkout_subdir:
             raise SystemExit(f"{recipe['name']}: source.sparse_paths requires source.checkout_subdir")

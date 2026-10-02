@@ -223,6 +223,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME crt_libcxx_predecessor_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_libcxx_predecessor.py"
   )
+  add_test(NAME crt_libcxx_fetch_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_libcxx_fetch.py"
+  )
   add_test(NAME crt_binary_dependencies_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_binary_dependencies.py"
   )
@@ -233,6 +236,7 @@ if(Python3_Interpreter_FOUND)
     crt_verify_dist_unit_runs
     crt_elf_unit_runs
     crt_libcxx_predecessor_unit_runs
+    crt_libcxx_fetch_unit_runs
     crt_binary_dependencies_unit_runs
     crtgfx_gpu_backend_boundary_unit_runs
     PROPERTIES
