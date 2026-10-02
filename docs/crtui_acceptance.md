@@ -5,7 +5,8 @@
 (Tranche 3) closed on all three hosts; layout, styling and the v1 widget set
 (Tranche 4) closed on Windows/x64, macOS/arm64 and Linux/x86_64; External
 Surface scene metadata, real final composition and host replay (Tranche 5)
-closed on all three hosts.**
+closed on all three hosts; MediaView (Tranche 6) closed on all three
+hosts (zero-copy VA-API/Vulkan on Linux).**
 The public contract in `libcrtui/include/crtui/ui.h` and the rules in the table
 below are frozen and covered by resource-free tests.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
@@ -898,6 +899,41 @@ CMake or test change was needed.
   `libcrtui_skia_media.a` and `crtui/skia_media.h` with no LVGL file in the SDK.
 - Not covered here: Linux/x86_64 (Vulkan/VA-API) replay, which closes 6C, and
   the isolated-stage packaging of `crtui_skia_media` (Tranche 7).
+
+**6C Linux/x86_64 replay (native Intel host, 2026-10-02).** Accepted unchanged:
+no source, CMake or test change was needed (the dev tree only needed
+`CRTMEDIA_ENABLE_FFMPEG=ON`, without which `crtui_media_view_test` is not
+registered).
+
+- `crtui_media_view_test` decodes the real H.264 fixture through VA-API and
+  submits each GPU frame to a MediaView. Offscreen: `backend=vulkan
+  interop=zero-copy gpu_frames=5 cpu_frames=0 releases=5` and
+  `frames/texture/composition/damage/ownership=pass`, identical over three runs.
+  Note the `interop=` word is derived from the backend by the test
+  (`gpu-copy` only for D3D12); the evidence that this is the dma-buf path is
+  that the Linux `crtgfx_skia_import_media_frame()` Vulkan branch accepts only
+  `crtmedia_vaapi_gpu_frame_handle` dma-buf frames (the Tranche 3 zero-copy
+  work) and `cpu_frames=0`; no CPU fallback was used or labelled zero-copy.
+- Passing a frame count presents the same path in a real Wayland/Vulkan window:
+  `crtui_media_view_test 5` reports `window backend=vulkan interop=zero-copy
+  gpu_frames=5 cpu_frames=0 releases=5`, exit 0.
+- Mutation check: replacing the release of the replaced image in
+  `crtui_skia_media_provider_submit()` with `(void)previous;` fails the ownership
+  check (`releases=1` instead of 5, exit 1, `FAILED (see the failed checks
+  above)` and no pass summary); reverted, rebuilt and green (`git diff` clean).
+  (A first attempt that merely commented the line out did not compile -- unused
+  variable -- so the run that followed was a stale binary; discarded.)
+- Full in-tree `ctest` 154/155 (only `crtmedia_playback_pipeline_test_runs`: no
+  sound card, pre-existing); all eight `crtui_*` tests pass; tooling 80/80.
+  `crt-ui-dist` (run in the Skia/FFmpeg dev tree, curl OFF) verifies and
+  installs `libcrtui_skia.a`, `libcrtui_skia_media.a` and `crtui/skia.h`,
+  `crtui/skia_media.h`; `libcrtui.so` exports only `crtui_*`, NEEDED
+  libm/libdl/libc++/libc, RUNPATH `$ORIGIN`, no LVGL file in the SDK. (The
+  options-default `out/linux-ui-check` tree has Skia OFF and so cannot package the
+  Skia companions.)
+- Not covered here: interactive/visual inspection of the window output (the
+  test checks pixels offscreen), and the isolated-stage packaging of
+  `crtui_skia_media` (Tranche 7).
 
 ### 7. Cross-host and isolated-package closure
 

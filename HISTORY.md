@@ -10,6 +10,18 @@ substantive update.
 
 ## 2026-10-02
 
+- **`crtui` Tranche 6C replayed on Linux/x86_64 with no change -- Tranche 6
+  closed.** `crtui_media_view_test` decodes the real H.264 fixture through VA-API
+  and composes it in the final Vulkan present: `backend=vulkan interop=zero-copy
+  gpu_frames=5 cpu_frames=0 releases=5`, identical over three runs, and 5/5
+  frames in a real Wayland/Vulkan window. (The `interop=` label is derived from
+  the backend by the test; the real evidence is `cpu_frames=0` plus the Linux
+  import accepting only VA-API dma-buf frames.) Mutation `(void)previous;` in
+  `crtui_skia_media_provider_submit()` fails ownership (`releases=1`), reverted.
+  ctest 154/155 (sound-card test only), tooling 80/80, `crt-ui-dist` verifies and
+  installs `libcrtui_skia_media.a`/`crtui/skia_media.h`; `libcrtui.so` still
+  exports only `crtui_*`. Needed only `CRTMEDIA_ENABLE_FFMPEG=ON` in the dev tree.
+
 - **`crtui` Tranche 6C replayed on macOS/arm64 with no change.**
   `crtui_media_view_test` decodes the real H.264 fixture with VideoToolbox and
   composes it in the final Metal present: `backend=metal interop=zero-copy

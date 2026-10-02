@@ -337,7 +337,7 @@ Each cell describes evidence on that host, not a future promise.
 | Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/macOS; measured no-CPU-readback GPU-copy fallback on Windows. |
 | Video encode / capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, AVFoundation/VideoToolbox. |
 | Network streaming | Verified | Verified | Verified | Bounded HTTP/HTTPS input/output, reconnect, lifecycle and package acceptance. |
-| Application UI (`crtui`) | In progress | In progress | In progress | Core contract/input/wrapper accepted on all hosts; v1 widget replay still progressing. |
+| Application UI (`crtui`) | In progress | In progress | In progress | Contract, input, private-LVGL wrapper, widgets, external surfaces and MediaView (Tranches 0-6) accepted on all hosts; isolated-package closure (Tranche 7) remains. |
 | Web runtime (`crtweb`) | Planned | Planned | Planned | WebKit CRT Port after `05-ui`. |
 
 The authoritative detailed evidence lives in [STATUS.md](STATUS.md), [HISTORY.md](HISTORY.md), and the subsystem acceptance documents.

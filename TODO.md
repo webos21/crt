@@ -112,7 +112,7 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
     hosts.** macOS/arm64 was accepted unchanged on 2026-10-01 and Linux/x86_64
     on 2026-10-02, including real Metal/Wayland-Vulkan presentation and
     balanced producer ownership. Media binding stays in Tranche 6.
-* [ ] **6. MediaView.** Zero-copy video composed in the final present, not via
+* [x] **6. MediaView.** Zero-copy video composed in the final present, not via
   an LVGL image buffer. Work in three explicit slices:
   * [x] **6A. Freeze the producer-neutral MediaView and binding contract.**
     Accepted on Windows/x64 2026-10-02 (`CRTUI_WIDGET_MEDIA_VIEW`, optional
@@ -120,12 +120,10 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   * [x] **6B. Windows/x64 real-media acceptance.** Accepted 2026-10-02: real
     H.264 decode, 5 GPU frames/0 CPU frames, balanced release, 5/5 frames in a
     real D3D12 window; evidence in `docs/crtui_acceptance.md`.
-  * [ ] **6C. Replay unchanged on macOS/arm64 and Linux/x86_64.** macOS/arm64
-    accepted unchanged 2026-10-02 (Metal/VideoToolbox, `interop=zero-copy`,
-    5 GPU frames/0 CPU, balanced release, real window); Linux remains. Record
-    Metal/VideoToolbox and Vulkan/VA-API interop/lifetime evidence before
-    closing Tranche 6; CPU-frame fallback must remain honest, never labelled
-    zero-copy.
+  * [x] **6C. Replay unchanged on macOS/arm64 and Linux/x86_64.** Accepted
+    unchanged 2026-10-02 on both (Metal/VideoToolbox and Vulkan/VA-API, 5 GPU
+    frames/0 CPU, balanced release, real windows); evidence in `HISTORY.md` and
+    `docs/crtui_acceptance.md`.
 * [ ] **7. Cross-host and isolated-package closure.** Isolated `05-ui` build
   from the installed `04-gfx-media` SDK; update `tools/create_stage_source.py`
   and `tools/crt_dist_prerequisites.py` in the same change.
