@@ -50,6 +50,48 @@ def require_string_list(value: object, description: str) -> list[str]:
     return value
 
 
+_ABSOLUTE = r"(?:/|[A-Za-z]:[/\\])"
+_SYSTEM_DIRS = ("/usr/", "/lib/", "/System/", "/Library/", "/opt/homebrew/")
+
+
+def validate_text_paths(dist: Path) -> None:
+    """Reject staging/build paths baked into installed text files.
+
+    Autotools and pkg-config write the install prefix into `*.la`, `*.pc` and
+    `bin/*-config`. An isolated stage installs into a temporary directory, so an
+    unrelocated file points at a path that no longer exists
+    (tools/crt_text_relocate.py makes them relocatable).
+    """
+    problems: list[str] = []
+    for path in sorted(dist.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(dist).as_posix()
+        if path.suffix == ".la":
+            problems.append(f"{relative}: libtool archive (holds absolute paths)")
+            continue
+        if path.suffix != ".pc" and not (relative.startswith("bin/") and path.stat().st_size < 1_000_000):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if path.suffix == ".pc":
+            for number, line in enumerate(text.splitlines(), 1):
+                if re.match(r"\s*\w+\s*=\s*" + _ABSOLUTE, line):
+                    problems.append(f"{relative}:{number}: absolute variable value")
+                for flag in re.findall(r"-[IL](" + _ABSOLUTE + r"\S*)", line):
+                    if not flag.startswith(_SYSTEM_DIRS):
+                        problems.append(f"{relative}:{number}: absolute path {flag}")
+        elif text.startswith("#!"):
+            for number, line in enumerate(text.splitlines(), 1):
+                if re.match(r"\s*(?:exec_)?prefix=['\"]?" + _ABSOLUTE, line):
+                    problems.append(f"{relative}:{number}: absolute install prefix")
+    if problems:
+        raise SystemExit("installed text files embed build/staging paths:\n  " +
+                         "\n  ".join(problems[:20]))
+
+
 def validate_elf_runtime_paths(dist: Path) -> None:
     """Reject checkout/build paths embedded in packaged Linux ELF files."""
     for path in dist.rglob("*"):
@@ -326,6 +368,7 @@ def main() -> None:
         raise SystemExit("compiler/linker executable was bundled: " + ", ".join(map(str, bundled)))
     if manifest.get("target", {}).get("os") == "linux":
         validate_elf_runtime_paths(dist)
+    validate_text_paths(dist)
     validate_binary_dependencies(dist, manifest)
 
     require(dist / "include" / "stdio.h")

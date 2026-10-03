@@ -16,6 +16,7 @@ from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import needed_libraries, relocate_absolute_runtime_paths, remove_absolute_runtime_paths
+from crt_text_relocate import relocate_text_prefixes
 
 
 DEFAULT_DEPENDENCY_JOBS = max(1, min(os.cpu_count() or 2, 4))
@@ -1306,6 +1307,16 @@ def main() -> None:
             # portable entry before the distribution acceptance gate runs.
             with timings.measure("remove absolute Linux rpath fallbacks"):
                 remove_staged_absolute_elf_rpaths(staged)
+
+        # Ports installed with --install-prefix <staged> bake that temporary
+        # path into .pc/.la/*-config text files. The binary equivalents are made
+        # relocatable above; do the same for text before the distribution gate.
+        with timings.measure("relocate staged-prefix text files"):
+            leftover = relocate_text_prefixes(staged, [staged])
+            if leftover:
+                print("unrelocated text files still naming the staging path: " +
+                      ", ".join(str(p.relative_to(staged)) for p in leftover),
+                      flush=True)
 
         # The packaged 04 SDK carries the pinned recipe that advances it to
         # 05-ui, the cumulative-chain contract tools/build_stage_02_cxx.py's own

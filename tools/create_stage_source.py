@@ -21,6 +21,7 @@ STAGE_VALIDATION_PROJECT_PATHS = (
     "tools/crt_stage_recipe.py",
     "tools/crt_dist_prerequisites.py",
     "tools/crt_elf.py",
+    "tools/crt_text_relocate.py",
     "tools/crt_pe.py",
     "tools/crt_macho.py",
     "tools/crt_binary_dependencies.py",
