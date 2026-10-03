@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crt_text_relocate import relocate_text_prefixes
+from crt_text_relocate import relocate_text_prefixes, root_spellings
 from verify_dist import validate_text_paths
 
 CURL_CONFIG = """#!/bin/sh
@@ -146,6 +146,33 @@ class TextRelocateTest(unittest.TestCase):
         self.assertEqual(leftover, [])
         self.assertTrue((self.staged / "lib/pkgconfig/zlib.pc").read_text(
             encoding="utf-8").startswith("prefix=${pcfiledir}/../.."))
+
+    def test_drive_paths_also_cover_the_msys_spelling(self) -> None:
+        # On Windows the CRT shell runs configure with the prefix spelled
+        # `/c/dir/...`, so the installed .pc and curl-config files carry that form,
+        # not `C:\dir\...`. The first Windows replay of the relocation fix failed on
+        # exactly this: the tree was relocated for `C:/...` and `C:\...` only.
+        spellings = root_spellings("C:\\crtw\\ws\\build\\x\\sdk")
+        for expected in ("C:\\crtw\\ws\\build\\x\\sdk", "C:/crtw/ws/build/x/sdk",
+                         "/c/crtw/ws/build/x/sdk", "/C/crtw/ws/build/x/sdk"):
+            self.assertIn(expected, spellings)
+        self.assertIn("/d/work/sdk", root_spellings("d:/work/sdk"))
+
+    def test_files_baked_with_the_msys_spelling_are_relocated(self) -> None:
+        msys = "/c/crtw/ws/build/x/sdk"
+        fresh = self.tmp / "msys" / "sdk"
+        fresh.mkdir(parents=True)
+        populate(fresh, msys)
+        leftover = relocate_text_prefixes(fresh, ["C:\\crtw\\ws\\build\\x\\sdk"])
+        self.assertEqual(leftover, [])
+        validate_text_paths(fresh)
+        for path in fresh.rglob("*"):
+            if path.is_file() and path.suffix != ".a":
+                self.assertNotIn("crtw", path.read_text(encoding="utf-8"), path)
+        self.assertFalse((fresh / "lib/libcurl.la").exists())
+        self.assertEqual(
+            (fresh / "lib/pkgconfig/freetype2.pc").read_text(encoding="utf-8").splitlines()[0],
+            "prefix=${pcfiledir}/../..")
 
 
 if __name__ == "__main__":

@@ -40,6 +40,16 @@ def root_spellings(*roots: Path | str) -> list[str]:
         for candidate in list(candidates):
             candidates.add(candidate.replace("\\", "/"))
             candidates.add(candidate.replace("/", "\\"))
+        # A Windows drive path is also baked in MSYS spelling (`/c/dir/...`): the
+        # CRT shell (mksh) that runs configure on Windows hands the prefix through
+        # as `/c/...`, so FreeType/FFmpeg/curl `.pc` and `curl-config` files carry
+        # that form, not `C:/...` (found by the first Windows replay of this fix).
+        for candidate in list(candidates):
+            drive = re.match(r"^([A-Za-z]):[\\/]+(.*)$", candidate)
+            if drive:
+                rest = drive.group(2).replace("\\", "/")
+                candidates.add("/" + drive.group(1).lower() + "/" + rest)
+                candidates.add("/" + drive.group(1).upper() + "/" + rest)
         spellings.update(c.rstrip("/\\") for c in candidates if c)
     # Longest first so a path that contains another is replaced whole.
     return sorted(spellings, key=len, reverse=True)
