@@ -10,6 +10,21 @@ substantive update.
 
 ## 2026-10-03
 
+- **`crtui` Tranche 7 replayed on Linux/x86_64: the isolated `05-ui` stage passes
+  -- Tranche 7 closed.** One fix: `tools/build_stage_05_ui.py` could not find
+  Debian's versioned `llvm-nm-21`; it now tries `/usr/bin/llvm-nm-N` and
+  `/usr/lib/llvm-*/bin`. Chain from empty work/cache dirs: 03 SDK -> isolated 04
+  (1102 s, verified) -> isolated 05-ui (23.5 s, also from space-containing paths):
+  ctest 8/8 including the real-clip media view test, installed `ui-basic` rebuilt
+  externally and the prebuilt demo `presented=30 pixel_check=pass input_check=pass`,
+  verify and atomic publish pass; package has the Skia/media companions, the LVGL
+  notice/recipe and no LVGL header; `libcrtui.so` exports only `crtui_*`. The
+  text-file relocation fix also holds on Linux (no `.la`, no staging paths,
+  relocated SDK's `pkg-config`/`curl-config` follow the move). Shortcut: the 05-ui
+  run used the freshly regenerated recipe/asset rather than the one embedded in the
+  04 SDK, which predated the fix. ctest 154/155 (sound-card test only), tooling
+  94/94.
+
 - **Isolated SDKs no longer carry the staging path in text files.** The 04
   stage installs ports into a temporary prefix that autotools/pkg-config baked
   into `lib/pkgconfig/*.pc`, `*.la` and `bin/curl-config`; Mach-O/ELF had been

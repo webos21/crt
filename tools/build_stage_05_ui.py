@@ -257,6 +257,13 @@ def llvm_bin_directory() -> Path:
         # toolchain, reachable through xcrun, not next to the compiler.
         result = subprocess.run(["xcrun", "--find", "llvm-nm"], capture_output=True, text=True)
         found = result.stdout.strip() if result.returncode == 0 else None
+    if found is None:
+        # Debian/Ubuntu install only versioned names (llvm-nm-21) in /usr/bin and
+        # unversioned ones under /usr/lib/llvm-N/bin; check_crtui_privacy.py
+        # resolves the same spellings.
+        versioned = sorted(Path("/usr/bin").glob("llvm-nm-[0-9]*"), reverse=True)
+        versioned += sorted(Path("/usr/lib").glob("llvm-*/bin/llvm-nm"), reverse=True)
+        found = str(versioned[0]) if versioned else None
     if found:
         return Path(found).resolve().parent
     raise SystemExit("llvm-nm/llvm-readobj were not found next to CRT_CC or on PATH; "

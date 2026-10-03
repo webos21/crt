@@ -6,7 +6,8 @@
 (Tranche 4) closed on Windows/x64, macOS/arm64 and Linux/x86_64; External
 Surface scene metadata, real final composition and host replay (Tranche 5)
 closed on all three hosts; MediaView (Tranche 6) closed on all three
-hosts (zero-copy VA-API/Vulkan on Linux).**
+hosts (zero-copy VA-API/Vulkan on Linux); isolated-package closure
+(Tranche 7) closed on all three hosts.**
 The public contract in `libcrtui/include/crtui/ui.h` and the rules in the table
 below are frozen and covered by resource-free tests.
 Tranches 1-7 add rendering, input mapping, the LVGL-backed widgets, external
@@ -1093,6 +1094,48 @@ for the first time and needed one fix; nothing else changed.
 - Not covered here: the stage does not run the macOS-only
   `crtui_contract_shared_test` (the in-tree guard); the installed sample linking
   the dylib is the stage's coverage of that failure. Linux/x86_64 replay remains.
+
+**Linux/x86_64 replay (native Intel host, 2026-10-03).** The stage project's
+Linux branch ran for the first time and needed no change; one builder fix.
+
+- **Finding (fixed).** `tools/build_stage_05_ui.py` aborted before configuring:
+  `llvm-nm/llvm-readobj were not found next to CRT_CC or on PATH`. Debian ships
+  only `llvm-nm-21` in `/usr/bin` (unversioned ones live in `/usr/lib/llvm-21/bin`),
+  the same cause as the Tranche 3 privacy-tool failure. `llvm_bin_directory()` now
+  also tries `/usr/bin/llvm-nm-N` and `/usr/lib/llvm-*/bin/llvm-nm`. The fix
+  changes the stage asset, so `crt-stage-05-source` was rerun.
+- **Clean-ish isolated chain.** `crt-gfx-simple-dist` (01-c..03, verified, 2 min)
+  regenerated the assets and recipes; the isolated `04-gfx-media` was built with
+  the 03 SDK's *own* `crt-stage-build.py` and recipe from empty work/cache
+  directories (1102 s; verified and published); the isolated `05-ui` was then
+  built with the 04 SDK's own `crt-stage-build.py` in 23.5 s: LVGL fetched and
+  SHA-256 verified, ctest 8/8 (contract, layout, surface, input, render, privacy,
+  surface compositor, media view), the installed `examples/ui-basic` rebuilt
+  externally from the SDK and the prebuilt `examples/bin/crtui_window_demo` both
+  `presented=30 pixel_check=pass input_check=pass`, `verify_dist.py` and the
+  atomic publish pass. A run from work/output paths containing spaces (22.7 s)
+  passes identically.
+- **Shortcut, stated.** Because of the fix above, the 04 SDK's embedded
+  `05-ui.json` no longer matched the regenerated asset, so the 05-ui run used the
+  freshly generated `stage-sources/05-ui.json` and asset (`--recipe`/`--asset`)
+  instead of the recipe embedded in the 04 SDK; the 04 chain was not rebuilt a
+  second time. The embedded-recipe path was exercised on Windows and macOS.
+- **Package content.** `libcrtui.a/.so`, `libcrtui_skia.a`, `libcrtui_skia_media.a`,
+  all five `crtui/*.h`, no LVGL header or file, LVGL notice and recipe under
+  `share/licenses/lvgl` and `share/crt/dependencies/lvgl`. `libcrtui.so` exports
+  only `crtui_*` (0 others); NEEDED libc/libm/libdl (the Skia/media companions are
+  static archives); RUNPATH is `$ORIGIN:$ORIGIN` (duplicate, harmless; the in-tree
+  package has a single `$ORIGIN`). Removing the LVGL notice makes `verify_dist.py`
+  fail.
+- **Text-file relocation verified on Linux.** No `*.la` remains in the 04 or 05
+  SDK, no installed text file names the work/staging path, `pkg-config` resolves
+  `freetype2`/`libcurl` into the SDK, and a copy of the SDK moved to a path with a
+  space gives `curl-config --prefix`/`--libs` and `pkg-config` results under the
+  new location.
+- In-tree after the fix: full `ctest` 154/155 (only the sound-card test),
+  tooling 94/94.
+- Not covered: running the stage as a release asset downloaded from GitHub (the
+  development assets are local files via `--asset`).
 
 ## Host order
 
