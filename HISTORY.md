@@ -10,6 +10,18 @@ substantive update.
 
 ## 2026-10-03
 
+- **Isolated `04-gfx-media -> 05-ui` stage replayed on macOS/arm64 (`crtui`
+  Tranche 7), after one fix.** The stage builder could not find `llvm-nm`
+  behind Apple's clang shim; `tools/build_stage_05_ui.py` now uses `xcrun`.
+  Rebuilt the whole chain clean afterwards: 03 SDK -> isolated 04 with the 03
+  SDK's own tool (615 s, 17/17) -> isolated 05-ui with the 04 SDK's own tool
+  (48.8 s, ctest 8/8, installed sample and packaged demo `presented=30
+  pixel_check=pass input_check=pass`, verify and publish pass), and again from a
+  path containing spaces. The isolated `libcrtui.dylib` binds libc to `libc.dylib`
+  and the dylib-linked sample runs cleanly. Full ctest 162/162, tooling 89/89,
+  `crt-ui-dist` verified. Inherited absolute paths in 04-layer text files
+  (`.la`, `curl-config`, `.pc`) are recorded as a follow-up. Linux replay is next.
+
 - **Isolated `04-gfx-media -> 05-ui` stage accepted on Windows/x64
   (`crtui` Tranche 7).** `distribution/stages/05-ui/CMakeLists.txt` and
   `tools/build_stage_05_ui.py` build crtui (private LVGL v9.6.0, fetched live and

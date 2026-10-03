@@ -1030,6 +1030,48 @@ macOS/Linux branches reuse the 04 stage's link interfaces but have never been
 run. The shared-dylib libc binding on macOS and the Linux Vulkan/Wayland/VA-API
 link lines are the likeliest places for a first-replay gap.
 
+**macOS/arm64 replay (2026-10-03).** The stage project's macOS branches ran
+for the first time and needed one fix; nothing else changed.
+
+- **Finding (fixed).** `tools/build_stage_05_ui.py` aborted before configuring:
+  `llvm-nm/llvm-readobj were not found next to CRT_CC or on PATH`. On macOS
+  `CRT_CC` is Apple's `/usr/bin/clang` shim and the LLVM binutils live in the
+  Xcode toolchain, the same cause as the privacy-tool failure in the Tranche 3
+  replay. `llvm_bin_directory()` now falls back to `xcrun --find llvm-nm`.
+  Because the builder runs from the source asset, the fix required regenerating
+  the asset, the embedded recipe chain and the 03/04 packages; the chain below
+  was rebuilt after it.
+- **Clean isolated chain on this host.** `crt-gfx-simple-dist` (01-c..03 packaged
+  and verified, 2.5 min) regenerated the stage assets and recipes; the isolated
+  `04-gfx-media` was built with the 03 SDK's *own* `crt-stage-build.py` and its
+  recipe (615 s: FreeType/FFmpeg, Skia, curl chain; 17/17 stage tests; verified);
+  the isolated `05-ui` was then built with the 04 SDK's *own*
+  `crt-stage-build.py` and its embedded `05-ui.json`, in 48.8 s: LVGL fetched and
+  SHA-256 verified, ctest 8/8 (contract, layout, surface, input, render,
+  privacy, surface compositor, media view), the installed `examples/ui-basic`
+  rebuilt externally from the SDK and the prebuilt `examples/bin/crtui_window_demo`
+  both `presented=30 pixel_check=pass input_check=pass`, `verify_dist.py` and the
+  atomic publish pass. A run from a work/output path containing spaces
+  (`/tmp/t7 sp/work dir/...`, 49.3 s) passes identically.
+- **Shared-library binding holds in the stage.** The isolated `libcrtui.dylib`
+  binds `_pthread_mutex_init`/`_malloc` to `libc` (not `libSystem`), id
+  `@rpath/libcrtui.dylib`, loads `@rpath` CRT libraries plus `libSystem` only,
+  exports no non-`crtui_*` symbol, and the externally built sample (which links
+  that dylib) exits cleanly -- the failure mode of the Tranche 3 replay does not
+  recur. The packaged demo carries `@loader_path/../../lib`. The package has the
+  LVGL notice and recipe (`share/licenses/lvgl`, `share/crt/dependencies/lvgl`)
+  and no LVGL header or link artifact.
+- In-tree after the fix: full `ctest` 162/162 (expected camera skip), the
+  `crtui_*`-excluding preset 110/110, tooling 89/89, `crt-ui-dist` verified.
+- **Inherited, not caused by this stage.** Text files from the 04 layer carry
+  the build host's absolute paths in the isolated SDK (`lib/libcurl.la`,
+  `lib/libfreetype.la`, `bin/curl-config`, `lib/pkgconfig/libcurl.pc`);
+  `verify_dist.py` inspects binaries, not these. They are present in the 04 SDK
+  already, so 05-ui merely copies them. Recorded in `TODO.md` as a follow-up.
+- Not covered here: the stage does not run the macOS-only
+  `crtui_contract_shared_test` (the in-tree guard); the installed sample linking
+  the dylib is the stage's coverage of that failure. Linux/x86_64 replay remains.
+
 ## Host order
 
 Windows/x64 first (interactive iteration), macOS/arm64 second (input/event

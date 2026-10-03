@@ -128,8 +128,9 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
   from the installed `04-gfx-media` SDK; update `tools/create_stage_source.py`
   and `tools/crt_dist_prerequisites.py` in the same change. Windows/x64 is
   accepted 2026-10-03 (isolated stage 8/8, sample and packaged demo, verify,
-  space-path run); macOS/arm64 and Linux/x86_64 replays remain, the stage
-  project's non-Windows branches being written but never run. Evidence and the
+  space-path run); macOS/arm64 replayed 2026-10-03 (clean 03->04->05 chain, stage
+  8/8, sample and demo, space-path run; one `xcrun llvm-nm` fix); Linux/x86_64
+  remains, its stage branch being written but never run. Evidence and the
   04-SDK `tools/` finding are in `docs/crtui_acceptance.md`.
 
 ## Planned
@@ -308,6 +309,12 @@ or host investigation supplies the required evidence.
   Decide whether to fix `crt_configure_shared_runtime()` for all of them and
   add a dylib-linked test per library. Found 2026-09-30
   (`docs/crtui_acceptance.md`, Tranche 3 macOS replay).
+- Isolated SDK text files carry the build host's absolute paths (macOS
+  `lib/libcurl.la`, `lib/libfreetype.la`, `bin/curl-config`,
+  `lib/pkgconfig/libcurl.pc`, inherited from the 04 layer) and
+  `verify_dist.py` only scans binaries. Rewrite them to a relocatable form (or
+  drop `.la`) and add a text-file path check; check whether Windows/Linux have
+  the same. Found 2026-10-03 (`docs/crtui_acceptance.md`, Tranche 7 macOS).
 - Make the ordinary in-tree Linux `crt-gfx-media-dist` verifiable with
   `CRTMEDIA_ENABLE_CURL=ON`: `libcrtmedia.so` links the shared `libcurl.so.4`
   in-tree (static zlib is not PIC) and `verify_dist.py` reports `undeclared
