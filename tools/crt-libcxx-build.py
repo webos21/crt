@@ -236,6 +236,13 @@ def detect_target_arch(target_arch_arg):
 def run(args, cwd=None, env=None, label=None):
     if label:
         progress(f"start {label}")
+    if os.name == "nt" and args and args[0] == "git":
+        # libc++'s sparse tree (libcxx/test/...) has paths beyond Windows' 260
+        # character limit; without core.longpaths a fresh checkout fails with
+        # "Filename too long" (found by the first clean Windows build of this
+        # tree, 2026-10-03). Scoped to this command: the user's own git
+        # configuration is left alone.
+        args = [args[0], "-c", "core.longpaths=true", *args[1:]]
     print("+", " ".join(str(a) for a in args), flush=True)
     subprocess.run(args, cwd=cwd, env=env, check=True)
     if label:

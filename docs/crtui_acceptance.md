@@ -997,16 +997,33 @@ input_check=pass`; `verify_dist.py` and the atomic publish pass. A run from a wo
 and output path containing a space (129 s) passes too. Removing the LVGL notice
 makes `verify_dist.py` fail, so the new check is live.
 
-**Chain finding.** An isolated 04 SDK copies `tools/` from its 03 predecessor, not
-from its own asset, so its `crt-stage-build.py` validates recipes with the 03
-SDK's `crt_stage_recipe.py`. That copy predates `04 -> 05` and rejects the 05-ui
-recipe ("invalid or unsupported CRT stage recipe"). The packaged chain therefore
-needs the 03 SDK regenerated from this tree (the in-tree `crt-gfx-simple-dist`
-does so) before the 04 build; this run used the repository's current
-`crt-stage-build.py` against the 04 SDK, which exercises the same stage entrypoint.
-Re-running the whole chain from a regenerated 03 SDK costs the full ~80-minute
-FreeType/FFmpeg rebuild, because the dependency cache is keyed on the predecessor
-SDK's content including its tools.
+**Clean-build verification (Windows/x64, 2026-10-03).** `out/` and every scratch
+directory were deleted and the whole chain rebuilt: `cmake --fresh`, default
+preset CTest 127/127, `crt-gfx-simple-dist` (01-c..03 packaged and verified, ~10
+min), an isolated 04 built with the 03 SDK's *own* `crt-stage-build.py` and recipe
+and no cache (4556 s, 17/17 stage tests, verified), then the isolated 05-ui built
+with the 04 SDK's *own* `crt-stage-build.py` and its embedded `05-ui.json`:
+ctest 8/8, sample and packaged demo `presented=30 pixel_check=pass
+input_check=pass`, `verify_dist.py` and publish pass in 132 s, from a plain path
+and from work/output paths containing a space (132 s). An isolated 04 SDK copies
+`tools/` from its 03 predecessor rather than from its own asset, so it only
+accepts the 05-ui recipe when the 03 SDK was packaged from this tree -- true here
+(`crt_stage_recipe.py` is byte-identical in the 03 and 04 SDKs and the repo),
+which resolves the earlier finding that an older 04 SDK rejects the recipe. The
+in-tree `crt-ui-dist` (LVGL on, Skia off) verifies 01..05, and its 05-ui package
+has `crtui/skia*.h` without the companion libraries, which `verify_dist.py` must
+and now does accept (`tools/test_verify_dist.py` covers both packages on a fake
+tree, and reverting to the first draft's check makes that test fail). `crt-ui-dist`
+needs `crtui-lvgl-fetch` and `-DCRTUI_ENABLE_LVGL=ON`: the sample it must package
+is built only then.
+
+The clean build found two real defects that the previous `out/` had hidden, both
+fixed: libc++'s sparse checkout fails on Windows with "Filename too long" when
+neither Windows long paths nor git `core.longpaths` is enabled
+(`tools/crt-libcxx-build.py` now passes `core.longpaths=true` to its own git
+commands on Windows), and `capture_mf.c` could compile before the mingw-w64
+headers existed because `crtmedia_backend_objects` did not depend on
+`crtgfx-mingw-w64-headers-fetch` (`libcrtmedia/CMakeLists.txt` now orders them).
 
 **Not verified here.** macOS/arm64 and Linux/x86_64: the stage project's
 macOS/Linux branches reuse the 04 stage's link interfaces but have never been

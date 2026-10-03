@@ -14,6 +14,7 @@ from verify_dist import (
     validate_external_prerequisites,
     validate_manifest_schema,
     validate_redistributed_dependencies,
+    validate_ui_stage,
 )
 
 
@@ -117,6 +118,106 @@ class RedistributedDependencyTests(unittest.TestCase):
         missing["redistributed_dependencies"][0]["headers"] = ["include/missing"]
         with self.assertRaises(SystemExit):
             validate_redistributed_dependencies(self.dist, missing)
+
+
+class UiStageTests(unittest.TestCase):
+    """validate_ui_stage() on a small fake tree: the ordinary in-tree 05-ui package
+    (companion headers installed unconditionally, companion libraries only with
+    Skia/FFmpeg) must pass, and the isolated option-ON package must be held to
+    the stricter contract. Guards the 2026-10-03 check that first draft got wrong:
+    it required the companion libraries of every package and would have rejected
+    the legitimate Skia-OFF one."""
+
+    DEPENDENCIES = ("freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib")
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.dist = Path(self.temporary.name)
+        for relative in (
+                "include/crtui/ui.h", "include/crtui/api.h", "include/crtui/crtgfx.h",
+                "include/crtui/skia.h", "include/crtui/skia_media.h",
+                "examples/ui-basic/main.c", "examples/ui-basic/CMakeLists.txt",
+                "examples/bin/crtui_window_demo.exe",
+                "lib/libcrtui.a", "lib/libcrtui_dll.dll.a"):
+            self.write(relative, "int main(void) { return 0; }\n")
+        self.redistributed: dict = {}
+        self.manifest: dict = {}
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def write(self, relative: str, text: str = "test") -> None:
+        path = self.dist / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def make_isolated(self) -> None:
+        for relative in ("lib/libcrtui_skia.a", "lib/libcrtui_skia_media.a",
+                         "share/licenses/lvgl/LICENCE.txt",
+                         "share/crt/dependencies/lvgl/recipe.json"):
+            self.write(relative)
+        self.manifest = {"built_from": {"stage": "04-gfx-media"}}
+        names = ("lvgl",) + self.DEPENDENCIES
+        self.redistributed = {
+            name: {"headers": [], "link_artifacts": []} for name in names}
+
+    def check(self) -> None:
+        validate_ui_stage(self.dist, self.manifest, self.redistributed, ".exe")
+
+    def test_ordinary_package_without_companion_libraries_passes(self) -> None:
+        # Headers installed, libraries absent: the Skia-OFF in-tree package.
+        self.check()
+
+    def test_ordinary_package_still_rejects_a_missing_core_library(self) -> None:
+        (self.dist / "lib" / "libcrtui.a").unlink()
+        with self.assertRaises(SystemExit):
+            self.check()
+
+    def test_ordinary_package_rejects_a_leaked_lvgl_header_and_sample(self) -> None:
+        self.write("include/lvgl/lvgl.h")
+        with self.assertRaises(SystemExit):
+            self.check()
+        (self.dist / "include" / "lvgl" / "lvgl.h").unlink()
+        self.write("examples/ui-basic/main.c", "lv_obj_create(NULL);\n")
+        with self.assertRaises(SystemExit):
+            self.check()
+
+    def test_complete_isolated_package_passes(self) -> None:
+        self.make_isolated()
+        self.check()
+
+    def test_isolated_package_requires_every_companion_and_lvgl_artifact(self) -> None:
+        for relative in ("lib/libcrtui_skia.a", "lib/libcrtui_skia_media.a",
+                         "include/crtui/skia.h", "include/crtui/skia_media.h",
+                         "share/licenses/lvgl/LICENCE.txt",
+                         "share/crt/dependencies/lvgl/recipe.json"):
+            with self.subTest(missing=relative):
+                self.make_isolated()
+                (self.dist / relative).unlink()
+                with self.assertRaises(SystemExit):
+                    self.check()
+
+    def test_isolated_package_requires_the_lvgl_record_and_keeps_it_private(self) -> None:
+        self.make_isolated()
+        del self.redistributed["lvgl"]
+        with self.assertRaises(SystemExit):
+            self.check()
+        self.make_isolated()
+        self.redistributed["lvgl"]["headers"] = ["include/lvgl"]
+        with self.assertRaises(SystemExit):
+            self.check()
+        self.make_isolated()
+        self.redistributed["lvgl"]["link_artifacts"] = ["lib/liblvgl.a"]
+        with self.assertRaises(SystemExit):
+            self.check()
+
+    def test_isolated_package_must_keep_every_04_dependency_record(self) -> None:
+        for name in self.DEPENDENCIES:
+            with self.subTest(dropped=name):
+                self.make_isolated()
+                del self.redistributed[name]
+                with self.assertRaises(SystemExit):
+                    self.check()
 
 
 class ExternalPrerequisiteTests(unittest.TestCase):

@@ -35,14 +35,31 @@ substantive update.
   closure test (7 tests, now covering 05-ui) passes. Removing the LVGL notice makes
   `verify_dist.py` fail.
 
-  Findings: an isolated 04 SDK copies `tools/` from its 03 predecessor, so its own
-  `crt-stage-build.py` rejected the 05 recipe until the 03 SDK is regenerated from
-  this tree (verified with the repository's current `crt-stage-build.py` instead; a
-  full chain rerun costs the ~80-minute dependency rebuild). A first draft of the
-  `verify_dist.py` check required the companion libraries of every in-tree package,
-  which would have rejected the legitimate Skia-OFF package (headers install
-  unconditionally); it now applies only to the isolated stage. macOS/arm64 and
-  Linux/x86_64 branches of the stage project are written but unverified.
+  A first draft of the `verify_dist.py` check required the companion libraries of
+  every in-tree package, which would have rejected the legitimate Skia-OFF package
+  (headers install unconditionally); it now applies only to the isolated stage.
+
+  **Clean-build verification.** With `out/` and all scratch directories deleted,
+  the whole chain was rebuilt and passed: `cmake --fresh`, default CTest 127/127,
+  `crt-gfx-simple-dist` (01-c..03), an isolated 04 built from the 03 SDK with that
+  SDK's own `crt-stage-build.py` and no cache (4556 s, 17/17), then the isolated
+  05-ui built with the 04 SDK's own tool and embedded `05-ui.json` (8/8, sample and
+  packaged demo `presented=30 pixel_check=pass input_check=pass`, verified, 132 s,
+  also from space-containing paths), and in-tree `crt-ui-dist` (LVGL on, Skia off)
+  verifies 01..05. The 05-ui `verify_dist` logic moved into `validate_ui_stage()`
+  with fake-tree tests in `tools/test_verify_dist.py` (15 tests; the first draft's
+  check makes one fail). The earlier "old 04 SDK rejects the 05 recipe" finding is
+  resolved: a 04 SDK built from a 03 SDK packaged from this tree carries the
+  current `crt_stage_recipe.py`.
+
+  The clean build exposed two defects the previous `out/` had hidden: libc++'s
+  sparse checkout failed on Windows with "Filename too long" (neither long paths
+  nor git `core.longpaths` enabled), fixed by passing `-c core.longpaths=true` to
+  `tools/crt-libcxx-build.py`'s own git commands; and `capture_mf.c` could compile
+  before the mingw-w64 headers were fetched (`'mfapi.h' file not found`) because
+  `crtmedia_backend_objects` did not depend on `crtgfx-mingw-w64-headers-fetch`,
+  now ordered in `libcrtmedia/CMakeLists.txt`. macOS/arm64 and Linux/x86_64
+  branches of the stage project are written but unverified.
 
 ## 2026-10-02
 

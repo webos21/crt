@@ -201,6 +201,57 @@ def validate_external_prerequisites(manifest: dict) -> dict[str, dict]:
     return by_id
 
 
+def validate_ui_stage(dist: Path, manifest: dict, redistributed: dict, suffix: str) -> None:
+    """Checks specific to the 05-ui SDK (in-tree and isolated); split out of main()
+    so tools/test_verify_dist.py can exercise it on a small fake tree."""
+    # crtui: the public header and both libraries. No LVGL header may leak
+    # into the installed SDK (LVGL is a private dependency, docs/crtui_
+    # acceptance.md), so its absence is checked too.
+    for header in ("ui.h", "api.h", "crtgfx.h"):
+        require(dist / "include" / "crtui" / header)
+    # The installed application sample: source, standalone project, binary.
+    # It must be a pure crtui/crtgfx consumer -- naming LVGL in it would mean
+    # the private dependency leaked into the application-facing surface.
+    for relative in ("main.c", "CMakeLists.txt"):
+        require(dist / "examples" / "ui-basic" / relative)
+    require(dist / "examples" / "bin" / f"crtui_window_demo{suffix}")
+    for relative in ("main.c", "CMakeLists.txt"):
+        sample = (dist / "examples" / "ui-basic" / relative).read_text(encoding="utf-8")
+        code = re.sub(r"/\*.*?\*/", "", sample, flags=re.DOTALL)
+        if re.search(r"lv_[a-z0-9_]+|LV_[A-Z0-9_]+|#\s*include\s*[<\"][^>\"]*lvgl", code, re.IGNORECASE):
+            raise SystemExit(f"examples/ui-basic/{relative} references LVGL; it must use crtui/crtgfx only")
+    require_any(dist / "lib", ("libcrtui.a",), "static crtui")
+    require_any(dist / "lib", ("*crtui*dll*", "libcrtui.so*", "libcrtui.dylib"), "shared crtui")
+    for leaked in ("lvgl", "lvgl.h", "lv_conf.h"):
+        if (dist / "include" / leaked).exists():
+            raise SystemExit(f"LVGL header leaked into the public SDK: include/{leaked}")
+    # The ordinary in-tree package installs crtui/skia*.h unconditionally but
+    # the companion libraries only when Skia/FFmpeg are enabled, so nothing is
+    # required of them here; the isolated option-ON stage requires them.
+    if manifest.get("built_from", {}).get("stage") == "04-gfx-media":
+        # The isolated transition is option-ON, like 04's: both companions
+        # exist, LVGL is declared as the private static dependency it is, and
+        # its MIT notice and pinned recipe are packaged even though no LVGL
+        # header or library is installed.
+        for header in ("skia.h", "skia_media.h"):
+            require(dist / "include" / "crtui" / header)
+        for library in ("libcrtui_skia.a", "libcrtui_skia_media.a"):
+            require(dist / "lib" / library)
+        if "lvgl" not in redistributed:
+            raise SystemExit("isolated 05-ui does not declare its lvgl dependency")
+        lvgl = redistributed["lvgl"]
+        if lvgl["headers"] or lvgl["link_artifacts"]:
+            raise SystemExit("lvgl is private to libcrtui: it must declare no "
+                             "headers or link artifacts")
+        require(dist / "share" / "licenses" / "lvgl" / "LICENCE.txt")
+        require(dist / "share" / "crt" / "dependencies" / "lvgl" / "recipe.json")
+        # The predecessor's own isolated-04 artifacts must still be here.
+        for name in ("freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib"):
+            if name not in redistributed:
+                raise SystemExit(
+                    f"isolated 05-ui lost the 04-gfx-media {name} dependency record")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", required=True, type=Path)
@@ -389,52 +440,7 @@ def main() -> None:
             require_any(dist / "lib", ("*crtmedia*dll*", "libcrtmedia.so*",
                                         "libcrtmedia.dylib"), "shared crtmedia")
     if args.stage >= "05-ui":
-        # crtui: the public header and both libraries. No LVGL header may leak
-        # into the installed SDK (LVGL is a private dependency, docs/crtui_
-        # acceptance.md), so its absence is checked too.
-        for header in ("ui.h", "api.h", "crtgfx.h"):
-            require(dist / "include" / "crtui" / header)
-        # The installed application sample: source, standalone project, binary.
-        # It must be a pure crtui/crtgfx consumer -- naming LVGL in it would mean
-        # the private dependency leaked into the application-facing surface.
-        for relative in ("main.c", "CMakeLists.txt"):
-            require(dist / "examples" / "ui-basic" / relative)
-        require(dist / "examples" / "bin" / f"crtui_window_demo{suffix}")
-        for relative in ("main.c", "CMakeLists.txt"):
-            sample = (dist / "examples" / "ui-basic" / relative).read_text(encoding="utf-8")
-            code = re.sub(r"/\*.*?\*/", "", sample, flags=re.DOTALL)
-            if re.search(r"lv_[a-z0-9_]+|LV_[A-Z0-9_]+|#\s*include\s*[<\"][^>\"]*lvgl", code, re.IGNORECASE):
-                raise SystemExit(f"examples/ui-basic/{relative} references LVGL; it must use crtui/crtgfx only")
-        require_any(dist / "lib", ("libcrtui.a",), "static crtui")
-        require_any(dist / "lib", ("*crtui*dll*", "libcrtui.so*", "libcrtui.dylib"), "shared crtui")
-        for leaked in ("lvgl", "lvgl.h", "lv_conf.h"):
-            if (dist / "include" / leaked).exists():
-                raise SystemExit(f"LVGL header leaked into the public SDK: include/{leaked}")
-        # The ordinary in-tree package installs crtui/skia*.h unconditionally but
-        # the companion libraries only when Skia/FFmpeg are enabled, so nothing is
-        # required of them here; the isolated option-ON stage requires them.
-        if manifest.get("built_from", {}).get("stage") == "04-gfx-media":
-            # The isolated transition is option-ON, like 04's: both companions
-            # exist, LVGL is declared as the private static dependency it is, and
-            # its MIT notice and pinned recipe are packaged even though no LVGL
-            # header or library is installed.
-            for header in ("skia.h", "skia_media.h"):
-                require(dist / "include" / "crtui" / header)
-            for library in ("libcrtui_skia.a", "libcrtui_skia_media.a"):
-                require(dist / "lib" / library)
-            if "lvgl" not in redistributed:
-                raise SystemExit("isolated 05-ui does not declare its lvgl dependency")
-            lvgl = redistributed["lvgl"]
-            if lvgl["headers"] or lvgl["link_artifacts"]:
-                raise SystemExit("lvgl is private to libcrtui: it must declare no "
-                                 "headers or link artifacts")
-            require(dist / "share" / "licenses" / "lvgl" / "LICENCE.txt")
-            require(dist / "share" / "crt" / "dependencies" / "lvgl" / "recipe.json")
-            # The predecessor's own isolated-04 artifacts must still be here.
-            for name in ("freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib"):
-                if name not in redistributed:
-                    raise SystemExit(
-                        f"isolated 05-ui lost the 04-gfx-media {name} dependency record")
+        validate_ui_stage(dist, manifest, redistributed, suffix)
     print(f"CRT distribution verified: {dist}")
 
 

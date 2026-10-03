@@ -412,6 +412,16 @@ set(CRTMEDIA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(CRTMEDIA_CRT_STATIC_LIBS c m dl cxx)
 set(CRTMEDIA_CRT_SHARED_LIBS c_shared m_shared dl_shared cxx_shared)
 crt_add_crtmedia_targets()
+if(CRT_TARGET_OS STREQUAL "windows" AND TARGET crtgfx-mingw-w64-headers-fetch
+   AND TARGET crtmedia_backend_objects)
+  # capture_mf.c includes real mingw-w64 Media Foundation headers from
+  # CRT_MINGW_W64_HEADERS_INCLUDE_ROOT, which that fetch target populates.
+  # Nothing ordered the two, so a clean tree failed with "'mfapi.h' file not
+  # found"; it stayed hidden while an earlier Skia build had already fetched the
+  # headers (found by the first clean Windows build, 2026-10-03). The isolated
+  # stages fetch the headers in their entrypoint and do not define this target.
+  add_dependencies(crtmedia_backend_objects crtgfx-mingw-w64-headers-fetch)
+endif()
 install(TARGETS crtmedia crtmedia_shared
   ARCHIVE DESTINATION lib COMPONENT crt-media
   LIBRARY DESTINATION lib COMPONENT crt-media
