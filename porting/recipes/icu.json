@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "name": "icu",
+  "version": "78.3",
+  "source": {
+    "url": "https://github.com/unicode-org/icu/releases/download/release-78.3/icu4c-78.3-sources.tgz",
+    "archive": "icu4c-78.3-sources.tgz",
+    "source_dir": "icu",
+    "sha256": "3a2e7a47604ba702f345878308e6fefeca612ee895cf4a5f222e7955fabfe0c0",
+    "sha512": "04a49455e1489030c520a4bfd2664fa2171e7938d08f2acdbbcb1fda976639fd8b1f0704f2eec89ba59a7b6d118ceaab6ec5a096e40d9085a0895d91ce225245"
+  },
+  "dependencies": [
+    "make"
+  ],
+  "build": {
+    "system": "configure",
+    "configure_cwd": "source",
+    "sysroot_stage": "02-cxx",
+    "configure_args": [
+      "--disable-tests",
+      "--disable-samples",
+      "--disable-extras",
+      "--disable-layoutex",
+      "--enable-static",
+      "--enable-shared"
+    ],
+    "env": {
+      "CFLAGS": "-O2",
+      "CXXFLAGS": "-O2",
+      "CRT_CXX_HOSTED": "1",
+      "CRT_CXX_ENABLE_RTTI": "1"
+    },
+    "make_args": [],
+    "make_subdir": "source"
+  },
+  "tests": [
+    {
+      "name": "unicode-static",
+      "type": "compile-run",
+      "language": "c++",
+      "source": "porting/tests/icu_unicode_test.cc",
+      "cflags": [
+        "-I@PORT_PREFIX@/include",
+        "-DU_STATIC_IMPLEMENTATION"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libicui18n.a",
+        "@PORT_PREFIX@/lib/libicuuc.a",
+        "@PORT_PREFIX@/lib/libicudata.a"
+      ],
+      "expect_stdout": "icu_unicode_test: ok"
+    },
+    {
+      "name": "unicode-shared",
+      "type": "compile-run",
+      "language": "c++",
+      "source": "porting/tests/icu_unicode_test.cc",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libicui18n.so",
+        "@PORT_PREFIX@/lib/libicuuc.so",
+        "@PORT_PREFIX@/lib/libicudata.so"
+      ],
+      "expect_stdout": "icu_unicode_test: ok"
+    }
+  ],
+  "status": {
+    "linux": "shared-pass"
+  },
+  "notes": [
+    "Added 2026-10-03 for Web Tranche 1: JavaScriptCore/WTF require ICU >= 70.1 with the data, uc and i18n components (Source/cmake/OptionsJSCOnly.cmake, find_package(ICU 70.1 REQUIRED COMPONENTS data i18n uc)). It is a CRT port so the 06-web SDK does not depend on a host ICU (which would differ per OS and break the package boundary).",
+    "78.3 is the newest non-prerelease release (2026-03-17); 79.1rc is a release candidate. The archive's SHA-256 matches the digest GitHub publishes for the asset and its SHA-512 matches the release's signed SHASUM512.txt entry.",
+    "build.sysroot_stage=02-cxx and build.env.CRT_CXX_HOSTED=1: ICU is C++ and ships programs (icupkg, genrb, ...) with a plain `int main`; see porting/recipes/gperf.json for why both are needed. ICU is built without tests, samples and extras; ICU's runtime data is the default embedded data library (libicudata).",
+    "build.env.CRT_CXX_ENABLE_RTTI=1: ICU uses dynamic_cast/typeid (normalizer2.cpp, rbbi.cpp), and tools/crt-c++ compiles with -fno-rtti unless a port opts in."
+  ]
+}

@@ -102,6 +102,9 @@ void* bsearch(
     size_t size,
     int (*compar)(const void*, const void*));
 char* getenv(const char* name);
+/* Bionic: basename of argv[0] ("<unknown>" before startup), see libc/src/env.c. */
+const char* getprogname(void);
+void setprogname(const char* name);
 int putenv(char* entry);
 int setenv(const char* name, const char* value, int overwrite);
 int unsetenv(const char* name);

@@ -200,6 +200,27 @@ for arg in "$@"; do
   esac
 done
 
+# Linux executable link: libm.a/libdl.a are already named in the static link below,
+# so an upstream's own `-lm`/`-ldl` (configure probes, LIBS=-lm) would additionally
+# select the shared libm.so/libdl.so and leave the program with `NEEDED libm.so` and
+# no rpath to the CRT sysroot; the host loader then picks glibc's /lib/.../libm.so
+# linker script and the program dies with "invalid ELF header" -- which turns every
+# configure run probe (ICU's `size of wchar_t`) into a false failure. Same reasoning
+# and same condition as tools/crt-c++'s `-lm|-ldl` case. Shared links keep them.
+if [ "$target_os" = linux ] && [ "$shared_mode" -eq 0 ] && [ "$compile_only" -eq 0 ]; then
+  linux_exec_argc=$#
+  linux_exec_i=0
+  while [ "$linux_exec_i" -lt "$linux_exec_argc" ]; do
+    linux_exec_arg=$1
+    shift
+    case "$linux_exec_arg" in
+      -lm|-ldl) ;;
+      *) set -- "$@" "$linux_exec_arg" ;;
+    esac
+    linux_exec_i=$((linux_exec_i + 1))
+  done
+fi
+
 # -fcrt-real-apple-sdk: a sentinel, not a real clang flag -- mirrors tools/
 # crt-c++'s own identical sentinel (see that file's own top comment for the
 # full "why": a translation unit that itself needs real Apple system/

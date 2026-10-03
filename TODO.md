@@ -74,11 +74,20 @@ then macOS/arm64.
   tag, license-file inventory), upstream mapping written, security/SBOM policy
   confirmed; evidence in `HISTORY.md` and `docs/crtweb_acceptance.md`.
 * [ ] **1. JavaScriptCore / JSCOnly bring-up.** Linux first, then a quick
-  Windows and macOS replay; JIT-off first-green is acceptable.
+  Windows and macOS replay; built against the installed SDK by
+  `tools/build_webkit_jsc.py`, never host clang.
+  * [ ] **1A. Dependency ports.** `gperf` and `icu` are done on Linux (recipes
+    pass; `HISTORY.md` 2026-10-03). Remaining: Ruby (>= 2.5) installed by the
+    maintainer, `tools/build_webkit_jsc.py`, and the Windows/macOS port replays.
+  * [ ] **1B. Interpreter first-green.** JIT off, `Generic` event loop; the CRT
+    acceptance list is in `docs/crtweb_acceptance.md`.
+  * [ ] **1C. JIT.** Executable memory, W^X, GC+JIT stress, unwind.
 * [ ] **2. Linux WPE reference baseline.** Upstream WPE unchanged rendering
   local HTML; the known-good baseline to diff `PlatformCRT` against.
-* [ ] **3. `PlatformCRT` graphics and input prototype.** Shared-memory output
-  through `crtgfx` into a `crtui` external surface, then GPU-buffer output.
+* [ ] **3. `PlatformCRT` graphics and input prototype.** 3A: Linux WPEPlatform
+  prototype (shared memory -> `crtgfx` -> `crtui` external surface); 3B+: the
+  `PlatformCRT` WebKit port, then GPU-buffer output. The frame-producer and input
+  contracts are frozen before 3A (`docs/crtweb_acceptance.md`).
 * [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
   `crtui`'s web view; no WebKit type in a public header.
 * [ ] **5. Multi-process lifecycle.** UI/Web/Network/GPU processes: launch, IPC,
@@ -93,6 +102,10 @@ then macOS/arm64.
   the installed `05-ui` SDK; update `tools/create_stage_source.py` and
   `tools/crt_dist_prerequisites.py` in the same change; provenance/SBOM/CVE
   artifacts.
+
+Web follow-up (not a gate): `tools/check_webkit_security.py` -- compare the pinned
+version with the upstream WPE advisory feed; becomes a package gate before the
+first public `06-web` release.
 
 Small UI follow-ups (not gates): teach `tools/prepare_release_assets.py` the
 `05-ui` SDK, and make a default-configuration `crt-ui-dist` fail with a clear

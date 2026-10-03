@@ -330,6 +330,14 @@ if(CRT_TARGET_OS STREQUAL "linux")
   # of the bare $<TARGET_OBJECTS:crt1> they'd otherwise need to remember
   # to extend themselves on every executable target.
   list(APPEND CRT_STARTUP_OBJECTS $<TARGET_OBJECTS:crt1_init_array>)
+  # crtbegin_so.o: the per-DSO __dso_handle for shared objects linked through
+  # tools/crt-cc / tools/crt-c++ (see that file's own comment). Not part of
+  # CRT_STARTUP_OBJECTS: executables get __dso_handle from libc.a.
+  add_library(crtbegin_so OBJECT src/arch/linux/common/crtbegin_so.c)
+  target_link_libraries(crtbegin_so PRIVATE crt_build_flags)
+  target_include_directories(crtbegin_so PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  )
 elseif(CRT_TARGET_OS STREQUAL "windows")
   # See libc/src/arch/windows/common/init_fini_array.c's own comment:
   # unlike Linux's single boundary-symbol-driven object, Windows/PE needs
@@ -480,6 +488,7 @@ install(TARGETS c c_shared
 install(FILES "$<TARGET_OBJECTS:crt1>" DESTINATION lib RENAME crt1.o COMPONENT crt-c)
 if(CRT_TARGET_OS STREQUAL "linux")
   install(FILES "$<TARGET_OBJECTS:crt1_init_array>" DESTINATION lib RENAME crt1_init_array.o COMPONENT crt-c)
+  install(FILES "$<TARGET_OBJECTS:crtbegin_so>" DESTINATION lib RENAME crtbegin_so.o COMPONENT crt-c)
 endif()
 if(CRT_TARGET_OS STREQUAL "windows")
   # crt_windows_dllcrt (crtDllMainCRTStartup, dllcrt.c) has so far only

@@ -935,6 +935,10 @@ add_custom_target(sysroot
   DEPENDS c c_shared m m_shared dl dl_shared crt1 crt_shell_artifacts
   COMMENT "Installing the C runtime stage into ${CRT_SYSROOT}"
 )
+if(TARGET crtbegin_so)
+  # The install component ships crtbegin_so.o (Linux per-DSO __dso_handle).
+  add_dependencies(sysroot crtbegin_so)
+endif()
 if(TARGET crt-libcxx-configure)
   add_dependencies(crt-libcxx-configure sysroot)
 endif()
@@ -1100,6 +1104,16 @@ if(Python3_Interpreter_FOUND)
   function(crt_add_build_port_target recipe_name recipe_build_system)
     crt_add_port_recipe_target(${recipe_name})
     set(CRT_PORT_BUILD_DEPENDS sysroot port-fetch-${recipe_name})
+    # A C++ port (gperf, ICU, ...) builds against the cumulative 02-cxx sysroot
+    # (libc++ headers and runtime), not the C-only 01-c one; its recipe says so
+    # with build.sysroot_stage (tools/crt-port-build.py selects the same dist).
+    file(READ "${CRT_PORT_RECIPE_ROOT}/${recipe_name}.json" CRT_PORT_RECIPE_TEXT)
+    string(JSON CRT_PORT_RECIPE_SYSROOT_STAGE ERROR_VARIABLE CRT_PORT_RECIPE_STAGE_ERROR
+      GET "${CRT_PORT_RECIPE_TEXT}" build sysroot_stage)
+    if(CRT_PORT_RECIPE_STAGE_ERROR STREQUAL "NOTFOUND" AND
+       CRT_PORT_RECIPE_SYSROOT_STAGE STREQUAL "02-cxx" AND TARGET crt-libcxx-sysroot)
+      list(APPEND CRT_PORT_BUILD_DEPENDS crt-libcxx-sysroot)
+    endif()
     set(CRT_PORT_BUILD_SHELL_ARGS)
     if((recipe_build_system STREQUAL "configure" OR
         recipe_build_system STREQUAL "android_host_tool" OR

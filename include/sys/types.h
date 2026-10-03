@@ -36,4 +36,9 @@ typedef __crt_uid_t uid_t;
 typedef __crt_gid_t gid_t;
 typedef __crt_socklen_t socklen_t;
 
+/* <sys/types.h> has always made the fixed-width integer types visible (Bionic
+ * includes <stdint.h> here). Included last, after every typedef above, so a
+ * <stdint.h> that itself pulls <wchar.h>/<stdio.h> finds off_t and ssize_t. */
+#include <stdint.h>
+
 #endif

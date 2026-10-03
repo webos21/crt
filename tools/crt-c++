@@ -198,6 +198,19 @@ while [ "$i" -lt "$original_argc" ]; do
       # libpthread/librt into standalone Android runtime builds.
       keep_arg=0
       ;;
+    -lm|-ldl)
+      # The Linux static-runtime link below already names libm.a/libdl.a inside its
+      # start-group. An upstream makefile's own `-lm` (gperf's LIBS, many others)
+      # would additionally select the shared libm.so, giving the executable a
+      # `NEEDED libm.so` with no rpath to the CRT sysroot -- the host loader then
+      # finds glibc's /lib/.../libm.so linker script and fails ("invalid ELF
+      # header"). Dropped only in that configuration; shared runtime linkage keeps
+      # them (libm.so is wanted there, with the sysroot rpath).
+      if [ "$target_os" = linux ] && [ "${CRT_CXX_RUNTIME_LINKAGE:-static}" != shared ] &&
+         [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
+        keep_arg=0
+      fi
+      ;;
     -lc)
       # While producing libc++/libc++abi themselves, the wrapper below picks
       # the correct static/shared CRT libc shape. Keeping the standalone
@@ -338,6 +351,18 @@ if [ "$target_os" = macos ] && [ "$want_real_apple_sdk" -eq 1 ]; then
 fi
 
 common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-sections -fdata-sections$cxx_language_flags -nostdinc -nostdinc++"
+# -ffreestanding makes `main` an ordinary C++ function, so an unmodified upstream
+# program that defines plain `int main(int, char**)` gets the mangled name
+# _Z4mainiPPc and the CRT's crt1 (which calls the C symbol `main`) cannot link it;
+# CRT's own C++ tests work around it with `extern "C" int main`. A port that
+# builds such a program (gperf, ICU's tools, JavaScriptCore's `jsc`) sets
+# CRT_CXX_HOSTED=1 in its recipe `env`: -fhosted restores clang's special handling
+# of `main` (unmangled) and sets __STDC_HOSTED__=1. Opt-in because it also changes
+# __STDC_HOSTED__ for the libc++/Skia/etc. builds that have always been
+# freestanding; flip the default only after those stages are rebuilt hosted.
+if [ "${CRT_CXX_HOSTED:-0}" = "1" ]; then
+  common_flags="$common_flags -fhosted"
+fi
 case "$target_os" in
   macos)
     common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1"
@@ -966,6 +991,11 @@ fi
 if [ "$target_os" = linux ]; then
   if [ "$shared_mode" -eq 1 ]; then
     set -- "$@" "-L${CRT_SYSROOT}/lib"
+    # Per-DSO __dso_handle (see libc/src/arch/linux/common/crtbegin_so.c): the
+    # shared-object link below uses libc.so, which has no visible one.
+    if [ -f "${CRT_SYSROOT}/lib/crtbegin_so.o" ] && [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
+      set -- "$@" "${CRT_SYSROOT}/lib/crtbegin_so.o"
+    fi
     if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
       if [ "$runtime_linkage" = shared ]; then
         set -- "$@" "$cxx_lib"

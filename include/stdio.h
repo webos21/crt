@@ -28,8 +28,11 @@ extern "C" {
 #define SEEK_END 2
 #endif
 
+#ifndef __CRT_FILE_DEFINED
+#define __CRT_FILE_DEFINED
 struct __sFILE;
 typedef struct __sFILE FILE;
+#endif
 typedef off_t fpos_t;
 
 extern FILE* stdin;

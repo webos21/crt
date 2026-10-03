@@ -213,6 +213,7 @@
 --exclude-symbols=__multadd_D2A
 --exclude-symbols=__nrv_alloc_D2A
 --exclude-symbols=__pow5mult_D2A
+--exclude-symbols=__progname
 --exclude-symbols=__quorem_D2A
 --exclude-symbols=__ratio_D2A
 --exclude-symbols=__regex_iswctype
@@ -451,6 +452,7 @@
 --exclude-symbols=getpgrp
 --exclude-symbols=getpid
 --exclude-symbols=getppid
+--exclude-symbols=getprogname
 --exclude-symbols=getpwnam
 --exclude-symbols=getpwnam_r
 --exclude-symbols=getpwuid
@@ -836,6 +838,7 @@
 --exclude-symbols=setlocale
 --exclude-symbols=setmntent
 --exclude-symbols=setpgid
+--exclude-symbols=setprogname
 --exclude-symbols=setresgid
 --exclude-symbols=setresuid
 --exclude-symbols=setrlimit

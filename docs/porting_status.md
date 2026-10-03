@@ -88,11 +88,65 @@ symlink/delete timing (both once open cross-cutting follow-ups from this
 queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
 2026-08-15 entries.
 
+`gperf` and `icu` (both added 2026-10-03) are the first **C++** ports and exist for
+the Web Runtime (`06-web`): JavaScriptCore/WTF need ICU >= 70.1 (`data`, `uc`,
+`i18n`) and WebKit's build needs gperf. Linux only so far (`gperf`
+`configure-pass`, `icu` `shared-pass`); Windows and macOS are not attempted. See
+the `gperf` and `icu` sections below.
+
 `expat` and `freetype` (both added 2026-08-24) are graphics-stack dependencies
 outside the networking/TLS queue. Expat supports the Wayland scanner build;
 FreeType now feeds Skia's custom-directory font manager. The resulting
 Wayland/Skia/FreeType input-and-text milestone is complete on all three hosts;
 their package-specific status remains in the sections below.
+
+## gperf
+
+- Version: `3.3`
+- Recipe: `porting/recipes/gperf.json`
+- Build system: `configure` (a C++ program; `build.sysroot_stage: 02-cxx`)
+- Dependencies: `make`
+- Status:
+  - Linux: `configure-pass`
+  - macOS, Windows: not attempted
+- Automated recipe tests:
+  - `generate-hash`
+
+The test runs the freshly built `gperf -t` on a four-keyword set and checks the
+emitted perfect-hash function. This is the first C++ port, which exposed several
+CRT gaps now closed in the toolchain and libc (details in `HISTORY.md`,
+2026-10-03): the port builder now selects the `02-cxx` sysroot for a C++ recipe
+(`build.sysroot_stage`); `tools/crt-c++` takes `CRT_CXX_HOSTED=1` so an
+unmodified `int main` is not mangled under `-ffreestanding`;
+`CRT_CXX_ENABLE_EXCEPTIONS=1` for gperf's `throw std::bad_alloc()`; a stray
+`-lm`/`-ldl` no longer links the shared libm/libdl into a static-runtime
+executable (host loader failure); `getprogname()`/`setprogname()` (Bionic API)
+were added to libc for gnulib; and CRT headers that formed an include ring
+(`<sys/types.h>`, `<stdint.h>`, `<wchar.h>`, `<xlocale.h>`) became cycle-safe so
+gnulib's wrapper headers can interpose them.
+
+## icu
+
+- Version: `78.3`
+- Recipe: `porting/recipes/icu.json`
+- Build system: `configure` in `source/` (`build.configure_cwd`/`make_subdir`;
+  C++, `build.sysroot_stage: 02-cxx`)
+- Dependencies: `make`
+- Status:
+  - Linux: `shared-pass`
+  - macOS, Windows: not attempted
+- Automated recipe tests:
+  - `unicode-static`
+  - `unicode-shared`
+
+Built without tests, samples and extras; RTTI is enabled for the port
+(`CRT_CXX_ENABLE_RTTI=1`, ICU uses `dynamic_cast`/`typeid`). The test exercises
+`uc` (full case mapping, NFD), `i18n` (locale-sensitive collation, which also
+proves the embedded `data` library) through the C API against both the static and
+shared libraries. Additional CRT surface it needed: the ELF32 types and
+constants in `<elf.h>` (ICU's `pkg_genc` writes ELF32 objects, and Bionic's
+`<elf.h>` defines both classes) and a per-DSO `__dso_handle` for shared libraries
+linked through the wrappers (`crtbegin_so.o`, Bionic's `crtbegin_so.o` role).
 
 ## make
 

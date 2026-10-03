@@ -228,12 +228,46 @@ static int rootfs_has_runtime_suffix(const char* suffix) {
          strncmp(suffix, "usr/bin/", 8) == 0;
 }
 
+/* getprogname()/setprogname()/__progname: Android Bionic's own surface
+ * (bionic/libc/bionic/getprogname.cpp and __libc_init_common(): __progname is
+ * the basename of argv[0], "<unknown>" before startup has run, and
+ * setprogname() stores the basename of its argument without copying it).
+ * Needed by gnulib (gperf, and every GNU tool that uses its getprogname
+ * module) and BSD-derived code. argv[0] outlives main(), so keeping the
+ * pointer is as valid here as it is in Bionic. Windows paths use '\\' too. */
+const char* __progname = "<unknown>";
+
+void setprogname(const char* name) {
+  const char* cursor;
+
+  if (name == 0) {
+    return;
+  }
+  for (cursor = name; *cursor != 0; ++cursor) {
+    if (*cursor == '/'
+#ifdef _WIN32
+        || *cursor == '\\'
+#endif
+    ) {
+      name = cursor + 1;
+    }
+  }
+  __progname = name;
+}
+
+const char* getprogname(void) {
+  return __progname;
+}
+
 void __crt_rootfs_bootstrap(int argc, char** argv) {
   char absolute_path[PATH_MAX];
   const char* marker;
   const char* suffix;
   size_t root_len;
 
+  if (argc > 0 && argv != 0 && argv[0] != 0) {
+    setprogname(argv[0]);
+  }
   __crt_env_init(0);
   if (getenv("CRT_ROOTFS") != 0) {
     return;

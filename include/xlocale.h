@@ -1,15 +1,17 @@
 #ifndef CRT_XLOCALE_H
 #define CRT_XLOCALE_H
 
-#include <ctype.h>
+/* Only leaf headers are included here, deliberately: the *_l prototypes below
+ * need size_t, locale_t, wint_t/wctype_t/mbstate_t and a forward `struct tm`,
+ * not the full <stdio.h>/<stdlib.h>/<time.h>/<wchar.h>/<wctype.h>. Pulling those
+ * in made <locale.h>-or-<xlocale.h> a way into a header ring that fails when any
+ * header in it is interposed (found by gnulib in the gperf port). */
 #include <locale.h>
 #include <stdarg.h>
 #include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-#include <wchar.h>
-#include <wctype.h>
+#include <bits/crt_wtypes.h>
+
+struct tm;
 
 #ifdef __cplusplus
 extern "C" {

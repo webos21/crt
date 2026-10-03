@@ -1,14 +1,13 @@
 #ifndef CRT_WCTYPE_H
 #define CRT_WCTYPE_H
 
+#include <bits/crt_wtypes.h>
 #include <wchar.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef unsigned long wctype_t;
-typedef unsigned long wctrans_t;
 
 int iswalnum(wint_t wc);
 int iswalpha(wint_t wc);

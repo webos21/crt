@@ -236,8 +236,9 @@ The first supported transitions are `01-c -> 02-cxx`, then
 `02-cxx -> 03-gfx-simple -> 04-gfx-media`. Thus `01-c` can fetch the pinned
 libc++/libc++abi/libunwind source package and build `02-cxx`; `02-cxx` can
 fetch the Simple Graphics and advanced Graphics/Media packages and build them
-in dependency order. The `04-gfx-media -> 05-ui` and `05-ui -> 06-web` transitions follow the same
-model once those stages exist.
+in dependency order. The `04-gfx-media -> 05-ui` transition follows the same model and is
+implemented; the `05-ui -> 06-web` transition will follow it once the `06-web`
+source stage is introduced.
 
 The SHA-256 is over the exact release asset bytes, not merely a Git ref. Git
 commit IDs remain provenance metadata, while the digest is the download

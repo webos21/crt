@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is next. Nothing is built or imported yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: its ports (gperf, ICU) come first. No WebKit code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -42,11 +42,9 @@ fonts/text, mouse/keyboard, scrolling, Canvas 2D, basic cookies/storage.
 Deferred: WebRTC, WebGPU, WebXR, EME/DRM, camera/microphone, printing,
 extensions, full accessibility, downloads.
 
-**Version and licensing (verify at Tranche 0).** The reference candidate is the
-current WPE WebKit stable series (2.54, where WPEPlatform is the stable
-embedding API -- confirm against the release notes before pinning). Record the
-exact pinned revision, source provenance, LGPL/BSD notices, and source
-correspondence. WebKit ports own their release and security cadence, so a
+**Version and licensing.** Frozen reference: WPE WebKit 2.54.0 (the stable
+series, where WPEPlatform is the stable embedding API), pinned in Tranche 0 with
+its revision, source provenance, LGPL/BSD notices, and source correspondence. WebKit ports own their release and security cadence, so a
 security-update policy is a deliverable, not an afterthought.
 
 ## Tranches and gates
@@ -110,7 +108,31 @@ that is confirmed or changed with the packaging decisions in Tranche 10.
 Prerequisite bring-up, not an application scripting layer. Linux first, then a
 quick replay on Windows and macOS, because it surfaces threads, TLS, virtual
 and executable memory, signals/exceptions, GC, and JIT problems in the lower
-runtime early. JIT-off first-green is acceptable; enabling the JIT follows.
+runtime early. Upstream's JSCOnly port is not stand-alone: it needs Threads and
+ICU >= 70.1, and its default `Generic` event loop needs no GLib. Upstream also
+disables the JSCOnly API tests on Windows, so CRT keeps its own acceptance.
+
+**Build boundary.** Tranche 1 builds against the installed SDK, never host clang
+plus the WebKit tree: `tools/build_webkit_jsc.py` (fetch, extract, configure with
+the CRT compiler wrappers and the installed `05-ui` sysroot, build `jsc`, run the
+CRT acceptance). Tranche 10 grows it into `tools/build_stage_06_web.py` (full
+WebKit, `libcrtweb`, packaging, `verify_dist.py`).
+
+**1A -- dependency inventory and ports.** Threads -> CRT pthread. ICU (`data`,
+`uc`, `i18n`) and gperf are pinned and built as CRT port recipes
+(`porting/recipes/icu.json`, `gperf.json`), not taken from the host: the host-ICU
+shortcut would be fast on Linux and wrong on Windows/macOS. Ruby (>= 2.5) is a
+build-host tool that the maintainer installs. Each port passes its own recipe
+test before JSC is attempted.
+
+**1B -- interpreter first-green.** JSCOnly, `EVENT_LOOP_TYPE=Generic`, JIT off.
+Acceptance: arithmetic, objects/arrays, JSON, RegExp, Promise/microtasks,
+UTF-8/Unicode (ICU), exceptions, a GC stress run, and repeated runtime
+create/destroy with a leak check. Linux, then Windows and macOS.
+
+**1C -- JIT.** `ENABLE_JIT=ON`: executable memory and W^X transitions, GC plus
+JIT stress, exception/unwind, repeated execution. Kept separate so a failure is
+attributed to basic runtime/PAL behaviour (1B) or to executable memory (1C).
 
 ### 2. Linux WPE reference baseline
 
@@ -120,9 +142,34 @@ against when `PlatformCRT` misbehaves.
 
 ### 3. `PlatformCRT` graphics and input prototype
 
-Shared-memory output first: WebKit rendering -> `PlatformCRT` adapter ->
-`crtgfx` -> `crtui` external surface. Then GPU-buffer output through the same
-external-surface contract. Use WPEPlatform as the structural reference.
+**3A -- Linux prototype.** A WPEPlatform platform implementation (the reference
+boundary, see `crtweb_porting.md`) that reaches shared-memory output: WebKit
+rendering -> adapter -> `crtgfx` -> `crtui` external surface. It exists to prove
+the surface and input contracts below, not to be the cross-platform
+architecture. **3B+ -- the product:** `PlatformCRT` as a new WebKit port
+(`OptionsCRT.cmake`, `PlatformCRT.cmake`, `platform/crt`, `UIProcess/crt`, ...),
+then GPU-buffer output through the same external-surface contract.
+
+Two contracts are frozen before 3A starts, because `crtui` deliberately owns only
+scene metadata (bounds, clip, opacity, z-order, damage, hit-testing) and not the
+producer's frame:
+
+1. **Frame producer.** `crtui` is the scene, `crtweb` is the browser frame
+   producer, `crtgfx` is the imported resource and compositor. The producer
+   contract states: acquire/release of a frame; width, height and pixel format;
+   damage region and a damage serial; frame sequence and presentation
+   acknowledgement; behaviour when the producer is blocked or the consumer is slow
+   (frame-drop policy); shared-memory ownership; and, for the GPU path, buffer
+   ownership with acquire/release synchronisation and fence/semaphore lifetime.
+   WPEBuffer lifetime semantics must not leak into the CRT API.
+2. **Input.** A web view needs more than `crtui`'s 12 keys and `SHIFT`: Ctrl/Alt/
+   Meta, letters, digits and function keys, native virtual key/scan code, repeat,
+   mouse button and click count, pointer type/id, and (later) composition.
+   **Decided 2026-10-03:** a separate path -- `crtgfx` native event -> a `crtweb`
+   input adapter -> WebKit -- with `crtui` supplying only focus, bounds and
+   hit-testing. The frozen `crtui` v1 key enum is not extended for WebView.
+   **IME/composition is deferred past Web v1** (Latin committed text and basic key
+   input only), together with selection handling and touch.
 
 ### 4. `libcrtweb` and the WebView
 
@@ -132,7 +179,7 @@ plus `crtui`'s web view on top. Application code sees no WebKit type.
 
 ### 5. Multi-process lifecycle
 
-UIProcess with WebProcess, NetworkProcess, and GPUProcess: launch, IPC, clean
+UIProcess with WebProcess, NetworkProcess, and GPUProcess (GPUProcess is on by default in the WPE port): launch through WebKit's `ProcessLauncher`/`AuxiliaryProcess` on CRT PAL primitives (not `WPEProcessManager`, which is Android-only), IPC, clean
 shutdown, forced WebProcess termination and recovery/reload, 100x view
 create/destroy, navigation while resizing, resource-leak audit. Closing this on
 Linux is the proof that the port's architecture holds.
@@ -141,7 +188,7 @@ Linux is the proof that the port's architecture holds.
 
 The same WebKit and `PlatformCRT` on the CRT PAL (not a WPE-for-Windows
 effort). Focus on process spawning, IPC handles, shared memory, executable
-pages, D3D12 surface integration, fonts, IME/input, TLS, DLL boundaries.
+pages, D3D12 surface integration, fonts, basic key/pointer input (IME is deferred past v1), TLS, DLL boundaries.
 
 ### 7. macOS/arm64 replay
 

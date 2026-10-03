@@ -10,6 +10,48 @@ substantive update.
 
 ## 2026-10-03
 
+- **Web Tranche 1A (in progress): `gperf` and `icu` ported as CRT recipes on
+  Linux -- the first C++ ports -- and the review of the `06-web` plan folded into
+  the docs.** JSCOnly needs ICU >= 70.1 (`data`, `uc`, `i18n`; verified in
+  `OptionsJSCOnly.cmake`, default `Generic` event loop so no GLib) and WebKit's
+  CMake needs gperf and Ruby; gperf 3.3 (GPG-verified) and ICU 78.3 (SHA-256 and
+  SHA-512 checked against the release) are CRT ports, Ruby is a host tool the
+  maintainer installs. Both pass recipe tests (`gperf` runs and emits a hash;
+  `icu` static and shared exercise case mapping, NFD and Swedish collation).
+  Building them exposed CRT gaps, all fixed rather than worked around:
+  - The port builder always used the C-only `01-c` sysroot; a recipe can now say
+    `build.sysroot_stage: 02-cxx` (and `make_subdir`, and C++ recipe tests with
+    `"language": "c++"`).
+  - `tools/crt-c++` compiles with `-ffreestanding`, so an unmodified `int main`
+    was mangled (`_Z4mainv`) and crt1 could not link it; `CRT_CXX_HOSTED=1` adds
+    `-fhosted` (opt-in; the default is unchanged).
+  - `-lm`/`-ldl` from an upstream makefile linked the shared libm into a
+    static-runtime executable (`NEEDED libm.so`, no rpath, so the host loader hit
+    glibc's `/lib/.../libm.so` linker script: "invalid ELF header", which also
+    broke ICU's configure `sizeof(wchar_t)` probe); both wrappers drop them in
+    that configuration.
+  - Shared libraries linked through the wrapper had no `__dso_handle`
+    (`crtbegin_so.o` added to libc and the Linux `-shared` link).
+  - CRT headers formed an include ring (`<sys/types.h>` -> `<stdint.h>` ->
+    `<wchar.h>` -> `<locale.h>` -> `<xlocale.h>` -> `<stdio.h>`) that gnulib's
+    wrapper headers broke at any entry point: `bits/crt_types.h` and the new
+    `bits/crt_wtypes.h` are leaf headers, and `<xlocale.h>` no longer includes
+    the heavy headers.
+  - libc gained Bionic's `getprogname()`/`setprogname()`/`__progname` (gnulib
+    requires it), and `<elf.h>` the ELF32 types ICU's `pkg_genc` writes.
+  Verified: full build, ctest 154/155 (only the sound-card test; the camera test
+  skips without a webcam), tooling 102/102, `crt-c-dist` verifies with the new
+  object. Windows and macOS are not attempted for either port. No WebKit code is
+  built yet.
+  Review changes to `docs/crtweb_acceptance.md` / `crtweb_porting.md` (checked
+  against the pinned 2.54.0 source): `PlatformCRT` is a new WebKit port with
+  WPEPlatform only as the Linux prototype boundary; `WPEProcessManager` is
+  compiled only for Android and is not a generic hook; the tarball has no Windows
+  IPC backend or `PlatformWin.cmake`, so the Windows transport must be written;
+  Tranche 1 split into 1A/1B/1C with a build harness against the installed SDK;
+  the frame-producer and input contracts are frozen before 3A (separate `crtweb`
+  input path, IME deferred past v1); stale candidate wording fixed.
+
 - **Windows replay of the isolated-SDK text-file relocation found and fixed a
   Windows-only defect.** The macOS/Linux fix for staging paths in `.pc`, `.la` and
   `*-config` files had never run on Windows, and its first Windows run failed in the

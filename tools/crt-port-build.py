@@ -1495,7 +1495,7 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     # (ordinary Automake substitution, not this ad-hoc sed hack) and was
     # itself configured with the same --prefix, so make_subdir lets a
     # recipe route straight to it and skip the broken dispatcher entirely.
-    make_subdir = build.get("target_overrides", {}).get(target_os, {}).get("make_subdir")
+    make_subdir = build.get("target_overrides", {}).get(target_os, {}).get("make_subdir", build.get("make_subdir"))
     if make_subdir:
         make_subdir = make_subdir.replace("@CRT_MINGW_TRIPLE@", mingw_triple)
     make_work = work / make_subdir if make_subdir else work
@@ -1757,9 +1757,11 @@ def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix,
         progress(f"{port_name}: no port tests declared")
         return
 
+    sysroot = port_sysroot_for(recipe, sysroot, preset_build_dir)
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
     apply_recipe_env(env, recipe, target_os, root, preset_build_dir, work_build_dir, sysroot, port_prefix)
     cc_argv = command_value_argv(env["CC"], preset_build_dir, target_os)
+    cxx_argv = command_value_argv(env["CXX"], preset_build_dir, target_os)
     test_root = work_build_dir / "tests" / port_name
     test_root.mkdir(parents=True, exist_ok=True)
     suffix = ".exe" if target_os == "windows" else ""
@@ -1782,10 +1784,29 @@ def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix,
         link_args = substitute_recipe_values(link_args, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os)
 
         binary = test_root / f"{test_name}{suffix}"
-        compile_cmd = cc_argv + cflags + [str(source)] + link_args + ["-o", str(binary)]
+        # "language": "c++" compiles the test with CXX (crt-c++, against the recipe's
+        # sysroot_stage SDK) instead of CC, for a port whose library needs libc++.
+        compiler_argv = cxx_argv if test.get("language") == "c++" else cc_argv
+        compile_cmd = compiler_argv + cflags + [str(source)] + link_args + ["-o", str(binary)]
         run(compile_cmd, test_root, env, f"{port_name}: test build {test_name}")
         run_checked_output([str(binary)], test_root, port_test_env(env, port_prefix, target_os),
                            test.get("expect_stdout"), f"{port_name}: test run {test_name}")
+
+
+def port_sysroot_for(recipe, sysroot, preset_build_dir):
+    """A C++ port needs libc++'s headers and runtime, which only the cumulative
+    02-cxx (or later) SDK has; its recipe declares that with build.sysroot_stage.
+    An SDK that already carries include/c++/v1 (packaged mode, or a later stage)
+    is used as is; otherwise the preset's own dist/<stage>."""
+    stage = recipe["build"].get("sysroot_stage")
+    if not stage or (sysroot / "include" / "c++" / "v1").is_dir():
+        return sysroot
+    candidate = (preset_build_dir / "dist" / stage).resolve()
+    if not (candidate / "include" / "c++" / "v1").is_dir():
+        raise SystemExit(
+            f"{recipe['name']}: needs the {stage} SDK (libc++) but {candidate} has none; "
+            "build the crt-libcxx-sysroot target first")
+    return candidate
 
 
 def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, use_crt_shell=False, configure_only=False, built=None, jobs=None):
@@ -1823,6 +1844,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
         export_windows_sdk_header_env(root, preset_build_dir)
 
     progress(f"{port}: build system {build['system']}")
+    sysroot = port_sysroot_for(recipe, sysroot, preset_build_dir)
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
     apply_recipe_env(env, recipe, target_os, root, preset_build_dir, work_build_dir, sysroot, port_prefix)
     if build["system"] == "configure":
