@@ -1026,10 +1026,9 @@ commands on Windows), and `capture_mf.c` could compile before the mingw-w64
 headers existed because `crtmedia_backend_objects` did not depend on
 `crtgfx-mingw-w64-headers-fetch` (`libcrtmedia/CMakeLists.txt` now orders them).
 
-**Not verified here.** macOS/arm64 and Linux/x86_64: the stage project's
-macOS/Linux branches reuse the 04 stage's link interfaces but have never been
-run. The shared-dylib libc binding on macOS and the Linux Vulkan/Wayland/VA-API
-link lines are the likeliest places for a first-replay gap.
+**Other hosts.** The stage project's macOS and Linux branches were written from
+the 04 stage's link interfaces and first ran in the replays below, each of which
+needed one small builder fix and nothing in the stage CMake.
 
 **macOS/arm64 replay (2026-10-03).** The stage project's macOS branches ran
 for the first time and needed one fix; nothing else changed.
@@ -1093,7 +1092,7 @@ for the first time and needed one fix; nothing else changed.
   Windows and Linux are unverified (tracked in `TODO.md`).
 - Not covered here: the stage does not run the macOS-only
   `crtui_contract_shared_test` (the in-tree guard); the installed sample linking
-  the dylib is the stage's coverage of that failure. Linux/x86_64 replay remains.
+  the dylib is the stage's coverage of that failure.
 
 **Linux/x86_64 replay (native Intel host, 2026-10-03).** The stage project's
 Linux branch ran for the first time and needed no change; one builder fix.
@@ -1136,6 +1135,38 @@ Linux branch ran for the first time and needed no change; one builder fix.
   tooling 94/94.
 - Not covered: running the stage as a release asset downloaded from GitHub (the
   development assets are local files via `--asset`).
+
+**Windows/x64 replay of the text-file relocation (2026-10-03).** The macOS fix that
+makes installed `.pc`, `.la` and `*-config` files independent of the staging path had
+never run on Windows, and its first Windows run failed. After the isolated 04 stage
+had built FreeType, FFmpeg, Skia and the curl chain (4575 s), installed and run every
+example, `verify_dist.py` rejected the SDK: `freetype2.pc`, `libav*.pc`,
+`libcurl.pc`, `libswresample.pc`, `libswscale.pc` and `bin/curl-config` still named the
+staging directory. On Windows the CRT shell (mksh) that runs configure passes the
+prefix as `/c/crtw/...`, so that is the spelling baked into the files, while
+`tools/crt_text_relocate.py` only knew `C:\...` and `C:/...`; this could not show on
+macOS or Linux.
+
+- **Fix.** `root_spellings()` now also produces the MSYS drive spelling (`/c/...` and
+  `/C/...`). `tools/test_text_relocate.py` gained two tests (the spelling list, and a
+  tree baked with `/c/...` being relocated and passing `validate_text_paths()`); with
+  that branch removed both fail. Tooling is 7 tests there, one skipped on Windows
+  (it needs a POSIX `sh`).
+- **Clean chain after the fix.** `crt-gfx-simple-dist` regenerated the 01-c..03 SDKs
+  and assets; the isolated `04-gfx-media` was built with the 03 SDK's own
+  `crt-stage-build.py` and recipe with `--reuse-work-root` (so its dependency layers
+  are now cached; 4560 s, 17/17 stage tests, relocation 11.7 s, verify and publish
+  pass); the isolated `05-ui` was built with the 04 SDK's own tool and embedded
+  `05-ui.json` (165.7 s: ctest 8/8, the rebuilt sample and the packaged
+  `crtui_window_demo` both `presented=30 pixel_check=pass input_check=pass`, verify and
+  publish pass).
+- **Evidence on the published SDKs.** No `.la` remains; the 8 `.pc` files start with
+  `prefix=${pcfiledir}/../..`; no `.pc` or `bin/curl-config` names the staging path;
+  and a copy of `bin/curl-config` moved to `C:/crtw sp reloc/final location/sdk/bin`
+  and run by the SDK's own mksh reports `--prefix` as that new location and its
+  `--static-libs` under it. (The shell needs the CRT's `/system/bin` on its PATH.)
+- Not covered: Windows ARM64, and `pkg-config` itself (the SDK ships none; the `.pc`
+  files are checked textually and through `curl-config`).
 
 ## Host order
 

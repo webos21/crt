@@ -31,7 +31,9 @@ Current baseline:
   `wl_registry`/`wl_compositor`/`wl_shm`/`wl_surface` protocol plus the
   stable `xdg_wm_base`/`xdg_surface`/`xdg_toplevel` shell extension
   directly over the `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` Unix socket.
-  Software-only (`wl_shm`) for now, matching the Windows GDI path. Returns
+  This software adapter is `wl_shm` only, matching the Windows GDI path (the GPU
+  path below uses the separate `window_wayland_native.c`, which links the real host
+  `libwayland-client` and the generated xdg-shell protocol glue). Returns
   `CRTGFX_ERROR_UNSUPPORTED` (not a hard error) when no compositor is
   reachable at all, so headless CI keeps working exactly as before.
 - `src/arch/macos/window_cocoa.c` is the real macOS host adapter: drives
@@ -61,6 +63,12 @@ Current baseline:
   `SkSurface`/`SkCanvas` plus FreeType-backed text, and
   `crtgfx_keyboard_interactive` draws typed text with the same path. This is
   verified on Linux, macOS, and Windows; host libc++ is not a substitute.
+
+**Current state:** all three hosts now have real GPU backends (Vulkan on Linux,
+D3D12 on Windows, Metal on macOS) behind this contract, with Skia/Ganesh live
+presentation verified on each; see `STATUS.md`, `docs/libcrtgfx_gpu_backend_boundary.md`
+and `docs/libcrtgfx_live_presentation_acceptance.md`. The paragraphs below record
+the state as each step landed.
 
 `include/crtgfx/gpu.h` (TODO.md's upper-runtime roadmap "Fix the common GPU
 resource contract" step) is the real, host-independent shape a later real GPU

@@ -24,8 +24,8 @@ debugging loop.
 
 Upper stages build on that foundation with native windows and input,
 Skia/GPU graphics, FFmpeg media, HTTP/HTTPS streaming, and the
-crtui application layer; a WebKit-based Web runtime is the next
-planned stage.
+`crtui` application layer; a WebKit-based Web runtime is the next
+stage and is not implemented yet.
 
 ## Why a Bionic-shaped interface?
 
@@ -141,9 +141,10 @@ It is a developer preview in preparation. The graphics/media stage
 macOS with the per-host limits listed in the README's capability matrix.
 Hardware H.264 decode is verified on all three hosts (VideoToolbox on macOS,
 D3D11VA on Windows, VA-API on Linux). Network streaming (HTTP/HTTPS input and
-output, reconnect) is also verified on all three. The next stages -- `05-ui`
-(`crtui`/LVGL) and `06-web` (a WebKit-based web runtime) -- are roadmap work,
-not supported features; the earlier QuickJS stage was dropped.
+output, reconnect) is also verified on all three. `05-ui`
+(`crtui`/LVGL application widgets and `MediaView`) is verified on all three too.
+The next stage, `06-web` (a WebKit-based web runtime), is roadmap work, not a
+supported feature; the earlier QuickJS stage was dropped.
 
 ## What do I need to build with it?
 

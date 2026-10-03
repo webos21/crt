@@ -57,79 +57,47 @@ newest entry first) rather than leaving it here.
 
 ## In Progress
 
-### Application UI (`05-ui`: crtui + LVGL)
+### Web Runtime (`06-web`: WebKit CRT Port)
 
-Promoted 2026-09-29 after Networking and streaming closed on Linux/x86_64,
-macOS/arm64, and Windows/x64, and after the roadmap was reordered to
-`04-gfx-media -> 05-ui -> 06-web` (`docs/runtime_roadmap.md`). The contract,
-gates, and host order live in
-[`docs/crtui_acceptance.md`](docs/crtui_acceptance.md) (contract frozen in
-Tranche 0). Keep completed evidence in `HISTORY.md`; this list tracks only tranche
-state. Windows/x64 is the first host, then macOS/arm64, then Linux.
+Promoted 2026-10-03 after Application UI (`05-ui`, Tranches 0-7) closed on
+Windows/x64, macOS/arm64 and Linux/x86_64; its External Surface contract is the
+accepted prerequisite (`HISTORY.md`, `docs/crtui_acceptance.md`). The contract,
+gates and host order live in
+[`docs/crtweb_acceptance.md`](docs/crtweb_acceptance.md); the upstream mapping in
+[`docs/crtweb_porting.md`](docs/crtweb_porting.md). Keep completed evidence in
+`HISTORY.md`; this list tracks only tranche state. Linux first (WPE is the
+reference), with an early three-host JavaScriptCore replay, then Windows/x64,
+then macOS/arm64.
 
-* [x] **0. Freeze the `crtui` contract and create the stage.** Closed
-  2026-09-30 on Windows/x64, macOS/arm64, and Linux/x86_64 (frozen `crtui/ui.h`,
-  headless model, `crtui_contract_test`, the `05-ui` stage, LVGL v9.6.0 pinned
-  but not imported); evidence in `HISTORY.md` and `docs/crtui_acceptance.md`.
-* [x] **1. LVGL import and first pixels.** Closed 2026-09-30 on Windows/x64,
-  macOS/arm64, and Linux/x86_64 (LVGL v9.6.0 fetched by `tools/fetch_lvgl.py`
-  and compiled privately behind `-DCRTUI_ENABLE_LVGL=ON`; CRT display adapter;
-  `crtui_render_test`, `crtui_window_demo`); evidence in `HISTORY.md` and
-  `docs/crtui_acceptance.md`.
-* [x] **2. Input, focus, resize.** Closed 2026-09-30 on Windows/x64,
-  macOS/arm64, and Linux/x86_64 (`crtui/crtgfx.h` adapter, spatial arrow
-  navigation, slider drag/wheel, drawn focus/pressed state, application-driven
-  re-layout, `POINTER_CANCEL` on focus loss; `crtui_input_test`,
-  `crtui_window_demo`); verified with scripted input -- interactive real-device
-  input is not automated on any host. Evidence in `HISTORY.md` and
-  `docs/crtui_acceptance.md`.
-* [x] **3. `crtui` wrapper (first green).** Closed 2026-09-30 on
-  Windows/x64, macOS/arm64, and Linux/x86_64: `libcrtui` exports exactly the 35
-  `CRTUI_API` functions (was 2,286 `lv_*` too), `examples/ui-basic` uses
-  crtui/crtgfx only and rebuilds from the packaged SDK, and
-  `crtui_privacy_test_runs` proves headers/exports/sample are LVGL-free;
-  evidence in `HISTORY.md` and `docs/crtui_acceptance.md`.
-* [x] **4. Layout, styling, v1 widget set.** Closed 2026-10-01 on Windows/x64,
-  macOS/arm64, and Linux/x86_64: CRT-owned free/Row/Column/Stack layout,
-  ScrollView/List, the CRT-neutral style mask, Image/Switch/Checkbox/TextInput,
-  committed-text input, private LVGL rendering, and the installed sample all
-  pass; evidence is in `HISTORY.md` and `docs/crtui_acceptance.md`.
-* [x] **5. External Surface view.** Closed 2026-10-02 on Windows/x64,
-  macOS/arm64, and Linux/x86_64: producer-agnostic scene metadata and real GPU
-  final composition, including balanced producer ownership in a native window.
-  This is the accepted `06-web` prerequisite; evidence is in `HISTORY.md` and
-  `docs/crtui_acceptance.md`.
-  * [x] **5A. Freeze the producer-neutral scene boundary (Windows first).**
-    Accepted on Windows/x64 2026-10-01: stable-id scene snapshot with layout,
-    clip, opacity, z-order and damage; detailed evidence is in `HISTORY.md` and
-    `docs/crtui_acceptance.md`.
-  * [x] **5B. Add the `crtgfx` external-surface/final-compositor boundary.**
-    Accepted on Windows/x64 2026-10-01: texture-backed synthetic producer,
-    exact plane-order/clip/opacity pixels and ownership/resize/damage checks,
-    plus 5/5 frames through a real D3D12 window; detailed evidence is in
-    `HISTORY.md` and `docs/crtui_acceptance.md`.
-  * [x] **5C. Replay the unchanged contract and compositor on the remaining
-    hosts.** macOS/arm64 was accepted unchanged on 2026-10-01 and Linux/x86_64
-    on 2026-10-02, including real Metal/Wayland-Vulkan presentation and
-    balanced producer ownership. Media binding stays in Tranche 6.
-* [x] **6. MediaView.** Zero-copy video composed in the final present, not via
-  an LVGL image buffer. Work in three explicit slices:
-  * [x] **6A. Freeze the producer-neutral MediaView and binding contract.**
-    Accepted on Windows/x64 2026-10-02 (`CRTUI_WIDGET_MEDIA_VIEW`, optional
-    `crtui_skia_media`); evidence in `docs/crtui_acceptance.md`.
-  * [x] **6B. Windows/x64 real-media acceptance.** Accepted 2026-10-02: real
-    H.264 decode, 5 GPU frames/0 CPU frames, balanced release, 5/5 frames in a
-    real D3D12 window; evidence in `docs/crtui_acceptance.md`.
-  * [x] **6C. Replay unchanged on macOS/arm64 and Linux/x86_64.** Accepted
-    unchanged 2026-10-02 on both (Metal/VideoToolbox and Vulkan/VA-API, 5 GPU
-    frames/0 CPU, balanced release, real windows); evidence in `HISTORY.md` and
-    `docs/crtui_acceptance.md`.
-* [x] **7. Cross-host and isolated-package closure.** Isolated `05-ui` build
-  from the installed `04-gfx-media` SDK; update `tools/create_stage_source.py`
-  and `tools/crt_dist_prerequisites.py` in the same change. Closed
-  2026-10-03 on Windows/x64, macOS/arm64 and Linux/x86_64 (isolated stage 8/8,
-  sample and packaged demo, verify, space-path run); evidence in `HISTORY.md` and
-  `docs/crtui_acceptance.md`.
+* [x] **0. Scope, version and license freeze.** Closed 2026-10-03: WPE WebKit
+  2.54.0 pinned and verified (`libcrtweb/third_party/webkit/`: recomputed SHA-256, signed
+  tag, license-file inventory), upstream mapping written, security/SBOM policy
+  confirmed; evidence in `HISTORY.md` and `docs/crtweb_acceptance.md`.
+* [ ] **1. JavaScriptCore / JSCOnly bring-up.** Linux first, then a quick
+  Windows and macOS replay; JIT-off first-green is acceptable.
+* [ ] **2. Linux WPE reference baseline.** Upstream WPE unchanged rendering
+  local HTML; the known-good baseline to diff `PlatformCRT` against.
+* [ ] **3. `PlatformCRT` graphics and input prototype.** Shared-memory output
+  through `crtgfx` into a `crtui` external surface, then GPU-buffer output.
+* [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
+  `crtui`'s web view; no WebKit type in a public header.
+* [ ] **5. Multi-process lifecycle.** UI/Web/Network/GPU processes: launch, IPC,
+  shutdown, forced termination and recovery, 100x create/destroy, leak audit.
+* [ ] **6. Windows/x64 replay.**
+* [ ] **7. macOS/arm64 replay.**
+* [ ] **8. CRT subsystem substitution.** Network, media and capture, one at a
+  time, only after a working browser.
+* [ ] **9. GPU integration.** WebKit Skia output to an external surface, later a
+  shared/zero-copy buffer.
+* [ ] **10. Distribution and security closure.** Isolated `06-web` build from
+  the installed `05-ui` SDK; update `tools/create_stage_source.py` and
+  `tools/crt_dist_prerequisites.py` in the same change; provenance/SBOM/CVE
+  artifacts.
+
+Small UI follow-ups (not gates): teach `tools/prepare_release_assets.py` the
+`05-ui` SDK, and make a default-configuration `crt-ui-dist` fail with a clear
+message instead of a missing `ui-basic/main.c` (it needs
+`-DCRTUI_ENABLE_LVGL=ON`).
 
 ## Planned
 
@@ -140,27 +108,18 @@ The completed cross-host baseline and its exact validation evidence stay in
 and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
 The allocator baseline decision gate is closed: keep the current allocator and
 leave Scudo conditional. Hardware video decode, Zero-copy decoded textures,
-Encode and capture, and Networking and streaming are all closed on
-Linux/x86_64, macOS/arm64, and Windows/x64 (`HISTORY.md`, 2026-09-22..29; full
-tranche-by-tranche detail in `docs/crtmedia_encode_capture_acceptance.md` and
-`docs/crtmedia_networking_acceptance.md`). The Application UI stage (`05-ui`)
-is in progress above; its accepted External Surface contract now unblocks the
-remaining roadmap item, which stays here until implementation begins.
-
-1. **Web Runtime (`06-web`): the WebKit CRT Port.** JavaScriptCore/JSCOnly
-   bring-up (Linux first, early three-host replay), a Linux WPE reference
-   baseline, `PlatformCRT` graphics/input, `libcrtweb` and the WebView,
-   multi-process lifecycle, Windows and macOS replay, CRT subsystem
-   substitution, GPU integration, and distribution/security closure. The
-   accepted `05-ui` External Surface contract now permits this work to start.
-   Detail belongs in `docs/crtweb_acceptance.md` and
-   `docs/crtweb_porting.md`, not here.
+Encode and capture, Networking and streaming, and Application UI (`05-ui`) are
+all closed on Linux/x86_64, macOS/arm64, and Windows/x64 (`HISTORY.md`,
+2026-09-22..10-03; tranche-by-tranche detail in
+`docs/crtmedia_encode_capture_acceptance.md`,
+`docs/crtmedia_networking_acceptance.md` and `docs/crtui_acceptance.md`). The
+Web Runtime (`06-web`) is in progress above.
 
 Deferred (not gates; see `docs/runtime_roadmap.md`): WebRTC, QuickJS (unless a
 non-WebKit lightweight runtime becomes a real product requirement), WebGPU,
 EME/DRM, and JS-native application bindings.
 
-The remaining execution order is `05-ui`, then `06-web`.
+The remaining execution order is `06-web`.
 
 
 ### Runtime architecture hardening backlog
@@ -307,12 +266,6 @@ or host investigation supplies the required evidence.
   Decide whether to fix `crt_configure_shared_runtime()` for all of them and
   add a dylib-linked test per library. Found 2026-09-30
   (`docs/crtui_acceptance.md`, Tranche 3 macOS replay).
-- Isolated SDK text-file relocation (`tools/crt_text_relocate.py`,
-  `verify_dist.validate_text_paths()`) was fixed and verified only on macOS/arm64
-  (2026-10-03) and Linux/x86_64 (2026-10-03). Re-run the isolated 04/05-ui chain
-  on Windows and confirm `.pc`/`*-config` come out relocatable there too; the Windows
-  `curl-config`/`.pc` spellings (`C:/...`, MSYS paths) are handled by design but
-  untested.
 - Make the ordinary in-tree Linux `crt-gfx-media-dist` verifiable with
   `CRTMEDIA_ENABLE_CURL=ON`: `libcrtmedia.so` links the shared `libcurl.so.4`
   in-tree (static zlib is not PIC) and `verify_dist.py` reports `undeclared

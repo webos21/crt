@@ -4,16 +4,18 @@ Media upper runtime layer. FFmpeg is the reference codec/container stack;
 public headers expose only CRT-owned frame, sample, format, codec, muxer, and
 player contracts.
 
-The cross-host playback baseline, hardware H.264 decode, and decoded-texture
-interop are complete. macOS and Linux import decoded surfaces zero-copy;
-Windows uses the accepted D3D11-to-D3D12 GPU-copy fallback without CPU
-readback. Encode & Capture is active: common encode/mux timing and ownership
-are frozen, and Linux/x86_64 passes the 100-frame software MPEG-4 -> MP4 ->
-decode-back gate. The V4L2 mmap backend and device-gated 30-frame round trip
-are implemented; native-layout conversion passes without hardware, while the
-current host has no `/dev/video*` and leaves physical capture acceptance open. See
-`docs/crtmedia_zero_copy_decode_acceptance.md` and
-`docs/crtmedia_encode_capture_acceptance.md`.
+The cross-host playback baseline, hardware H.264 decode, decoded-texture
+interop, encode and capture, and network streaming are all complete and accepted
+on Linux/x86_64, macOS/arm64 and Windows/x64. macOS and Linux import decoded
+surfaces zero-copy; Windows uses the accepted D3D11-to-D3D12 GPU-copy fallback
+without CPU readback. Capture (V4L2, AVFoundation, Media Foundation) and
+software/hardware encode pass mux/decode-back and lifecycle gates, and HTTP/HTTPS
+input, fragmented-MP4 upload and reconnect are verified against loopback fixtures.
+See `docs/crtmedia_hardware_decode_acceptance.md`,
+`docs/crtmedia_zero_copy_decode_acceptance.md`,
+`docs/crtmedia_encode_capture_acceptance.md` and
+`docs/crtmedia_networking_acceptance.md`; the sections below keep the dated
+implementation trail.
 
 The CPU video frame handoff contract is defined:
 `include/crtmedia/frame.h`'s `crtmedia_frame` (packed RGBA8888/BGRA8888
@@ -29,7 +31,7 @@ design trail.
 A real FFmpeg-backed demux/software-decode bridge exists behind the
 `CRTMEDIA_ENABLE_FFMPEG` CMake option (default OFF, matching
 `CRTGFX_ENABLE_SKIA`'s own opt-in shape): `include/crtmedia/demux.h` +
-`src/demux.c` open a local file (`file` protocol only, no network yet),
+`src/demux.c` open a local file (`file` protocol only: FFmpeg's own network stack stays disabled, and HTTP/HTTPS input goes through the CRT-owned transport, `src/http_*.c`),
 demux one container (MOV/MP4/M4A), and decode H.264 video into
 `crtmedia_frame` / AAC+MP3+PCM audio into the new
 `include/crtmedia/audio.h`'s `crtmedia_audio_buffer` -- no FFmpeg type is

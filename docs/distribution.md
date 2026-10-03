@@ -22,18 +22,17 @@ external toolchain contract.
 | `02-cxx` | `01-c` plus libc++, libc++abi, and libunwind | C++ applications and libraries |
 | `03-gfx-simple` | `02-cxx` plus one window, keyboard/mouse input, and a CPU-writable software framebuffer | Industrial HMI and simple native UI |
 | `04-gfx-media` | `03-gfx-simple` plus the GPU API, Skia CPU/GPU rendering, Vulkan/D3D12/Metal presentation, and FFmpeg media | accelerated UI and playback |
-| `05-ui` (in progress) | 04-gfx-media + crtui + private LVGL 9.6, software-rendered widget composition, input/focus/resize, CRT-owned wrapper; v1 widgets and external-surface composition still progressing. | native application UI |
-| `06-web` (planned) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
+| `05-ui` | 04-gfx-media + crtui + private LVGL 9.6, CRT-owned layout/style/v1 widgets, input/focus/resize, external-surface composition and `MediaView`, the optional Skia/media companions | native application UI |
+| `06-web` (in progress, Tranche 0 closed) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
-The repository builds 05-ui through the currently accepted crtui/LVGL
-tranches, and an isolated `04-gfx-media -> 05-ui` stage build is accepted on
-Windows/x64 (macOS and Linux replays remain). It is not yet a release asset:
-`tools/prepare_release_assets.py` does not yet know `05-ui`.  The former `05-js`
-skeleton (`libcrtjs`, no engine) and its `crt-js-*` targets were deleted on
-2026-09-29; the QuickJS plan behind it is retired
-([`runtime_roadmap.md`](runtime_roadmap.md)). `05-ui` was created fresh by
-`crtui` Tranche 0 (2026-09-30) with `crt-ui-build/test/dist` targets; it is not
-yet offered as a release asset.
+`05-ui` is accepted: the repository builds it in-tree (`crt-ui-dist`) and as an
+isolated `04-gfx-media -> 05-ui` stage on Windows/x64, macOS/arm64 and
+Linux/x86_64. It is not yet a release asset: `tools/prepare_release_assets.py`
+does not yet know `05-ui`. The former `05-js` skeleton (`libcrtjs`, no engine)
+and its `crt-js-*` targets were deleted on 2026-09-29; the QuickJS plan behind
+it is retired ([`runtime_roadmap.md`](runtime_roadmap.md)). `05-ui` was created
+fresh by `crtui` Tranche 0 (2026-09-30) with `crt-ui-build/test/dist` targets.
+`crt-ui-dist` needs `-DCRTUI_ENABLE_LVGL=ON` after `crtui-lvgl-fetch`.
 
 Each binary stage is cumulative and independently consumable. The repository
 build currently creates each later directory by copying the preceding

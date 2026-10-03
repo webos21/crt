@@ -26,7 +26,7 @@ graphics/media/UI/web layers, with support limited to 64-bit x86 and
 dynamic linker is deferred outside the current roadmap.
 
 The deliverable is a cumulative staged sysroot, not a bundled toolchain.
-`01-c`, `02-cxx`, `03-gfx-simple`, `04-gfx-media`, and the planned `05-ui` and
+`01-c`, `02-cxx`, `03-gfx-simple`, `04-gfx-media`, `05-ui`, and the planned
 `06-web` let an
 embedded product stop at the capability level it needs. Every distribution
 uses an external host or board-vendor compiler; see
@@ -140,9 +140,9 @@ The intended shape is:
   Skia, a Wayland-compatible compositor boundary, and a future Chromium Ozone
   backend path.
 - `libcrtmedia`: FFmpeg plus explicit codec, audio, and video libraries.
-- `crtui` (in progress, `05-ui`): a CRT-owned application UI API with LVGL as a
-  private implementation and an external-surface view for video and, later,
-  a WebView.
+- `crtui` (`05-ui`, accepted): a CRT-owned application UI API with LVGL as a
+  private implementation and external-surface composition for video
+  (`MediaView`) and, later, a WebView.
 - `libcrtweb` (planned, `06-web`): a WebKit CRT Port (`PlatformCRT`), using
   WPE WebKit as the reference. WebKit brings JavaScriptCore, so the earlier
   QuickJS-first plan (the removed `libcrtjs` skeleton) is superseded; V8/Chromium stay later

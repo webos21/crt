@@ -26,17 +26,18 @@ Development and release follow the cumulative stages defined in
    hosts; Windows uses the documented GPU-copy fallback).
 5. **Application UI (`05-ui`)** — `crtui`, LVGL, application widgets, and
    external-surface composition (video today, WebView later) over the stable
-   lower graphics/media contracts. Planned; see [`crtui_acceptance.md`](crtui_acceptance.md).
+   lower graphics/media contracts. Accepted on all three hosts; see
+   [`crtui_acceptance.md`](crtui_acceptance.md).
 6. **Web Runtime (`06-web`)** — JavaScriptCore, WebCore, the WebKit
    multi-process runtime, a `PlatformCRT` port, and `crtweb`/WebView
-   integration. Planned; see [`crtweb_acceptance.md`](crtweb_acceptance.md)
+   integration. In progress (Tranche 0 closed); see [`crtweb_acceptance.md`](crtweb_acceptance.md)
    and [`crtweb_porting.md`](crtweb_porting.md).
 
 The earlier plan named a QuickJS stage (`05-js`). It is superseded: WebKit
 brings JavaScriptCore in anyway, so a separate QuickJS stage would be
 duplicate investment. The `05-js`/`libcrtjs` skeleton and its build targets
-were deleted on 2026-09-29; `05-ui` is created fresh by UI Tranche 0 (see
-[`../TODO.md`](../TODO.md)).
+were deleted on 2026-09-29; `05-ui` was created fresh by UI Tranche 0 and is
+now accepted (see [`../HISTORY.md`](../HISTORY.md)).
 
 The installed output of one stage is the input boundary for the next. A stage
 is not complete merely because an in-tree target links.
@@ -85,10 +86,11 @@ is not complete merely because an in-tree target links.
   `crtmedia_networking_acceptance.md` and `HISTORY.md` (2026-09-28..29).
   FFmpeg's own network stack stays disabled; libcurl sits under a CRT-owned
   transport contract.
-- The cumulative binary-package chain currently ends at `04-gfx-media`
-  (`05-ui`/`06-web` are planned). Predecessor-only isolated-stage acceptance through the option-ON
+- The cumulative binary-package chain currently ends at `05-ui` (`06-web` is
+  next). Predecessor-only isolated-stage acceptance through the option-ON
   `03-gfx-simple -> 04-gfx-media` transition is complete on Windows, macOS,
-  and native Linux/aarch64, including final distribution verification and
+  and native Linux/aarch64, and `04-gfx-media -> 05-ui` is accepted on Windows,
+  macOS and Linux/x86_64, including final distribution verification and
   atomic publication.
 - `libcrtjs` was a skeleton only and was removed (2026-09-29); no QuickJS
   engine, event loop, or bindings exist or are planned as a stage.
@@ -138,12 +140,13 @@ comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
    transport core, progressive HTTP input and fragmented-MP4 HTTP output,
    reconnect/discontinuity, HTTPS trust matrix, and isolated-package
    acceptance. See `crtmedia_networking_acceptance.md`.
-6. **Application UI (`05-ui`) — In Progress.** Freeze the `crtui` contract, import
-   LVGL behind it, wire CRT input/focus/resize, add the external-surface view
-   and a media view over the zero-copy path, then close cross-host and
-   isolated-package acceptance. Windows/x64 first (fast interactive
-   iteration), then macOS/arm64, then Linux. See `crtui_acceptance.md`.
-7. **Web Runtime (`06-web`).** JavaScriptCore/JSCOnly bring-up, a Linux WPE
+6. ~~Application UI (`05-ui`): freeze the `crtui` contract, import LVGL behind
+   it, wire CRT input/focus/resize, add the external-surface view and a media
+   view over the zero-copy path, then close cross-host and isolated-package
+   acceptance.~~ **Complete 2026-10-03** (`HISTORY.md`): Windows/x64,
+   macOS/arm64 and Linux/x86_64 pass Tranches 0-7, including the isolated
+   `04-gfx-media -> 05-ui` stage. See `crtui_acceptance.md`.
+7. **Web Runtime (`06-web`) — In Progress (Tranche 0 closed).** JavaScriptCore/JSCOnly bring-up, a Linux WPE
    reference baseline, `PlatformCRT` graphics/input, `libcrtweb` and the
    WebView, multi-process lifecycle, then Windows and macOS replay, CRT
    subsystem substitution, GPU integration, and distribution/security
@@ -194,8 +197,8 @@ benchmark once the lower contracts have stable evidence:
 
 | Work | First host | Reason |
 | --- | --- | --- |
-| `05-ui` | Windows/x64 | fastest loop for interactive input, focus, and resize checks |
-| `05-ui` replay | macOS/arm64, then Linux | event semantics first, embedded/product closure last |
+| `05-ui` (done) | Windows/x64 | fastest loop for interactive input, focus, and resize checks |
+| `05-ui` replay (done) | macOS/arm64, then Linux | event semantics first, embedded/product closure last |
 | `06-web` JavaScriptCore | Linux, replayed on all three hosts early | exposes threads/TLS/executable-memory/signal gaps in the lower runtime |
 | `06-web` WPE reference and `PlatformCRT` | Linux | WPE is the known-good reference to compare against |
 | `06-web` replay | Windows/x64, then macOS/arm64 | proves `PlatformCRT` is OS-neutral rather than a Linux port |

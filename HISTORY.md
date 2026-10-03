@@ -10,6 +10,70 @@ substantive update.
 
 ## 2026-10-03
 
+- **Windows replay of the isolated-SDK text-file relocation found and fixed a
+  Windows-only defect.** The macOS/Linux fix for staging paths in `.pc`, `.la` and
+  `*-config` files had never run on Windows, and its first Windows run failed in the
+  final `verify_dist.py` of the isolated 04 stage (after a 4575 s build): the CRT
+  shell passes the install prefix as `/c/crtw/...`, a spelling `tools/crt_text_
+  relocate.py` did not know. `root_spellings()` now also yields `/c/...` and `/C/...`;
+  two new tests in `tools/test_text_relocate.py` fail without it. The chain was rebuilt
+  clean from a regenerated 03 SDK: isolated 04 with the 03 SDK's own tool (4560 s,
+  17/17, verified, published; `--reuse-work-root` now leaves its dependency layers
+  cached), isolated 05-ui with the 04 SDK's own tool and embedded recipe (165.7 s,
+  8/8, sample and packaged demo `presented=30 pixel_check=pass input_check=pass`,
+  verified, published). No `.la` remains, the `.pc` files use `${pcfiledir}`, and a
+  `curl-config` moved to a path containing a space reports the new location. The
+  relocation fix is now verified on Windows, macOS and Linux; evidence in
+  `docs/crtui_acceptance.md`.
+
+- **Application UI (`05-ui`) closed; documents reconciled; Web Runtime (`06-web`)
+  Tranche 0 closed.** With the macOS/arm64 and Linux/x86_64 replays of Tranche 7
+  accepted, `crtui` Tranches 0-7 are closed on all three hosts (per-tranche evidence
+  in the entries below and `docs/crtui_acceptance.md`). `README.md`, `STATUS.md`
+  (updated at the owner's request, synchronized to 2026-10-03), `TODO.md`,
+  `docs/runtime_roadmap.md`, `docs/distribution.md`, `docs/faq.md`,
+  `docs/project_meanings.md`, `libcrtui/README.md` and the acceptance documents now
+  describe `05-ui` as accepted and `06-web` as the current stage; the completed
+  Application UI section left `TODO.md`, and the stale "not verified"/"replay
+  remains" statements in `docs/crtui_acceptance.md` were replaced by the replay
+  records. `STATUS.md` gained a `libcrtui` baseline, its known limitations (no IME,
+  selection, touch or pointer-drag scrolling; scripted input only; `05-ui` not a
+  release asset; `crt-ui-dist` needs `CRTUI_ENABLE_LVGL=ON`) and a UI check table.
+
+  `AGENTS.md` was brought up to date as well: its project structure now lists every
+  top-level folder (the upper-runtime libraries, `distribution/`, `examples/`,
+  `cmake/`, `benchmark/`, `libcrtweb/`) and the real state of `libm`, `libstdc++`,
+  `shell/awk`, `porting`, `tools` and the reserved, unbuilt `linker/`; Android is
+  stated to be the source of Bionic libc, not a target OS; WebKit is named as the
+  `06-web` goal; the stack, layer 4/5 and reference-document sections were
+  corrected, and the document-management rules were pointed to. Stale statements
+  in `libcrtmedia/README.md` (encode/capture "active", "no network yet") and
+  `libcrtgfx/README.md` (no libwayland-client, no GPU backend) were corrected, and
+  the root `README.md` Build section now says `crt-ui-*` needs `CRTUI_ENABLE_LVGL=ON`.
+
+  **Web Tranche 0 closed.** WPE WebKit **2.54.0** (2026-09-16, the current stable
+  series) is pinned in `libcrtweb/third_party/webkit/recipe.json` and verified. The signed tag
+  `wpewebkit-2.54.0`, its commit `73f39d84ea9d...` and the archive size (46,202,080
+  bytes) were confirmed from GitHub and HTTP; the archive was then downloaded and its
+  SHA-256 recomputed (`efa9bcc3cb89...eb452`, equal to the release page); the tag's
+  signature verifies with `gpg` against the signer's key (Adrian Perez de Castro,
+  `5AA3BC33...123B`, DSA-1024 expiring 2027-03-16, not web-of-trust certified); and
+  six sampled source files are byte-identical to the tagged commit (the top-level
+  `NEWS` exists only in the tarball). The release notes (WPEPlatform stable and
+  default, libwpe API deprecated, Skia-only 2D with the compositor in the web process,
+  Ninja required, `WPEProcessManager`) were checked against the raw pages, not only a
+  summary. The archive holds 38,843 files; `tools/scan_webkit_licenses.py` inventoried
+  its 64 license/notice files (LGPL-2/2.1, an Apple BSD-style notice, and bundled
+  Skia, ANGLE, pdf.js, gtest and others) in `libcrtweb/third_party/webkit/license-inventory.json`.
+  One design-relevant finding: WebKit bundles its **own Skia, milestone 154**, while
+  CRT uses m148, so the two stay separate copies. `tools/fetch_webkit.py` and
+  `tools/scan_webkit_licenses.py` (with `tools/test_fetch_webkit.py`, 6 tests) make
+  this reproducible; `docs/crtweb_porting.md` holds the upstream mapping and
+  `docs/crtweb_acceptance.md` the frozen scope and the security/SBOM policy, which the
+  owner confirmed. Left explicit in the recipe: per-file license headers were not
+  scanned, the tarball is not proven equal to the commit tree beyond the sampled
+  files, and upstream's security support window is undocumented on the pages read.
+
 - **`crtui` Tranche 7 replayed on Linux/x86_64: the isolated `05-ui` stage passes
   -- Tranche 7 closed.** One fix: `tools/build_stage_05_ui.py` could not find
   Debian's versioned `llvm-nm-21`; it now tries `/usr/bin/llvm-nm-N` and

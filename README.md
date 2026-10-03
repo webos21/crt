@@ -11,7 +11,7 @@ It provides a common C/C++ runtime and platform layer, then builds upward into n
 The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-Pi-class consoles, industrial HMIs, smart displays, and automotive IVI systems. Windows and macOS are first-class native development and execution hosts, not emulation environments.
 
 > CRT is pre-1.0 developer software under active development.  
-> The current upper-runtime milestone is **`05-ui`**, which adds `crtui` and LVGL-based application widgets. The planned **`06-web`** stage follows with JavaScriptCore, WebCore, WebKit, `PlatformCRT`, and `WebView`.
+> The accepted upper runtime now reaches **`05-ui`**: `crtui` application widgets, layout, input, external-surface composition, and a GPU-composed `MediaView`, verified on all three hosts. The current upper-runtime work is **`06-web`**, a WebKit CRT Port with JavaScriptCore, WebCore, WebKit, `PlatformCRT`, and `WebView`; it has no implementation yet.
 
 [Roadmap](docs/runtime_roadmap.md) ·
 [Current Status](STATUS.md) ·
@@ -36,7 +36,7 @@ That foundation now supports a broader goal:
                               |
               +---------------+---------------+
               |               |               |
-           Widgets         VideoView        WebView
+           Widgets         MediaView        WebView
               |               |               |
             LVGL           crtmedia         crtweb
                               |               |
@@ -73,7 +73,8 @@ Today, the lower and middle layers are already working across all three hosts:
 - zero-copy or measured GPU-copy decoded-texture interop
 - camera capture and hardware/software encode
 - HTTP/HTTPS streaming with bounded buffering and reconnect
-- the first `crtui` application widgets
+- `crtui` application widgets with CRT-owned layout, styling, input and focus
+- external-surface composition, including GPU video (`MediaView`) composed in the final present
 
 The Web runtime remains roadmap work and is not claimed as implemented.
 
@@ -170,11 +171,12 @@ The planned `06-web` stage will add an embedded Web runtime rather than making W
 04-gfx-media
   Skia / GPU / media / networking
       |
-05-ui                         <-- current upper-runtime work
+05-ui                         accepted on all three hosts
   crtui / LVGL / widgets
   external-surface composition
+  MediaView
       |
-06-web                        <-- planned
+06-web                        <-- current upper-runtime work (pinned, not built)
   JavaScriptCore
   WebCore
   WebKit
@@ -193,9 +195,9 @@ Encode & Capture
       |
 Networking & Streaming
       |
-Application UI       <-- current
+Application UI
       |
-Web Runtime          <-- planned
+Web Runtime          <-- current
 ```
 
 WebRTC, WebGPU, EME/DRM, and other large Web capabilities are intentionally consumer-driven follow-ups rather than prerequisites for the WebKit bring-up.
@@ -227,37 +229,37 @@ It includes:
 - reconnect without unsafe byte-stream splicing
 - HTTPS with explicit trust policy
 
-### `05-ui`: in progress
+### `05-ui`: accepted cross-host
 
 `crtui` is a CRT-owned application API.
 
 LVGL is an implementation dependency, not part of the public CRT ABI.
 
-Already accepted across all three hosts:
+Accepted on Linux, Windows, and macOS:
 
-- frozen `crtui` public contract
+- frozen `crtui` public contract and a headless model
 - LVGL 9.6.0 software rendering through a CRT display adapter
-- pointer and keyboard input
-- spatial focus navigation
-- slider drag/wheel interaction
-- resize handling
-- private-LVGL wrapper boundary
-- installed `ui-basic` consumer
+- pointer, keyboard, and committed-text input; spatial focus navigation; resize
+- CRT-owned layout (free, row, column, stack, scroll), a CRT-neutral style set,
+  and the v1 widgets
+- private-LVGL boundary: only `crtui_*` is exported and no LVGL header or file
+  ships in the SDK
+- the producer-neutral external-surface scene, composed by `crtgfx` in the final
+  present
+- `MediaView`: hardware-decoded GPU video composed in that present without an
+  LVGL framebuffer copy (zero-copy on Linux/macOS, measured GPU-copy on Windows)
+- the isolated `04-gfx-media -> 05-ui` source-stage build and the installed
+  `ui-basic` consumer
 
-The v1 layout/style/widget tranche is accepted on Windows/x64, macOS/arm64,
-and Linux/x86_64. The producer-neutral SurfaceView scene boundary and real
-GPU final compositor are accepted on Windows/x64 and macOS/arm64; Linux replay
-remains before the external-surface tranche closes.
-
-Current UI work is replaying MediaView (GPU video frames composed in the final
-present, never copied through an LVGL CPU framebuffer) on macOS and Linux; it
-is accepted on Windows/x64.
+Interactive real-device input is not automated; the input evidence is scripted.
+`tools/prepare_release_assets.py` does not yet know `05-ui`, so it is not a
+release asset.
 
 See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
 
-### `06-web`: planned
+### `06-web`: current work
 
-The Web stage is planned around a **WebKit CRT Port**, not around porting WPE unchanged to every OS.
+The Web stage is built around a **WebKit CRT Port**, not around porting WPE unchanged to every OS.
 
 The intended architecture is:
 
@@ -301,7 +303,7 @@ native window
 + crtui widgets
 + GPU presentation
 + streaming media
-+ VideoView
++ MediaView
 + input / focus / resize
 ```
 
@@ -337,8 +339,8 @@ Each cell describes evidence on that host, not a future promise.
 | Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/macOS; measured no-CPU-readback GPU-copy fallback on Windows. |
 | Video encode / capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, AVFoundation/VideoToolbox. |
 | Network streaming | Verified | Verified | Verified | Bounded HTTP/HTTPS input/output, reconnect, lifecycle and package acceptance. |
-| Application UI (`crtui`) | In progress | In progress | In progress | Contract, input, private-LVGL wrapper, widgets, external surfaces and MediaView and the isolated `05-ui` package (Tranches 0-7) accepted on all hosts. |
-| Web runtime (`crtweb`) | Planned | Planned | Planned | WebKit CRT Port after `05-ui`. |
+| Application UI (`crtui`) | Verified | Verified | Verified | Contract, input, private-LVGL wrapper, widgets, external surfaces, MediaView and the isolated `05-ui` package (Tranches 0-7) accepted on all hosts. |
+| Web runtime (`crtweb`) | In progress | Planned | Planned | WebKit CRT Port (`06-web`). Tranche 0 (WPE WebKit 2.54.0 pinned and verified) is closed; the JavaScriptCore bring-up is next and nothing is built yet. |
 
 The authoritative detailed evidence lives in [STATUS.md](STATUS.md), [HISTORY.md](HISTORY.md), and the subsystem acceptance documents.
 
@@ -452,7 +454,7 @@ CRT is built as cumulative SDK stages.
 | `03-gfx-simple` | `02-cxx` + native window/input/software framebuffer |
 | `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg, media/networking |
 | `05-ui` | `04-gfx-media` + `crtui`, LVGL-backed widgets, application composition |
-| `06-web` | planned: `05-ui` + JavaScriptCore/WebCore/WebKit, `PlatformCRT`, `crtweb`/WebView |
+| `06-web` | in progress (Tranche 1 next): `05-ui` + JavaScriptCore/WebCore/WebKit, `PlatformCRT`, `crtweb`/WebView |
 
 A later stage is expected to contain everything from the preceding stage.
 
@@ -515,6 +517,15 @@ Outputs are cumulative SDK trees and archives under:
 ```text
 out/<preset>/dist/
 ```
+
+The `crt-ui-*` targets need the LVGL renderer: run the `crtui-lvgl-fetch` target
+once and configure with `-DCRTUI_ENABLE_LVGL=ON`. Without it `crt-ui-dist` fails
+at `verify_dist.py`, because the installed `ui-basic` sample it must package is
+only built then. The Skia/`MediaView` companions and their tests also need a
+Skia/FFmpeg-enabled tree. The in-tree `crt-gfx-media-dist` keeps Skia and FFmpeg
+OFF; the release-grade `04-gfx-media` and `05-ui` SDKs come from the isolated
+stage builds (`tools/crt-stage-build.py`, see
+[docs/release_preview.md](docs/release_preview.md)).
 
 ---
 
@@ -680,7 +691,7 @@ Application
 
 This keeps LVGL private and leaves room for CRT-native media/external-surface widgets.
 
-The initial widget set is intentionally small and application-oriented:
+The v1 widget set is intentionally small and application-oriented:
 
 - window/screen
 - container
@@ -695,14 +706,14 @@ The initial widget set is intentionally small and application-oriented:
 - list/scroll view
 - text input
 
-The critical next architecture boundary is the external surface:
+The external surface is the architecture boundary that keeps GPU-backed content out of the LVGL CPU framebuffer. It is accepted for video (`MediaView`); a Web view is the next producer:
 
 ```text
                  crtui scene
                      |
         +------------+------------+
         |            |            |
-      Widgets     VideoView    future WebView
+      Widgets     MediaView    future WebView
         |            |            |
       LVGL        crtmedia      WebKit
         |            |            |
@@ -711,13 +722,13 @@ The critical next architecture boundary is the external surface:
                    crtgfx
 ```
 
-This allows video and Web content to stay GPU-backed instead of being copied into an LVGL CPU framebuffer.
+Video stays GPU-backed instead of being copied into an LVGL CPU framebuffer, and the same contract is meant to carry Web content.
 
 See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
 
 ---
 
-## Planned Web Runtime
+## Web Runtime
 
 The planned Web layer is a **WebKit CRT Port**.
 
@@ -769,6 +780,7 @@ shell/            tiny shell, mksh, Toybox, awk
 libcrtgfx/        window/input/framebuffer and Skia/GPU integration
 libcrtmedia/      media, capture/encode, streaming and FFmpeg integration
 libcrtui/         application-facing UI API and LVGL adapter
+libcrtweb/        Web Runtime: WebKit pin and provenance only so far (planned port)
 porting/recipes/  pinned upstream porting recipes
 tools/            wrappers, builders, packaging and porting automation
 libc/tests/       libc/PAL/shell/ABI/integration tests
@@ -778,7 +790,7 @@ libcrtmedia/tests/ media/codec/audio/capture/network tests
 docs/             design, policy, roadmap and acceptance records
 ```
 
-`libcrtweb/` and the `06-web` source stage are planned and should not be read as existing implementation until that stage begins.
+`libcrtweb/` currently holds only the pinned WPE WebKit reference and its provenance; the `crtweb` API, `PlatformCRT` and the `06-web` source stage are planned and should not be read as existing implementation.
 
 ---
 
@@ -832,20 +844,22 @@ software + hardware media
 zero-copy/GPU interop
 capture + encode
 network streaming
+crtui widgets, layout, input and MediaView
+isolated 05-ui source-stage build
 ```
 
 ### In progress
 
 ```text
-crtui
-LVGL-backed application widgets
-external-surface composition
+WebKit CRT Port (06-web):
+WPE WebKit 2.54.0 pinned and verified (Tranche 0 closed);
+JavaScriptCore bring-up next
 ```
 
 ### Planned
 
 ```text
-WebKit CRT Port
+JavaScriptCore bring-up, PlatformCRT
 crtweb / WebView
 ```
 

@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting_status.md`](docs/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-10-01**.
+Last synchronized with the source tree and git history: **2026-10-03**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -19,11 +19,9 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
   WSL/container replacement, or an Android APK runtime.
 - The default workflow builds and tests only the C stage. Explicit cumulative
   distributions then add C++, Simple Graphics, advanced Graphics/Media, and
-  the in-progress `05-ui` stage under `out/<preset>/dist/`. `05-ui` now has a
-  frozen contract, a headless model, private LVGL rendering, input/focus/resize,
-  and the all-three-host-accepted Tranche 4 layout/style/widget set; the planned
-  `06-web` follows (the superseded `05-js`/`libcrtjs` skeleton was removed on
-  2026-09-29).
+  `05-ui` (`crtui`, accepted on all three hosts) under `out/<preset>/dist/`; the
+  planned `06-web` follows (the superseded `05-js`/`libcrtjs` skeleton was
+  removed on 2026-09-29).
 - No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
   provide the host or vendor toolchain; CRT supplies the staged sysroot,
   startup/runtime objects, wrappers, configuration, and manifest.
@@ -228,6 +226,42 @@ hosts:
 This evidence does not yet prove production-complete seeking/track selection,
 adaptive streaming (HLS/DASH), RTSP, or realtime/WebRTC behavior.
 
+### libcrtui
+
+The application UI layer (`05-ui`) is accepted on Linux/x86_64, macOS/arm64,
+and Windows/x64 (Tranches 0-7, `docs/crtui_acceptance.md`):
+
+- `libcrtui` is a CRT-owned API: no LVGL type appears in a public header, and the
+  shared library exports exactly the declared `CRTUI_API` functions (68 at the
+  last Windows count, `lvgl_exports=0`), checked by `crtui_privacy_test`. LVGL
+  9.6.0 is fetched at build time (pinned, SHA-256 verified), compiled privately,
+  and used only as a software renderer into a caller-owned BGRA8888 buffer.
+- The CRT model owns the widget tree, layout, events, focus and hit-testing.
+  Layout is free, Row, Column, Stack, and scrolling (ScrollView/List) with
+  margin, padding, gap, alignment and grow; styling is a CRT-neutral mask
+  (colors, border, radius, opacity, font, text alignment). The v1 widgets are
+  Window, Container, Text, Button, Slider, Progress, Switch, Checkbox, Image,
+  List/ScrollView and TextInput. Contract, layout, surface, input and render
+  tests pass headless and with LVGL on every host.
+- Input arrives through the `crtui/crtgfx.h` adapter: keys, committed text
+  (UTF-8), pointer, wheel, resize, DPI and focus loss (which cancels an in-flight
+  press). Focus navigation is spatial. The evidence is scripted events through
+  the same queue real events use; interactive device input is not automated.
+- A producer-neutral external-surface scene (stable ids, clip, opacity, z-order,
+  damage) is composed by `crtgfx`/Skia in the final present (`crtui_skia`
+  companion, kept out of core `libcrtui`). `MediaView` binds a hardware-decoded
+  `crtmedia` GPU frame to that scene (`crtui_skia_media`) with balanced frame
+  ownership: zero-copy on Linux and macOS, measured GPU-copy on Windows, real
+  H.264 clip, real windows.
+- `05-ui` is packaged in-tree (`crt-ui-dist`) and built in isolation from the
+  isolated `04-gfx-media` SDK (8/8 stage tests, installed `examples/ui-basic`
+  rebuilt externally, packaged demo, `verify_dist.py`, atomic publish; Windows
+  132 s, macOS 49 s, Linux 24 s, also from paths with spaces). LVGL is declared as
+  a private static dependency with its MIT notice. The same work added relocation
+  of text files (`.pc`, `.la`, `*-config`) that bake the isolated 04 staging
+  path, now rejected by `verify_dist.py` and verified on all three hosts (on
+  Windows the path is baked in the `/c/...` spelling).
+
 ### Removed: libcrtjs / 05-js
 
 The `libcrtjs` skeleton (static/shared skeleton libraries only, no engine) and
@@ -240,7 +274,7 @@ JavaScriptCore). No JavaScript engine or binding exists.
 ### Upper Runtime Direction
 
 - The runtime is packaged through the cumulative C, C++, Simple Graphics, and
-  Graphics/Media stages, plus a contract-only `05-ui` (`06-web` is planned).
+  Graphics/Media stages and `05-ui` (`06-web` is the next stage).
 - Each cumulative stage can also be bootstrapped and verified in isolation,
   purely from its own predecessor's already-packaged SDK rather than the
   in-repo build tree. The complete predecessor-only chain through
@@ -248,8 +282,10 @@ JavaScriptCore). No JavaScript engine or binding exists.
   (not the in-repo cumulative pass's default-OFF state), is complete on
   Windows, macOS, and native Linux/aarch64. Linux's fresh cumulative run also
   passes both installed-source Vulkan examples, `verify_dist.py`, and atomic
-  publication.
-- Distribution hardening is complete for the current 01-through-04 contract:
+  publication. The `04-gfx-media -> 05-ui` transition is accepted the same way
+  on Windows, macOS, and Linux/x86_64 (the 05-ui stage built with the 04 SDK's own
+  tool and embedded recipe).
+- Distribution hardening is complete for the current 01-through-05 contract:
   predecessor relinking, external-prerequisite manifests, ELF/PE/Mach-O
   dependency inventory, ELF RUNPATH and Mach-O install-name/RPATH portability,
   installed external CMake consumers, configure/make port consumers, and
@@ -288,10 +324,10 @@ JavaScriptCore). No JavaScript engine or binding exists.
   completed preview or the active runtime tranche.
 - Zero-copy decoded-texture interop, Encode and capture, and Networking and
   streaming are closed on all three hosts.
-- The roadmap is now `04-gfx-media -> 05-ui -> 06-web`. `05-ui` is `crtui`
-  with LVGL as a private implementation, plus an external-surface view so video
-  (and later a WebView) is composed by `crtgfx` rather than copied through an
-  LVGL framebuffer; `06-web` is a WebKit CRT Port (`PlatformCRT`) with
+- The roadmap is `04-gfx-media -> 05-ui -> 06-web`. `05-ui` (`crtui`, LVGL as a
+  private implementation, with external surfaces so video -- and later a WebView
+  -- is composed by `crtgfx` rather than copied through an LVGL framebuffer) is
+  accepted; `06-web` is the next stage and is a WebKit CRT Port (`PlatformCRT`) with
   `libcrtweb` and a WebView, using WPE WebKit as the reference. WebRTC,
   QuickJS, WebGPU, EME/DRM, V8, and Chromium/Ozone are deferred, not gates.
 
@@ -327,6 +363,22 @@ of truth.
 | Keyboard and pointer event translation | synthetic common-queue coverage plus host adapter tests | `crtgfx_keyboard_interactive` |
 | Skia-backed interactive typed text | one-command `crtgfx-keyboard-interactive-skia` build | run the resulting interactive binary |
 | Wayland source/toolchain integration | `crtgfx-wayland-smoke` | Linux host adapter needs a reachable compositor for the live path |
+
+### UI Checks
+
+| Evidence | Automated |
+| --- | --- |
+| Contract: errors, lifetime, threads, events, focus, geometry | `crtui_contract_test` |
+| Layout, style and v1 widget behavior (headless) | `crtui_layout_test` |
+| External-surface scene: clip, opacity, z-order, damage, hit-test | `crtui_surface_test` |
+| Input and focus through the `crtgfx` adapter | `crtui_input_test` |
+| LVGL pixels, state changes, resize, lifecycle | `crtui_render_test` |
+| LVGL stays private: headers, exports, sample | `crtui_privacy_test` |
+| Real GPU final composition and MediaView with a real H.264 clip | `crtui_surface_compositor_test`, `crtui_media_view_test` |
+| Isolated stage and installed sample | `crt-stage-build.py` (04 -> 05) with the packaged demo, `verify_dist.py --stage 05-ui` |
+
+`crt-ui-test` runs the `crtui_*` set; the compositor and MediaView tests exist
+only in a Skia/FFmpeg-enabled tree.
 
 ### Media Checks
 
@@ -429,29 +481,41 @@ statuses, and exceptions are maintained in:
   and realtime/WebRTC remain open. FFmpeg is still intentionally file-only
   (`--disable-network`); network I/O goes through the CRT-owned transport.
 - No JavaScript engine exists and `libcrtjs` is gone; QuickJS is no longer
-  planned as a stage. The `05-ui` (`crtui`/LVGL) stage is in progress, with
-  External Surface closed on all three hosts; `06-web` (WebKit) is unblocked
-  but not started.
+  planned as a stage. `06-web` (WebKit) is the current stage: its Tranche 0 is
+  closed (WPE WebKit 2.54.0 pinned and verified in `libcrtweb/third_party/webkit/`: recomputed
+  archive SHA-256, signed tag, license-file inventory, bundled Skia m154), and no
+  WebKit/JavaScriptCore code is built or imported yet.
+
+### libcrtui
+
+- Text entry takes committed UTF-8 `TEXT` events only: there is no IME
+  composition, text selection, clipboard, or pointer caret placement. Scrolling
+  is by wheel and focus; pointer-drag scrolling is not implemented. There is no
+  touch input (no `crtgfx` source for it) and no hover state.
+- Image and video are drawn with Skia/LVGL scaling that is not exact at source
+  edges; the tests use sources whose pixels survive it.
+- Input evidence is scripted through the real event queue; interactive keyboard,
+  mouse and trackpad behavior on real devices is not automated on any host.
+- The `05-ui` SDK is not yet a release asset: `tools/prepare_release_assets.py`
+  has no `05-ui` entry. The in-tree package ships `crtui/skia*.h` even when
+  Skia/FFmpeg are off but builds the companion libraries only when they are on.
+- `crt-ui-dist` needs `-DCRTUI_ENABLE_LVGL=ON` (after `crtui-lvgl-fetch`); with
+  the default configuration it fails at `verify_dist.py` because the required
+  `ui-basic` sample is not built.
 
 ## Next Priorities
 
-1. Continue `TODO.md`'s active Application UI (`05-ui`) work. Tranche 0 (frozen
-   `crtui` contract, headless model, `05-ui` stage, LVGL v9.6.0 pinned) is done
-   on all three hosts. Tranche 1 (LVGL v9.6.0 imported privately, software
-   rendering through a CRT display adapter into crtgfx) is done on Windows/x64
-   (2026-09-30) and closed on all three hosts; Tranche 2 (input, focus and resize
-   through a crtgfx adapter) and Tranche 3 (LVGL made truly private: export
-   control, an installed LVGL-free sample, a privacy check) are closed on all
-   three hosts. Tranche 4 (CRT-owned layout, styling and the v1 widget set) is
-   closed on Windows/x64, macOS/arm64 and Linux/x86_64 (2026-10-01). Tranche 5
-   (producer-neutral SurfaceView metadata and real GPU final composition) is
-   closed on all three hosts as of 2026-10-02. Continue with Tranche 6
-   MediaView and Tranche 7 isolated-package closure. See
-   `docs/crtui_acceptance.md`.
-2. Begin the now-unblocked `06-web`: a
-   JavaScriptCore/JSCOnly bring-up (Linux first, early three-host replay), a
-   Linux WPE reference baseline, then `PlatformCRT`. See
-   `docs/crtweb_acceptance.md` and `docs/crtweb_porting.md`.
+1. Continue `TODO.md`'s active Web Runtime (`06-web`) work, a WebKit CRT Port.
+   Application UI (`05-ui`, Tranches 0-7) is closed on all three hosts, so its
+   External Surface contract is the accepted prerequisite. The order is
+   `docs/crtweb_acceptance.md`: Tranche 0 (scope, version and license freeze) is
+   closed; next a JavaScriptCore/JSCOnly bring-up (Linux first, early three-host
+   replay), a Linux WPE reference baseline, then `PlatformCRT`. See
+   `docs/crtweb_porting.md`.
+2. Small follow-ups left by the UI work, not gates: teach
+   `tools/prepare_release_assets.py` the `05-ui` SDK, and make a default-
+   configuration `crt-ui-dist` fail with a clear message instead of a missing
+   `ui-basic/main.c`.
 
 Also ongoing, opportunistically rather than sequenced: closing the focused
 CRT/PAL limitations above when an upstream consumer exposes a concrete
