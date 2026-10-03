@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "name": "wpewebkit",
+  "version": "2.54.0",
+  "role": "reference",
+  "source": {
+    "type": "release-tarball",
+    "release_page": "https://wpewebkit.org/release/wpewebkit-2.54.0.html",
+    "archive_url": "https://wpewebkit.org/releases/wpewebkit-2.54.0.tar.xz",
+    "archive_name": "wpewebkit-2.54.0.tar.xz",
+    "archive_size": 46202080,
+    "archive_sha256": "efa9bcc3cb891c2d88f50eec710d9ccee71cbdf1040420361eb98c17355eb452",
+    "repository": "https://github.com/WebKit/WebKit",
+    "tag": "wpewebkit-2.54.0",
+    "tag_object": "1616e9ae260d8d0601da601de24cd8d96adc5e0f",
+    "tag_signed": true,
+    "expected_commit": "73f39d84ea9d4071994214373efbde3665402b05",
+    "released": "2026-09-16",
+    "tag_signature": {
+      "verified": true,
+      "method": "gpg --verify of the tag object's signature and payload (GitHub API git/tags), signer key fetched from keys.openpgp.org by fingerprint; GitHub also reports verification 'valid'",
+      "signer": "Adrian Perez de Castro <aperez@igalia.com>",
+      "fingerprint": "5AA3BC334FD7E3369E7C77B291C559DBE4C9123B",
+      "caveats": "The key is not certified through any web of trust here, so this proves the tag was signed by that key, not independently who holds it. The key is DSA-1024 (created 2008, expires 2027-03-16); a release that outlives the expiry needs the key's renewal checked."
+    }
+  },
+  "license": {
+    "summary": "Mixed per-file licensing. License files in the archive: LGPL-2 and LGPL-2.1 texts (Source/WebCore/LICENSE-LGPL-2, LICENSE-LGPL-2.1, Source/JavaScriptCore/COPYING.LIB), an Apple BSD-style 2-clause notice (Source/WebCore/LICENSE-APPLE), and bundled third-party components each with their own license file. Per-file headers were not scanned; the inventory records the license files only.",
+    "scan_status": "license files inventoried 2026-10-03 (64 files, libcrtweb/third_party/webkit/license-inventory.json); per-file header scan not done",
+    "notices_required_in_sdk": true,
+    "source_correspondence_required": true,
+    "bundled_third_party": {
+      "ANGLE": 5169,
+      "skia": 3059,
+      "pdfjs": 399,
+      "gtest": 155,
+      "libsysprof-capture": 34,
+      "xdgmime": 19,
+      "unifdef": 6
+    },
+    "bundled_skia_milestone": 154,
+    "crt_skia_milestone": 148
+  },
+  "verification": {
+    "date": "2026-10-03",
+    "confirmed_from_primary_sources": [
+      "wpewebkit.org/release lists 2.54.x as the current stable series, 2.54.0 released 2026-09-16, development series 2.53.92.",
+      "The 2.54.0 release page states: the WPEPlatform embedding API is stable and enabled by default; the legacy libwpe-based API remains but is deprecated; cairo rendering was removed and Skia is the only 2D renderer, with the compositor moved from TextureMapper to Skia in the web process; Ninja is mandatory; ENABLE_WPE_LEGACY_API=OFF disables the legacy API.",
+      "GitHub API: refs/tags/wpewebkit-2.54.0 is an annotated tag (object 1616e9ae260d8d0601da601de24cd8d96adc5e0f, tagger date 2026-09-16T09:54:47Z, PGP-signed) pointing at commit 73f39d84ea9d4071994214373efbde3665402b05.",
+      "HTTP HEAD of the archive URL: 200, Content-Length 46202080 bytes, Last-Modified 2026-09-16 10:01:39 GMT.",
+      "WSA-2026-0006 (2026-09-29) is the latest advisory listed and gives its affected versions as 'WebKitGTK and WPE WebKit before 2.54.0 or earlier' (upstream's wording), so this pin is not listed as affected; the advisory is a large batch dominated by bundled Skia/ANGLE issues. Its CVE list was not audited here.",
+      "The archive was downloaded and its SHA-256 recomputed locally: efa9bcc3cb891c2d88f50eec710d9ccee71cbdf1040420361eb98c17355eb452, size 46202080, identical to the release page (tools/fetch_webkit.py).",
+      "The tag's signature verifies with gpg (see source.tag_signature).",
+      "Six sampled source files (Source/cmake/OptionsWPE.cmake, Source/JavaScriptCore/COPYING.LIB, Source/WebCore/LICENSE-LGPL-2.1, Source/ThirdParty/skia/include/core/SkMilestone.h, Source/WTF/wtf/Platform.h, CMakeLists.txt) are byte-identical (git blob SHA-1) to the tree at the tagged commit; the top-level NEWS is a release-tarball file with no counterpart at that commit. The tarball is not otherwise proven to equal the commit tree.",
+      "The archive bundles its own Skia (milestone 154, Source/ThirdParty/skia/include/core/SkMilestone.h) and ANGLE; CRT's Skia is m148."
+    ],
+    "not_yet_verified": [
+      "Per-file license headers (SPDX or header text) were not scanned; only license files were inventoried.",
+      "The tarball is not proven equal to the tagged commit beyond the six sampled files.",
+      "Upstream's security support window for a stable series is not documented on the pages consulted."
+    ]
+  },
+  "import": {
+    "status": "pinned and verified (Web Tranche 0); nothing is fetched into a build, imported or compiled yet",
+    "fetch": "tools/fetch_webkit.py (download and verify); tools/scan_webkit_licenses.py (license inventory); extraction arrives with Tranche 1",
+    "notes": [
+      "The archive is a release tarball, not a git archive, so it carries no commit header: expected_commit is the authority for provenance and is recorded from the signed tag, while archive_sha256 pins the exact bytes CRT builds from.",
+      "WPE WebKit 2.54 is the reference for Tranche 2 and the structural model for PlatformCRT. It is not itself the product: the CRT port is a separate platform implementation (docs/crtweb_porting.md).",
+      "Do not patch upstream source to hide a missing CRT/PAL surface (AGENTS.md porting loop). Any carried patch needs a row in docs/crtweb_porting.md with its upstream reference and removal condition."
+    ]
+  },
+  "security_policy": {
+    "advisory_feed": "https://wpewebkit.org/security/",
+    "advisory_mailing_list": "webkit-wpe",
+    "observed_cadence_2026": "WSA-2026-0001 2026-03-18, 0002 2026-03-28, 0003 2026-06-02, 0004 2026-07-10, 0006 2026-09-29 (0005 date not recorded)",
+    "rule": "A pinned version is affected by an advisory when it is older than the advisory's fixed version. Re-check the pin against every new advisory; see docs/crtweb_acceptance.md Tranche 0."
+  },
+  "public_api_policy": [
+    "No WebKit, WPE or GLib type, macro or header appears in any installed libcrtweb or crtui header.",
+    "tools/verify_dist.py (stage 06-web) will fail if a WebKit/WPE/GLib header leaks into the public SDK, as it already does for LVGL in 05-ui."
+  ]
+}

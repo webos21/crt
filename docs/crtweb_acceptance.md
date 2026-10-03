@@ -1,10 +1,10 @@
 # crtweb Acceptance (Stage `06-web`)
 
-**Status: planned, not started.** Detailed contract and tranche order for the
+**Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
+Tranche 1 (JavaScriptCore bring-up) is next. Nothing is built or imported yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
-([`crtui_acceptance.md`](crtui_acceptance.md)); nothing here begins before that
-stage is accepted, except the JavaScriptCore replay noted in Tranche 1. Upstream
-mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
+([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
+hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
 here as each tranche closes; completed work goes to `../HISTORY.md` and the
 current tranche state to `../TODO.md`.
 
@@ -55,6 +55,55 @@ security-update policy is a deliverable, not an afterthought.
 
 Pin the reference release and write `crtweb_porting.md`'s upstream mapping.
 Decide the SBOM/CVE-tracking policy now.
+
+**Status (2026-10-03): closed.** The reference is pinned in
+`libcrtweb/third_party/webkit/recipe.json` (provenance in `libcrtweb/third_party/webkit/README.md`) and
+verified: the archive was downloaded and its SHA-256 recomputed
+(`efa9bcc3...eb452`, 46,202,080 bytes, equal to the release page); the signed tag
+`wpewebkit-2.54.0` verifies with `gpg` (signer Adrian Perez de Castro, key
+`5AA3BC33...123B`, not web-of-trust certified) and points at commit `73f39d84...`;
+six sampled source files are byte-identical to that commit; and the 64 license and
+notice files of the archive are inventoried in `libcrtweb/third_party/webkit/license-inventory.json`
+(`tools/scan_webkit_licenses.py`). The upstream mapping is in `crtweb_porting.md`
+and the security policy below was confirmed by the owner. Still unverified, and
+carried as explicit items in the recipe: per-file license headers, tarball-equals-
+commit beyond the sampled files, and upstream's security support window.
+
+**Frozen scope and version.** Reference: WPE WebKit **2.54.0** (2026-09-16), the
+current stable series. CRT targets the stable WPEPlatform API and does not use the
+deprecated libwpe-based API (`ENABLE_WPE_LEGACY_API=OFF`). Build system: CMake with
+Ninja (upstream now requires it). 2D rendering is Skia only; threaded painting is
+mandatory upstream. The v1 scope above is unchanged.
+
+**Licensing.** WebKit is licensed per file and bundles third-party components. The
+archive carries LGPL-2 and LGPL-2.1 texts (WebCore, JavaScriptCore's `COPYING.LIB`),
+an Apple BSD-style 2-clause notice, and license files for bundled Skia (BSD-3-style,
+milestone 154), ANGLE, pdf.js, gtest and others (inventory above). Every `06-web` SDK
+must carry the notices, the exact source revision and archive hash, and enough
+information for source correspondence (the pinned recipe plus the carried-patch
+list). Because parts are LGPL, the proposal is to keep WebKit as separately built,
+separately replaceable libraries rather than merging it into application binaries;
+that is confirmed or changed with the packaging decisions in Tranche 10.
+
+**Security and update policy (confirmed by the owner 2026-10-03).**
+1. Upstream publishes WebKitGTK/WPE advisories (`WSA-YYYY-NNNN`, the 2026 ones
+   dated 2026-03-18, 03-28, 06-02, 07-10 and 09-29 at the time of writing) and
+   fixes them in the current stable series. CRT pins one stable series and moves
+   to the newest micro release of it.
+2. Every new advisory is checked against the pin by version ("affected: before
+   X"); an affected pin is bumped and re-verified (`tools/fetch_webkit.py`) before
+   any further `06-web` release asset is published. A bump is a recipe change plus
+   a re-run of the stage gates, never an in-place edit of a built tree.
+3. The advisory feed (`https://wpewebkit.org/security/`) and the `webkit-wpe`
+   mailing list are the tracked sources; a release asset records the WebKit
+   version and the newest advisory it was checked against.
+4. An SBOM (package, version, license, source URL, hash) is generated with each
+   `06-web` SDK and declared in its manifest, like the other redistributed
+   dependencies; the SBOM format is chosen at Tranche 10.
+5. When the pinned series stops receiving upstream fixes, moving to the next
+   stable series is a planned tranche item, not a silent bump. The length of
+   upstream's support window is not documented on the pages consulted and must
+   be confirmed before the first public `06-web` release.
 
 ### 1. JavaScriptCore / JSCOnly bring-up
 
