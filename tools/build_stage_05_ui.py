@@ -252,6 +252,11 @@ def llvm_bin_directory() -> Path:
         if any(candidate.glob("llvm-nm*")):
             return candidate
     found = shutil.which("llvm-nm")
+    if found is None and sys.platform == "darwin":
+        # Apple's /usr/bin/clang is a shim; the LLVM binutils live in the Xcode
+        # toolchain, reachable through xcrun, not next to the compiler.
+        result = subprocess.run(["xcrun", "--find", "llvm-nm"], capture_output=True, text=True)
+        found = result.stdout.strip() if result.returncode == 0 else None
     if found:
         return Path(found).resolve().parent
     raise SystemExit("llvm-nm/llvm-readobj were not found next to CRT_CC or on PATH; "
