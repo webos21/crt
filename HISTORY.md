@@ -10,6 +10,17 @@ substantive update.
 
 ## 2026-10-03
 
+- **Isolated SDKs no longer carry the staging path in text files.** The 04
+  stage installs ports into a temporary prefix that autotools/pkg-config baked
+  into `lib/pkgconfig/*.pc`, `*.la` and `bin/curl-config`; Mach-O/ELF had been
+  relocated but text had not, and `verify_dist.py` never looked
+  (`docs/distribution.md` criterion 8). New `tools/crt_text_relocate.py` (drops
+  `.la`, `prefix=${pcfiledir}/../..`, location-relative `*-config`) runs in
+  `build_stage_04_gfx_media.py`; `verify_dist.validate_text_paths()` rejects
+  leftovers; `tools/test_text_relocate.py` adds 5 tests (tooling 94/94). Rebuilt
+  the clean macOS chain (isolated 04 607 s, 05-ui 47 s, 8/8): no stale path in the
+  SDK, `pkg-config`/`curl-config` follow a moved copy. Windows/Linux unverified.
+
 - **Isolated `04-gfx-media -> 05-ui` stage replayed on macOS/arm64 (`crtui`
   Tranche 7), after one fix.** The stage builder could not find `llvm-nm`
   behind Apple's clang shim; `tools/build_stage_05_ui.py` now uses `xcrun`.
@@ -20,7 +31,8 @@ substantive update.
   path containing spaces. The isolated `libcrtui.dylib` binds libc to `libc.dylib`
   and the dylib-linked sample runs cleanly. Full ctest 162/162, tooling 89/89,
   `crt-ui-dist` verified. Inherited absolute paths in 04-layer text files
-  (`.la`, `curl-config`, `.pc`) are recorded as a follow-up. Linux replay is next.
+  (`.la`, `curl-config`, `.pc`) were recorded as a follow-up and fixed the same day
+  (next entry). Linux replay is next.
 
 - **Isolated `04-gfx-media -> 05-ui` stage accepted on Windows/x64
   (`crtui` Tranche 7).** `distribution/stages/05-ui/CMakeLists.txt` and

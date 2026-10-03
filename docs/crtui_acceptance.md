@@ -1062,12 +1062,34 @@ for the first time and needed one fix; nothing else changed.
   LVGL notice and recipe (`share/licenses/lvgl`, `share/crt/dependencies/lvgl`)
   and no LVGL header or link artifact.
 - In-tree after the fix: full `ctest` 162/162 (expected camera skip), the
-  `crtui_*`-excluding preset 110/110, tooling 89/89, `crt-ui-dist` verified.
-- **Inherited, not caused by this stage.** Text files from the 04 layer carry
-  the build host's absolute paths in the isolated SDK (`lib/libcurl.la`,
-  `lib/libfreetype.la`, `bin/curl-config`, `lib/pkgconfig/libcurl.pc`);
-  `verify_dist.py` inspects binaries, not these. They are present in the 04 SDK
-  already, so 05-ui merely copies them. Recorded in `TODO.md` as a follow-up.
+  `crtui_*`-excluding preset 110/110, tooling 94/94 after the relocation fix, `crt-ui-dist` verified.
+- **Inherited finding, fixed.** The isolated 04 layer installs its ports with
+  `--install-prefix <temporary staged dir>`, which autotools/pkg-config bake into
+  text files: `lib/pkgconfig/*.pc` (8 files: zlib, freetype2, libcurl,
+  libav*/libsw*), `lib/libcurl.la`, `lib/libfreetype.la` and `bin/curl-config`.
+  After the move to the output directory they named a path that no longer exists.
+  Binaries had been made relocatable (Mach-O/ELF RPATHs) but text files had no
+  such step, and `verify_dist.py` only inspected binaries, although
+  `docs/distribution.md` criterion 8 forbids build paths in installed files.
+  Fix: `tools/crt_text_relocate.py` (run by `build_stage_04_gfx_media.py` before
+  the distribution gate; shipped in the SDK tools and the stage source asset)
+  drops `*.la`, rewrites each `.pc` to `prefix=${pcfiledir}/../..` with other
+  occurrences as `${prefix}`, and makes `bin/*-config` compute its prefix from its
+  own location, handling single-/double-quoted occurrences; anything else that
+  still contains the staging path is reported, not guessed. New
+  `verify_dist.validate_text_paths()` rejects any `.la`, any absolute `.pc`
+  variable or non-system `-I/-L`, and any absolute `prefix=` in `bin/` scripts.
+  `tools/test_text_relocate.py` (5 tests) covers an unrelocated tree failing,
+  relocation, the real `curl-config` run after the tree is moved, an unknown file
+  type being reported, and a symlinked spelling of the root.
+  Evidence on the clean chain (03 -> isolated 04 in 607 s -> isolated 05-ui in
+  47 s, stage 8/8, sample and demo `presented=30 pixel_check=pass
+  input_check=pass`, verify and publish pass): no `.la` remains, no file in the
+  05-ui SDK names the work/staging path (the manifest's `source_recipe` is the
+  caller-supplied recipe location by design), `pkg-config --cflags --libs freetype2
+  libcurl` resolves to the SDK, and a copy of the SDK moved to a path with a space
+  gives `curl-config --prefix` and `pkg-config` results under the new location.
+  Windows and Linux are unverified (tracked in `TODO.md`).
 - Not covered here: the stage does not run the macOS-only
   `crtui_contract_shared_test` (the in-tree guard); the installed sample linking
   the dylib is the stage's coverage of that failure. Linux/x86_64 replay remains.

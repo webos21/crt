@@ -309,12 +309,12 @@ or host investigation supplies the required evidence.
   Decide whether to fix `crt_configure_shared_runtime()` for all of them and
   add a dylib-linked test per library. Found 2026-09-30
   (`docs/crtui_acceptance.md`, Tranche 3 macOS replay).
-- Isolated SDK text files carry the build host's absolute paths (macOS
-  `lib/libcurl.la`, `lib/libfreetype.la`, `bin/curl-config`,
-  `lib/pkgconfig/libcurl.pc`, inherited from the 04 layer) and
-  `verify_dist.py` only scans binaries. Rewrite them to a relocatable form (or
-  drop `.la`) and add a text-file path check; check whether Windows/Linux have
-  the same. Found 2026-10-03 (`docs/crtui_acceptance.md`, Tranche 7 macOS).
+- Isolated SDK text-file relocation (`tools/crt_text_relocate.py`,
+  `verify_dist.validate_text_paths()`) was fixed and verified only on macOS/arm64
+  (2026-10-03). Re-run the isolated 04/05-ui chain on Windows and Linux and
+  confirm `.pc`/`*-config` come out relocatable there too; the Windows
+  `curl-config`/`.pc` spellings (`C:/...`, MSYS paths) are handled by design but
+  untested.
 - Make the ordinary in-tree Linux `crt-gfx-media-dist` verifiable with
   `CRTMEDIA_ENABLE_CURL=ON`: `libcrtmedia.so` links the shared `libcurl.so.4`
   in-tree (static zlib is not PIC) and `verify_dist.py` reports `undeclared

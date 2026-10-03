@@ -317,7 +317,10 @@ and build trees using the packaged directory. At minimum they must verify:
 6. no access to repository headers, libraries, or build outputs during that
    isolated stage build;
 7. packaged examples rebuilt and run at the appropriate stage;
-8. no accidental absolute source/build paths in installed files;
+8. no accidental absolute source/build paths in installed files (binaries via
+    the RPATH/install-name gates, text files via `verify_dist.py`'s `.la`/`.pc`/
+    `bin/*-config` check; `tools/crt_text_relocate.py` makes the isolated
+    stages' port text files relocatable);
 9. no compiler or linker executable in the archive;
 10. every declared external dependency's headers, link artifacts, and runtime
     libraries are present, and its provenance/license metadata is recorded;
