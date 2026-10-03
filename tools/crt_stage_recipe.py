@@ -11,6 +11,7 @@ STAGE_SUCCESSORS = {
     "01-c": "02-cxx",
     "02-cxx": "03-gfx-simple",
     "03-gfx-simple": "04-gfx-media",
+    "04-gfx-media": "05-ui",
 }
 
 

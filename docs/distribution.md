@@ -26,8 +26,9 @@ external toolchain contract.
 | `06-web` (planned) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
 The repository builds 05-ui through the currently accepted crtui/LVGL
-tranches. It is not yet a release asset because final external-surface,
-MediaView and isolated-package closure remain open.  The former `05-js`
+tranches, and an isolated `04-gfx-media -> 05-ui` stage build is accepted on
+Windows/x64 (macOS and Linux replays remain). It is not yet a release asset:
+`tools/prepare_release_assets.py` does not yet know `05-ui`.  The former `05-js`
 skeleton (`libcrtjs`, no engine) and its `crt-js-*` targets were deleted on
 2026-09-29; the QuickJS plan behind it is retired
 ([`runtime_roadmap.md`](runtime_roadmap.md)). `05-ui` was created fresh by

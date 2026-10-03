@@ -31,7 +31,7 @@ BACKSLASH = chr(92)
 #: Directories quoted includes may resolve against, besides the including file's.
 INCLUDE_DIRS = tuple(ROOT / path for path in (
     "libcrtgfx/src", "libcrtgfx/include", "libcrtmedia/src", "libcrtmedia/include",
-    "libc/include", "libcrtgfx/tests", "libcrtmedia/tests"))
+    "libc/include", "libcrtgfx/tests", "libcrtmedia/tests", "libcrtui/include"))
 
 #: (stage, os) -> {header: reason} for includes guarded so the OS never compiles them.
 CONDITIONAL_ON_OTHER_OSES = {
@@ -41,6 +41,14 @@ CONDITIONAL_ON_OTHER_OSES = {
     ("04-gfx-media", "macos"): {
         "libcrtgfx/src/arch/linux/gpu_vulkan_test.h":
             "tests/gpu_test.c includes it under CRT_TARGET_OS_LINUX && CRTGFX_HAVE_VULKAN"},
+}
+
+#: stage -> repository prefixes whose headers the *predecessor SDK* installs, so the
+#: stage asset must not (and need not) bundle them. 05-ui compiles against the
+#: installed 04-gfx-media SDK's include/crtgfx and include/crtmedia (stage 04
+#: installs both trees with install(DIRECTORY ...); the test below checks that).
+PREDECESSOR_SDK_HEADERS = {
+    "05-ui": ("libcrtgfx/include/", "libcrtmedia/include/"),
 }
 
 QUOTED_INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
@@ -87,6 +95,8 @@ def unbundled_project_headers(stage: str, target_os: str) -> dict:
                 continue
             if "third_party" in found.relative_to(ROOT).parts:
                 continue
+            if relative(found).startswith(PREDECESSOR_SDK_HEADERS.get(stage, ())):
+                continue
             if found in bundled:
                 if found not in seen:
                     pending.append(found)
@@ -111,6 +121,38 @@ class StageSourceClosure(unittest.TestCase):
                         f"{stage} ({target_os}) source asset lacks project headers "
                         "its bundled sources include; add them to "
                         "tools/create_stage_source.py")
+
+    def test_predecessor_sdk_headers_are_really_installed_by_the_predecessor_stage(self):
+        # 05-ui relies on the 04-gfx-media SDK for crtgfx/crtmedia headers. If that
+        # stage ever stopped installing them, the isolated 05-ui build would only
+        # find out hours later.
+        text = (ROOT / "distribution/stages/04-gfx-media/CMakeLists.txt").read_text(encoding="utf-8")
+        for stage, prefixes in PREDECESSOR_SDK_HEADERS.items():
+            for prefix in prefixes:
+                directory = prefix.rstrip("/")
+                root_variable = {"libcrtgfx": "CRTGFX_ROOT", "libcrtmedia": "CRTMEDIA_ROOT"}[
+                    directory.split("/")[0]]
+                with self.subTest(stage=stage, prefix=prefix):
+                    self.assertRegex(
+                        text,
+                        r'install\(DIRECTORY "\$\{' + root_variable + r'\}/include/" DESTINATION include\)')
+
+    def test_05_ui_bundles_every_source_the_shared_crtui_list_names(self):
+        # libcrtui/cmake/crtui_sources.cmake is the one list both the in-tree
+        # build and the isolated 05-ui stage compile from. Every file it names
+        # must exist and ride in the 05-ui asset, or the isolated build only
+        # finds out after fetching LVGL.
+        text = (ROOT / "libcrtui/cmake/crtui_sources.cmake").read_text(encoding="utf-8")
+        names = re.findall(r"^\s+(src/[\w./]+)\s*$", text, re.M)
+        self.assertGreaterEqual(len(names), 5, names)
+        spec = stage_source.STAGES["05-ui"]
+        for target_os in ("windows", "linux", "macos"):
+            bundled = expand(stage_source.required_project_paths(spec, target_os))
+            for name in names:
+                with self.subTest(os=target_os, source=name):
+                    path = (ROOT / "libcrtui" / name).resolve()
+                    self.assertTrue(path.is_file(), name)
+                    self.assertIn(path, bundled, name)
 
     def test_the_headers_that_once_went_missing_are_bundled(self):
         for header in ("libcrtgfx/src/gpu_test_control.h",

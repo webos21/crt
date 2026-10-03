@@ -126,7 +126,11 @@ state. Windows/x64 is the first host, then macOS/arm64, then Linux.
     `docs/crtui_acceptance.md`.
 * [ ] **7. Cross-host and isolated-package closure.** Isolated `05-ui` build
   from the installed `04-gfx-media` SDK; update `tools/create_stage_source.py`
-  and `tools/crt_dist_prerequisites.py` in the same change.
+  and `tools/crt_dist_prerequisites.py` in the same change. Windows/x64 is
+  accepted 2026-10-03 (isolated stage 8/8, sample and packaged demo, verify,
+  space-path run); macOS/arm64 and Linux/x86_64 replays remain, the stage
+  project's non-Windows branches being written but never run. Evidence and the
+  04-SDK `tools/` finding are in `docs/crtui_acceptance.md`.
 
 ## Planned
 

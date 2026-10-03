@@ -8,6 +8,42 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-03
+
+- **Isolated `04-gfx-media -> 05-ui` stage accepted on Windows/x64
+  (`crtui` Tranche 7).** `distribution/stages/05-ui/CMakeLists.txt` and
+  `tools/build_stage_05_ui.py` build crtui (private LVGL v9.6.0, fetched live and
+  re-verified against its pinned SHA-256), the Skia/MediaView companions, eight
+  tests and the installed `ui-basic` sample from a ~118 KB source asset against the
+  isolated 04 SDK alone. The entrypoint refuses the ordinary default-OFF 04
+  package, declares LVGL as a private static dependency with its MIT notice and
+  pinned recipe (the in-tree package never shipped the notice), rebuilds the sample
+  externally from the SDK, runs the packaged demo, verifies and publishes
+  atomically. `libcrtui/cmake/crtui_sources.cmake` is now the single source list
+  for the in-tree and stage builds. `STAGE_SUCCESSORS` gained `04 -> 05`;
+  `crt-stage-05-source` exists, `crt-gfx-media-dist` and the 04 source asset embed
+  `05-ui.json`, and the 04 entrypoint copies it into its SDK. `tools/crt_dist_
+  prerequisites.py` needed no entry (05-ui equals 04 on every OS).
+
+  From the real isolated 04 SDK (4594 s, built from the packaged 03 SDK), the 05
+  stage passes in 123-158 s: ctest 8/8 including the compositor test and the
+  media-view test (`interop=gpu-copy gpu_frames=5 cpu_frames=0 releases=5`), the
+  rebuilt sample and the packaged `crtui_window_demo` both report `presented=30
+  pixel_check=pass input_check=pass`, and `verify_dist.py` passes; a work/output
+  path containing a space passes too. In-tree `crt-ui-dist` still verifies the whole
+  01..05 chain, full CTest is 177/177 (one no-camera skip), and the stage-source
+  closure test (7 tests, now covering 05-ui) passes. Removing the LVGL notice makes
+  `verify_dist.py` fail.
+
+  Findings: an isolated 04 SDK copies `tools/` from its 03 predecessor, so its own
+  `crt-stage-build.py` rejected the 05 recipe until the 03 SDK is regenerated from
+  this tree (verified with the repository's current `crt-stage-build.py` instead; a
+  full chain rerun costs the ~80-minute dependency rebuild). A first draft of the
+  `verify_dist.py` check required the companion libraries of every in-tree package,
+  which would have rejected the legitimate Skia-OFF package (headers install
+  unconditionally); it now applies only to the isolated stage. macOS/arm64 and
+  Linux/x86_64 branches of the stage project are written but unverified.
+
 ## 2026-10-02
 
 - **`crtui` Tranche 6C replayed on Linux/x86_64 with no change -- Tranche 6

@@ -944,6 +944,75 @@ registries updated in the same change -- both were silently stale in earlier
 tranches; do not repeat that. Include an installed sample, `verify_dist.py`,
 and the per-OS dependency/RPATH checks.
 
+**Frozen design (Windows/x64 accepted 2026-10-03).**
+
+1. *What the stage consumes.* The isolated, option-ON `04-gfx-media` SDK
+   (`manifest.built_from.stage == "03-gfx-simple"`): the entrypoint refuses the
+   ordinary cumulative 04 package up front, because that one has no Skia, FFmpeg
+   or curl. crtgfx/crtmedia headers, `libskia.a`, FreeType, FFmpeg, the curl chain,
+   the mingw/win32-shim headers and the emutls stub archive all come from the
+   installed SDK. The asset (`distribution/stages/05-ui/CMakeLists.txt`,
+   `tools/build_stage_05_ui.py`, `libcrtui/{cmake,include,src,tests,tools}`, the
+   LVGL recipe and fetcher, the test clip, the sample project) is ~118 KB.
+2. *LVGL.* Fetched live and pinned by `libcrtui/third_party/lvgl/recipe.json`
+   (size and SHA-256 re-verified every run, archive cached in the work root),
+   compiled privately into `libcrtui`. It is declared in the manifest as a
+   `private-static-port` with no headers and no link artifacts, and its MIT notice
+   (`share/licenses/lvgl/LICENCE.txt`) and pinned recipe
+   (`share/crt/dependencies/lvgl/recipe.json`) are packaged -- the in-tree package
+   never shipped that notice.
+3. *One source list.* `libcrtui/cmake/crtui_sources.cmake` is the only place the
+   core, LVGL-backend, Skia and MediaView source files are named; the in-tree
+   `libcrtui/CMakeLists.txt` and the stage project both include it, and
+   `tools/test_stage_source_closure.py` fails if a file it names is missing from
+   the asset. The closure test also checks that stage 04 really installs the
+   crtgfx/crtmedia header trees 05-ui compiles against.
+4. *Installed result.* `libcrtui.a` + `libcrtui_dll.dll.a`/`libcrtui.dll`,
+   `libcrtui_skia.a`, `libcrtui_skia_media.a`, `include/crtui/*`,
+   `examples/bin/crtui_window_demo`, `examples/ui-basic`. `verify_dist.py
+   --stage 05-ui` additionally requires, for an isolated build, both companion
+   libraries and headers, the LVGL record (with no header/link artifact) and the
+   notice/provenance files, and that every 04 dependency record survived. It does
+   not require the companion libraries of the ordinary in-tree package, which
+   installs `crtui/skia*.h` unconditionally but builds the libraries only with
+   Skia/FFmpeg enabled.
+5. *Prerequisites registry.* `tools/crt_dist_prerequisites.py` needed no new
+   entry: crtui adds no external runtime, so `05-ui` equals `04-gfx-media` on every
+   OS (checked), and the PE dependency scan of `libcrtui.dll` is clean.
+6. *Recipe chain.* `STAGE_SUCCESSORS` gained `04-gfx-media -> 05-ui`;
+   `crt-stage-05-source` generates the asset and recipe; `crt-gfx-media-dist`
+   packages `05-ui.json` into the in-tree 04 package, and the 04 source asset now
+   embeds it (as 02-cxx embeds 03's) so an isolated 04 SDK can bootstrap 05-ui from
+   a downloaded asset alone.
+
+**Windows evidence.** From the isolated 04 SDK (built from the real packaged 03
+SDK with `crt-stage-build.py`), the isolated 05-ui stage passes in 151 s: ctest
+8/8 (contract, layout, surface, input, render, privacy, surface compositor, media
+view), where the compositor test reports `gpu/ordering/clip/opacity/damage/resize/
+ownership=pass` and the media view test decodes the real clip
+(`backend=d3d12 interop=gpu-copy gpu_frames=5 cpu_frames=0 releases=5`); the
+installed sample rebuilt externally from the SDK and the prebuilt
+`examples/bin/crtui_window_demo` both report `presented=30 pixel_check=pass
+input_check=pass`; `verify_dist.py` and the atomic publish pass. A run from a work
+and output path containing a space (129 s) passes too. Removing the LVGL notice
+makes `verify_dist.py` fail, so the new check is live.
+
+**Chain finding.** An isolated 04 SDK copies `tools/` from its 03 predecessor, not
+from its own asset, so its `crt-stage-build.py` validates recipes with the 03
+SDK's `crt_stage_recipe.py`. That copy predates `04 -> 05` and rejects the 05-ui
+recipe ("invalid or unsupported CRT stage recipe"). The packaged chain therefore
+needs the 03 SDK regenerated from this tree (the in-tree `crt-gfx-simple-dist`
+does so) before the 04 build; this run used the repository's current
+`crt-stage-build.py` against the 04 SDK, which exercises the same stage entrypoint.
+Re-running the whole chain from a regenerated 03 SDK costs the full ~80-minute
+FreeType/FFmpeg rebuild, because the dependency cache is keyed on the predecessor
+SDK's content including its tools.
+
+**Not verified here.** macOS/arm64 and Linux/x86_64: the stage project's
+macOS/Linux branches reuse the 04 stage's link interfaces but have never been
+run. The shared-dylib libc binding on macOS and the Linux Vulkan/Wayland/VA-API
+link lines are the likeliest places for a first-replay gap.
+
 ## Host order
 
 Windows/x64 first (interactive iteration), macOS/arm64 second (input/event

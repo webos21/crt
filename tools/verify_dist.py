@@ -410,6 +410,31 @@ def main() -> None:
         for leaked in ("lvgl", "lvgl.h", "lv_conf.h"):
             if (dist / "include" / leaked).exists():
                 raise SystemExit(f"LVGL header leaked into the public SDK: include/{leaked}")
+        # The ordinary in-tree package installs crtui/skia*.h unconditionally but
+        # the companion libraries only when Skia/FFmpeg are enabled, so nothing is
+        # required of them here; the isolated option-ON stage requires them.
+        if manifest.get("built_from", {}).get("stage") == "04-gfx-media":
+            # The isolated transition is option-ON, like 04's: both companions
+            # exist, LVGL is declared as the private static dependency it is, and
+            # its MIT notice and pinned recipe are packaged even though no LVGL
+            # header or library is installed.
+            for header in ("skia.h", "skia_media.h"):
+                require(dist / "include" / "crtui" / header)
+            for library in ("libcrtui_skia.a", "libcrtui_skia_media.a"):
+                require(dist / "lib" / library)
+            if "lvgl" not in redistributed:
+                raise SystemExit("isolated 05-ui does not declare its lvgl dependency")
+            lvgl = redistributed["lvgl"]
+            if lvgl["headers"] or lvgl["link_artifacts"]:
+                raise SystemExit("lvgl is private to libcrtui: it must declare no "
+                                 "headers or link artifacts")
+            require(dist / "share" / "licenses" / "lvgl" / "LICENCE.txt")
+            require(dist / "share" / "crt" / "dependencies" / "lvgl" / "recipe.json")
+            # The predecessor's own isolated-04 artifacts must still be here.
+            for name in ("freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib"):
+                if name not in redistributed:
+                    raise SystemExit(
+                        f"isolated 05-ui lost the 04-gfx-media {name} dependency record")
     print(f"CRT distribution verified: {dist}")
 
 

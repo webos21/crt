@@ -1319,8 +1319,26 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
+      --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
       --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
+    # Embeds 05-ui.json so the isolated 04 SDK can bootstrap 05-ui with nothing
+    # but a downloaded asset (the same contract 02-cxx -> 03-gfx-simple has).
+    DEPENDS crt-stage-05-source
     COMMENT "Creating the pinned 03-gfx-simple -> 04-gfx-media source asset and recipe"
+    USES_TERMINAL
+  )
+  # 04-gfx-media -> 05-ui (Tranche 7): crtui, its Skia/MediaView companions and
+  # tests build from this asset against the isolated 04 SDK alone; only LVGL is
+  # fetched live. No source_root content is bundled (the asset carries project
+  # paths only), so the shared external/ root is just a placeholder.
+  add_custom_target(crt-stage-05-source
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
+      --root "${CMAKE_SOURCE_DIR}" --stage 05-ui
+      --target-os "${CRT_TARGET_OS}"
+      --source-root "${CMAKE_BINARY_DIR}/external"
+      --output-dir "${CRT_STAGE_SOURCE_ROOT}"
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
+    COMMENT "Creating the pinned 04-gfx-media -> 05-ui source asset and recipe"
     USES_TERMINAL
   )
   add_custom_target(crt-c-dist
@@ -1537,10 +1555,11 @@ if(Python3_Interpreter_FOUND)
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/04-gfx-media" --base "${CRT_DIST_ROOT}/03-gfx-simple"
       --component crt-gfx --component crt-media --cmake "${CMAKE_COMMAND}" --stage 04-gfx-media
+      --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
       --dist "${CRT_DIST_ROOT}/04-gfx-media" --stage 04-gfx-media
-    DEPENDS crt-gfx-simple-dist crt-gfx-media-build
+    DEPENDS crt-gfx-simple-dist crt-gfx-media-build crt-stage-05-source
     USES_TERMINAL
   )
 

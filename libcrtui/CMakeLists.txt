@@ -12,6 +12,7 @@ option(CRTUI_ENABLE_LVGL "Build crtui's private LVGL software renderer" OFF)
 set(CRTUI_LVGL_RECIPE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lvgl/recipe.json")
 set(CRTUI_LVGL_FETCH_DIR "${CMAKE_BINARY_DIR}/lvgl" CACHE PATH "Where tools/fetch_lvgl.py extracts LVGL")
 set(CRTUI_LVGL_ROOT "${CRTUI_LVGL_FETCH_DIR}/lvgl-9.6.0" CACHE PATH "Extracted LVGL source root")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtui_sources.cmake")
 set(CRTUI_LVGL_SOURCES)
 set(CRTUI_LVGL_PRIVATE_SOURCES)
 if(Python3_Interpreter_FOUND)
@@ -28,7 +29,7 @@ if(CRTUI_ENABLE_LVGL)
     message(FATAL_ERROR "CRTUI_ENABLE_LVGL=ON requires the extracted LVGL source at ${CRTUI_LVGL_ROOT}. Run the crtui-lvgl-fetch target, then reconfigure.")
   endif()
   file(GLOB_RECURSE CRTUI_LVGL_SOURCES CONFIGURE_DEPENDS "${CRTUI_LVGL_ROOT}/src/*.c")
-  set(CRTUI_LVGL_PRIVATE_SOURCES src/lvgl_backend.c)
+  set(CRTUI_LVGL_PRIVATE_SOURCES ${CRTUI_LVGL_BACKEND_SOURCES})
   # Third-party code: no warnings-as-errors, LVGL reads only crtui's lv_conf.h.
   set(CRTUI_LVGL_COMPILE_OPTIONS -w -DLV_CONF_INCLUDE_SIMPLE=1 -fvisibility=hidden)
   if(CRT_TARGET_OS STREQUAL "windows")
@@ -47,8 +48,7 @@ if(CRTUI_ENABLE_LVGL)
 endif()
 
 add_library(crtui STATIC
-  src/core.c
-  src/crtgfx_adapter.c
+  ${CRTUI_CORE_SOURCES}
   ${CRTUI_LVGL_SOURCES}
   ${CRTUI_LVGL_PRIVATE_SOURCES}
 )
@@ -74,8 +74,7 @@ set_target_properties(crtui PROPERTIES
 )
 
 add_library(crtui_shared SHARED
-  src/core.c
-  src/crtgfx_adapter.c
+  ${CRTUI_CORE_SOURCES}
   ${CRTUI_LVGL_SOURCES}
   ${CRTUI_LVGL_PRIVATE_SOURCES}
 )
@@ -158,7 +157,7 @@ if(CRTUI_ENABLE_LVGL AND TARGET crtgfx_skia AND TARGET crtgfx_gpu)
     endif()
   endfunction()
 
-  add_library(crtui_skia STATIC src/skia_compositor.cc)
+  add_library(crtui_skia STATIC ${CRTUI_SKIA_SOURCES})
   target_link_libraries(crtui_skia PUBLIC crtui crtgfx_skia)
   target_include_directories(crtui_skia PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -174,7 +173,7 @@ if(CRTUI_ENABLE_LVGL AND TARGET crtgfx_skia AND TARGET crtgfx_gpu)
 
   # Tranche 6: the media-specific companion owns current imported images for
   # MediaViews. Core crtui and the generic final compositor stay media-free.
-  add_library(crtui_skia_media STATIC src/skia_media_provider.cc)
+  add_library(crtui_skia_media STATIC ${CRTUI_SKIA_MEDIA_SOURCES})
   target_link_libraries(crtui_skia_media PUBLIC
     crtui_skia crtgfx_skia crtmedia)
   target_include_directories(crtui_skia_media PUBLIC

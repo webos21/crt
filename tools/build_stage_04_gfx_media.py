@@ -1307,6 +1307,16 @@ def main() -> None:
             with timings.measure("remove absolute Linux rpath fallbacks"):
                 remove_staged_absolute_elf_rpaths(staged)
 
+        # The packaged 04 SDK carries the pinned recipe that advances it to
+        # 05-ui, the cumulative-chain contract tools/build_stage_02_cxx.py's own
+        # successor-recipe comment documents. create_stage_source.py embedded it
+        # in this asset at the same relative path.
+        successor_recipe = build_asset / "stages" / "recipes" / "05-ui.json"
+        if successor_recipe.is_file():
+            recipe_dest = staged / "stages" / "recipes" / "05-ui.json"
+            recipe_dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(successor_recipe, recipe_dest)
+
         with timings.measure("write dependency provenance and manifest"):
             manifest["stage"] = "04-gfx-media"
             manifest["external_prerequisites"] = external_prerequisites_for(

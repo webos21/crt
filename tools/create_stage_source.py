@@ -355,6 +355,34 @@ STAGES = {
         # tree is duplicated into this release asset.
         "source_paths": (),
     },
+    "05-ui": {
+        "input_stage": "04-gfx-media",
+        "entrypoint": "tools/build_stage_05_ui.py",
+        "project_paths": (
+            "LICENSE.md",
+            "distribution/stages/05-ui/CMakeLists.txt",
+            "tools/build_stage_05_ui.py",
+            # The pinned LVGL release is fetched live (like Skia in 04); only
+            # its recipe and the fetcher travel in the asset.
+            "tools/fetch_lvgl.py",
+            "libcrtui/third_party/lvgl",
+            "tools/check_crtui_privacy.py",
+            *STAGE_VALIDATION_PROJECT_PATHS,
+            # Everything the isolated project compiles. crtgfx/crtmedia
+            # headers, Skia and the C runtime come from the installed 04 SDK,
+            # not from the asset.
+            "libcrtui/cmake/crtui_sources.cmake",
+            "libcrtui/include",
+            "libcrtui/src",
+            "libcrtui/tests",
+            "libcrtui/tools/window_demo.c",
+            # media_view_test.cc decodes this clip; the in-tree test reads the
+            # same file by repository path.
+            "libcrtmedia/assets/test_video.mp4",
+            "examples/ui-basic/CMakeLists.txt",
+        ),
+        "source_paths": (),
+    },
 }
 
 
