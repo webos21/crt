@@ -85,6 +85,7 @@ then macOS/arm64.
   * [ ] **Replays.** macOS/arm64: 1A/1B/1C done 2026-10-04 (interpreter and Baseline-JIT acceptance, thread
     cycles, watchdog and the Mach-O host-ABI audit pass; WebKit is presented as a Linux-shaped platform with two
     carried patches, see `docs/crtweb_acceptance.md`); macOS/x86_64 has no signal conversion or JIT permissions.
+    **Next: run the Linux (then Windows) checklist "Linux verification of the macOS replay" in the same document** (shared libc/header/wrapper/recipe changes are unverified there).
     Windows/x64: the ICU/gperf ports, the
     harness, the clocks/`sched_*`/signal code (software signal mask and a stub `sigsuspend`),
     `jit_memory_test` and `VirtualAlloc` shapes; aarch64 Linux needs native thread TLS (variant I) first.

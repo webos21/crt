@@ -477,6 +477,42 @@ keys these on the object format instead of `OS(DARWIN)`, or CRT presents macOS a
 *Open on macOS.* x86_64 macOS has neither the signal conversion nor JIT permissions; the DFG/FTL/WebAssembly tiers and
 concurrent compiler threads are 1D; the harness is run from the in-tree `05-ui` SDK, not yet from the isolated stage chain.
 
+**Linux verification of the macOS replay (to run after pulling; not yet done).** The macOS work changed shared
+libc, headers, wrappers, recipes and the harness. Nothing below has been built or run on Linux (or Windows) since
+Linux/x86_64 closed 1C (`c8d5c11`); the macOS-only code is guarded by `CRT_TARGET_OS_MACOS`, but these shared
+pieces are not, and are what to check:
+
+| Shared change | Where | Linux/Windows risk to look for |
+|---|---|---|
+| `gettid()` (+ `unistd.h`), `syscall()` mapping is macOS-only | `libc/src/process.c`, `include/unistd.h` | duplicate/conflicting definition; `__crt_sys_thread_id` is the Linux tid syscall |
+| `memset_explicit()` | `libc/src/string/memset_explicit.c`, `string.h` | new exported symbol on every host; `bionic_surface_test` |
+| `tzname`/`daylight`/`timezone` (UTC) | `libc/src/time.c`, `time.h` | glibc-style name clashes on Windows (`_timezone`/`_daylight` macros of the mingw headers) |
+| real `getrusage()` stays Linux's; `bionic_surface_test` cases | `libc/src/resource.c`, test | the test's new `ru_maxrss`/gettid/hwcap cases on Linux |
+| `<asm/hwcap.h>`, `sys/auxv.h` comment | `include/asm/hwcap.h` | collides with the cleaned kernel UAPI `asm/hwcap.h` if the Linux sysroot ships one |
+| `pthread_getattr_np()`/`pthread_kill` macOS parts | `libc/src/pthread.c`, `env.c` | only the shared edits (includes, externs) compile on Linux/Windows |
+| test changes | `jit_memory_test`, `signal_threads_test`, `pthread_native_tls_test`, `crtmedia_http_lifecycle_test` | the Linux paths are unchanged except the TLS test now keeps threads alive and the upload receiver backlog is 16 |
+| wrappers | `tools/crt-cc`, `tools/crt-c++` | macOS-only branches (`-lm/-ldl` drop, ELF-only flag filter); Linux link lines must be byte-identical to before |
+| recipes | `porting/recipes/icu.json`, `gperf.json`, `libstdc++/third_party/libcxx/recipe.json` | the macOS overrides are keyed by host; the Linux ICU/libc++ builds must be unchanged |
+| harness | `tools/build_webkit_jsc.py` | `apply_patches` (patches target `macos` only, so nothing applies on Linux), `jsc_library`, `MEASURE`, `build_test_programs` |
+
+Steps on the Linux host (x86_64 first, then aarch64 if available):
+
+```
+git pull
+cmake --preset linux-host-ninja-debug && cmake --build --preset linux-host-ninja-debug
+ctest --preset linux-host-ninja-debug                      # C stage; expect the previous pass count
+cmake --build out/linux-host-ninja-debug --target crt-ui-dist
+(cd tools && python3 test_verify_dist.py && python3 test_text_relocate.py)
+python3 tools/build_webkit_jsc.py --sdk-root out/linux-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/linux-host-ninja-debug/port-tests/install --work-root /tmp/jscw --mode interpreter
+python3 tools/build_webkit_jsc.py ... --mode baseline-jit   # same arguments; expect the 1C results above
+```
+
+Expected: the C and `crtui_`/`crtmedia_` tests pass as before, `verify_dist` passes, both JSC modes pass with the
+Linux numbers recorded in 1B/1C (the watchdog test, 150 cycles on 0/1/4/8 threads, `ldd` audit). A failure in
+a shared-code row above is a regression from the macOS replay and should be fixed in the shared code, not
+guarded away. Windows needs the same build plus `ctest`, with particular attention to the `time.h` row.
+
 ### 2. Linux WPE reference baseline
 
 Build upstream WPE unchanged and render local HTML with its own built-in
