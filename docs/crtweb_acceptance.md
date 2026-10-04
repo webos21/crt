@@ -477,7 +477,7 @@ keys these on the object format instead of `OS(DARWIN)`, or CRT presents macOS a
 *Open on macOS.* x86_64 macOS has neither the signal conversion nor JIT permissions; the DFG/FTL/WebAssembly tiers and
 concurrent compiler threads are 1D; the harness is run from the in-tree `05-ui` SDK, not yet from the isolated stage chain.
 
-**Linux verification of the macOS replay (to run after pulling; not yet done).** The macOS work changed shared
+**Linux verification of the macOS replay (done on Linux/x86_64 2026-10-04 at `cd954c9`; Windows and aarch64 Linux not yet).** The macOS work changed shared
 libc, headers, wrappers, recipes and the harness. Nothing below has been built or run on Linux (or Windows) since
 Linux/x86_64 closed 1C (`c8d5c11`); the macOS-only code is guarded by `CRT_TARGET_OS_MACOS`, but these shared
 pieces are not, and are what to check:
@@ -512,6 +512,16 @@ Expected: the C and `crtui_`/`crtmedia_` tests pass as before, `verify_dist` pas
 Linux numbers recorded in 1B/1C (the watchdog test, 150 cycles on 0/1/4/8 threads, `ldd` audit). A failure in
 a shared-code row above is a regression from the macOS replay and should be fixed in the shared code, not
 guarded away. Windows needs the same build plus `ctest`, with particular attention to the `time.h` row.
+
+*Result (Linux/x86_64).* Clean build with 0 warnings; C-stage ctest 114/114; full `ctest` 158/158 serial (the one
+excluded test is `crtmedia_playback_pipeline_test_runs`, which needs a sound card); `crt-ui-dist` builds and
+`verify_dist` passes; tooling unittests 102/102 (`test_verify_dist` 15, `test_text_relocate` 7 included). The JSC
+harness passes from the installed `05-ui` SDK in both modes with the 1B/1C numbers: Baseline compile proof 2,340
+reports (same as before), watchdog terminates the compiled loop, cycles on 0/1/4/8 threads, host-ABI audit clean.
+No shared-code regression found in the table above. *Wrapper check:* `tools/crt-cc` and `tools/crt-c++` at
+`c8d5c11` and at HEAD were run against a stub compiler that prints its argv, on the Linux SDK, for compile, exe-link
+and `-shared` lines (including `-lm -ldl` and the new `-fdebug-types-section -Wl,--no-undefined`) under six
+`CRT_CXX_*` environments: 54 cases, output byte-identical. *Not checked:* no aarch64 Linux host was available.
 
 ### 2. Linux WPE reference baseline
 
