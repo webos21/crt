@@ -29,7 +29,7 @@ uses a kernel-tid keyed runtime registry for project-created clone threads. This
 keeps `pthread_self()` and `__errno()` on the same thread-context abstraction
 without forcing macOS or Windows to emulate Linux TLS internals.
 
-**Native ELF TLS (2026-10-04, x86_64).** Compiler-level `thread_local`/`__thread`
+**Native ELF TLS (2026-10-04, x86_64; aarch64 added 2026-10-05).** Compiler-level `thread_local`/`__thread`
 used to be shared by every CRT thread, because `clone` ran without `CLONE_SETTLS`
 and the child inherited the creator's thread pointer: one address, values bleeding
 between threads (reproduced with a two-thread counter; found when JavaScriptCore
@@ -42,10 +42,24 @@ the module's own `PT_TLS` image (never from the initial thread's modified copy),
 copying the control block header, and re-aiming the tcb/self/dtv pointers. The
 block lives at the top of the thread's stack mapping and is freed with it;
 `pthread_create` passes the new thread pointer with `CLONE_SETTLS`. It declines
-(the old behaviour) when the layout is not exactly as expected. Limits: x86_64
-and the glibc dynamic loader only (aarch64 uses variant I with a different control
-block and is not implemented -- threads there still share TLS), and modules loaded
-later with `dlopen` have no static block to clone (CRT's `dlopen` is a stub).
+(the old behaviour) when the layout is not exactly as expected. Limits: the glibc
+dynamic loader only, and modules loaded later with `dlopen` have no static block
+to clone (CRT's `dlopen` is a stub).
+
+*aarch64 (variant I).* The thread pointer is `tpidr_el0` and addresses a 16-byte
+header (`dtv`, `private`); the static blocks follow it at positive offsets and the
+loader's thread descriptor (glibc's `struct pthread`, 0x720 bytes on glibc 2.43)
+lies below it. Block offsets are read from the initial thread's dtv exactly as on
+x86_64, and the new thread pointer is aligned to the strictest `p_align`. The
+descriptor's size is a loader internal that `ld.so` does not export, so the window
+below the thread pointer (at most 0x1000 bytes) is copied at the same
+thread-pointer-relative offsets the loader's code uses (it reads `tp-40`, `tp-0x720`,
+`tp-0x71c` and the `tid` field) and is clamped to pages that `mincore()` proves are
+mapped, so nothing unmapped is ever read; setup declines when fewer than 0x100 bytes
+are mapped. `__crt_sys_clone_thread` already passed the TLS argument in the aarch64
+`clone` order. Verified with `pthread_native_tls_test` (and its decline mutation) and
+with JavaScriptCore on 4 and 8 threads, which exercises three shared-library TLS
+modules (`libJavaScriptCore`, `libc++abi`, `libicuuc`).
 `pthread_native_tls_test` covers it; `pthread_getattr_np` now describes the real
 stack of the initial thread.
 

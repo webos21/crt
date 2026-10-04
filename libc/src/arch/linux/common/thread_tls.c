@@ -27,10 +27,22 @@
  * count that disagrees with the dtv, a block outside the static area) makes the setup
  * decline, and the thread then starts as it always did.
  *
- * The glibc dynamic loader (/lib64/ld-linux-x86-64.so.2, the loader every Linux
- * CRT executable uses today) and x86_64 only: aarch64 uses TLS variant I with a
- * different control-block layout and is not implemented (declined, behaviour
- * unchanged). Modules loaded later with dlopen are not covered: CRT's dlopen is a
+ * The glibc dynamic loader (/lib64/ld-linux-x86-64.so.2 or /lib/ld-linux-aarch64.so.1,
+ * the loader every Linux CRT executable uses today) on x86_64 and aarch64.
+ *
+ * x86_64 is TLS variant II: the thread pointer addresses the control block, which sits
+ * ABOVE the static TLS blocks (blocks are at negative offsets, dtv at tp+8).
+ *
+ * aarch64 is TLS variant I (tpidr_el0): the thread pointer addresses a 16-byte header
+ * (dtv, private) and the static blocks follow it at POSITIVE offsets, while the loader's
+ * thread descriptor (glibc's struct pthread) lies BELOW the thread pointer. Block offsets
+ * are still read from the initial thread's dtv rather than recomputed. The descriptor's
+ * size is a loader internal that is not exported, so the window below the thread pointer
+ * is copied at the same thread-pointer-relative offsets the loader's own code uses (a
+ * fixed upper bound, clamped to the pages that are actually mapped); every field the
+ * loader reads there keeps its offset from tp whatever the size is.
+ *
+ * Modules loaded later with dlopen are not covered: CRT's dlopen is a
  * stub and a dynamically-added TLS module has no static block to clone. */
 
 #include <elf.h>
@@ -41,7 +53,7 @@
 #include <private/crt_atomic.h>
 #include <private/crt_thread_tls.h>
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__aarch64__)
 
 #define CRT_TLS_MAX_MODULES 32
 /* Bytes of the control block header copied from the initial thread. The loader's
@@ -51,6 +63,16 @@
  * guard, feature flags, the tid fields). */
 #define CRT_TLS_TCB_COPY 0x700
 #define CRT_TLS_ALIGN 64
+
+#if defined(__aarch64__)
+/* The 16-byte variant I header at the thread pointer (dtv, private). */
+#define CRT_TLS_TCB_SIZE 16
+/* Upper bound of the bytes below the thread pointer copied from the initial thread
+ * (glibc's struct pthread is 0x720 there today; see the file comment). */
+#define CRT_TLS_PRE_TCB_MAX 0x1000
+/* Fewer mapped bytes than this below the thread pointer cannot hold the descriptor. */
+#define CRT_TLS_PRE_TCB_MIN 0x100
+#endif
 
 typedef union {
   size_t counter;
@@ -77,7 +99,7 @@ struct crt_tls_module {
   const unsigned char* image;
   size_t filesz;
   size_t memsz;
-  size_t distance; /* thread pointer minus the block address (variant II). */
+  size_t distance; /* x86_64: tp minus the block address; aarch64: block address minus tp. */
 };
 
 static crt_spinlock tls_lock = CRT_SPINLOCK_INIT;
@@ -87,14 +109,32 @@ static size_t tls_module_count;
 static size_t tls_dtv_slots;
 static size_t tls_dtv_generation;
 static size_t tls_static_size;
+#if defined(__aarch64__)
+static size_t tls_pre_size;   /* bytes copied from below the initial thread's pointer. */
+static size_t tls_align = CRT_TLS_ALIGN; /* thread-pointer alignment (>= every p_align). */
+#endif
 
 unsigned long getauxval(unsigned long type);
+int mincore(void* addr, size_t length, unsigned char* vector);
 
 static uintptr_t current_thread_pointer(void) {
   uintptr_t tp;
 
+#if defined(__aarch64__)
+  __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tp));
+#else
   __asm__ volatile("movq %%fs:0, %0" : "=r"(tp));
+#endif
   return tp;
+}
+
+/* The dtv pointer of the thread whose thread pointer is `tp`. */
+static const crt_dtv_t* thread_dtv(uintptr_t tp) {
+#if defined(__aarch64__)
+  return *(const crt_dtv_t* const*)tp;
+#else
+  return *(const crt_dtv_t* const*)(tp + 8);
+#endif
 }
 
 static size_t round_up(size_t value, size_t alignment) {
@@ -145,6 +185,27 @@ static int add_module(const Elf64_Phdr* tls, uintptr_t bias, uintptr_t tp, const
     return -1;
   }
   block = (uintptr_t)dtv[tls_module_count + 1].pointer.val;
+#if defined(__aarch64__)
+  /* Variant I: a static-TLS block lies ABOVE the 16-byte header at the thread pointer,
+   * inside the area the loader reserved, and is aligned as its segment asks. */
+  if (block == 0 || block == (uintptr_t)-1L || block < tp + CRT_TLS_TCB_SIZE ||
+      (block - tp) > (1UL << 24) || (tls->p_align != 0 && (block % tls->p_align) != 0) ||
+      tls->p_memsz > (1UL << 24)) {
+    return -1;
+  }
+  module = &tls_modules[tls_module_count++];
+  module->image = (const unsigned char*)(bias + tls->p_vaddr);
+  module->filesz = tls->p_filesz;
+  module->memsz = tls->p_memsz;
+  module->distance = block - tp;
+  if (module->distance + module->memsz > tls_static_size) {
+    tls_static_size = module->distance + module->memsz;
+  }
+  if (tls->p_align > tls_align) {
+    tls_align = tls->p_align;
+  }
+  return 0;
+#else
   /* A static-TLS block lies below the thread pointer (variant II), inside the
    * area the loader reserved, and is aligned as its segment asks. */
   if (block == 0 || block >= tp || (tp - block) > (1UL << 24) ||
@@ -160,7 +221,34 @@ static int add_module(const Elf64_Phdr* tls, uintptr_t bias, uintptr_t tp, const
     tls_static_size = module->distance;
   }
   return 0;
+#endif
 }
+
+#if defined(__aarch64__)
+/* How many bytes immediately below `tp` (up to `want`) lie in mapped pages. mincore()
+ * fails with ENOMEM for an unmapped page instead of faulting, so this never touches
+ * memory it has not proved mapped. */
+static size_t mapped_bytes_below(uintptr_t tp, size_t want) {
+  uintptr_t page = (uintptr_t)getauxval(6 /* AT_PAGESZ */);
+  uintptr_t addr;
+  size_t covered;
+  unsigned char vec;
+
+  if (page == 0 || (page & (page - 1)) != 0) {
+    return 0;
+  }
+  addr = tp & ~(page - 1);
+  covered = tp - addr; /* the part of tp's own page below tp */
+  while (covered < want && addr >= page) {
+    addr -= page;
+    if (mincore((void*)addr, page, &vec) != 0) {
+      break;
+    }
+    covered = tp - addr;
+  }
+  return covered < want ? covered : want;
+}
+#endif
 
 static int tls_discover(void) {
   uintptr_t tp = current_thread_pointer();
@@ -176,7 +264,7 @@ static int tls_discover(void) {
   if (tp == 0 || exe_phdr == 0 || exe_count == 0) {
     return -1;
   }
-  dtv = *(const crt_dtv_t* const*)(tp + 8);
+  dtv = thread_dtv(tp);
   if (dtv == 0) {
     return -1;
   }
@@ -232,6 +320,17 @@ static int tls_discover(void) {
       return -1; /* a block we did not account for. */
     }
   }
+#if defined(__aarch64__)
+  /* The thread pointer of every new thread must be aligned for the strictest module. */
+  if (tls_align > 4096 || (tls_align & (tls_align - 1)) != 0 || (tp & (tls_align - 1)) != 0) {
+    return -1;
+  }
+  tls_pre_size = mapped_bytes_below(tp, CRT_TLS_PRE_TCB_MAX);
+  if (tls_pre_size < CRT_TLS_PRE_TCB_MIN) {
+    return -1;
+  }
+  tls_pre_size &= ~(size_t)15;
+#endif
   return 0;
 }
 
@@ -243,6 +342,56 @@ static int tls_ready(void) {
   crt_spin_unlock(&tls_lock);
   return tls_state == 1;
 }
+
+#if defined(__aarch64__)
+
+size_t __crt_linux_thread_tls_size(void) {
+  if (!tls_ready()) {
+    return 0;
+  }
+  /* descriptor window + thread-pointer alignment slack + static blocks + dtv with its
+   * length slot, plus the 64-byte rounding of the stack end pthread_create() applies. */
+  return tls_pre_size + tls_align + round_up(tls_static_size, 16) +
+         (tls_dtv_slots + 2) * sizeof(crt_dtv_t) + CRT_TLS_ALIGN;
+}
+
+void* __crt_linux_thread_tls_setup(void* region_end) {
+  uintptr_t tp0;
+  uintptr_t start;
+  uintptr_t tp;
+  size_t size = __crt_linux_thread_tls_size();
+  crt_dtv_t* dtv;
+  size_t i;
+
+  if (size == 0) {
+    return 0;
+  }
+  /* `start` is the same address pthread_create() uses as the top of the new stack, so
+   * nothing below is ever shared with the stack. */
+  start = ((uintptr_t)region_end - size) & ~(uintptr_t)(CRT_TLS_ALIGN - 1);
+  tp = round_up(start + tls_pre_size, tls_align);
+  tp0 = current_thread_pointer();
+  memset((void*)start, 0, (size_t)((uintptr_t)region_end - start));
+  /* The loader's thread descriptor, at the same offsets from the thread pointer. */
+  memcpy((void*)(tp - tls_pre_size), (const void*)(tp0 - tls_pre_size), tls_pre_size);
+  /* Header (dtv, private): copy, then re-aim the dtv. */
+  memcpy((void*)tp, (const void*)tp0, CRT_TLS_TCB_SIZE);
+  dtv = (crt_dtv_t*)(tp + round_up(tls_static_size, 16) + sizeof(crt_dtv_t));
+  dtv[-1].counter = tls_dtv_slots;
+  dtv[0].counter = tls_dtv_generation;
+  for (i = 0; i < tls_module_count; ++i) {
+    unsigned char* block = (unsigned char*)(tp + tls_modules[i].distance);
+
+    memcpy(block, tls_modules[i].image, tls_modules[i].filesz);
+    /* The remainder of the block (.tbss) is already zero from the memset. */
+    dtv[i + 1].pointer.val = block;
+    dtv[i + 1].pointer.to_free = 0;
+  }
+  *(void**)tp = (void*)dtv; /* this thread's own dtv. */
+  return (void*)tp;
+}
+
+#else
 
 size_t __crt_linux_thread_tls_size(void) {
   if (!tls_ready()) {
@@ -267,7 +416,7 @@ void* __crt_linux_thread_tls_setup(void* region_end) {
   base = ((uintptr_t)region_end - size) & ~(uintptr_t)(CRT_TLS_ALIGN - 1);
   tp = base + round_up(tls_static_size, CRT_TLS_ALIGN);
   tp0 = current_thread_pointer();
-  dtv0 = *(const crt_dtv_t* const*)(tp0 + 8);
+  dtv0 = thread_dtv(tp0);
   /* Control block header, then the dtv after it. */
   memset((void*)base, 0, size);
   memcpy((void*)tp, (const void*)tp0, CRT_TLS_TCB_COPY);
@@ -288,6 +437,8 @@ void* __crt_linux_thread_tls_setup(void* region_end) {
   *(uintptr_t*)(tp + 16) = tp;       /* self pointer. */
   return (void*)tp;
 }
+
+#endif
 
 #else
 

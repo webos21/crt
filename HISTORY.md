@@ -8,6 +8,38 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-05
+
+- **Web Tranche 1 replayed on Linux/aarch64: native thread TLS implemented for aarch64, and the JavaScriptCore
+  interpreter and Baseline JIT run on the CRT runtime.** First verification of the shared libc/headers/wrappers/
+  recipes/harness work on an aarch64 Linux host (Ubuntu 26.04 aarch64 QEMU guest, Clang 21.1.8, from a deleted
+  `out/`): clean build exit 0 with no warning from CRT sources; C-stage ctest 113/114. The one failure,
+  `pthread_native_tls_test`, was the documented gap (every thread reported one TLS address), and the same gap crashed
+  JSC's 4- and 8-thread context cycles with `SIGTRAP`, while the script and the 0/1-thread cycles passed.
+
+  `libc/src/arch/linux/common/thread_tls.c` now supports aarch64 (TLS variant I, `tpidr_el0`): the 16-byte header
+  and a fresh dtv at the new thread pointer, static blocks above it at the offsets read from the initial thread's dtv
+  (never recomputed), the thread pointer aligned to the strictest `p_align`, and the loader's thread descriptor below it
+  copied at the same thread-pointer-relative offsets. Its size (glibc's `struct pthread`, 0x720 here) is not exported by
+  `ld.so` (no `_thread_db_*`; the TLS functions are `GLIBC_PRIVATE`), so the copy window is a fixed upper bound
+  (0x1000) clamped to pages that `mincore()` proves are mapped, and setup declines below 0x100 bytes. Found by
+  disassembling `ld.so` that it reads fixed offsets below `tp` (`tp-40`, `tp-0x720`, `tp-0x71c`, `tp-0x600`).
+  `__crt_sys_clone_thread` already passed the TLS argument in the aarch64 `clone` order, so no assembly changed;
+  x86_64 behaviour is unchanged (both targets syntax-check clean).
+
+  Verified: `pthread_native_tls_test` passes and fails when the setup is made to decline (mutation, restored); full
+  `ctest` 136/136 (was 135/136); tooling unittests 102/102; `crt-ui-dist` and `verify_dist` pass. JSC interpreter
+  acceptance passes (cycles on 0/1/4/8 threads, 150 each, 0 failures; host-ABI audit clean) and so does the
+  Baseline JIT (2,340 compile reports, the same count as Linux/x86_64; compiled loop terminated by the watchdog); 150/150
+  watchdog runs, and 20/20 four- and eight-thread cycles in each mode. Three shared-library TLS modules
+  (`libJavaScriptCore`, `libc++abi`, `libicuuc`) are in the process, so the multi-module path is exercised.
+
+  A fresh host needed more than the checklist said, now recorded in `docs/crtweb_acceptance.md`: `libc++-21-dev`,
+  `libc++abi-21-dev`, `libunwind-21-dev` (the build forces `-stdlib=libc++`) and `ruby`; the ICU port built into the
+  harness's `--deps-prefix` (`port-build-icu`); and `-DCRTUI_ENABLE_LVGL=ON` for `crt-ui-dist`, whose
+  `crtui-lvgl-fetch` target cannot run while configure fails (an existing "Small UI follow-up"). Open on aarch64:
+  DFG/FTL/WebAssembly and W^X (1D), and a shared-library TLS case inside `pthread_native_tls_test` itself.
+
 ## 2026-10-04
 
 - **Web Tranche 1C replayed on macOS/arm64: the JavaScriptCore Baseline JIT runs on the CRT runtime.** Clean

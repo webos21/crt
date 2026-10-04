@@ -85,10 +85,13 @@ then macOS/arm64.
   * [ ] **Replays.** macOS/arm64: 1A/1B/1C done 2026-10-04 (interpreter and Baseline-JIT acceptance, thread
     cycles, watchdog and the Mach-O host-ABI audit pass; WebKit is presented as a Linux-shaped platform with two
     carried patches, see `docs/crtweb_acceptance.md`); macOS/x86_64 has no signal conversion or JIT permissions.
-    Linux/x86_64 re-verified after the macOS replay (2026-10-04, no regression); **next: the same checklist on Windows** ("Linux verification of the macOS replay" in the same document) and aarch64 Linux.
+    Linux/x86_64 re-verified after the macOS replay (2026-10-04, no regression). Linux/aarch64: 1A/1B/1C
+    done 2026-10-05 after implementing native thread TLS (variant I); full ctest 136/136, interpreter and Baseline-JIT
+    acceptance green (`HISTORY.md`, `docs/crtweb_acceptance.md`); **next: the same checklist on Windows**
+    ("Linux verification of the macOS replay" in the same document).
     Windows/x64: the ICU/gperf ports, the
     harness, the clocks/`sched_*`/signal code (software signal mask and a stub `sigsuspend`),
-    `jit_memory_test` and `VirtualAlloc` shapes; aarch64 Linux needs native thread TLS (variant I) first.
+    `jit_memory_test` and `VirtualAlloc` shapes.
   * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided
     `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed
     `05-ui` SDK and from the isolated stage chain (Tranche 10); the Windows/macOS replays must

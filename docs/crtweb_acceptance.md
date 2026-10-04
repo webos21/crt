@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64 and on macOS/arm64; the Windows replay, W^X hardening and the DFG/FTL/WebAssembly tiers (1D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64 and macOS/arm64; the Windows replay, W^X hardening and the DFG/FTL/WebAssembly tiers (1D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -278,8 +278,8 @@ whole run from an empty work root takes about six minutes (build 297 s) and pass
   clean).
 - *Mutation.* Making `__crt_linux_thread_tls_size()` decline reverts threads to shared TLS
   and fails `pthread_native_tls_test` (and, before the fix, every JSC thread test); restored.
-- *Not covered.* The JIT (1C, planned above), any host but Linux/x86_64, aarch64 (native thread TLS is not
-  implemented there, so threaded JSC would still misbehave), and the sampling profiler and
+- *Not covered.* The JIT (1C, planned above), any host but Linux/x86_64, aarch64 (native thread TLS was not
+  implemented there when this was written, so threaded JSC misbehaved; done 2026-10-05, see the Linux/aarch64 replay below), and the sampling profiler and
   WebAssembly (they need the JIT tiers and signal-based thread suspension).
 
 **CRT gaps this exposed (all fixed in CRT/PAL, none by changing WebKit):**
@@ -359,7 +359,7 @@ provided"); that is compile-checked, not run, and is the likely first problem of
 
 *Not part of this green:* W^X policy (upstream's default does not exercise an RW-to-RX transition),
 the DFG, FTL and WebAssembly tiers (compiled in, disabled at run time; 1D), the sampling profiler,
-concurrent compiler threads, aarch64, and the Windows and macOS replays. Default thread stack stays
+concurrent compiler threads, aarch64 (replayed 2026-10-05, below), and the Windows and macOS replays. Default thread stack stays
 1 MiB; the baseline JIT needed no more.
 
 **macOS/arm64 replay, 1A and 1B (2026-10-04): the JavaScriptCore interpreter is green on the CRT
@@ -477,7 +477,7 @@ keys these on the object format instead of `OS(DARWIN)`, or CRT presents macOS a
 *Open on macOS.* x86_64 macOS has neither the signal conversion nor JIT permissions; the DFG/FTL/WebAssembly tiers and
 concurrent compiler threads are 1D; the harness is run from the in-tree `05-ui` SDK, not yet from the isolated stage chain.
 
-**Linux verification of the macOS replay (done on Linux/x86_64 2026-10-04 at `cd954c9`; Windows and aarch64 Linux not yet).** The macOS work changed shared
+**Linux verification of the macOS replay (done on Linux/x86_64 2026-10-04 at `cd954c9` and on Linux/aarch64 2026-10-05; Windows not yet).** The macOS work changed shared
 libc, headers, wrappers, recipes and the harness. Nothing below has been built or run on Linux (or Windows) since
 Linux/x86_64 closed 1C (`c8d5c11`); the macOS-only code is guarded by `CRT_TARGET_OS_MACOS`, but these shared
 pieces are not, and are what to check:
@@ -521,7 +521,41 @@ reports (same as before), watchdog terminates the compiled loop, cycles on 0/1/4
 No shared-code regression found in the table above. *Wrapper check:* `tools/crt-cc` and `tools/crt-c++` at
 `c8d5c11` and at HEAD were run against a stub compiler that prints its argv, on the Linux SDK, for compile, exe-link
 and `-shared` lines (including `-lm -ldl` and the new `-fdebug-types-section -Wl,--no-undefined`) under six
-`CRT_CXX_*` environments: 54 cases, output byte-identical. *Not checked:* no aarch64 Linux host was available.
+`CRT_CXX_*` environments: 54 cases, output byte-identical. *Not checked on that run:* no aarch64 Linux host was available (the aarch64 run follows).
+
+**Linux/aarch64 replay, 1A/1B/1C (2026-10-05): green, after implementing native thread TLS for aarch64.**
+Host: Ubuntu 26.04 aarch64 (a QEMU guest, 4 CPUs, kernel 7.0, 4 KiB pages), Clang 21.1.8, from a deleted `out/`.
+Host prerequisites that a fresh machine lacked and the checklist did not name: `libc++-21-dev`, `libc++abi-21-dev`,
+`libunwind-21-dev` (the build forces `-stdlib=libc++`, so the active Clang's libc++ must be installed) and `ruby`
+(JavaScriptCore's offlineasm). The harness also needs the ICU port in `--deps-prefix`, which a clean tree does not
+build by default (`port-build-icu`, `port-test-icu`), and `crt-ui-dist` needs `-DCRTUI_ENABLE_LVGL=ON`, whose
+`crtui-lvgl-fetch` target cannot run while configure is failing (the fetch was run through `tools/fetch_lvgl.py`
+directly, then reconfigured).
+
+*Before the TLS work.* Clean build, exit 0, no warning from CRT sources (37 unused `-L` warnings from the port
+builds, one in third-party `make`, and about 2,100 deprecated-builtin warnings from the imported libc++ headers under
+Clang 21). C-stage ctest 113/114: only `pthread_native_tls_test` failed, every thread reporting the same TLS address.
+JSC interpreter: the eight-group script and the 0- and 1-thread context cycles passed; the 4- and 8-thread cycles
+died with `SIGTRAP` (WTF's `CRASH()` on arm64), the shared-TLS symptom this document predicted.
+
+*The fix.* `libc/src/arch/linux/common/thread_tls.c` now builds the new thread's TLS on aarch64 (variant I; details in
+`docs/linux_pthread_lifecycle.md`): header and dtv at the thread pointer, static blocks at the offsets read from the
+initial thread's dtv, the thread pointer aligned to the strictest `p_align`, and the window below the thread pointer
+(glibc's `struct pthread`, 0x720 bytes here, a loader internal that is not exported) copied at the same
+thread-pointer-relative offsets and clamped with `mincore()`. `__crt_sys_clone_thread` already passed the TLS argument
+in the aarch64 `clone` order. x86_64 behaviour is unchanged; both targets syntax-check clean.
+
+*After.* `pthread_native_tls_test` passes, and fails when the setup is made to decline (mutation, restored); full
+`ctest` 136/136; tooling unittests 102/102; `crt-ui-dist` and `verify_dist` pass for 03/04/05. JSC interpreter
+acceptance passes (script peak RSS 69 MB, bound 450 MB; cycles on 0/1/4/8 threads, 150 each, 0 failures; host-ABI audit
+clean). Baseline JIT acceptance passes: the assembly interpreter compiles nothing, the JIT script reports 2,340 Baseline
+compilations (the same count as Linux/x86_64), the 1B script passes under the JIT, cycles on 0/1/4/8 threads pass, and
+the watchdog terminates a compiled loop. Repeats: 150/150 watchdog runs, and 4- and 8-thread context cycles 20/20 in
+both interpreter and JIT mode. The process has three shared-library TLS modules (`libJavaScriptCore`, `libc++abi`,
+`libicuuc`), so the multi-module dtv path is exercised, not only the executable's own block.
+
+*Not covered on aarch64.* DFG/FTL/WebAssembly and W^X (1D), the wrapper byte-for-byte comparison (it was an x86_64
+check), and a shared-library TLS case in `pthread_native_tls_test` itself (JSC is the only multi-module evidence).
 
 ### 2. Linux WPE reference baseline
 
