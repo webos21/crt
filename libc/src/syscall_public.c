@@ -59,6 +59,22 @@ long syscall(long number, ...) {
   }
   return result;
 }
+#elif defined(CRT_TARGET_OS_MACOS)
+#include <sys/syscall.h>
+
+/* macOS has no Linux syscall table. Code written against Bionic (WTF, bmalloc, ...) calls
+ * syscall() only for a handful of numbers whose meaning CRT can provide through its own PAL;
+ * those are mapped here and everything else stays an honest ENOSYS. */
+long syscall(long number, ...) {
+  switch (number) {
+    case SYS_gettid:
+      return (long)gettid();
+    case SYS_getpid:
+      return (long)getpid();
+    default:
+      return __set_errno(ENOSYS);
+  }
+}
 #else
 long syscall(long number, ...) {
   (void)number;

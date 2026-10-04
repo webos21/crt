@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "upstream": "WPE WebKit 2.54.0 (libcrtweb/third_party/webkit/recipe.json)",
+  "policy": "Nothing here is applied silently: tools/build_webkit_jsc.py verifies the SHA-256 of each file before the patch (or accepts the recorded result), applies it, verifies the result, and records it in the configure fingerprint. Add an entry only with a reason and a removal condition (docs/crtweb_porting.md).",
+  "patches": [
+    {
+      "id": "0001-wtf-rawhex-int64-distinct-from-intptr",
+      "file": "Source/WTF/wtf/RawHex.h",
+      "patch": "0001-wtf-rawhex-int64-distinct-from-intptr.patch",
+      "sha256_before": "d2f20a16dd821b744779cc302895bc4375022084aabcdb2669b886aa188ab340",
+      "sha256_after": "5d12a98dc9976ee8445dbe7c8ad9e20dd344a297f3894ea3f3f197194e66c6aa",
+      "targets": ["macos"],
+      "reason": "WTF::RawHex gives int64_t/uint64_t their own constructors only for CPU(ADDRESS32) or OS(DARWIN); elsewhere it assumes int64_t is intptr_t (true for Linux/Bionic LP64). CRT presents macOS to WebKit as a Linux-shaped platform (no __APPLE__), but the compiler's integer types stay Darwin's (int64_t is long long, intptr_t is long): clang's own arm_acle.h/arm_neon.h and builtins require uint64_t == __UINT64_TYPE__, so the typedef cannot be changed (tried: clang crashed). RawHex(uint64_t) was therefore ambiguous in JavaScriptCore/tools/Integrity.cpp. The patch adds one more condition, selected by -DWTF_CRT_INT64_IS_LONG_LONG which the harness passes on macOS.",
+      "remove_when": "WebKit selects the int64_t overloads by type identity (std::is_same_v<int64_t, intptr_t>) instead of OS(DARWIN), or CRT presents macOS to WTF as OS(DARWIN) without pulling in Apple SDK code."
+    }
+  ]
+}

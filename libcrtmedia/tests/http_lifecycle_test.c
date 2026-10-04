@@ -346,6 +346,15 @@ int main(void) {
       crtmedia_http_upload_close(upload); /* cancel: no finish() */
     }
     audit_end(&audit);
+    /* The receiver accepts on its own thread, so on a loaded host it can still be working through
+     * connections the cancelled uploads already opened: wait (bounded) instead of asserting at
+     * once. Seen as a rare failure of the immediate check in a parallel full CTest on macOS. */
+    for (int wait = 0; wait < 100 &&
+                       http_upload_test_server_connection_count(upload_server) < UPLOAD_CANCEL_CYCLES / 2;
+         ++wait) {
+      struct timespec pause = {0, 50L * 1000L * 1000L};
+      nanosleep(&pause, NULL);
+    }
     CHECK(http_upload_test_server_connection_count(upload_server) >= UPLOAD_CANCEL_CYCLES / 2,
           "the receiver really saw the cancelled uploads");
     http_upload_test_server_stop(upload_server);

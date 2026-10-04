@@ -979,6 +979,21 @@ ___crt_sys_thread_id:
   neg x0, x0
   ret
 
+.globl ___crt_sys_getrusage
+.p2align 2
+___crt_sys_getrusage:
+  mov x16, #117
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  stp x29, x30, [sp, #-16]!
+  mov x29, sp
+  bl ___crt_macos_to_bionic_errno
+  ldp x29, x30, [sp], #16
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_getpid
 .p2align 2
 ___crt_sys_getpid:

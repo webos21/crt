@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -37,6 +38,45 @@ static void test_time_zone_variables(void) {
             local.tm_mday == utc.tm_mday,
         "localtime is UTC, matching the variables");
 }
+
+static void* report_gettid(void* out) {
+  *(long*)out = (long)gettid();
+  return 0;
+}
+
+static void test_gettid(void) {
+  pthread_t thread;
+  long worker_tid = -1;
+
+  /* Linux semantics WTF relies on: the initial thread's id is the pid, every other thread's differs. */
+  CHECK((long)gettid() == (long)getpid(), "gettid() on the initial thread equals getpid()");
+  CHECK(pthread_create(&thread, 0, report_gettid, &worker_tid) == 0, "pthread_create for gettid");
+  CHECK(pthread_join(thread, 0) == 0, "pthread_join for gettid");
+  CHECK(worker_tid > 0 && worker_tid != (long)getpid(), "a worker thread's gettid() differs from the pid");
+#if defined(__linux__) || defined(__APPLE__)
+  CHECK(syscall(SYS_gettid) == (long)gettid(), "syscall(SYS_gettid) matches gettid()");
+  CHECK(syscall(SYS_getpid) == (long)getpid(), "syscall(SYS_getpid) matches getpid()");
+#endif
+}
+
+#if defined(__APPLE__)
+#include <sys/resource.h>
+
+static void test_getrusage(void) {
+  struct rusage usage;
+  volatile unsigned long sink = 0;
+  unsigned long i;
+
+  for (i = 0; i < 30000000UL; ++i) {
+    sink += i;
+  }
+  CHECK(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage(RUSAGE_SELF)");
+  CHECK(usage.ru_maxrss > 512 && usage.ru_maxrss < 64L * 1024 * 1024, "ru_maxrss is a plausible number of KiB");
+  CHECK(usage.ru_utime.tv_sec > 0 || usage.ru_utime.tv_usec > 0, "user CPU time advanced");
+  CHECK(usage.ru_utime.tv_usec >= 0 && usage.ru_utime.tv_usec < 1000000, "tv_usec is normalized");
+  CHECK(getrusage(RUSAGE_CHILDREN, &usage) == 0, "getrusage(RUSAGE_CHILDREN)");
+}
+#endif
 
 static void test_memset_explicit(void) {
   unsigned char buffer[32];
@@ -152,7 +192,7 @@ static void test_main_thread_stack(void) {
 
   CHECK(pthread_getattr_np(pthread_self(), &attr) == 0, "pthread_getattr_np on the initial thread");
   CHECK(pthread_attr_getstack(&attr, &base, &size) == 0, "pthread_attr_getstack");
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
   CHECK(base != 0 && size >= 128 * 1024, "initial thread stack is reported");
   CHECK((char*)&local >= (char*)base && (char*)&local < (char*)base + size,
         "an automatic variable lies inside the reported stack");
@@ -300,6 +340,10 @@ static void test_kill_initial_thread(void) {
 int main(void) {
   test_memmem();
   test_memset_explicit();
+#if defined(__APPLE__)
+  test_getrusage();
+#endif
+  test_gettid();
   test_time_zone_variables();
   test_usleep();
   test_mkostemp();

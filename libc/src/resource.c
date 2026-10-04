@@ -5,6 +5,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(CRT_TARGET_OS_MACOS)
+long __crt_sys_getrusage(int who, struct rusage* usage);
+#endif
+
 int getrlimit(int resource, struct rlimit* rlim) {
   if (rlim == 0) {
     errno = EFAULT;
@@ -69,6 +73,24 @@ int getrusage(int who, struct rusage* usage) {
     return -1;
   }
   memset(usage, 0, sizeof(*usage));
+#if defined(CRT_TARGET_OS_MACOS)
+  /* Darwin's BSD getrusage(2): RUSAGE_SELF (0) and RUSAGE_CHILDREN (-1) are the same numbers as
+   * here; Darwin has no per-thread variant, so RUSAGE_THREAD keeps reporting zeros. Its struct
+   * is laid out like this one except that tv_usec is a 32-bit int followed by padding, so the
+   * microsecond fields are normalized. ru_maxrss is in BYTES on Darwin (KiB on Linux/Bionic);
+   * it is converted so callers see Bionic's unit. */
+  if (who != RUSAGE_THREAD) {
+    long result = __crt_sys_getrusage(who, usage);
+
+    if (result < 0) {
+      errno = (int)-result;
+      return -1;
+    }
+    usage->ru_utime.tv_usec = (int)usage->ru_utime.tv_usec;
+    usage->ru_stime.tv_usec = (int)usage->ru_stime.tv_usec;
+    usage->ru_maxrss /= 1024;
+  }
+#endif
   return 0;
 }
 

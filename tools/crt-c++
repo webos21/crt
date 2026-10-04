@@ -192,6 +192,16 @@ while [ "$i" -lt "$original_argc" ]; do
       # own prior real use was compile-only through this stage's own
       # in-tree calling context, which never hits this wrapper at all).
       ;;
+    -fdebug-types-section|-Wl,--no-undefined)
+      # ELF-only spellings WebKit adds once it believes the target is not Apple (the CRT
+      # presents macOS to it as a Bionic/Linux-shaped platform, Web Tranche 1 macOS replay):
+      # Mach-O has no .debug_types section (clang rejects the option for a Darwin target) and
+      # ld64 already refuses undefined symbols in a dylib by default, so dropping both
+      # changes nothing here. Same filter in tools/crt-cc.
+      if [ "$target_os" = macos ]; then
+        keep_arg=0
+      fi
+      ;;
     -ffreestanding)
       # CRT_CXX_HOSTED=1 asks for -fhosted (see common_flags below); a caller-supplied
       # -ffreestanding -- CMake's CMAKE_CXX_FLAGS_INIT in the packaged

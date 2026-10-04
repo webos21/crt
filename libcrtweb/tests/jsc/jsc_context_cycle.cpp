@@ -11,6 +11,18 @@
 #include <string.h>
 #include <unistd.h>
 
+#if defined(__APPLE__) || defined(CRT_TARGET_OS_MACOS)
+#include <sys/resource.h>
+
+// macOS has no /proc. The peak resident size (ru_maxrss) never shrinks, so it
+// cannot show memory being returned, but a leak across the cycles still raises it, which is what
+// the bounded-growth check below is for.
+static long resident_kilobytes() {
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) != 0) return -1;
+  return usage.ru_maxrss;  // KiB: CRT's getrusage() converts Darwin's bytes to Bionic's unit
+}
+#else
 static long resident_kilobytes() {
   FILE* file = fopen("/proc/self/statm", "r");
   long pages = 0, resident = 0;
@@ -19,6 +31,7 @@ static long resident_kilobytes() {
   fclose(file);
   return resident < 0 ? -1 : resident * (sysconf(_SC_PAGESIZE) / 1024);
 }
+#endif
 
 static bool run_script(JSGlobalContextRef context, const char* source, double* number_out) {
   JSStringRef script = JSStringCreateWithUTF8CString(source);

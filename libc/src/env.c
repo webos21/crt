@@ -144,8 +144,53 @@ static int env_store_entry(const char* entry, int overwrite) {
   return 0;
 }
 
+long __crt_sys_thread_id(void);
+
+/* The initial thread's id, recorded here because this runs on it at startup. Linux's gettid()
+ * returns the pid for the initial thread and a distinct id for every other one (WTF decides
+ * "main thread" with getpid() == syscall(SYS_gettid)); macOS thread ids are not the pid, so
+ * gettid() uses this to give the initial thread the pid there too (libc/src/process.c). */
+long __crt_initial_thread_id;
+
+/* macOS: the initial thread's stack top, so pthread_getattr_np() can describe the initial thread's
+ * stack (macOS has no /proc/self/maps). The kernel places argv, envp and the `apple` vector with
+ * their strings at the very top of the initial stack, so the end of the highest of those strings,
+ * rounded up to a page, bounds it from above; stack-bounds consumers such as WTF then use
+ * `environ` as the origin anyway. */
+unsigned long __crt_initial_stack_top;
+
+static void record_initial_stack_top(char** envp) {
+#if defined(CRT_TARGET_OS_MACOS)
+  unsigned long highest = 0;
+  char** cursor;
+
+  if (envp == 0) {
+    return;
+  }
+  for (cursor = envp; *cursor != 0; ++cursor) {
+    unsigned long end = (unsigned long)*cursor + strlen(*cursor) + 1;
+    if (end > highest) {
+      highest = end;
+    }
+  }
+  for (++cursor; *cursor != 0; ++cursor) {
+    unsigned long end = (unsigned long)*cursor + strlen(*cursor) + 1;
+    if (end > highest) {
+      highest = end;
+    }
+  }
+  if (highest != 0) {
+    __crt_initial_stack_top = (highest + 4095UL) & ~4095UL;
+  }
+#else
+  (void)envp;
+#endif
+}
+
 void __crt_env_set_initial(char** envp) {
   __crt_initial_envp = envp;
+  __crt_initial_thread_id = __crt_sys_thread_id();
+  record_initial_stack_top(envp);
 }
 
 #if defined(CRT_TARGET_OS_WINDOWS)

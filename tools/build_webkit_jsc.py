@@ -143,6 +143,40 @@ def fetch_and_extract(recipe: Path, cache: Path, work: Path) -> Path:
     return tree
 
 
+PATCHES = ROOT / "libcrtweb" / "patches"
+
+
+def sha256_file(path: Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def apply_patches(tree: Path, target_os: str) -> list:
+    """Apply the carried patches that target this host (libcrtweb/patches/manifest.json).
+
+    Each is verified: the file must hash to sha256_before (then it is patched) or already to
+    sha256_after (a rerun); anything else means the tree is not the pinned one and the run stops.
+    Returns the applied entries for the configure fingerprint."""
+    manifest = json.loads((PATCHES / "manifest.json").read_text(encoding="utf-8"))
+    applied = []
+    for entry in manifest["patches"]:
+        if target_os not in entry["targets"]:
+            continue
+        target = tree / entry["file"]
+        current = sha256_file(target)
+        if current == entry["sha256_after"]:
+            print(f"patch {entry['id']}: already applied")
+        elif current == entry["sha256_before"]:
+            run(["patch", "-p1", "-i", PATCHES / entry["patch"]], cwd=tree)
+            if sha256_file(target) != entry["sha256_after"]:
+                raise SystemExit(f"patch {entry['id']}: result of {entry['file']} does not hash to sha256_after")
+        else:
+            raise SystemExit(f"patch {entry['id']}: {entry['file']} hashes to {current}, expected the pinned "
+                             f"{entry['sha256_before']}")
+        applied.append({"id": entry["id"], "file": entry["file"], "sha256_after": entry["sha256_after"]})
+    return applied
+
+
 def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
     env = dict(os.environ)
     # Shared runtime linkage: ONE libc/libc++ in the process. The shared libraries
@@ -209,6 +243,18 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         # __atomic_*_16 (libatomic), which the CRT toolchain does not provide.
         c_flags.append("-mcx16")
     link_flags = []
+    macos_options = []
+    if target_os == "macos":
+        # CRT presents macOS to WebKit as a Bionic/Linux-shaped platform (libcrtweb/cmake/
+        # crt_webkit_platform.cmake and the CRT wrapper's -U__APPLE__), because WebKit's Darwin
+        # branches are Apple SDK code. __linux__ makes WTF/bmalloc take OS(LINUX); the int64
+        # define selects the RawHex overloads for Darwin's `long long` int64_t (patch 0001).
+        # The compilers are given explicitly: on a macOS host WebKitXcodeSDK.cmake otherwise
+        # pins Xcode's own clang before the toolchain file is read.
+        c_flags += ["-D__linux__=1", "-DWTF_CRT_INT64_IS_LONG_LONG=1"]
+        macos_options = [f"-DCMAKE_C_COMPILER={sdk / 'tools' / 'crt-cc'}",
+                         f"-DCMAKE_CXX_COMPILER={sdk / 'tools' / 'crt-c++'}",
+                         f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
     if target_os == "linux":
         # Native TLS in a shared library: the initial-exec model avoids __tls_get_addr, which
         # only the (host) dynamic loader defines.
@@ -220,6 +266,7 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         shutil.rmtree(build)
     command = ["cmake", "-S", tree, "-B", build, "-G", "Ninja",
                f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", f"-DICU_ROOT={deps}"]
+    command += macos_options
     command += [option for option, _ in configure_options(mode)]
     command += [f"-DCMAKE_C_FLAGS={' '.join(c_flags)}", f"-DCMAKE_CXX_FLAGS={' '.join(c_flags)}"]
     if link_flags:
@@ -237,14 +284,16 @@ def runtime_library_path(sdk: Path, deps: Path, build: Path, target_os: str, env
     return run_env
 
 
-def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str) -> dict:
+def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str, mode: str = "interpreter") -> dict:
     """The C API test programs (libcrtweb/tests/jsc/*.cpp), linked against the built library."""
     programs = {}
     compile_env = dict(env)
     compile_env["CRT_SYSROOT"] = str(sdk)
     if target_os == "linux":
         compile_env["CRT_TARGET_OS"] = "linux"
-    for name in ("jsc_context_cycle", "jsc_watchdog_test"):
+    # The watchdog test interrupts compiled code with a signal and reads the forwarded machine
+    # context, so it belongs to the JIT step only.
+    for name in (("jsc_context_cycle", "jsc_watchdog_test") if mode == "baseline-jit" else ("jsc_context_cycle",)):
         output = build / "bin" / name
         command = [sdk / "tools" / "crt-c++", f"-I{build / 'JavaScriptCore' / 'Headers'}",
                    TESTS / f"{name}.cpp", "-o", output, f"-L{build / 'lib'}",
@@ -350,7 +399,7 @@ KNOWN_HOST_LIBRARIES: dict[str, str] = {}
 
 def jsc_library(build: Path, target_os: str) -> Path:
     """The built JavaScriptCore shared library (its file name differs per host)."""
-    patterns = ("libJavaScriptCore*.dylib",) if target_os == "macos" else ("libJavaScriptCore.so.*", "libJavaScriptCore.so")
+    patterns = ("libJavaScriptCore*.dylib*",) if target_os == "macos" else ("libJavaScriptCore.so.*", "libJavaScriptCore.so")
     for pattern in patterns:
         found = sorted(path for path in (build / "lib").glob(pattern) if not path.is_symlink())
         if found:
@@ -507,13 +556,17 @@ def main() -> int:
         if not args.skip_build:
             with phases.measure("fetch, verify and extract WebKit"):
                 tree = fetch_and_extract(args.recipe, cache, work)
+            with phases.measure("apply carried patches"):
+                carried_patches = apply_patches(tree, target_os)
+                (work / "carried-patches.json").write_text(json.dumps(carried_patches, indent=2) + "\n",
+                                                          encoding="utf-8")
             with phases.measure(f"configure JavaScriptCore (JSCOnly, {mode})"):
                 configure(tree, build, sdk, deps, env, target_os, arch, mode)
             with phases.measure("build jsc"):
                 run(["ninja", "-C", build, "jsc"], env=env)
         run_env = runtime_library_path(sdk, deps, build, target_os, env)
         with phases.measure("build the C API test programs"):
-            programs = build_test_programs(sdk, build, env, target_os)
+            programs = build_test_programs(sdk, build, env, target_os, mode)
         with phases.measure(f"run the {mode} acceptance"):
             results = run_acceptance(mode, build, run_env, programs)
         with phases.measure("host ABI audit"):

@@ -6,6 +6,7 @@
  * distinct addresses, pristine initial values (.tdata and .tbss), isolation, and that
  * the creating thread's own copy is untouched. */
 #include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +17,12 @@ static __thread uintptr_t identity;      /* .tbss, set to the thread's own marke
 
 #define THREADS 6
 #define ROUNDS 2000
+
+/* Every worker records its TLS address and then waits until all of them have: a thread that
+ * exited before the next one started could legitimately have its TLS block reused at the same
+ * address (seen as a false "share a TLS address" on a loaded macOS host), so the addresses are
+ * only comparable while all the threads are alive. */
+static int threads_started;
 
 struct result {
   int initial_counter;
@@ -32,6 +39,10 @@ static void* worker(void* argument) {
   result->initial_counter = counter;
   result->initial_scratch_zero = scratch[0] == 0 && scratch[63] == 0 && identity == 0;
   result->address = (uintptr_t)&counter;
+  __atomic_add_fetch(&threads_started, 1, __ATOMIC_SEQ_CST);
+  while (__atomic_load_n(&threads_started, __ATOMIC_SEQ_CST) < THREADS) {
+    sched_yield();
+  }
   identity = marker;
   scratch[0] = (char)(marker & 0x7f);
   result->isolated = 1;

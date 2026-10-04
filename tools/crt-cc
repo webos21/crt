@@ -302,6 +302,7 @@ if [ "$want_real_apple_sdk" -eq 1 ] || [ "$target_os" = macos ]; then
     shift
     case "$arg" in
       -fcrt-real-apple-sdk|--sysroot=*) ;;
+      -fdebug-types-section|-Wl,--no-undefined) [ "$target_os" = macos ] || set -- "$@" "$arg" ;;
       *) set -- "$@" "$arg" ;;
     esac
     i=$((i + 1))

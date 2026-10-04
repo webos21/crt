@@ -987,6 +987,21 @@ ___crt_sys_thread_id:
   negq %rax
   retq
 
+.globl ___crt_sys_getrusage
+.p2align 4, 0x90
+___crt_sys_getrusage:
+  movq $0x2000075, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
+  negq %rax
+  retq
+
 .globl ___crt_sys_getpid
 .p2align 4, 0x90
 ___crt_sys_getpid:

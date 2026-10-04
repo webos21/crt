@@ -1,0 +1,11 @@
+--- a/Source/WTF/wtf/RawHex.h	2026-10-04 18:56:53
++++ b/Source/WTF/wtf/RawHex.h	2026-10-04 18:56:54
+@@ -62,7 +62,7 @@
+     { }
+ #endif
+ 
+-#if CPU(ADDRESS32) || OS(DARWIN)
++#if CPU(ADDRESS32) || OS(DARWIN) || defined(WTF_CRT_INT64_IS_LONG_LONG)
+     // These causes build errors for CPU(ADDRESS64) on some ports because int64_t
+     // is already handled by intptr_t, and uint64_t is handled by uintptr_t.
+     explicit RawHex(int64_t value)

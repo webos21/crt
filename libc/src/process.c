@@ -639,6 +639,23 @@ long __crt_sys_posix_spawn(
 }
 #endif
 
+long __crt_sys_thread_id(void);
+extern long __crt_initial_thread_id;
+
+/* gettid(): Bionic's <unistd.h> (the kernel thread id). The initial thread's id equals the pid, as
+ * on Linux; on macOS the native thread id differs from the pid, so the initial thread is mapped to
+ * it and every other thread keeps its own (distinct) id. */
+pid_t gettid(void) {
+  long tid = __crt_sys_thread_id();
+
+#if defined(CRT_TARGET_OS_MACOS)
+  if (__crt_initial_thread_id != 0 && tid == __crt_initial_thread_id) {
+    return getpid();
+  }
+#endif
+  return (pid_t)tid;
+}
+
 pid_t getpid(void) {
   return (pid_t)normalize_syscall_result(__crt_sys_getpid());
 }

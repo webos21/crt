@@ -21,6 +21,9 @@
 #endif
 
 long __crt_sys_thread_id(void);
+#if defined(CRT_TARGET_OS_MACOS)
+extern unsigned long __crt_initial_stack_top;
+#endif
 void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 
 #define CRT_PTHREAD_KEYS_MAX 128
@@ -1732,6 +1735,19 @@ int pthread_getattr_np(pthread_t thread, pthread_attr_t* attr) {
         attr->stack_base = base;
         attr->stack_size = size;
       }
+    }
+#elif defined(CRT_TARGET_OS_MACOS)
+    /* The initial thread: from the stack top recorded at startup (libc/src/env.c) down by the
+     * soft stack limit, like glibc reports the main thread's stack. */
+    if (result == 0 && pthread_is_current_thread(thread) && __crt_initial_stack_top != 0) {
+      struct rlimit limit;
+      unsigned long size = 8UL * 1024UL * 1024UL;
+
+      if (getrlimit(RLIMIT_STACK, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY && limit.rlim_cur != 0) {
+        size = (unsigned long)limit.rlim_cur;
+      }
+      attr->stack_base = (void*)(__crt_initial_stack_top - size);
+      attr->stack_size = size;
     }
 #endif
     return result;
