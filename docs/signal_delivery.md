@@ -115,8 +115,9 @@ signal backend now forwards the kernel's own `siginfo_t` and `ucontext_t` to an
 and a null context. `ucontext_t`/`mcontext_t` are the Bionic/kernel layouts on Linux
 x86_64 (`uc_mcontext.gregs[REG_RIP]`, ...) and aarch64 (the sigcontext), because
 JavaScriptCore reads them in its thread-suspend handler; `getcontext`/`swapcontext`
-save into the same slots. macOS and Windows keep the private, opaque `mcontext_t` and
-the synthesized record (a self-directed `raise()` also synthesizes it everywhere).
+save into the same slots. Windows keeps the private, opaque `mcontext_t` and
+the synthesized record (a self-directed `raise()` also synthesizes it everywhere); macOS/arm64 does
+the same conversion as Linux, see below.
 `stack_t` follows the kernel order (`ss_sp`, `ss_flags`, `ss_size`).
 
 **Per-thread masks, `sa_mask`/flags and a real `sigsuspend` on Linux (2026-10-04).** The signal mask is
@@ -125,9 +126,20 @@ inherits its creator's); `sigaction` passes `sa_mask` and `SA_RESTART`/`SA_NODEF
 `SA_NOCLDSTOP`/`SA_NOCLDWAIT` to the kernel (`SA_RESETHAND` is emulated by resetting CRT's table before the
 handler runs); `sigsuspend` is `rt_sigsuspend`, so it blocks until a handler has run. WTF suspends a thread
 by signalling it and parking it in `sigsuspend`; the old stub returned at once and let a "suspended"
-thread run on. `pause()` polls the delivery generation (10 ms) on every host. macOS and Windows keep the
-software mask and the stub `sigsuspend` (the backends report "not provided"), and `pthread_kill` toward
+thread run on. `pause()` polls the delivery generation (10 ms) on every host. Windows keeps the
+software mask and the stub `sigsuspend` (the backend reports "not provided"), and `pthread_kill` toward
 another thread is `ENOTSUP` there. `signal_threads_test` covers the Linux behaviour.
+
+**Real signals on macOS/arm64 (2026-10-04, Web Tranche 1C replay).** CRT threads on macOS are real Apple
+pthreads (`control->native_thread`), so the backend (`libc/src/arch/macos/common/signal_backend.c`) forwards
+to libSystem's own `sigaction`, `pthread_sigmask`, `sigsuspend` and `pthread_kill` (found through the Mach-O
+export-trie lookup above, not `dlsym`). The kernel's Darwin `siginfo_t` and arm64 `mcontext64` are converted to
+the Bionic `siginfo_t` and the Linux aarch64 `ucontext_t`/sigcontext layout before the handler runs
+(`libc/include/private/crt_linux_ucontext_aarch64.h`), and the registers a handler wrote are written back before
+the kernel context is restored, so JavaScriptCore's suspend/resume and VM-trap handlers see the same shapes as
+on Linux. Signal numbers are mapped Bionic to Darwin and back. Only aarch64 is converted: on macOS/x86_64 the
+backend still reports "not provided" (open). `signal_threads_test` runs the Linux cases on macOS, and mutation
+of the register write-back makes it fail.
 
 x86_64's `rt_sigaction` requires `SA_RESTORER` plus a real, executable
 restorer address (a tiny trampoline the kernel jumps to after running the

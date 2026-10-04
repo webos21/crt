@@ -5,13 +5,50 @@
   "patches": [
     {
       "id": "0001-wtf-rawhex-int64-distinct-from-intptr",
-      "file": "Source/WTF/wtf/RawHex.h",
       "patch": "0001-wtf-rawhex-int64-distinct-from-intptr.patch",
-      "sha256_before": "d2f20a16dd821b744779cc302895bc4375022084aabcdb2669b886aa188ab340",
-      "sha256_after": "5d12a98dc9976ee8445dbe7c8ad9e20dd344a297f3894ea3f3f197194e66c6aa",
-      "targets": ["macos"],
+      "targets": [
+        "macos"
+      ],
+      "files": [
+        {
+          "file": "Source/WTF/wtf/RawHex.h",
+          "sha256_before": "d2f20a16dd821b744779cc302895bc4375022084aabcdb2669b886aa188ab340",
+          "sha256_after": "5d12a98dc9976ee8445dbe7c8ad9e20dd344a297f3894ea3f3f197194e66c6aa"
+        }
+      ],
       "reason": "WTF::RawHex gives int64_t/uint64_t their own constructors only for CPU(ADDRESS32) or OS(DARWIN); elsewhere it assumes int64_t is intptr_t (true for Linux/Bionic LP64). CRT presents macOS to WebKit as a Linux-shaped platform (no __APPLE__), but the compiler's integer types stay Darwin's (int64_t is long long, intptr_t is long): clang's own arm_acle.h/arm_neon.h and builtins require uint64_t == __UINT64_TYPE__, so the typedef cannot be changed (tried: clang crashed). RawHex(uint64_t) was therefore ambiguous in JavaScriptCore/tools/Integrity.cpp. The patch adds one more condition, selected by -DWTF_CRT_INT64_IS_LONG_LONG which the harness passes on macOS.",
       "remove_when": "WebKit selects the int64_t overloads by type identity (std::is_same_v<int64_t, intptr_t>) instead of OS(DARWIN), or CRT presents macOS to WTF as OS(DARWIN) without pulling in Apple SDK code."
+    },
+    {
+      "id": "0002-macho-assembler-flavor",
+      "patch": "0002-macho-assembler-flavor.patch",
+      "targets": [
+        "macos"
+      ],
+      "files": [
+        {
+          "file": "Source/WTF/wtf/InlineASM.h",
+          "sha256_before": "6305669014715bc26ec80a370951adfec0eee411def10ad5eae6b8042defa3d1",
+          "sha256_after": "d641d5b3098ff1b757dedb2205f820cdc87c95ba4156f52ea42fba942f545d54"
+        },
+        {
+          "file": "Source/JavaScriptCore/llint/LowLevelInterpreter.cpp",
+          "sha256_before": "decd4c4a761c6bfdadcdfb2a123307c5608bc15847d2c9ba088e5b981b37c219",
+          "sha256_after": "5b23d7322f858231b12b0cb8c99d4c76f3ff08c52c71a0241055cd73237e05b7"
+        },
+        {
+          "file": "Source/JavaScriptCore/offlineasm/asm.rb",
+          "sha256_before": "4c5f1bfec9df2bb1d00527215d54b7513672a2e09e96246fc4ef5219121d5beb",
+          "sha256_after": "e06138a49a102b82280a8b7f435382d48ee50ed2c2c3fcd4daae9ec626efcadc"
+        },
+        {
+          "file": "Source/JavaScriptCore/offlineasm/arm64.rb",
+          "sha256_before": "a2469f60bc3709e9367322d3531d2c0f6d8b5882ceaef332dec259d283ad7240",
+          "sha256_after": "dc707187e9e4c940be359fcd2e2dd3188ec6279dffafcff222bd12afea5e6234"
+        }
+      ],
+      "reason": "JavaScriptCore's inline assembler for the offlineasm LLInt and its thunks takes the assembler syntax from OS(DARWIN): the `_` symbol prefix (SYMBOL_STRING), `.private_extern _x` versus `.hidden x` (HIDE_SYMBOL), the local label prefix `L` versus `.L`, `.alt_entry`, and the absence of `.cfi_startproc` in the global asm blocks. Those are properties of the Mach-O object format, not of the OS, but CRT presents macOS to WebKit as a Linux-shaped platform (no __APPLE__; see 0001), so the ELF spellings were chosen and would not link or assemble. The patch ORs one more condition, selected by -DWTF_CRT_MACHO_ASM which the harness passes on macOS in baseline-jit mode, into those conditionals (the three in WTF/InlineASM.h, the alt-entry and two cfi conditionals in llint/LowLevelInterpreter.cpp, the `#if OS(DARWIN)` guard offlineasm itself writes into LLIntAssembly.h, and the two `#if OS(DARWIN)` guards arm64.rb writes for Mach-O versus ELF relocation specifiers (`@PAGE`/`@GOTPAGE` versus `:lo12:`/`:got:`)). offlineasm also emits ELF `.size`/`.type` debug directives whenever CMake passes --binary-format=ELF, which it does for CMAKE_SYSTEM_NAME Linux, so asm.rb additionally skips them when the environment variable WTF_CRT_MACHO_ASM is set (the harness sets it).",
+      "remove_when": "WebKit keys the assembler syntax on the object format (__MACH__/__ELF__/_WIN32) instead of OS(DARWIN), or CRT presents macOS as OS(DARWIN) without Apple SDK code."
     }
   ]
 }

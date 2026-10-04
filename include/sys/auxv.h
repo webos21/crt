@@ -11,9 +11,9 @@ extern "C" {
  * ELF auxiliary vector the kernel passed this process at exec(), e.g.
  * getauxval(AT_HWCAP) for ARM/x86 runtime CPU feature detection. On
  * failure (the type is not present in the auxiliary vector) returns 0 and
- * sets errno to ENOENT, matching Android Bionic's getauxval(). Linux-only:
- * there is no equivalent kernel mechanism on macOS/Windows, matching real
- * upstream (neither host ships this header either). */
+ * sets errno to ENOENT, matching Android Bionic's getauxval(). Only Linux has
+ * an auxiliary vector; on macOS no entry is ever present (always 0/ENOENT, see
+ * libc/src/arch/macos/common/auxv.c). */
 unsigned long getauxval(unsigned long type);
 
 #ifdef __cplusplus

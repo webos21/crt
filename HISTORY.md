@@ -10,6 +10,21 @@ substantive update.
 
 ## 2026-10-04
 
+- **Web Tranche 1C replayed on macOS/arm64: the JavaScriptCore Baseline JIT runs on the CRT runtime.** Clean
+  `--mode baseline-jit` build 153 s; assembly interpreter (no code compiled), JIT script (2,340 compile reports),
+  1B script under the JIT, VM cycles on 0/1/4/8 threads, a watchdog that kills compiled code on main and worker
+  threads, and the Mach-O host-ABI audit all pass, repeatedly. No WebKit patch for W^X: `mmap()` promotes anonymous
+  RWX to `MAP_JIT`, `__crt_jit_write_protect` wraps `pthread_jit_write_protect_np`, and JSC's
+  `OS_THREAD_SELF_RESTRICT` extension point is bound to it by a force-included header. Second carried patch
+  (`0002-macho-assembler-flavor`): Mach-O spellings of the inline/offlineasm assembler keyed on
+  `WTF_CRT_MACHO_ASM`; its last hunk drops the bare GDB debug labels the Linux persona emitted, which split the
+  `.alt_entry` atoms and left zero-filled gaps in the linked LLInt (found by comparing the `.o` with the dylib at
+  the symbol; it looked like a `-dead_strip` problem at first and the `CRT_MACOS_NO_DEAD_STRIP` workaround was
+  removed). CRT changes: real macOS signals (libSystem forwarding, Darwin/arm64 to Bionic/Linux aarch64
+  `siginfo`/context conversion with register write-back), real stack bounds for threads created with only a
+  size, `getauxval`/`<asm/hwcap.h>`, `jit_memory_test` and `signal_threads_test` extended for Apple Silicon.
+  Open: macOS/x86_64 (no signal conversion, no JIT permissions), 1D.
+
 - **Web Tranche 1A/1B replayed on macOS/arm64: the JavaScriptCore interpreter runs on the CRT runtime.**
   Decision (A): WebKit sees macOS as a Linux-shaped POSIX platform (`libcrtweb/cmake/crt_webkit_platform.cmake`,
   `-U__APPLE__ -D__linux__=1`, explicit CRT compilers) with one hash-checked carried patch (`WTF::RawHex`,

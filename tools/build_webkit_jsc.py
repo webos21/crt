@@ -154,26 +154,35 @@ def sha256_file(path: Path) -> str:
 def apply_patches(tree: Path, target_os: str) -> list:
     """Apply the carried patches that target this host (libcrtweb/patches/manifest.json).
 
-    Each is verified: the file must hash to sha256_before (then it is patched) or already to
-    sha256_after (a rerun); anything else means the tree is not the pinned one and the run stops.
-    Returns the applied entries for the configure fingerprint."""
+    Each patch lists the files it changes with their SHA-256 before and after. Every file must hash
+    to sha256_before (then the patch is applied) or already to sha256_after (a rerun); anything else
+    means the tree is not the pinned one and the run stops. Returns the applied entries for the
+    configure fingerprint."""
     manifest = json.loads((PATCHES / "manifest.json").read_text(encoding="utf-8"))
     applied = []
     for entry in manifest["patches"]:
         if target_os not in entry["targets"]:
             continue
-        target = tree / entry["file"]
-        current = sha256_file(target)
-        if current == entry["sha256_after"]:
-            print(f"patch {entry['id']}: already applied")
-        elif current == entry["sha256_before"]:
+        states = []
+        for item in entry["files"]:
+            current = sha256_file(tree / item["file"])
+            if current == item["sha256_after"]:
+                states.append("applied")
+            elif current == item["sha256_before"]:
+                states.append("pristine")
+            else:
+                raise SystemExit(f"patch {entry['id']}: {item['file']} hashes to {current}, expected the "
+                                 f"pinned {item['sha256_before']}")
+        if len(set(states)) != 1:
+            raise SystemExit(f"patch {entry['id']}: its files are in mixed states {states}")
+        if states[0] == "pristine":
             run(["patch", "-p1", "-i", PATCHES / entry["patch"]], cwd=tree)
-            if sha256_file(target) != entry["sha256_after"]:
-                raise SystemExit(f"patch {entry['id']}: result of {entry['file']} does not hash to sha256_after")
+            for item in entry["files"]:
+                if sha256_file(tree / item["file"]) != item["sha256_after"]:
+                    raise SystemExit(f"patch {entry['id']}: result of {item['file']} does not hash to sha256_after")
         else:
-            raise SystemExit(f"patch {entry['id']}: {entry['file']} hashes to {current}, expected the pinned "
-                             f"{entry['sha256_before']}")
-        applied.append({"id": entry["id"], "file": entry["file"], "sha256_after": entry["sha256_after"]})
+            print(f"patch {entry['id']}: already applied")
+        applied.append({"id": entry["id"], "files": [item["file"] for item in entry["files"]]})
     return applied
 
 
@@ -185,6 +194,10 @@ def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
     env["CRT_CXX_RUNTIME_LINKAGE"] = "shared"
     # WebKit's `jsc` and its tools define a plain `int main`; see tools/crt-c++.
     env["CRT_CXX_HOSTED"] = "1"
+    if target_os == "macos":
+        # Read by patched offlineasm/asm.rb (libcrtweb/patches, 0002): no ELF .size/.type debug
+        # directives although CMake is told the system is Linux.
+        env["WTF_CRT_MACHO_ASM"] = "1"
     return env
 
 
@@ -251,7 +264,12 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         # define selects the RawHex overloads for Darwin's `long long` int64_t (patch 0001).
         # The compilers are given explicitly: on a macOS host WebKitXcodeSDK.cmake otherwise
         # pins Xcode's own clang before the toolchain file is read.
-        c_flags += ["-D__linux__=1", "-DWTF_CRT_INT64_IS_LONG_LONG=1"]
+        c_flags += ["-D__linux__=1", "-DWTF_CRT_INT64_IS_LONG_LONG=1", "-DWTF_CRT_MACHO_ASM=1",
+                    # Mach-O: a global label inside a function is a new linker atom unless marked
+                    # .alt_entry, and the linker may then move the continuation elsewhere (the
+                    # LLInt's vmEntryToJavaScript lost the rest of its body). WTF turns this on only
+                    # for PLATFORM(COCOA); the header does not guard it, so a -D is enough.
+                    "-DENABLE_OFFLINE_ASM_ALT_ENTRY=1"]
         macos_options = [f"-DCMAKE_C_COMPILER={sdk / 'tools' / 'crt-cc'}",
                          f"-DCMAKE_CXX_COMPILER={sdk / 'tools' / 'crt-c++'}",
                          f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
@@ -262,13 +280,18 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         # The shared libraries reference loader-provided symbols (__tls_get_addr from ICU and
         # libc++abi); the executable link must not insist on resolving them at link time.
         link_flags.append("-Wl,--allow-shlib-undefined")
+    cxx_flags = list(c_flags)
+    if target_os == "macos" and mode == "baseline-jit":
+        # Apple Silicon W^X through JavaScriptCore's own extension point (no patch): the CRT toggle
+        # behind OS_THREAD_SELF_RESTRICT. JavaScriptCore only uses these macros from C++.
+        cxx_flags += ["-include", str(ROOT / "libcrtweb" / "cmake" / "crt_webkit_jit_permissions.h")]
     if build.exists():
         shutil.rmtree(build)
     command = ["cmake", "-S", tree, "-B", build, "-G", "Ninja",
                f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", f"-DICU_ROOT={deps}"]
     command += macos_options
     command += [option for option, _ in configure_options(mode)]
-    command += [f"-DCMAKE_C_FLAGS={' '.join(c_flags)}", f"-DCMAKE_CXX_FLAGS={' '.join(c_flags)}"]
+    command += [f"-DCMAKE_C_FLAGS={' '.join(c_flags)}", f"-DCMAKE_CXX_FLAGS={' '.join(cxx_flags)}"]
     if link_flags:
         command += [f"-DCMAKE_EXE_LINKER_FLAGS={' '.join(link_flags)}",
                     f"-DCMAKE_SHARED_LINKER_FLAGS={' '.join(link_flags)}"]
@@ -300,6 +323,10 @@ def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str, mode:
                    "-lJavaScriptCore", f"-Wl,-rpath,{build / 'lib'}"]
         if target_os == "linux":
             command.append("-Wl,--allow-shlib-undefined")
+        if target_os == "macos":
+            # Same presentation as the JavaScriptCore build: <ucontext.h> then gives the
+            # Linux-layout ucontext_t the CRT signal backend forwards to handlers.
+            command.insert(1, "-D__linux__=1")
         run(command, env=compile_env)
         programs[name] = output
     return programs

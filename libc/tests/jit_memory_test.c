@@ -47,6 +47,18 @@ static void flush_instructions(void* begin, size_t size) {
   __builtin___clear_cache((char*)begin, (char*)begin + size);
 }
 
+#if defined(__APPLE__) && defined(__aarch64__)
+/* Apple Silicon: memory that is writable and executable at once is per-thread read-write or
+ * read-execute; libc/src/arch/macos/common/jit_permissions.c. */
+extern int __crt_jit_write_protect_supported(void);
+extern void __crt_jit_write_protect(int enabled);
+#define JIT_WRITE_BEGIN() __crt_jit_write_protect(0)
+#define JIT_WRITE_END() __crt_jit_write_protect(1)
+#else
+#define JIT_WRITE_BEGIN() ((void)0)
+#define JIT_WRITE_END() ((void)0)
+#endif
+
 static int call_at(void* code) {
   int_function function;
   memcpy(&function, &code, sizeof(function));
@@ -75,10 +87,14 @@ static void test_rwx_in_one_call(size_t page) {
                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   CHECK(memory != MAP_FAILED, "mmap RWX in one call");
   if (memory == MAP_FAILED) return;
+  JIT_WRITE_BEGIN();
   emit_return_constant(memory, 7);
+  JIT_WRITE_END();
   flush_instructions(memory, code_size());
   CHECK(call_at(memory) == 7, "code in RWX memory runs");
+  JIT_WRITE_BEGIN();
   emit_return_constant(memory, 8);
+  JIT_WRITE_END();
   flush_instructions(memory, code_size());
   CHECK(call_at(memory) == 8, "code patched in place in RWX memory runs");
   CHECK(munmap(memory, page) == 0, "munmap RWX");
@@ -87,17 +103,35 @@ static void test_rwx_in_one_call(size_t page) {
 static void test_reserve_then_commit(size_t page) {
   /* A large address-space reservation (WTF's ExecutableAllocator pool), committed in pieces. */
   const size_t reservation = 256UL * 1024 * 1024;
-  unsigned char* pool = mmap(0, reservation, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-  CHECK(pool != MAP_FAILED, "reserve 256 MiB PROT_NONE|MAP_NORESERVE");
+#if defined(__APPLE__) && defined(__aarch64__)
+  /* Only MAP_JIT memory can later become RWX, so the reservation is requested RWX (which mmap()
+   * maps with MAP_JIT), as WTF's POSIX allocator does; then decommitted and recommitted below. */
+  const int reservation_protection = PROT_READ | PROT_WRITE | PROT_EXEC;
+#else
+  const int reservation_protection = PROT_NONE;
+#endif
+  unsigned char* pool = mmap(0, reservation, reservation_protection, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  CHECK(pool != MAP_FAILED, "reserve 256 MiB with MAP_NORESERVE");
   if (pool == MAP_FAILED) return;
   {
     unsigned char* second = pool + 5 * page;
+#if defined(__APPLE__) && defined(__aarch64__)
+    /* WTF's POSIX allocator never mprotect()s a committed page: it reserves with the final
+     * protection and uses madvise() to decommit and commit. */
+    CHECK(madvise(second, page, MADV_DONTNEED) == 0, "decommit the page with madvise(MADV_DONTNEED)");
+    CHECK(madvise(second, page, MADV_WILLNEED) == 0, "commit the page with madvise(MADV_WILLNEED)");
+#else
     CHECK(mprotect(second, page, PROT_READ | PROT_WRITE | PROT_EXEC) == 0, "commit one page RWX");
+#endif
+    JIT_WRITE_BEGIN();
     emit_return_constant(second, 99);
+    JIT_WRITE_END();
     flush_instructions(second, code_size());
     CHECK(call_at(second) == 99, "code in a committed page of the reservation runs");
     CHECK(madvise(second, page, MADV_DONTNEED) == 0, "madvise(MADV_DONTNEED) on a committed page");
+#if !(defined(__APPLE__) && defined(__aarch64__))
     CHECK(mprotect(second, page, PROT_NONE) == 0, "decommit back to PROT_NONE");
+#endif
   }
   CHECK(munmap(pool, reservation) == 0, "munmap the reservation");
 }
@@ -107,19 +141,6 @@ int main(void) {
 #if defined(__x86_64__) || defined(__aarch64__)
   size_t page = (size_t)sysconf(_SC_PAGESIZE);
   test_rw_then_rx(page);
-#if defined(__APPLE__) && defined(__aarch64__)
-  /* Apple Silicon refuses a mapping or mprotect that is writable and executable at once unless
-   * it was mmap'd with MAP_JIT (and then toggled per thread with pthread_jit_write_protect_np).
-   * This libc does not provide MAP_JIT yet -- Darwin's value 0x800 collides with the Bionic
-   * MAP_DENYWRITE bit, which mmap() strips -- so the two WTF shapes that need it (one-call RWX
-   * and a committed RWX page) cannot run here. Web Tranche 1 macOS replay, docs/crtweb_acceptance.md. */
-  if (failures != 0) {
-    fprintf(stderr, "jit_memory_test: %d check(s) failed\n", failures);
-    return 1;
-  }
-  printf("jit_memory_test: ok (macOS/arm64: RW->RX only; RWX shapes need MAP_JIT, not provided yet)\n");
-  return 0;
-#endif
   test_rwx_in_one_call(page);
   test_reserve_then_commit(page);
   if (failures != 0) {

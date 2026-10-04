@@ -226,6 +226,17 @@ static void test_linux_extras(void) {
   }
   CHECK(syscall(SYS_gettid) == syscall(__NR_gettid) && syscall(SYS_gettid) > 0, "SYS_gettid/__NR_gettid");
 }
+#endif
+
+/* Real kernel signals reach CRT handlers on Linux and, since the Web Tranche 1 macOS replay, on
+ * Apple Silicon: the handler gets the real siginfo and a Linux-layout ucontext_t. */
+#if defined(__linux__) || (defined(__APPLE__) && defined(__aarch64__))
+#define HAVE_REAL_SIGNALS 1
+#endif
+#if defined(HAVE_REAL_SIGNALS)
+#if defined(__APPLE__)
+#include <private/crt_linux_ucontext_aarch64.h>
+#endif
 
 static volatile int handler_ran;
 static volatile int handler_signo;
@@ -236,7 +247,11 @@ static volatile unsigned long handler_sp;
 static volatile int handler_code;
 
 static void on_usr1(int sig, siginfo_t* info, void* context) {
+#if defined(__APPLE__)
+  struct crt_linux_aarch64_ucontext* uc = (struct crt_linux_aarch64_ucontext*)context;
+#else
   ucontext_t* uc = (ucontext_t*)context;
+#endif
   handler_signo = info != 0 ? info->si_signo : -1;
   handler_code = info != 0 ? info->si_code : 0;
   handler_tid = syscall(SYS_gettid);
@@ -297,7 +312,7 @@ static void test_pthread_kill(void) {
 }
 #endif
 
-#if defined(__linux__)
+#if defined(HAVE_REAL_SIGNALS)
 static volatile long initial_thread_handler_tid;
 
 static void on_usr2_initial(int sig, siginfo_t* info, void* context) {
@@ -353,6 +368,8 @@ int main(void) {
   test_main_thread_stack();
 #if defined(__linux__)
   test_linux_extras();
+#endif
+#if defined(HAVE_REAL_SIGNALS)
   test_pthread_kill();
   test_kill_initial_thread();
 #endif

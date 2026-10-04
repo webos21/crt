@@ -13,6 +13,7 @@
 #include <time.h>
 
 #include <private/crt_atomic.h>
+#include <private/crt_signal_backend.h>
 #include <private/crt_thread_tls.h>
 #include <private/crt_tls.h>
 #include <private/crt_wait.h>
@@ -23,6 +24,7 @@
 long __crt_sys_thread_id(void);
 #if defined(CRT_TARGET_OS_MACOS)
 extern unsigned long __crt_initial_stack_top;
+extern long __crt_initial_thread_id;
 #endif
 void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 
@@ -587,6 +589,28 @@ static int pthread_start(void* arg) {
 
 #if defined(CRT_TARGET_OS_MACOS)
 static void* pthread_macos_start(void* arg) {
+  crt_pthread_control* control = (crt_pthread_control*)arg;
+  void* (*stackaddr_fn)(crt_macos_pthread_t) =
+      (void* (*)(crt_macos_pthread_t))crt_macos_pthread_symbol("pthread_get_stackaddr_np");
+  size_t (*stacksize_fn)(crt_macos_pthread_t) =
+      (size_t (*)(crt_macos_pthread_t))crt_macos_pthread_symbol("pthread_get_stacksize_np");
+
+  /* The kernel allocated the stack (the caller gave only a size), so pthread_getattr_np() could
+   * not say where it is. Record the real bounds -- Apple reports the highest address and the
+   * usable size -- for stack-bounds consumers (WTF::StackBounds, JavaScriptCore's stack limit). */
+  crt_macos_pthread_t (*self_fn)(void) =
+      (crt_macos_pthread_t (*)(void))crt_macos_pthread_symbol("pthread_self");
+
+  if (stackaddr_fn != 0 && stacksize_fn != 0 && self_fn != 0 &&
+      (control->attr.flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) == 0) {
+    crt_macos_pthread_t self = self_fn();  /* control->native_thread may not be stored yet */
+    size_t size = stacksize_fn(self);
+
+    if (size != 0) {
+      control->attr.stack_base = (char*)stackaddr_fn(self) - size;
+      control->attr.stack_size = size;
+    }
+  }
   pthread_start(arg);
   return 0;
 }
@@ -2139,6 +2163,17 @@ int pthread_kill(pthread_t thread, int sig) {
     long result = syscall(SYS_tgkill, (long)getpid(), tid, (long)sig);
 
     return result < 0 ? errno : 0;
+  }
+#elif defined(CRT_TARGET_OS_MACOS)
+  {
+    /* The initial thread's pthread_t is its native thread id (it has no control block); any
+     * other one is the control block of a thread made by pthread_create(), which holds Apple's
+     * pthread_t. */
+    void* apple_thread = (long)thread == __crt_initial_thread_id
+                             ? __crt_macos_main_pthread()
+                             : (void*)((crt_pthread_control*)(uintptr_t)thread)->native_thread;
+
+    return __crt_macos_thread_kill(apple_thread, sig);
   }
 #else
   return ENOTSUP;

@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64; the Windows/macOS replays, W^X hardening and the DFG/FTL/WebAssembly tiers (1D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64 and on macOS/arm64; the Windows replay, W^X hardening and the DFG/FTL/WebAssembly tiers (1D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -363,7 +363,7 @@ concurrent compiler threads, aarch64, and the Windows and macOS replays. Default
 1 MiB; the baseline JIT needed no more.
 
 **macOS/arm64 replay, 1A and 1B (2026-10-04): the JavaScriptCore interpreter is green on the CRT
-runtime; the Baseline JIT (1C) is the open part.** Built from the in-tree `05-ui` SDK and the CRT-built ICU by
+runtime. The Baseline JIT (1C) is green too, recorded after this section.** Built from the in-tree `05-ui` SDK and the CRT-built ICU by
 `tools/build_webkit_jsc.py --mode interpreter` on macOS 27.0.1 / arm64 (about 2.3 minutes from a populated
 cache: build 100 s).
 
@@ -381,7 +381,7 @@ nothing in the WebKit tree except one carried patch:
   (WTF/bmalloc `OS(LINUX)`) and `-DWTF_CRT_INT64_IS_LONG_LONG=1`. The integer typedefs stay Darwin's: changing
   `int64_t` to `long` was tried and clang crashed on 142 translation units, because clang's own `arm_acle.h` and
   NEON builtins require `uint64_t == __UINT64_TYPE__`.
-- *One carried patch* (`libcrtweb/patches/manifest.json`, applied by the harness with a SHA-256 check before and
+- *Carried patches* (`libcrtweb/patches/manifest.json`; this one is 0001, the Mach-O assembler flavor 0002 is described under 1C below, applied by the harness with a SHA-256 check before and
   after, recorded in `carried-patches.json`): `WTF::RawHex` gives `int64_t`/`uint64_t` their own constructors only
   for `CPU(ADDRESS32) || OS(DARWIN)` and otherwise assumes `int64_t` is `intptr_t`; with Darwin's `long long` the
   call in `JavaScriptCore/tools/Integrity.cpp` was ambiguous. The patch adds one condition keyed on the define
@@ -420,21 +420,62 @@ they load) is clean: only CRT SDK libraries, the CRT-built ICU, the build tree a
    `crtmedia_http_lifecycle_test` listened with a backlog of 1 and the test asserted its connection count at
    once; the backlog is 16 and the check waits (bounded). A macOS-only `-Werror` in `bionic_surface_test.c`.
 
-*`jit_memory_test` on Apple Silicon.* RW to RX to RW works. A mapping or `mprotect` that is writable and
-executable at once is refused unless the memory was `mmap`'d with `MAP_JIT` and is toggled per thread with
-`pthread_jit_write_protect_np`; this libc has neither, and Darwin's `MAP_JIT` (0x800) collides with the Bionic
-`MAP_DENYWRITE` bit that `mmap()` strips. The test therefore checks only RW to RX there and says so; that is a
-gap in what CRT provides, not a pass.
+*`jit_memory_test` on Apple Silicon.* Before 1C the test could only check RW to RX there, which was a gap in what
+CRT provides, not a pass; the full test now runs, see 1C below.
 
-*Open for 1C on macOS (not started beyond the analysis).* The Linux persona chooses ELF assembler syntax: the
-offlineasm LLInt and thunks take their symbol spelling (`_` prefix), `.private_extern` versus `.hidden`, local
-label prefix and cache-flush call from `OS(DARWIN)` in `WTF/InlineASM.h`, `llint/LowLevelInterpreter.cpp`,
-`offlineasm/asm.rb`, `ARM64Assembler.h` and `MacroAssemblerARM64.cpp`, so the Baseline JIT needs a second carried
-patch keyed on the object format. W^X has an official extension point that needs no patch:
-`FastJITPermissions.h` honours `OS_THREAD_SELF_RESTRICT`/`OS_THREAD_SELF_RESTRICT_SUPPORTED`, which CRT can
-define to `pthread_jit_write_protect_np`, together with `MAP_JIT` for anonymous RWX mappings. The macOS signal
-backend (software mask, stub `sigsuspend`, no real kernel context) must forward `siginfo`/`ucontext` before the
-watchdog test can run.
+**macOS/arm64 replay, 1C Baseline JIT (2026-10-04): green.** `tools/build_webkit_jsc.py --mode baseline-jit`
+from an empty work root builds in 153 s (configure 9 s) and passes all of: the 1B script with the JIT off (the
+assembly interpreter runs it and no code is compiled), the JIT script with `2,340` `using Baseline ... into N bytes`
+reports as the compile proof, the 1B script under the JIT, 150 VM cycles plus 20 per thread on 0/1/4/8 threads
+(growth under 300 KB), and `jsc_watchdog_test`, which terminates a compiled infinite loop on the main thread and on
+workers three times each (about 0.25 s each) through the signal-based VM traps. The Mach-O host-ABI audit is clean.
+Three more acceptance runs on the same tree, and the interpreter mode from a clean tree, all pass.
+
+*How the JIT is allowed to run (no WebKit patch).* Apple Silicon refuses memory that is writable and executable at
+once unless it was `mmap`'d with `MAP_JIT` and is switched per thread between RW and RX with
+`pthread_jit_write_protect_np`. CRT provides both: `mmap()` promotes an anonymous RWX request to `MAP_JIT`
+(Darwin's 0x800 collides with Bionic's `MAP_DENYWRITE`, which `mmap()` strips for everything else), and
+`libc/src/arch/macos/common/jit_permissions.c` exposes the toggle as `__crt_jit_write_protect`.
+JavaScriptCore's own extension point, `OS_THREAD_SELF_RESTRICT(_SUPPORTED)` in `FastJITPermissions.h`, is pointed
+at it by `libcrtweb/cmake/crt_webkit_jit_permissions.h`, force-included by the harness. WTF's POSIX allocator
+reserves the pool RWX with `MAP_NORESERVE` and commits with `madvise`, which is what the extended
+`jit_memory_test` now does as well (RWX in one call, reserve then commit, patching in place). `MAP_JIT` plus
+the per-thread toggle is the macOS W^X behaviour; hardened-runtime entitlements are an application-packaging question, not tested here.
+x86_64 macOS has no JIT permissions backend (the functions report unsupported).
+
+*Second carried patch, `0002-macho-assembler-flavor`.* The Linux persona chooses ELF assembler syntax, but the
+generated and inline assembly is assembled by clang for a Mach-O target. The patch ORs a condition keyed on
+`-DWTF_CRT_MACHO_ASM` into the places that choose the `_` symbol prefix, `.private_extern` versus `.hidden`, the
+`L` local-label prefix, `.alt_entry`, the absence of `.cfi_startproc`/`.cfi_endproc` in the global asm blocks, the
+`#if OS(DARWIN)` guard offlineasm writes into `LLIntAssembly.h`, and Mach-O versus ELF relocation specifiers
+(`@PAGE`/`@GOTPAGE` versus `:lo12:`/`:got:`) in `arm64.rb`; `asm.rb` also skips ELF `.size`/`.type` when the
+environment variable of the same name is set, because CMake tells offlineasm `--binary-format=ELF` for a Linux
+system. The last hunk of the patch is the one that took longest to find: because the persona defines
+`OS(LINUX)`, `OFFLINE_ASM_OPCODE_DEBUG_LABEL` emitted a bare, non-underscore GDB label (`op_construct_return_location:`)
+next to every `.alt_entry` label. On Mach-O a non-temporary symbol starts a new atom, so the linker moved that
+atom away and left zeros after the `blr` that precedes it (twelve such 92-byte gaps; the assembly interpreter died
+with `udf` in the middle of `callHelper`). The patch disables those debug labels in the Mach-O flavor. Without the
+debug labels the default wrapper link (`-dead_strip`) works and no linker option is needed (an earlier
+`CRT_MACOS_NO_DEAD_STRIP` escape hatch, which only hid part of the symptom, was removed). Removal condition: WebKit
+keys these on the object format instead of `OS(DARWIN)`, or CRT presents macOS as `OS(DARWIN)` without Apple SDK code.
+
+*CRT gaps found and fixed (CRT/PAL, not WebKit).*
+
+1. *Signals.* The macOS backend kept a software mask and a stub `sigsuspend`; it now forwards real
+   `sigaction`/`pthread_sigmask`/`sigsuspend`/`pthread_kill` to libSystem and converts Darwin `siginfo` and the
+   arm64 context to the Bionic/Linux aarch64 layouts with register write-back (`docs/signal_delivery.md`).
+2. *Thread stack bounds.* A thread created by `pthread_create` with only a stack size had no recorded base on
+   macOS, so `pthread_getattr_np()` reported a null stack; JavaScriptCore's soft limit then put the LLInt frame
+   zero-fill at address 0x800000 and every worker-thread context cycle died with `EXC_BAD_ACCESS`. The new thread
+   now records the bounds Apple reports (`docs/pthread_policy.md`).
+3. *Bionic surface.* `getauxval()` (a macOS stub, `AT_HWCAP` etc. report no features), `<asm/hwcap.h>`,
+   `gettid()`/`SYS_gettid` mapping (1B), real `getrusage()` (1B).
+4. *Tests.* `jit_memory_test` (RWX and reserve-then-commit on Apple Silicon), `signal_threads_test` (the real macOS
+   signal cases), `pthread_native_tls_test`, `bionic_surface_test`, and `jsc_watchdog_test`/`jsc_context_cycle`
+   run on macOS.
+
+*Open on macOS.* x86_64 macOS has neither the signal conversion nor JIT permissions; the DFG/FTL/WebAssembly tiers and
+concurrent compiler threads are 1D; the harness is run from the in-tree `05-ui` SDK, not yet from the isolated stage chain.
 
 ### 2. Linux WPE reference baseline
 

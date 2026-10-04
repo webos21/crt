@@ -1,0 +1,113 @@
+--- a/Source/WTF/wtf/InlineASM.h	2026-10-04 20:19:57
++++ b/Source/WTF/wtf/InlineASM.h	2026-10-04 20:19:57
+@@ -31,7 +31,7 @@
+ 
+ /* asm directive helpers */ 
+ 
+-#if OS(DARWIN) || (OS(WINDOWS) && CPU(X86))
++#if OS(DARWIN) || defined(WTF_CRT_MACHO_ASM) || (OS(WINDOWS) && CPU(X86))
+ #define SYMBOL_STRING(name) "_" #name
+ #else
+ #define SYMBOL_STRING(name) #name
+@@ -57,7 +57,7 @@
+ #define LABEL_REFERENCE(name) GLOBAL_REFERENCE(name)
+ #endif
+ 
+-#if OS(DARWIN)
++#if OS(DARWIN) || defined(WTF_CRT_MACHO_ASM)
+     // Mach-O platform
+ #define HIDE_SYMBOL(name) ".private_extern _" #name
+ #elif OS(AIX)
+@@ -80,7 +80,7 @@
+ // FIXME: figure out how this works on all the platforms. I know that
+ // on ELF, the preferred form is ".Lstuff" as opposed to "Lstuff".
+ // Don't know about any of the others.
+-#if OS(DARWIN)
++#if OS(DARWIN) || defined(WTF_CRT_MACHO_ASM)
+ #define LOCAL_LABEL_STRING(name) "L" #name
+ #elif  OS(LINUX)               \
+     || OS(FREEBSD)             \
+--- a/Source/JavaScriptCore/llint/LowLevelInterpreter.cpp	2026-10-04 20:19:57
++++ b/Source/JavaScriptCore/llint/LowLevelInterpreter.cpp	2026-10-04 20:19:57
+@@ -550,7 +550,7 @@
+ 
+ #define OFFLINE_ASM_NO_ALT_ENTRY_DIRECTIVE(label)
+ 
+-#if COMPILER(CLANG) && OS(DARWIN) && ENABLE(OFFLINE_ASM_ALT_ENTRY)
++#if COMPILER(CLANG) && (OS(DARWIN) || defined(WTF_CRT_MACHO_ASM)) && ENABLE(OFFLINE_ASM_ALT_ENTRY)
+ #define OFFLINE_ASM_ALT_ENTRY_DIRECTIVE(label) \
+     ".alt_entry " SYMBOL_STRING(label) "\n"
+ #else
+@@ -637,7 +637,7 @@
+     LOCAL_LABEL_STRING(label) ":\n" \
+     OFFLINE_ASM_ALT_GLOBAL_LABEL(label)
+ 
+-#if OS(LINUX)
++#if OS(LINUX) && !defined(WTF_CRT_MACHO_ASM)
+ #define OFFLINE_ASM_OPCODE_DEBUG_LABEL(label)  #label ":\n"
+ #else
+ #define OFFLINE_ASM_OPCODE_DEBUG_LABEL(label)
+@@ -662,7 +662,7 @@
+ // This may seem strange; We duplicate these table entries because
+ // different lldb versions seem to sometimes have off-by-one errors otherwise.
+ // See GdbJIT.cpp for a detailed explanation of how these DWARF directives work.
+-#if !OS(DARWIN) && COMPILER(CLANG)
++#if !OS(DARWIN) && !defined(WTF_CRT_MACHO_ASM) && COMPILER(CLANG)
+ #if CPU(ARM64)
+ __asm__(
+     ".cfi_startproc\n"
+@@ -700,7 +700,7 @@
+ #include "LLIntAssembly.h"
+ 
+ // See GdbJIT.cpp for a detailed explanation.
+-#if !OS(DARWIN) && COMPILER(CLANG)
++#if !OS(DARWIN) && !defined(WTF_CRT_MACHO_ASM) && COMPILER(CLANG)
+ #if CPU(ARM64) || CPU(ARM_THUMB2)
+ __asm__(
+     ".cfi_endproc\n"
+--- a/Source/JavaScriptCore/offlineasm/asm.rb	2026-10-04 20:19:57
++++ b/Source/JavaScriptCore/offlineasm/asm.rb	2026-10-04 20:19:57
+@@ -71,12 +71,12 @@
+     def leaveAsm
+         putsLastComment
+         if not @deferredOSDarwinActions.size.zero?
+-            putStr("#if OS(DARWIN)")
++            putStr("#if OS(DARWIN) || defined(WTF_CRT_MACHO_ASM)")
+             (@deferredNextLabelActions + @deferredOSDarwinActions).each {
+                 | action |
+                 action.call()
+             }
+-            putStr("#endif // OS(DARWIN)")
++            putStr("#endif // OS(DARWIN) || defined(WTF_CRT_MACHO_ASM)")
+         end
+         putStr "OFFLINE_ASM_END"
+         @state = :cpp
+@@ -328,7 +328,7 @@
+ end
+ 
+ # We want this in all ELF systems we support, except for C_LOOP (we'll disable it later on if we are building cloop)
+-$emitELFDebugDirectives = $options.has_key?(:binary_format) && $options[:binary_format] == "ELF"
++$emitELFDebugDirectives = $options.has_key?(:binary_format) && $options[:binary_format] == "ELF" && !ENV.key?("WTF_CRT_MACHO_ASM")
+ 
+ inputHash =
+     "// offlineasm input hash: " + parseHash(asmFile, $options) +
+--- a/Source/JavaScriptCore/offlineasm/arm64.rb	2026-10-04 20:19:57
++++ b/Source/JavaScriptCore/offlineasm/arm64.rb	2026-10-04 20:19:57
+@@ -1431,7 +1431,7 @@
+             labelRef = operands[0]
+             register = operands[1].arm64Operand(:quad)
+             if labelRef.externOrGlobal?
+-                $asm.putStr("#if OS(DARWIN)")
++                $asm.putStr("#if OS(DARWIN) || defined(WTF_CRT_MACHO_ASM)")
+                 $asm.puts "adrp #{register}, #{labelRef.asmLabel}@PAGE"
+                 $asm.puts "add #{register}, #{register}, #{labelRef.asmLabel}@PAGEOFF"
+                 $asm.putStr("#else")
+@@ -1447,7 +1447,7 @@
+ 
+             # On Darwin, use Macho-O GOT relocation specifiers, along with
+             # the labels required for the .loh directive.
+-            $asm.putStr("#if OS(DARWIN)")
++            $asm.putStr("#if OS(DARWIN) || defined(WTF_CRT_MACHO_ASM)")
+             $asm.puts "Ljsc_llint_loh_adrp_#{uid}:"
+             $asm.puts "adrp #{operands[1].arm64Operand(:quad)}, #{operands[0].asmLabel}@GOTPAGE"
+             $asm.puts "Ljsc_llint_loh_ldr_#{uid}:"

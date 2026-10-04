@@ -64,7 +64,11 @@ to Linux, macOS, and Windows.
 - Caller-provided stacks disable runtime guard ownership, matching the rule that
   stack ownership remains with the caller.
 - macOS passes stack size, guard size, and caller-provided stacks into native
-  libSystem pthread attributes when the native entry points are available.
+  libSystem pthread attributes when the native entry points are available. When the kernel allocates the
+  stack (only a size was given), the new thread records the real bounds from `pthread_get_stackaddr_np`/
+  `pthread_get_stacksize_np` so `pthread_getattr_np()` reports them (JavaScriptCore's soft stack limit read a
+  null base and wrote the LLInt frame zero-fill to address 0x800000 before this). The initial thread's stack is
+  the startup-recorded top minus the soft stack limit.
 - Windows passes stack size to `CreateThread`. Caller-provided stacks return
   `ENOTSUP` at `pthread_create` time, not at `pthread_attr_setstack` time,
   because Kernel32 does not accept an arbitrary caller-owned stack for
@@ -80,8 +84,9 @@ to Linux, macOS, and Windows.
   `linux_pthread_lifecycle.md`.
 - `pthread_kill` is real on Linux (`tgkill`). A `pthread_t` is the control block only for a thread
   created by `pthread_create`; the initial thread's is its kernel tid, so the handle is validated against
-  the registry of live CRT threads before it is dereferenced. Toward another thread it fails with
-  `ENOTSUP` on macOS and Windows, which have no delivery mechanism yet.
+  the registry of live CRT threads before it is dereferenced. On macOS (arm64) it is libSystem's
+  `pthread_kill` on the control block's native thread (the initial thread's own Apple pthread). Toward another
+  thread it fails with `ENOTSUP` on Windows and on macOS/x86_64, which have no delivery mechanism yet.
 - `pthread_gettid_np` returns the backend thread id when the project has a
   control block. For the current thread it asks the backend directly.
 - Thread names are stored in the project thread context.

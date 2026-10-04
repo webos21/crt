@@ -36,7 +36,7 @@ static long normalize_long(long result) {
   return result;
 }
 
-static int host_mmap_flags(int flags) {
+static int host_mmap_flags(int flags, int prot) {
 #if defined(CRT_TARGET_OS_MACOS)
   int host_flags = flags;
 
@@ -50,8 +50,20 @@ static int host_mmap_flags(int flags) {
     host_flags &= ~MAP_NORESERVE;
     host_flags |= 0x0040;
   }
+#if defined(__aarch64__)
+  /* Apple Silicon only allows a mapping that is writable and executable at once if it carries
+   * Darwin's MAP_JIT (0x0800, which is MAP_DENYWRITE in the Bionic numbering above and was
+   * stripped). Code written for Linux asks for exactly that with a plain anonymous
+   * PROT_READ|PROT_WRITE|PROT_EXEC mmap (JavaScriptCore's executable pool), so such a request is
+   * given MAP_JIT; the thread then picks writable or executable with __crt_jit_write_protect()
+   * (libc/src/arch/macos/common/jit_permissions.c). */
+  if ((flags & MAP_ANONYMOUS) != 0 && (prot & PROT_EXEC) != 0 && (prot & PROT_WRITE) != 0) {
+    host_flags |= 0x0800;
+  }
+#endif
   return host_flags;
 #else
+  (void)prot;
   return flags;
 #endif
 }
@@ -64,7 +76,7 @@ void* mmap64(void* addr, size_t length, int prot, int flags, int fd, off64_t off
     return MAP_FAILED;
   }
 
-  result = __crt_sys_mmap(addr, (unsigned long)length, prot, host_mmap_flags(flags), fd, (long long)offset);
+  result = __crt_sys_mmap(addr, (unsigned long)length, prot, host_mmap_flags(flags, prot), fd, (long long)offset);
   value = (intptr_t)result;
   if (value < 0 && value >= -4095) {
     errno = (int)-value;

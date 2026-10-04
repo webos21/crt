@@ -76,16 +76,16 @@ then macOS/arm64.
 * [ ] **1. JavaScriptCore / JSCOnly bring-up.** Linux/x86_64 1A (dependency ports) and 1B
   (interpreter first-green) are done 2026-10-04 (`HISTORY.md`, `docs/crtweb_acceptance.md`),
   built by `tools/build_webkit_jsc.py` against an installed SDK.
-  * [x] **1C. Baseline JIT.** Done on Linux/x86_64 2026-10-04 (`HISTORY.md`,
+  * [x] **1C. Baseline JIT.** Done on Linux/x86_64 and macOS/arm64 2026-10-04 (`HISTORY.md`,
     `docs/crtweb_acceptance.md`): pre-JIT gate, assembly-interpreter and Baseline-JIT runs with a
     compile proof, watchdog termination of compiled code, threads, host-ABI audit.
   * [ ] **1D and hardening.** DFG/FTL/WebAssembly tiers (compiled in, disabled at run time) with
     concurrent compiler threads and the thread-stack question; W^X policy (upstream default does not
     exercise it); the sampling profiler.
-  * [ ] **Replays.** macOS/arm64: 1A/1B done 2026-10-04 (interpreter acceptance, thread cycles and the
-    Mach-O host-ABI audit pass; WebKit is presented as a Linux-shaped platform with one carried patch, see
-    `docs/crtweb_acceptance.md`); 1C needs a Mach-O assembler-flavor patch, `MAP_JIT`/W^X through
-    `OS_THREAD_SELF_RESTRICT`, and a real macOS signal backend. Windows/x64: the ICU/gperf ports, the
+  * [ ] **Replays.** macOS/arm64: 1A/1B/1C done 2026-10-04 (interpreter and Baseline-JIT acceptance, thread
+    cycles, watchdog and the Mach-O host-ABI audit pass; WebKit is presented as a Linux-shaped platform with two
+    carried patches, see `docs/crtweb_acceptance.md`); macOS/x86_64 has no signal conversion or JIT permissions.
+    Windows/x64: the ICU/gperf ports, the
     harness, the clocks/`sched_*`/signal code (software signal mask and a stub `sigsuspend`),
     `jit_memory_test` and `VirtualAlloc` shapes; aarch64 Linux needs native thread TLS (variant I) first.
   * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided

@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 #include <ucontext.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 // Declared in JSContextRefPrivate.h, which the build does not install; exported by the library.
@@ -47,7 +48,7 @@ static void report_crash(int sig, siginfo_t* info, void* context) {
   }
   n = snprintf(line, sizeof line, "jsc_watchdog_test: CRASH signal=%d code=%d addr=%p pc=%#lx sp=%#lx in %s+%#lx (%s) tid=%ld\n",
                sig, info ? info->si_code : -1, info ? info->si_addr : nullptr, pc, sp, name, offset, module,
-               static_cast<long>(syscall(186)));
+               static_cast<long>(syscall(SYS_gettid)));
   write(2, line, n);
 #if defined(__x86_64__)
   if (uc) {

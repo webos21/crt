@@ -72,4 +72,12 @@ void __crt_signal_dispatch(int bionic_sig);
  * passed through untouched and may be null. */
 void __crt_signal_dispatch_info(int bionic_sig, const siginfo_t* info, void* uctx);
 
+#if defined(CRT_TARGET_OS_MACOS)
+/* macOS only: threads made by pthread_create() are Apple pthreads underneath (libc/src/pthread.c), so a
+ * thread-directed signal goes through Apple's pthread_kill with the Darwin signal number. Returns 0 or
+ * an errno value. __crt_macos_main_pthread() is Apple's pthread_t of the initial thread. */
+int __crt_macos_thread_kill(void* apple_pthread, int bionic_sig);
+void* __crt_macos_main_pthread(void);
+#endif
+
 #endif

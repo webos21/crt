@@ -189,6 +189,10 @@ if(CRT_TARGET_OS STREQUAL "macos")
   # tcdrain()/tcflow()/tcflush()/tcsendbreak() -- see that file's own
   # comment for the hardcoded-stub round-trip bug this replaces.
   set(CRT_MACOS_TERMIOS_FILE src/arch/macos/common/termios.c)
+  set(CRT_MACOS_PLATFORM_FILES
+    src/arch/macos/common/jit_permissions.c
+    src/arch/macos/common/auxv.c
+  )
 elseif(CRT_TARGET_OS STREQUAL "linux")
   if(CRT_EFFECTIVE_ARCH MATCHES "^(arm64|aarch64)$")
     set(CRT_START_FILE src/arch/linux/aarch64/crt1.S)
@@ -280,7 +284,7 @@ target_include_directories(crt_syscall PRIVATE
 target_sources(c PRIVATE $<TARGET_OBJECTS:crt_syscall>)
 if(CRT_TARGET_OS STREQUAL "macos")
   target_sources(c PRIVATE ${CRT_MACOS_ERRNO_FILE})
-  target_sources(c PRIVATE ${CRT_MACOS_TERMIOS_FILE})
+  target_sources(c PRIVATE ${CRT_MACOS_TERMIOS_FILE} ${CRT_MACOS_PLATFORM_FILES})
 endif()
 target_sources(c PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
 if(CRT_TARGET_OS STREQUAL "linux")
@@ -408,7 +412,7 @@ target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_setjmp>)
 target_sources(c_shared PRIVATE $<TARGET_OBJECTS:crt_ucontext>)
 if(CRT_TARGET_OS STREQUAL "macos")
   target_sources(c_shared PRIVATE ${CRT_MACOS_ERRNO_FILE})
-  target_sources(c_shared PRIVATE ${CRT_MACOS_TERMIOS_FILE})
+  target_sources(c_shared PRIVATE ${CRT_MACOS_TERMIOS_FILE} ${CRT_MACOS_PLATFORM_FILES})
 endif()
 target_sources(c_shared PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
 if(CRT_TARGET_OS STREQUAL "linux")
