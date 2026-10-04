@@ -39,7 +39,8 @@
     }
   ],
   "status": {
-    "linux": "configure-pass"
+    "linux": "configure-pass",
+    "macos": "configure-pass"
   },
   "notes": [
     "Added 2026-10-03 for Web Tranche 1: WebKit's CMake (Source/cmake/WebKitCommon.cmake, find_package(Gperf 3.0.1 REQUIRED)) needs gperf to generate perfect-hash tables for WebCore. It is a build tool that runs on the build machine (a C++ program that depends only on the C++ runtime), built as a CRT port like every other tool the project owns rather than taken from the host.",

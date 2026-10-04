@@ -71,6 +71,7 @@ set(CRT_LIBC_SOURCES
   src/string/memchr.c
   src/string/memrchr.c
   src/string/memmem.c
+  src/string/memset_explicit.c
   src/string/memccpy.c
   src/string/memcmp.c
   src/string/memcpy.c

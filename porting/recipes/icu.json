@@ -31,7 +31,14 @@
       "CRT_CXX_ENABLE_RTTI": "1"
     },
     "make_args": [],
-    "make_subdir": "source"
+    "make_subdir": "source",
+    "target_overrides": {
+      "macos": {
+        "env": {
+          "CRT_CXX_RUNTIME_LINKAGE": "shared"
+        }
+      }
+    }
   },
   "tests": [
     {
@@ -48,7 +55,14 @@
         "@PORT_PREFIX@/lib/libicuuc.a",
         "@PORT_PREFIX@/lib/libicudata.a"
       ],
-      "expect_stdout": "icu_unicode_test: ok"
+      "expect_stdout": "icu_unicode_test: ok",
+      "target_overrides": {
+        "macos": {
+          "cflags": [
+            "-std=c++17"
+          ]
+        }
+      }
     },
     {
       "name": "unicode-shared",
@@ -58,21 +72,45 @@
       "cflags": [
         "-I@PORT_PREFIX@/include"
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libicui18n.so",
-        "@PORT_PREFIX@/lib/libicuuc.so",
-        "@PORT_PREFIX@/lib/libicudata.so"
-      ],
-      "expect_stdout": "icu_unicode_test: ok"
+      "expect_stdout": "icu_unicode_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libicui18n.so",
+            "@PORT_PREFIX@/lib/libicuuc.so",
+            "@PORT_PREFIX@/lib/libicudata.so"
+          ]
+        },
+        "macos": {
+          "cflags": [
+            "-std=c++17"
+          ],
+          "link_args": [
+            "@PORT_PREFIX@/lib/libicui18n.dylib",
+            "@PORT_PREFIX@/lib/libicuuc.dylib",
+            "@PORT_PREFIX@/lib/libicudata.dylib"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libicui18n.so",
+            "@PORT_PREFIX@/lib/libicuuc.so",
+            "@PORT_PREFIX@/lib/libicudata.so"
+          ]
+        }
+      }
     }
   ],
   "status": {
-    "linux": "shared-pass"
+    "linux": "shared-pass",
+    "macos": "shared-pass"
   },
   "notes": [
     "Added 2026-10-03 for Web Tranche 1: JavaScriptCore/WTF require ICU >= 70.1 with the data, uc and i18n components (Source/cmake/OptionsJSCOnly.cmake, find_package(ICU 70.1 REQUIRED COMPONENTS data i18n uc)). It is a CRT port so the 06-web SDK does not depend on a host ICU (which would differ per OS and break the package boundary).",
     "78.3 is the newest non-prerelease release (2026-03-17); 79.1rc is a release candidate. The archive's SHA-256 matches the digest GitHub publishes for the asset and its SHA-512 matches the release's signed SHASUM512.txt entry.",
     "build.sysroot_stage=02-cxx and build.env.CRT_CXX_HOSTED=1: ICU is C++ and ships programs (icupkg, genrb, ...) with a plain `int main`; see porting/recipes/gperf.json for why both are needed. ICU is built without tests, samples and extras; ICU's runtime data is the default embedded data library (libicudata).",
-    "build.env.CRT_CXX_ENABLE_RTTI=1: ICU uses dynamic_cast/typeid (normalizer2.cpp, rbbi.cpp), and tools/crt-c++ compiles with -fno-rtti unless a port opts in."
+    "build.env.CRT_CXX_ENABLE_RTTI=1: ICU uses dynamic_cast/typeid (normalizer2.cpp, rbbi.cpp), and tools/crt-c++ compiles with -fno-rtti unless a port opts in.",
+    "Web Tranche 1 macOS replay (2026-10-04): build.target_overrides.macos.env.CRT_CXX_RUNTIME_LINKAGE=shared. ICU's own build runs the tools it just built (icupkg, genrb, pkgdata) against the shared libicuuc.dylib, which depends on @rpath/libc.dylib; a tool linked with the static runtime has no rpath to the CRT sysroot (and Apple's make/sh strip DYLD_LIBRARY_PATH under SIP), so dyld aborted with 'Library not loaded: @rpath/libc.dylib' while generating icudata.lst. Shared runtime linkage gives the tools the sysroot rpath and, as in Tranche 1B, one libc in the process.",
+    "Test changes for macOS (2026-10-04): the unicode tests pass -std=c++17 on macOS because Apple clang defaults to an older C++ dialect than ICU's headers need (std::is_same_v, auto template parameters), and the shared test now names libicu*.dylib per host like freetype.json/zlib.json instead of .so on every host."
   ]
 }

@@ -82,7 +82,9 @@ then macOS/arm64.
   * [ ] **1D and hardening.** DFG/FTL/WebAssembly tiers (compiled in, disabled at run time) with
     concurrent compiler threads and the thread-stack question; W^X policy (upstream default does not
     exercise it); the sampling profiler.
-  * [ ] **Replays.** Windows/x64 and macOS/arm64: the ICU/gperf ports, the harness, the
+  * [ ] **Replays.** macOS/arm64 (2026-10-04): ICU/gperf ports and CRT fixes done, JSC blocked on how WTF is built
+    on macOS (Apple SDK paths versus CRT's Bionic surface) plus `MAP_JIT`; see `docs/crtweb_acceptance.md`.
+    Windows/x64 and macOS/arm64: the ICU/gperf ports, the harness, the
     clocks/`sched_*`/signal code (macOS and Windows still have the software signal mask and a stub
     `sigsuspend`) compile-checked there but never run, `jit_memory_test` and the executable-memory
     shapes (`MAP_JIT` on macOS, `VirtualAlloc` on Windows); aarch64 Linux

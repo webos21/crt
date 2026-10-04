@@ -90,8 +90,8 @@ queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
 
 `gperf` and `icu` (both added 2026-10-03) are the first **C++** ports and exist for
 the Web Runtime (`06-web`): JavaScriptCore/WTF need ICU >= 70.1 (`data`, `uc`,
-`i18n`) and WebCore's build needs gperf (JavaScriptCore alone does not). Linux only so far (`gperf`
-`configure-pass`, `icu` `shared-pass`); Windows and macOS are not attempted. See
+`i18n`) and WebCore's build needs gperf (JavaScriptCore alone does not). Linux and macOS/arm64 so far (`gperf`
+`configure-pass`, `icu` `shared-pass`); Windows is not attempted. See
 the `gperf` and `icu` sections below.
 
 `expat` and `freetype` (both added 2026-08-24) are graphics-stack dependencies
@@ -107,8 +107,8 @@ their package-specific status remains in the sections below.
 - Build system: `configure` (a C++ program; `build.sysroot_stage: 02-cxx`)
 - Dependencies: `make`
 - Status:
-  - Linux: `configure-pass`
-  - macOS, Windows: not attempted
+  - Linux, macOS: `configure-pass`
+  - Windows: not attempted
 - Automated recipe tests:
   - `generate-hash`
 
@@ -125,6 +125,21 @@ were added to libc for gnulib; and CRT headers that formed an include ring
 (`<sys/types.h>`, `<stdint.h>`, `<wchar.h>`, `<xlocale.h>`) became cycle-safe so
 gnulib's wrapper headers can interpose them.
 
+macOS/arm64 replay (2026-10-04) of these two recipes found four CRT gaps, all fixed in
+CRT, none in upstream: (1) gnulib took Apple's `memset_s` from the host libSystem (the port
+link sees libSystem) whose declaration CRT headers do not have, so libc gained Bionic's
+`memset_explicit()` and gnulib uses it on every host; (2) ICU's configure aborted on
+`size of wchar_t is 0` and a wrong "bigendian": the upstream `-lm` selected the sysroot's
+`libm.dylib` and every run probe died in dyld, the same failure Linux had, so
+`tools/crt-cc`/`crt-c++` now drop `-lm`/`-ldl` from non-shared links on macOS too;
+(3) the configure probe also found `tzname` in libSystem and ICU used it, but CRT declared
+none of Bionic's `tzname[]`/`daylight`/`timezone` (and `localtime()` is UTC), so libc now
+defines them as UTC; (4) ICU's own build runs the data tools it just built against
+`libicuuc.dylib`, whose `@rpath/libc.dylib` only resolves with a sysroot rpath (and `make`/`sh`
+strip `DYLD_LIBRARY_PATH` under SIP), so the recipe sets
+`CRT_CXX_RUNTIME_LINKAGE=shared` on macOS. The ICU tests also need `-std=c++17` on macOS
+(Apple clang defaults to an older C++ dialect) and the host's `.dylib` names.
+
 ## icu
 
 - Version: `78.3`
@@ -133,8 +148,8 @@ gnulib's wrapper headers can interpose them.
   C++, `build.sysroot_stage: 02-cxx`)
 - Dependencies: `make`
 - Status:
-  - Linux: `shared-pass`
-  - macOS, Windows: not attempted
+  - Linux, macOS: `shared-pass`
+  - Windows: not attempted
 - Automated recipe tests:
   - `unicode-static`
   - `unicode-shared`

@@ -362,6 +362,44 @@ the DFG, FTL and WebAssembly tiers (compiled in, disabled at run time; 1D), the 
 concurrent compiler threads, aarch64, and the Windows and macOS replays. Default thread stack stays
 1 MiB; the baseline JIT needed no more.
 
+**macOS/arm64 replay (2026-10-04): the CRT-level and port steps are done; JavaScriptCore itself is
+blocked on a platform decision.** Run on this host from the in-tree `05-ui` SDK (rebuilt first, so it
+carries the 1A-1C libc changes) and the CRT-built ICU.
+
+- *Done and green.* In-tree `ctest` 166/166 (the camera-authorization test is the expected skip), tooling
+  102/102. The `gperf` and `icu` recipes build and pass their own tests on macOS (`gperf_run_test: ok`;
+  ICU static and shared `icu_unicode_test: ok icu=78.3`). Found and fixed on the way (details in
+  `docs/porting_status.md`): `memset_explicit()` (Bionic API 34) added to libc, because gnulib otherwise took
+  Apple's `memset_s` from the host libSystem; `tzname`/`daylight`/`timezone` (UTC) added; `crt-cc`/`crt-c++`
+  drop upstream's `-lm`/`-ldl` from non-shared macOS links (ICU's `wchar_t` and endianness probes died in dyld);
+  the ICU recipe links its build tools with the shared runtime on macOS; and a macOS-only `-Werror` break in
+  `bionic_surface_test.c` (a variable used only in the Linux block).
+- *`jit_memory_test` is red-by-design on Apple Silicon and is now an honest partial.* RW to RX to RW works.
+  A mapping or `mprotect` that is writable and executable at once is refused unless the memory was `mmap`'d with
+  `MAP_JIT` and is toggled per thread with `pthread_jit_write_protect_np`; this libc has neither: Darwin's
+  `MAP_JIT` (0x800) collides with the Bionic `MAP_DENYWRITE` bit that `mmap()` strips, so the flag cannot even
+  be passed. On macOS/arm64 the test therefore checks only RW to RX and prints that the RWX shapes need
+  `MAP_JIT`. That is a gap in what CRT provides, not a pass.
+- *Flaky fixture, fixed.* `crtmedia_http_lifecycle_test` failed deterministically from the eighth upload cycle
+  (`Could not connect to server`, `Failed sending data to the peer`): the upload receiver listened with a backlog
+  of 1 while handling connections one at a time, and the cancelled-upload loop connects faster than that. The
+  backlog is now 16; three identical green runs. It had passed on macOS 25.6 and the host is now macOS 27.0.1, so
+  the trigger may be the OS, but a backlog of 1 was the fragile part either way.
+- *Harness.* `tools/build_webkit_jsc.py` now accepts a macOS SDK: `ru_maxrss` is converted from bytes, the host-ABI
+  audit has a Mach-O twin (`otool -L`, only `@rpath` names that resolve inside the SDK/ICU/build tree, plus
+  `libSystem`), and the library name is looked up per host. It has not yet run past configure.
+- *Blocked: what WTF is built as on macOS.* The configure of the pinned tree through the CRT toolchain finds
+  `APPLE`, selects the Xcode SDK (`macosx27.0`), the *host* ICU (`libicucore.tbd`, ignoring `-DICU_ROOT`), and
+  WTF's Darwin sources, then stops at `Source/WTF/wtf/PlatformJSCOnly.cmake:80` because the Mach exception
+  `.defs` (MIG) are not in the release tarball. The Darwin paths (`<mach/...>`, CoreFoundation, libdispatch,
+  `mach_vm_remap`, Apple's thread suspension) are Apple SDK surface, and building against them would make
+  `libJavaScriptCore.dylib` run on libSystem, not on the CRT runtime, which is exactly what the Host ABI
+  firewall exists to reject. The alternative mirrors what the Windows curl port does (`-U_WIN32`): steer
+  WTF to its portable POSIX paths for a Bionic-shaped CRT (undefine `__APPLE__`, and make CMake not set
+  `APPLE`). That needs a decision, plus real work whichever way it goes: the JIT needs `MAP_JIT` and the arm64
+  write-protect toggle, the macOS signal backend still has the software mask and a stub `sigsuspend`, and WTF's
+  Linux code assumes `pthread_getattr_np`, procfs and `sched_getcpu`.
+
 ### 2. Linux WPE reference baseline
 
 Build upstream WPE unchanged and render local HTML with its own built-in

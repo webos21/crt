@@ -26,6 +26,32 @@ static int failures;
     }                                                                  \
   } while (0)
 
+static void test_time_zone_variables(void) {
+  time_t now = 1700000000;
+  struct tm local, utc;
+
+  tzset();
+  CHECK(tzname[0] != 0 && tzname[1] != 0 && strcmp(tzname[0], "UTC") == 0, "tzname describes UTC");
+  CHECK(daylight == 0 && timezone == 0, "daylight and timezone describe UTC");
+  CHECK(localtime_r(&now, &local) != 0 && gmtime_r(&now, &utc) != 0 && local.tm_hour == utc.tm_hour &&
+            local.tm_mday == utc.tm_mday,
+        "localtime is UTC, matching the variables");
+}
+
+static void test_memset_explicit(void) {
+  unsigned char buffer[32];
+  size_t i;
+  void* result;
+
+  memset(buffer, 0xAA, sizeof(buffer));
+  result = memset_explicit(buffer, 0x5C, sizeof(buffer));
+  CHECK(result == buffer, "memset_explicit returns its destination");
+  for (i = 0; i < sizeof(buffer); ++i) {
+    CHECK(buffer[i] == 0x5C, "memset_explicit fills every byte");
+  }
+  CHECK(memset_explicit(buffer, 0, 0) == buffer && buffer[0] == 0x5C, "memset_explicit with n == 0 changes nothing");
+}
+
 static void test_memmem(void) {
   const char haystack[] = "the quick brown fox jumps over the lazy dog";
   CHECK(memmem(haystack, sizeof(haystack) - 1, "fox", 3) == haystack + 16, "memmem finds a word");
@@ -131,6 +157,9 @@ static void test_main_thread_stack(void) {
   CHECK((char*)&local >= (char*)base && (char*)&local < (char*)base + size,
         "an automatic variable lies inside the reported stack");
 #endif
+  (void)local;
+  (void)base;
+  (void)size;
   pthread_attr_destroy(&attr);
 }
 
@@ -270,6 +299,8 @@ static void test_kill_initial_thread(void) {
 
 int main(void) {
   test_memmem();
+  test_memset_explicit();
+  test_time_zone_variables();
   test_usleep();
   test_mkostemp();
   test_progname();

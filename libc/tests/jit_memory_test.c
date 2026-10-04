@@ -107,6 +107,19 @@ int main(void) {
 #if defined(__x86_64__) || defined(__aarch64__)
   size_t page = (size_t)sysconf(_SC_PAGESIZE);
   test_rw_then_rx(page);
+#if defined(__APPLE__) && defined(__aarch64__)
+  /* Apple Silicon refuses a mapping or mprotect that is writable and executable at once unless
+   * it was mmap'd with MAP_JIT (and then toggled per thread with pthread_jit_write_protect_np).
+   * This libc does not provide MAP_JIT yet -- Darwin's value 0x800 collides with the Bionic
+   * MAP_DENYWRITE bit, which mmap() strips -- so the two WTF shapes that need it (one-call RWX
+   * and a committed RWX page) cannot run here. Web Tranche 1 macOS replay, docs/crtweb_acceptance.md. */
+  if (failures != 0) {
+    fprintf(stderr, "jit_memory_test: %d check(s) failed\n", failures);
+    return 1;
+  }
+  printf("jit_memory_test: ok (macOS/arm64: RW->RX only; RWX shapes need MAP_JIT, not provided yet)\n");
+  return 0;
+#endif
   test_rwx_in_one_call(page);
   test_reserve_then_commit(page);
   if (failures != 0) {

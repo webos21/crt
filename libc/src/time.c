@@ -729,6 +729,14 @@ unsigned int alarm(unsigned int seconds) {
   return 0;
 }
 
+/* Bionic's <time.h> declares tzname[], daylight and timezone. This libc has no time zone
+ * database: localtime() is UTC (see above), so they describe UTC and tzset() has nothing
+ * to refresh. Defined so that upstream configure probes (ICU's U_TZNAME) and the headers
+ * agree instead of a probe finding the host libSystem's own tzname. */
+char* tzname[2] = {(char*)"UTC", (char*)"UTC"};
+int daylight = 0;
+long timezone = 0;
+
 void tzset(void) {
 }
 

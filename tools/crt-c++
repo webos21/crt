@@ -216,7 +216,7 @@ while [ "$i" -lt "$original_argc" ]; do
       # finds glibc's /lib/.../libm.so linker script and fails ("invalid ELF
       # header"). Dropped only in that configuration; shared runtime linkage keeps
       # them (libm.so is wanted there, with the sysroot rpath).
-      if [ "$target_os" = linux ] && [ "${CRT_CXX_RUNTIME_LINKAGE:-static}" != shared ] &&
+      if { [ "$target_os" = linux ] || [ "$target_os" = macos ]; } && [ "${CRT_CXX_RUNTIME_LINKAGE:-static}" != shared ] &&
          [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
         keep_arg=0
       fi

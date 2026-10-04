@@ -86,6 +86,10 @@ size_t strftime_l(
     char* s, size_t max, const char* format, const struct tm* tm, locale_t locale);
 char* strptime(const char* buf, const char* format, struct tm* tm);
 void tzset(void);
+/* UTC only: this libc has no time zone database (localtime() == gmtime()). */
+extern char* tzname[2];
+extern int daylight;
+extern long timezone;
 
 #ifdef __cplusplus
 }

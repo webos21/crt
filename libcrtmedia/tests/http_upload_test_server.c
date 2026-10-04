@@ -187,7 +187,7 @@ static int upload_server_start(
   addr.sin_family = AF_INET;
   addr.sin_port = htons(0);
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)) != 0 || listen(listen_fd, 1) != 0) {
+  if (bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)) != 0 || listen(listen_fd, 16) != 0) {
     close(listen_fd);
     return -1;
   }

@@ -207,7 +207,12 @@ done
 # linker script and the program dies with "invalid ELF header" -- which turns every
 # configure run probe (ICU's `size of wchar_t`) into a false failure. Same reasoning
 # and same condition as tools/crt-c++'s `-lm|-ldl` case. Shared links keep them.
-if [ "$target_os" = linux ] && [ "$shared_mode" -eq 0 ] && [ "$compile_only" -eq 0 ]; then
+# macOS has the same failure with a different symptom: the extra `-lm` selects the
+# sysroot's libm.dylib (install name @rpath/libm.dylib) and the configure probe
+# aborts in dyld ("Library not loaded: @rpath/libm.dylib"), which made ICU's
+# `size of wchar_t` and endianness probes fail and its configure stop (Web Tranche
+# 1 macOS replay). libm is already named by the link below on both hosts.
+if { [ "$target_os" = linux ] || [ "$target_os" = macos ]; } && [ "$shared_mode" -eq 0 ] && [ "$compile_only" -eq 0 ]; then
   linux_exec_argc=$#
   linux_exec_i=0
   while [ "$linux_exec_i" -lt "$linux_exec_argc" ]; do

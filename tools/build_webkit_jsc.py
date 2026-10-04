@@ -261,7 +261,9 @@ def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str) -> di
 # child ever waited for, the build's compilers included).
 MEASURE = ("import resource, subprocess, sys;"
            "code = subprocess.run(sys.argv[1:]).returncode;"
-           "print('PEAK_RSS_KB=%d' % resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss);"
+           "peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss;"
+           # ru_maxrss is in bytes on macOS and in KiB on Linux.
+           "print('PEAK_RSS_KB=%d' % (peak // 1024 if sys.platform == 'darwin' else peak));"
            "sys.exit(code)")
 
 # The line JavaScriptCore prints for each function the Baseline JIT compiles when
@@ -346,12 +348,69 @@ def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict) -> dic
 KNOWN_HOST_LIBRARIES: dict[str, str] = {}
 
 
-def host_abi_audit(sdk: Path, deps: Path, build: Path, binaries, run_env: dict) -> dict:
+def jsc_library(build: Path, target_os: str) -> Path:
+    """The built JavaScriptCore shared library (its file name differs per host)."""
+    patterns = ("libJavaScriptCore*.dylib",) if target_os == "macos" else ("libJavaScriptCore.so.*", "libJavaScriptCore.so")
+    for pattern in patterns:
+        found = sorted(path for path in (build / "lib").glob(pattern) if not path.is_symlink())
+        if found:
+            return found[0]
+    raise SystemExit(f"libJavaScriptCore not found under {build / 'lib'}")
+
+
+# macOS: the only system library the CRT runtime itself loads. libc.dylib sits on top of
+# libSystem (the Mach kernel boundary), so a CRT process always has it; anything else under
+# /usr/lib or /System (frameworks, libc++, libobjc, ICU) is a host ABI leak.
+MACOS_ALLOWED_SYSTEM_LIBRARIES = {"/usr/lib/libSystem.B.dylib"}
+
+
+def host_abi_audit_macos(sdk: Path, deps: Path, build: Path, binaries) -> dict:
+    """Mach-O twin of the Linux audit, from `otool -L` on every binary and the libraries they
+    load: each dependency must be an @rpath/@loader_path name that resolves inside the CRT SDK,
+    the CRT-built ICU or this build tree, or libSystem."""
+    allowed = [sdk.resolve(), deps.resolve(), build.resolve()]
+    search = [build / "lib", deps / "lib", sdk / "lib"]
+    violations, inventory, pending, seen = [], {}, [Path(b) for b in binaries], set()
+    while pending:
+        binary = pending.pop()
+        if binary in seen:
+            continue
+        seen.add(binary)
+        completed = run(["otool", "-L", binary], capture=True, check=False)
+        libraries = []
+        for line in completed.stdout.splitlines()[1:]:
+            name = line.strip().split(" (")[0]
+            if not name:
+                continue
+            libraries.append(Path(name).name)
+            if name in MACOS_ALLOWED_SYSTEM_LIBRARIES:
+                continue
+            if name.startswith(("@rpath/", "@loader_path/", "@executable_path/")):
+                leaf = Path(name).name
+                resolved = next((directory / leaf for directory in search if (directory / leaf).exists()), None)
+                if resolved is None:
+                    violations.append(f"{binary.name}: {name} not found in the CRT SDK, ICU or build tree")
+                else:
+                    pending.append(resolved.resolve())
+                continue
+            path = Path(name).resolve()
+            if any(path.is_relative_to(prefix) for prefix in allowed):
+                pending.append(path)
+                continue
+            violations.append(f"{binary.name}: {name} is a host library")
+        inventory[binary.name] = sorted(set(libraries))
+    return {"ok": not violations, "violations": violations, "known_host_libraries": {},
+            "libraries": inventory}
+
+
+def host_abi_audit(sdk: Path, deps: Path, build: Path, binaries, run_env: dict, target_os: str = "linux") -> dict:
     """The Host ABI firewall for the JavaScriptCore bring-up (Linux): every shared object the
     binaries load must come from the CRT SDK, the CRT-built ICU or this build tree. A native
     libc, a host ICU, libstdc++ or any other host library would mean the result is a native
     JavaScriptCore port that merely ran, not one running on the CRT runtime. The dynamic
     loader itself (the host's, by design until CRT owns one) and the vDSO are allowed."""
+    if target_os == "macos":
+        return host_abi_audit_macos(sdk, deps, build, binaries)
     allowed = [sdk.resolve(), deps.resolve(), build.resolve()]
     violations, known, inventory = [], {}, {}
     for binary in binaries:
@@ -429,9 +488,9 @@ def main() -> int:
     build = work / f"build-{mode}"
 
     target_os, arch = sdk_target(sdk)
-    if target_os != "linux":
-        raise SystemExit(f"JSC bring-up is verified on Linux only so far (SDK target is {target_os!r}); "
-                         "the Windows and macOS replays are separate Tranche 1 steps")
+    if target_os not in ("linux", "macos"):
+        raise SystemExit(f"JSC bring-up is verified on Linux and macOS only so far (SDK target is "
+                         f"{target_os!r}); the Windows replay is a separate Tranche 1 step")
     if not (sdk / "include" / "c++" / "v1").is_dir():
         raise SystemExit(f"{sdk} has no libc++ headers: use a 02-cxx or later SDK")
     needed = deps / "include" / "unicode" / "utypes.h"
@@ -460,7 +519,7 @@ def main() -> int:
         with phases.measure("host ABI audit"):
             audit = host_abi_audit(
                 sdk, deps, build,
-                [build / "bin" / "jsc", build / "lib" / "libJavaScriptCore.so.1", *programs.values()], run_env)
+                [build / "bin" / "jsc", jsc_library(build, target_os), *programs.values()], run_env, target_os)
             print(json.dumps(audit, indent=2))
             results["host_abi"] = {"ok": audit["ok"], **audit}
         (work / f"acceptance-{mode}.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
