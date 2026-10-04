@@ -137,7 +137,8 @@ none of Bionic's `tzname[]`/`daylight`/`timezone` (and `localtime()` is UTC), so
 defines them as UTC; (4) ICU's own build runs the data tools it just built against
 `libicuuc.dylib`, whose `@rpath/libc.dylib` only resolves with a sysroot rpath (and `make`/`sh`
 strip `DYLD_LIBRARY_PATH` under SIP), so the recipe sets
-`CRT_CXX_RUNTIME_LINKAGE=shared` on macOS. The ICU tests also need `-std=c++17` on macOS
+`CRT_CXX_RUNTIME_LINKAGE=shared` on macOS and `--enable-rpath` (absolute install names; ICU's default records
+bare names such as `libicudata.78.dylib` that only resolve through `DYLD_LIBRARY_PATH`). The ICU tests also need `-std=c++17` on macOS
 (Apple clang defaults to an older C++ dialect) and the host's `.dylib` names.
 
 ## icu

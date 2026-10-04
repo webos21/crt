@@ -10,15 +10,16 @@ substantive update.
 
 ## 2026-10-04
 
-- **Web Tranche 1A-1C replayed on macOS/arm64: CRT and ports done, JavaScriptCore blocked on a platform decision.**
-  Fixed on the way: `memset_explicit()` added to libc (gnulib took Apple's `memset_s`), UTC `tzname`/`daylight`/
-  `timezone`, `-lm`/`-ldl` dropped from non-shared macOS links in `crt-cc`/`crt-c++` (ICU's configure probes died in
-  dyld), the ICU recipe's macOS shared-runtime tools plus `-std=c++17`/dylib test names, a macOS-only `-Werror` in
-  `bionic_surface_test.c`, and the upload test receiver's backlog of 1 (lifecycle test failed from the eighth
-  cycle). gperf and ICU now pass their recipe tests on macOS; ctest 166/166, tooling 102/102. `jit_memory_test` can only
-  check RW to RX on Apple Silicon (no `MAP_JIT` in this libc). The harness now handles a macOS SDK but configure picks
-  the Xcode SDK, host ICU and WTF's Darwin sources; how WTF should be built on macOS is the open decision
-  (`docs/crtweb_acceptance.md`).
+- **Web Tranche 1A/1B replayed on macOS/arm64: the JavaScriptCore interpreter runs on the CRT runtime.**
+  Decision (A): WebKit sees macOS as a Linux-shaped POSIX platform (`libcrtweb/cmake/crt_webkit_platform.cmake`,
+  `-U__APPLE__ -D__linux__=1`, explicit CRT compilers) with one hash-checked carried patch (`WTF::RawHex`,
+  `libcrtweb/patches/manifest.json`). `jsc_acceptance.js` (8 groups, 69 MB peak) and 150 context cycles on 0/1/4/8
+  threads pass and the new Mach-O host-ABI audit is clean. It found and led to: libc++.dylib linking the host
+  libc++abi, ICU's bare install names, `gettid()`/`syscall(SYS_gettid)` on macOS, initial-thread stack bounds,
+  a real `getrusage()` (it was a stub on every host), `memset_explicit()`, UTC `tzname`/`timezone`, `-lm`/`-ldl`
+  handling in the wrappers, ELF-only option filtering, and fixes to two flaky tests. `jit_memory_test` can only
+  check RW to RX on Apple Silicon (no `MAP_JIT`). The Baseline JIT (1C) needs a Mach-O assembler-flavor patch, W^X
+  through `OS_THREAD_SELF_RESTRICT` and a real macOS signal backend (`docs/crtweb_acceptance.md`).
 
 - **Web Tranche 1C closed on Linux/x86_64: the JavaScriptCore Baseline JIT runs on CRT, and the work
   found five more signal/thread defects.** The pre-JIT gate (harness `--mode`, the CRT

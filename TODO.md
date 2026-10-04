@@ -82,13 +82,12 @@ then macOS/arm64.
   * [ ] **1D and hardening.** DFG/FTL/WebAssembly tiers (compiled in, disabled at run time) with
     concurrent compiler threads and the thread-stack question; W^X policy (upstream default does not
     exercise it); the sampling profiler.
-  * [ ] **Replays.** macOS/arm64 (2026-10-04): ICU/gperf ports and CRT fixes done, JSC blocked on how WTF is built
-    on macOS (Apple SDK paths versus CRT's Bionic surface) plus `MAP_JIT`; see `docs/crtweb_acceptance.md`.
-    Windows/x64 and macOS/arm64: the ICU/gperf ports, the harness, the
-    clocks/`sched_*`/signal code (macOS and Windows still have the software signal mask and a stub
-    `sigsuspend`) compile-checked there but never run, `jit_memory_test` and the executable-memory
-    shapes (`MAP_JIT` on macOS, `VirtualAlloc` on Windows); aarch64 Linux
-    needs native thread TLS (variant I) first.
+  * [ ] **Replays.** macOS/arm64: 1A/1B done 2026-10-04 (interpreter acceptance, thread cycles and the
+    Mach-O host-ABI audit pass; WebKit is presented as a Linux-shaped platform with one carried patch, see
+    `docs/crtweb_acceptance.md`); 1C needs a Mach-O assembler-flavor patch, `MAP_JIT`/W^X through
+    `OS_THREAD_SELF_RESTRICT`, and a real macOS signal backend. Windows/x64: the ICU/gperf ports, the
+    harness, the clocks/`sched_*`/signal code (software signal mask and a stub `sigsuspend`),
+    `jit_memory_test` and `VirtualAlloc` shapes; aarch64 Linux needs native thread TLS (variant I) first.
   * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided
     `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed
     `05-ui` SDK and from the isolated stage chain (Tranche 10); the Windows/macOS replays must
