@@ -8,7 +8,9 @@ are in [`../libcrtweb/third_party/webkit/README.md`](../libcrtweb/third_party/we
 
 The reference is **WPE WebKit 2.54.0**. What is below comes from its release
 notes and announcement plus an inventory of the verified archive (file names and
-license files; the source was not built or read in depth yet). A row marked
+license files) and, since Tranche 1, from building JavaScriptCore (JSCOnly) and reading the
+CMake and WTF/JSC sources it touches; WebCore, WebKit and the platform layers are not read in depth
+yet. A row marked
 *verify* is a hypothesis to confirm against the extracted source in the tranche
 named, not a commitment.
 
@@ -25,7 +27,7 @@ named, not a commitment.
 | Network | libsoup | CRT networking | Keep upstream first; substitute in Tranche 8 |
 | Media | GStreamer | `crtmedia` | Keep upstream first; substitute in Tranche 8 |
 | Fonts / text | fontconfig / FreeType | CRT-controlled FreeType/font layer | *Verify* dependency set at extraction |
-| JavaScriptCore | JSCOnly / WPE build (`Source/cmake/OptionsJSCOnly.cmake`: needs Threads and **ICU >= 70.1** `data i18n uc`; default `EVENT_LOOP_TYPE=Generic`, so no GLib; Ruby, Perl, Python and gperf at build time) | CRT libc/libc++ build against the installed SDK, interpreter first (JIT off), then JIT | Tranche 1. ICU and gperf are CRT ports (`porting/recipes/icu.json`, `gperf.json`), not host libraries, so the `06-web` SDK stays self-contained; Ruby is a host build tool the maintainer installs. Surfaces threads, TLS, executable memory and signal gaps in the lower runtime |
+| JavaScriptCore | JSCOnly / WPE build (`Source/cmake/OptionsJSCOnly.cmake`: needs Threads and **ICU >= 70.1** `data i18n uc`; default `EVENT_LOOP_TYPE=Generic`, so no GLib; Ruby, Perl and Python as build-host tools; gperf only once WebCore is enabled) | CRT libc/libc++ build against the installed SDK, interpreter first (JIT off), then JIT | Tranche 1. ICU and gperf are CRT ports (`porting/recipes/icu.json`, `gperf.json`), not host libraries, so the `06-web` SDK stays self-contained; Ruby, Perl and Python are build-host tools. Surfaces threads, TLS, executable memory and signal gaps in the lower runtime |
 | Event loop | GLib main loop (WPE); `Generic` for JSCOnly | not decided for the full port; `Generic` for JSC | JSC needs no GLib. For WebCore/WebKit the question stays open and depends on how deeply GLib stays in the port |
 
 ## CRT port files (to be filled as the source is read)
@@ -46,7 +48,17 @@ the tranche that touches it reads the source. Not yet decided means blank.
 | `GPUProcess` (ON by default for WPE) | `PlatformCRT` path | replace |
 | Skia compositor (`Shared/skia`, m154) | kept as WebKit's private copy | reuse |
 
+## Source layers
+
+| Source | Role |
+| --- | --- |
+| WPE WebKit 2.54.0 release tarball (`recipe.json`) | *Reference*: the WPE baseline, JSCOnly bring-up, the Linux 3A prototype. Has no Windows port |
+| Full WebKit commit `73f39d84...` (the signed tag's target; to be pinned as its own source before Tranche 3B) | *PlatformCRT product source*: the Mac and Win ports as references, and the tree `PlatformCRT` lives in |
+
 ## Rules
+
+- Before the first carried WebKit patch: a per-file license/provenance scan and a patch
+  manifest that separates new CRT-owned platform files from modified upstream files.
 
 - Upstream source is not patched to hide a CRT/PAL deficiency; a missing
   Bionic-compatible surface is fixed in CRT (`../AGENTS.md`).

@@ -5,9 +5,13 @@ acceptance (Web Tranche 1, docs/crtweb_acceptance.md).
 The build is driven the way an external consumer would drive it: the pinned WPE WebKit
 tarball (libcrtweb/third_party/webkit/recipe.json, verified by tools/fetch_webkit.py) is
 configured with an installed SDK's crt-toolchain.cmake -- the CRT compiler wrappers and
-sysroot -- never with host clang and host headers. ICU and gperf come from CRT port
-recipes (porting/recipes/icu.json, gperf.json) installed under --deps-prefix; Ruby is the
-one host build tool, because JavaScriptCore generates its interpreter with Ruby scripts.
+sysroot -- never with host clang and host headers. The target-side
+dependency, ICU, comes from a CRT port recipe (porting/recipes/icu.json) installed under
+--deps-prefix. The BUILD-host tools -- CMake, Ninja, Perl (with English, FindBin, JSON::PP),
+Python and Ruby >= 2.5 -- run on the build machine and are not CRT artifacts: JavaScriptCore
+generates its interpreter with Ruby and Perl scripts. gperf is not needed here: upstream asks
+for it only when WebCore is enabled (Source/cmake/WebKitCommon.cmake), so it is a later
+prerequisite, not a JSCOnly one.
 
 Steps: check host tools -> fetch and verify -> extract -> configure -> build `jsc` -> build
 the lifecycle test program -> run the acceptance (a JavaScript script through the `jsc`
@@ -79,18 +83,34 @@ def sdk_target(sdk: Path) -> tuple[str, str]:
     return target.get("os", ""), target.get("arch", "")
 
 
-def require_host_tools() -> str:
+def tool_version(command) -> str:
+    completed = run(command, capture=True, check=False)
+    return (completed.stdout or completed.stderr).strip().splitlines()[0] if (completed.stdout or completed.stderr) else "?"
+
+
+def require_host_tools() -> dict:
+    """The build-host tools (they run on the build machine, whatever the target) and
+    their versions, which also go into the configure fingerprint."""
     missing = [tool for tool in ("cmake", "ninja", "perl", "python3") if shutil.which(tool) is None]
     ruby = shutil.which("ruby")
     if ruby is None:
         missing.append("ruby (>= 2.5: JavaScriptCore generates its interpreter with Ruby scripts)")
     if missing:
         raise SystemExit("missing host build tools: " + ", ".join(missing))
-    version = run([ruby, "-e", "print RUBY_VERSION"], capture=True).stdout.strip()
-    major, minor = (int(part) for part in version.split(".")[:2])
+    ruby_version = run([ruby, "-e", "print RUBY_VERSION"], capture=True).stdout.strip()
+    major, minor = (int(part) for part in ruby_version.split(".")[:2])
     if (major, minor) < (2, 5):
-        raise SystemExit(f"ruby {version} found, 2.5 or newer is required")
-    return version
+        raise SystemExit(f"ruby {ruby_version} found, 2.5 or newer is required")
+    modules = run(["perl", "-MEnglish", "-MFindBin", "-MJSON::PP", "-e", "print 1"], capture=True, check=False)
+    if modules.stdout.strip() != "1":
+        raise SystemExit("perl needs the English, FindBin and JSON::PP modules (WebKitCommon.cmake requires them)")
+    return {
+        "cmake": tool_version(["cmake", "--version"]),
+        "ninja": tool_version(["ninja", "--version"]),
+        "perl": tool_version(["perl", "-e", "print $^V"]),
+        "python": tool_version([sys.executable, "--version"]),
+        "ruby": ruby_version,
+    }
 
 
 def fetch_and_extract(recipe: Path, cache: Path, work: Path) -> Path:
@@ -122,7 +142,6 @@ def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
     env["CRT_CXX_RUNTIME_LINKAGE"] = "shared"
     # WebKit's `jsc` and its tools define a plain `int main`; see tools/crt-c++.
     env["CRT_CXX_HOSTED"] = "1"
-    env["PATH"] = f"{deps / 'bin'}{os.pathsep}{env['PATH']}"
     return env
 
 
@@ -227,13 +246,74 @@ def run_acceptance(build: Path, run_env: dict, cycle_program: Path) -> dict:
     return results
 
 
+# A shared library the process may load that is NOT a CRT artifact. Each entry is a known gap,
+# listed so the audit stays honest instead of being loosened (see docs/crtweb_acceptance.md).
+KNOWN_HOST_LIBRARIES: dict[str, str] = {}
+
+
+def host_abi_audit(sdk: Path, deps: Path, build: Path, binaries, run_env: dict) -> dict:
+    """The Host ABI firewall for the JavaScriptCore bring-up (Linux): every shared object the
+    binaries load must come from the CRT SDK, the CRT-built ICU or this build tree. A native
+    libc, a host ICU, libstdc++ or any other host library would mean the result is a native
+    JavaScriptCore port that merely ran, not one running on the CRT runtime. The dynamic
+    loader itself (the host's, by design until CRT owns one) and the vDSO are allowed."""
+    allowed = [sdk.resolve(), deps.resolve(), build.resolve()]
+    violations, known, inventory = [], {}, {}
+    for binary in binaries:
+        completed = run(["ldd", binary], env=run_env, capture=True, check=False)
+        libraries = []
+        for line in completed.stdout.splitlines():
+            line = line.strip()
+            if not line or line.startswith("linux-vdso"):
+                continue
+            name, _, rest = line.partition(" => ")
+            resolved = rest.split(" (")[0].strip() if rest else name.split(" (")[0].strip()
+            if resolved == "not found":
+                violations.append(f"{Path(binary).name}: {name} not found")
+                continue
+            libraries.append(Path(resolved).name)
+            path = Path(resolved).resolve()
+            if "ld-linux" in path.name or path.name.startswith("ld-"):
+                continue
+            if any(path.is_relative_to(prefix) for prefix in allowed):
+                continue
+            if path.name in KNOWN_HOST_LIBRARIES:
+                known[path.name] = KNOWN_HOST_LIBRARIES[path.name]
+                continue
+            violations.append(f"{Path(binary).name}: {name} resolves to {path}")
+        inventory[Path(binary).name] = sorted(set(libraries))
+    return {"ok": not violations, "violations": violations, "known_host_libraries": known,
+            "libraries": inventory}
+
+
+def write_fingerprint(work: Path, recipe: Path, sdk: Path, deps: Path, tools: dict, arch: str):
+    """What this configuration was built from, so a later success or failure can be tied to
+    exactly these inputs."""
+    import hashlib
+    recipe_data = json.loads(recipe.read_text(encoding="utf-8"))
+    manifest = sdk / "manifest.json"
+    fingerprint = {
+        "webkit": {"version": recipe_data["version"],
+                   "archive_sha256": recipe_data["source"]["archive_sha256"],
+                   "expected_commit": recipe_data["source"]["expected_commit"]},
+        "sdk": {"root": str(sdk), "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                "arch": arch},
+        "icu_prefix": str(deps),
+        "icu_recipe_sha256": hashlib.sha256((ROOT / "porting/recipes/icu.json").read_bytes()).hexdigest(),
+        "host_tools": tools,
+        "configuration": {"port": "JSCOnly", "jit": False, "c_loop": True, "event_loop": "Generic",
+                          "options": [option for option, _ in CONFIGURE_OPTIONS]},
+    }
+    (work / "webkit-jsc-config.json").write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--recipe", type=Path, default=ROOT / "libcrtweb/third_party/webkit/recipe.json")
     parser.add_argument("--sdk-root", type=Path, required=True,
                         help="installed CRT SDK (02-cxx or later: libc++ is required)")
     parser.add_argument("--deps-prefix", type=Path, required=True,
-                        help="install prefix holding the CRT ICU and gperf ports")
+                        help="install prefix holding the CRT ICU port")
     parser.add_argument("--work-root", type=Path, required=True)
     parser.add_argument("--cache", type=Path, help="download cache (default: <work-root>/cache)")
     parser.add_argument("--skip-build", action="store_true",
@@ -254,14 +334,16 @@ def main() -> int:
                          "the Windows and macOS replays are separate Tranche 1 steps")
     if not (sdk / "include" / "c++" / "v1").is_dir():
         raise SystemExit(f"{sdk} has no libc++ headers: use a 02-cxx or later SDK")
-    for needed in (deps / "include" / "unicode" / "utypes.h", deps / "bin" / "gperf"):
-        if not needed.is_file():
-            raise SystemExit(f"{needed} not found: build the icu and gperf port recipes into --deps-prefix")
+    needed = deps / "include" / "unicode" / "utypes.h"
+    if not needed.is_file():
+        raise SystemExit(f"{needed} not found: build the icu port recipe into --deps-prefix")
 
     phases = Phases()
     try:
         with phases.measure("check host build tools"):
-            print("ruby", require_host_tools())
+            host_tools = require_host_tools()
+            print(json.dumps(host_tools))
+            write_fingerprint(work, args.recipe, sdk, deps, host_tools, arch)
         env = build_environment(sdk, deps, target_os)
         if not args.skip_build:
             with phases.measure("fetch, verify and extract WebKit"):
@@ -275,7 +357,14 @@ def main() -> int:
             cycle_program = build_cycle_program(sdk, build, env, target_os)
         with phases.measure("run the acceptance"):
             results = run_acceptance(build, run_env, cycle_program)
+        with phases.measure("host ABI audit"):
+            audit = host_abi_audit(
+                sdk, deps, build,
+                [build / "bin" / "jsc", build / "lib" / "libJavaScriptCore.so.1", cycle_program], run_env)
+            print(json.dumps(audit, indent=2))
+            results["host_abi"] = {"ok": audit["ok"], **audit}
         (work / "acceptance.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+        results["passed"] = results["passed"] and results["host_abi"]["ok"]
         if not results["passed"]:
             raise SystemExit("JSC acceptance FAILED: " + json.dumps(results))
     finally:

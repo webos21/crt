@@ -28,12 +28,12 @@
       "-DLIBCXX_HAS_PTHREAD_API=ON",
       "-DLIBCXX_USE_COMPILER_RT=ON",
       "-DLIBCXX_HAS_RT_LIB=OFF",
+      "-DLIBCXX_HAS_ATOMIC_LIB=OFF",
       "-DLIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF"
     ],
     "target_overrides": {
       "windows": {
         "options": [
-          "-DLIBCXX_HAS_ATOMIC_LIB=OFF",
           "-DCMAKE_SHARED_LINKER_FLAGS=-L@INSTALL_PREFIX@/lib @INSTALL_PREFIX@/lib/libunwind.dll.a"
         ]
       }

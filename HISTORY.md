@@ -10,6 +10,34 @@ substantive update.
 
 ## 2026-10-04
 
+- **Web Tranche 1C plan refined (documentation).** Checked against the pinned WebKit: the JIT conflicts
+  with `C_LOOP`, DFG defaults on with the JIT and FTL depends on DFG, `ENABLE_MPROTECT_RX_TO_RWX` is 0
+  and Linux executable memory is created RWX at once without `MAP_JIT`, and the JIT enables
+  signal-based VM traps. 1C is now the Baseline JIT only (DFG/FTL/WebAssembly/profiler are 1D and
+  later), W^X is a hardening follow-up rather than part of first green, proof of compiled code is
+  required, and a pre-JIT gate (harness build modes, a CRT `jit_memory_test`, rerunning 1B from the
+  installed `05-ui` SDK) precedes it. Two review items were already done (gperf dropped from the JSCOnly
+  checks; the host `libatomic` dependency removed at its root in the libc++ build).
+
+- **Second review of the `06-web` plan folded in, and its host-ABI firewall found a real
+  leak.** Checked against the pinned `WebKitCommon.cmake`: gperf is required only when WebCore
+  is enabled (so a WebCore prerequisite, not a JSCOnly one), while Perl (with `English`,
+  `FindBin`, `JSON::PP`), Python and Ruby are required for every port. `docs/crtweb_acceptance.md`
+  now separates build-host tools from target dependencies (and notes that a cross build will
+  need that split for gperf/ICU's generators), adds the configure fingerprint
+  (`webkit-jsc-config.json`), the Host ABI firewall for every JSC acceptance, a mandatory gate
+  before Tranche 3B (pin the full WebKit commit behind the signed tag as the `PlatformCRT`
+  product source; the WPE tarball stays the reference, and lacks the Windows port), and a
+  per-file license scan plus patch manifest before the first carried WebKit patch. The harness
+  gained the fingerprint, the host-tool/Perl-module check, and `host_abi_audit()`; it no longer
+  demands gperf. `libcrtweb/README.md` and several stale README lines (`06-web` "no
+  implementation", "Tranche 1 next") were brought up to date.
+
+  The new audit failed at once: the SDK's `libc++.so.1` recorded `NEEDED libatomic.so.1` (the
+  libc++ build linked the host libatomic), which pulled glibc's `libc.so.6` into every
+  JavaScriptCore process beside CRT's `libc.so`. `LIBCXX_HAS_ATOMIC_LIB=OFF` is now set on every
+  target (it was Windows-only); `libc++.so.1` no longer needs libatomic and the audit passes
+  with no exceptions. The harness result (script, VM cycles on 1/4/8 threads) is unchanged.
 - **Web Tranche 1 on Linux/x86_64: JavaScriptCore (JSCOnly) builds with the CRT toolchain
   and passes the interpreter acceptance (1A and 1B); the exercise found and fixed several
   fundamental CRT/PAL defects.** `tools/build_webkit_jsc.py` builds the pinned WPE WebKit
@@ -50,7 +78,7 @@ substantive update.
   Linux -- the first C++ ports -- and the review of the `06-web` plan folded into
   the docs.** JSCOnly needs ICU >= 70.1 (`data`, `uc`, `i18n`; verified in
   `OptionsJSCOnly.cmake`, default `Generic` event loop so no GLib) and WebKit's
-  CMake needs gperf and Ruby; gperf 3.3 (GPG-verified) and ICU 78.3 (SHA-256 and
+  CMake needs Ruby, Perl and Python as host tools, and gperf once WebCore is on; gperf 3.3 (GPG-verified) and ICU 78.3 (SHA-256 and
   SHA-512 checked against the release) are CRT ports, Ruby is a host tool the
   maintainer installs. Both pass recipe tests (`gperf` runs and emits a hash;
   `icu` static and shared exercise case mapping, NFD and Swedish collation).

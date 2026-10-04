@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: its ports (gperf, ICU) come first. No WebKit code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A and 1B are green on Linux/x86_64, the JIT (1C) and the Windows/macOS replays remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -118,30 +118,142 @@ the CRT compiler wrappers and the installed `05-ui` sysroot, build `jsc`, run th
 CRT acceptance). Tranche 10 grows it into `tools/build_stage_06_web.py` (full
 WebKit, `libcrtweb`, packaging, `verify_dist.py`).
 
-**1A -- dependency inventory and ports.** Threads -> CRT pthread. ICU (`data`,
-`uc`, `i18n`) and gperf are pinned and built as CRT port recipes
-(`porting/recipes/icu.json`, `gperf.json`), not taken from the host: the host-ICU
-shortcut would be fast on Linux and wrong on Windows/macOS. Ruby (>= 2.5) is a
-build-host tool that the maintainer installs. Each port passes its own recipe
-test before JSC is attempted.
+**Build-host tools versus target dependencies.** The two are different things and are
+kept apart from the start.
+
+- *Build-host tools* run on the build machine, whatever the target, and are not CRT
+  artifacts: CMake, Ninja, Perl >= 5.10 with the `English`, `FindBin` and `JSON::PP`
+  modules, Python, and Ruby >= 2.5 (all required by the pinned
+  `Source/cmake/WebKitCommon.cmake` for every port; JavaScriptCore generates its
+  interpreter with Ruby and Perl scripts). `gperf` joins them only when WebCore is
+  enabled (`if (ENABLE_WEBCORE) find_package(Gperf ...)`), so it is a WebCore
+  prerequisite, not a JSCOnly one: its Linux port is done and kept, and its
+  Windows/macOS replay does not block 1B.
+- *Target dependencies* are built against the CRT target sysroot and shipped: CRT
+  pthread/libc/libc++, and ICU (`data`, `uc`, `i18n`, >= 70.1) from the CRT port
+  `porting/recipes/icu.json`, never the host ICU (fast on Linux, wrong on
+  Windows/macOS).
+
+Today host and target are the same machine and architecture, so the ports are
+ordinary CRT executables that run during the build. That does not survive a cross
+build (an x86_64 build host producing a Linux/aarch64 SDK cannot run an aarch64
+`gperf` or ICU's data generators), so before `06-web` becomes the embedded product
+stage the build must separate the two: build tools built for, and run on, the build
+machine; target libraries built for the target. Not a blocker for the native
+three-host acceptance; recorded in `TODO.md`.
+
+**1A -- dependency inventory and ports.** The build-host tool inventory above
+(checked, with versions, by `tools/build_webkit_jsc.py`) and the ICU target port,
+which passes its own recipe test before JSC is attempted. The gperf port exists for
+WebCore.
+
+**Configure fingerprint.** Each harness run writes `webkit-jsc-config.json`: the
+WebKit version, archive hash and expected commit, the SDK manifest hash and
+architecture, the ICU prefix and recipe hash, the build-host tool versions, and the
+configuration (port, JIT, interpreter, event loop, every CMake option). A later
+success or failure can then be tied to exactly the inputs that produced it.
+
+**Host ABI firewall.** CRT's aim is that JavaScriptCore runs on the CRT runtime, not
+that a native JavaScriptCore links. Every 1B acceptance therefore audits what the
+binaries load: only CRT SDK libraries, the CRT-built ICU and the build tree are
+allowed, plus the loader itself. Rejected: a native libc/libstdc++, a host ICU, any
+undeclared host library, and (Windows/macOS) an undeclared Win32 or Cocoa dependency.
+Linux checks the resolved `ldd` set (`host_abi_audit()` in `tools/build_webkit_jsc.py`,
+no exceptions); the Windows replay uses `llvm-readobj`/`dumpbin` imports and the macOS
+replay `otool -L`.
 
 **1B -- interpreter first-green.** JSCOnly, `EVENT_LOOP_TYPE=Generic`, JIT off.
 Acceptance: arithmetic, objects/arrays, JSON, RegExp, Promise/microtasks,
 UTF-8/Unicode (ICU), exceptions, a GC stress run, and repeated runtime
 create/destroy with a leak check. Linux, then Windows and macOS.
 
-**1C -- JIT.** `ENABLE_JIT=ON`: executable memory and W^X transitions, GC plus
-JIT stress, exception/unwind, repeated execution. Kept separate so a failure is
-attributed to basic runtime/PAL behaviour (1B) or to executable memory (1C).
+**1C -- Baseline JIT (refined 2026-10-04).** One new runtime assumption at a time, so a
+failure can be attributed. 1C is the **Baseline JIT only**; DFG, FTL, concurrent compiler
+threads, WebAssembly and the sampling profiler are later steps (1D and after), and W^X
+policy is a hardening follow-up (below).
+
+*Why not just `ENABLE_JIT=ON`.* Checked against the pinned `Source/cmake/WebKitFeatures.cmake`:
+`ENABLE_JIT` conflicts with `ENABLE_C_LOOP`; with the JIT on, `ENABLE_DFG_JIT` defaults to
+ON (and `ENABLE_FTL_JIT` depends on DFG, WebAssembly's BBQ/OMG tiers on FTL); WebAssembly and
+the sampling profiler also conflict with `C_LOOP`. So the harness grows
+`--mode interpreter|baseline-jit` and the Baseline profile pins every one of them:
+
+| | 1B `interpreter` | 1C `baseline-jit` |
+| --- | --- | --- |
+| `ENABLE_JIT` | OFF | ON |
+| `ENABLE_C_LOOP` | ON | OFF (the offlineasm assembly LLInt) |
+| `ENABLE_DFG_JIT` / `ENABLE_FTL_JIT` | OFF | OFF |
+| `ENABLE_WEBASSEMBLY` / `ENABLE_SAMPLING_PROFILER` | OFF | OFF |
+
+Turning `C_LOOP` off also switches to the assembly interpreter, a second new assumption,
+so 1C runs in two steps over **the same binary**, chosen at run time with JSC options:
+(1) `JSC_useJIT=false` -- the assembly LLInt with no generated code, rerunning the whole 1B
+acceptance; (2) `JSC_useJIT=true JSC_useBaselineJIT=true JSC_useDFGJIT=false
+JSC_useFTLJIT=false`.
+
+*Proof that machine code ran.* Passing the interpreter script on a JIT build proves
+nothing. Step (2) runs `jsc_jit_acceptance.js` with `JSC_jitPolicyScale=0.01` (compile
+almost at once), `JSC_crashIfCantAllocateJITMemory=true`, `JSC_validateOptions=true` and
+`JSC_reportBaselineCompileTimes=true`, and the harness requires at least one Baseline
+compile in that output and none in the step (1) run. The script covers a hot arithmetic
+loop, hot calls, array and property access, an exception thrown through a compiled
+frame, a full GC while compiled code is live, repeated compile and execute, and the
+multi-thread VM cycle with the same options.
+
+*New risk: signal-based VM traps.* With the JIT on, `ENABLE_SIGNAL_BASED_VM_TRAPS` is 1: the
+watchdog and termination interrupt compiled code from another thread with a signal whose
+handler edits the interrupted `ucontext_t`. CRT now forwards the kernel's real context and has
+`pthread_kill`, so it can work; it is unproven until a compiled infinite loop is terminated
+by `JSContextGroupSetExecutionTimeLimit` (exported by the library and declared in the source tree's `API/JSContextRefPrivate.h`, which the build's header set does not install, so the test declares it itself; a 1C acceptance item).
+
+*CRT's own executable-memory contract first.* `libc/tests/mman_test.c` exercises RW to R to RW
+only and never `PROT_EXEC`. A `jit_memory_test` (x86_64: `mov eax, 42; ret`; aarch64 with the
+instruction-cache flush) maps RW, writes code, `mprotect` RX, calls it, flips to RW, patches,
+flips to RX and calls again, and also maps `PROT_READ|PROT_WRITE|PROT_EXEC` in one call and
+reserves `PROT_NONE`/`MAP_NORESERVE` address space that is then committed -- the shapes WTF
+uses. It runs before JSC, so an executable-memory defect in CRT is told apart from one in
+JSC's executable allocator. macOS needs `MAP_JIT` and the arm64 write-protect toggle, and
+Windows `VirtualAlloc`/`VirtualProtect`; each is its own host replay.
+
+*W^X is not part of the first green.* In the pinned tree `ENABLE_MPROTECT_RX_TO_RWX` defaults
+to 0 and the POSIX allocator creates Linux executable memory `PROT_READ|PROT_WRITE|PROT_EXEC`
+at once, with no `MAP_JIT` (that flag is Darwin's). A JIT-on build therefore does *not* test an
+RW to RX transition, and the earlier wording "W^X transitions" overstated 1C. 1C verifies the
+executable-memory lifecycle (allocate, generate, execute, free); a W^X policy -- whether CRT
+enables upstream's mprotect path on a given host, and verifies it -- is a separate hardening
+step after first green.
+
+*Pre-JIT gate (all before the first JIT run):* build mode and the Baseline profile in the
+harness; `jit_memory_test`; rerun 1B from the installed `05-ui` SDK (the stage contract's
+predecessor of `06-web`; 1B was run from `02-cxx`); gperf removed from the JSCOnly checks
+(done); the host `libatomic` dependency of `libc++.so` removed (done: the libc++ build now sets
+`LIBCXX_HAS_ATOMIC_LIB=OFF`, and neither `libc++.so` nor `libJavaScriptCore.so` has an undefined
+`__atomic_*` symbol); the stale `libcrtweb` and porting documents corrected (done).
+
+*1C is complete when:* the Baseline-JIT acceptance, the `JSC_useJIT=false` rerun of 1B and the
+watchdog test pass on Linux/x86_64; the compile proof is present; resident memory stays
+bounded; the host-ABI audit is clean; and the Windows and macOS replays are recorded as
+separate steps.
+
+*Deliberately unchanged.* The default thread stack stays 1 MiB (1B already showed correct
+stack-overflow detection and 1/4/8-thread VMs; JSC's own defaults are 5 MB per-thread usage,
+64 KB reserved zone, 128 KB soft zone); revisit it when concurrent DFG/FTL compiler threads
+arrive. `__tls_get_addr`: JSC itself avoids it with `-ftls-model=initial-exec`; ICU and
+`libc++abi` still reference it. On Linux the host's dynamic loader is CRT's loader today, so
+this is the *accepted current loader boundary*, and becomes a gap only when CRT owns a loader.
+
+**1D and after (not planned in detail):** DFG with concurrent compilation threads, FTL,
+WebAssembly, the sampling profiler, and the W^X hardening above.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the
 verified pin against an installed SDK (`02-cxx` here) and runs the acceptance; the
 whole run from an empty work root takes about six minutes (build 297 s) and passes.
 
-- *1A.* JSCOnly needs ICU >= 70.1 (`data`, `uc`, `i18n`), gperf and Ruby. ICU 78.3 and
-  gperf 3.3 are CRT ports (`porting/recipes/icu.json`, `gperf.json`, both passing their
-  recipe tests); Ruby is the one host build tool. The first-green configuration is the
+- *1A.* JSCOnly needs ICU >= 70.1 (`data`, `uc`, `i18n`) as a target dependency, and
+  CMake, Ninja, Perl (with modules), Python and Ruby as build-host tools. ICU 78.3 is a
+  CRT port (`porting/recipes/icu.json`); gperf 3.3 is ported too (`gperf.json`) but is a
+  WebCore prerequisite, not needed here; both pass their recipe tests. The first-green configuration is the
   C_LOOP interpreter (JIT, FTL, WebAssembly and the sampling profiler off) with the
   `Generic` event loop, no GLib; every deviation is a CMake option or compiler flag
   recorded in the harness with its reason (`USE_HEADER_MAPS=OFF` because the release
@@ -161,7 +273,7 @@ whole run from an empty work root takes about six minutes (build 297 s) and pass
   clean).
 - *Mutation.* Making `__crt_linux_thread_tls_size()` decline reverts threads to shared TLS
   and fails `pthread_native_tls_test` (and, before the fix, every JSC thread test); restored.
-- *Not covered.* The JIT (1C), any host but Linux/x86_64, aarch64 (native thread TLS is not
+- *Not covered.* The JIT (1C, planned above), any host but Linux/x86_64, aarch64 (native thread TLS is not
   implemented there, so threaded JSC would still misbehave), and the sampling profiler and
   WebAssembly (they need the JIT tiers and signal-based thread suspension).
 
@@ -188,10 +300,14 @@ whole run from an empty work root takes about six minutes (build 297 s) and pass
 6. *GNU ld.bfd links a PIE that has `PT_TLS` with a stray `.rela.plt` entry the loader
    rejects*: the Linux CTest executables now link with LLD, the project's primary linker.
 
-*Recorded, not fixed:* `libc++.so.1` records `NEEDED libatomic.so.1` (a host library); the
-ICU shared libraries and `libc++abi.so` use the global-dynamic TLS model and so reference
-the loader-provided `__tls_get_addr`, which is why the harness links with
-`--allow-shlib-undefined`; the default thread stack is 1 MiB (as in Bionic), far less than
+*Found by the host-ABI audit and fixed:* `libc++.so.1` recorded `NEEDED libatomic.so.1`
+(the libc++ build had linked the host libatomic), and that host library in turn pulled
+glibc's own `libc.so.6` into the process next to CRT's `libc.so`; the libc++ recipe now sets
+`LIBCXX_HAS_ATOMIC_LIB=OFF` on every target (it was Windows-only), and the audit is clean.
+
+*Recorded, not fixed:* the ICU shared libraries and `libc++abi.so` use the global-dynamic TLS model and so reference
+the loader-provided `__tls_get_addr` (the accepted Linux dynamic-loader boundary, a gap only once
+CRT owns a loader), which is why the harness links with `--allow-shlib-undefined`; the default thread stack is 1 MiB (as in Bionic), far less than
 JavaScriptCore wants, so an embedder must size the stacks of threads that run script.
 
 ### 2. Linux WPE reference baseline
@@ -209,6 +325,21 @@ the surface and input contracts below, not to be the cross-platform
 architecture. **3B+ -- the product:** `PlatformCRT` as a new WebKit port
 (`OptionsCRT.cmake`, `PlatformCRT.cmake`, `platform/crt`, `UIProcess/crt`, ...),
 then GPU-buffer output through the same external-surface contract.
+
+**Source gate before 3B.** The pinned WPE tarball is the *reference* source: the WPE
+baseline, the JSCOnly bring-up and the Linux 3A prototype. `PlatformCRT` is a new
+cross-platform port, and the tarball lacks the Windows port entirely (no
+`PlatformWin.cmake`, no Windows IPC backend). Before the first `PlatformCRT` file is
+written, the full WebKit commit that the signed tag points at (`73f39d84...`,
+already recorded in `recipe.json`) is pinned as a second source, role
+*PlatformCRT product source*, with its own fetch-and-verify path, so the Mac and Win
+ports can be read as references for process, IPC, font and input work instead of
+guessing. The WPE tarball pin stays as it is.
+
+**Licensing gate.** Per-file license headers are not scanned yet (Tranche 0 recorded
+that honestly). The rule from here: before the first carried WebKit patch, scan the
+files per file and keep a patch manifest that distinguishes a new CRT-owned platform
+file from a modified LGPL/BSD WebKit file; Tranche 10 then closes it for release.
 
 Two contracts are frozen before 3A starts, because `crtui` deliberately owns only
 scene metadata (bounds, clip, opacity, z-order, damage, hit-testing) and not the

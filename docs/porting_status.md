@@ -90,7 +90,7 @@ queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
 
 `gperf` and `icu` (both added 2026-10-03) are the first **C++** ports and exist for
 the Web Runtime (`06-web`): JavaScriptCore/WTF need ICU >= 70.1 (`data`, `uc`,
-`i18n`) and WebKit's build needs gperf. Linux only so far (`gperf`
+`i18n`) and WebCore's build needs gperf (JavaScriptCore alone does not). Linux only so far (`gperf`
 `configure-pass`, `icu` `shared-pass`); Windows and macOS are not attempted. See
 the `gperf` and `icu` sections below.
 
