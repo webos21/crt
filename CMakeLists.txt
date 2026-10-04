@@ -281,6 +281,11 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_LINUX=1)
 elseif(CRT_TARGET_OS STREQUAL "windows")
   target_compile_definitions(crt_build_flags INTERFACE CRT_TARGET_OS_WINDOWS=1)
+  # thread_local/__thread lower to __emutls_get_address() (compiler-rt, on Win32 TLS
+  # slots) because the freestanding startup has no PE TLS directory (_tls_index);
+  # the same strategy tools/crt-cc applies to every port, so in-tree code and tests
+  # see the same TLS semantics (found by pthread_native_tls_test on Windows).
+  target_compile_options(crt_build_flags INTERFACE -femulated-tls)
 endif()
 
 # CRT_ENABLE_DEBUG_MALLOC (introduced 2026-09-14 diagnosing the Skia/SkSL

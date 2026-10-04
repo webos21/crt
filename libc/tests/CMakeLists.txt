@@ -452,6 +452,20 @@ set_tests_properties(ucontext_test_runs PROPERTIES
 # thread_local data between all threads) and the Bionic surface the Web Runtime
 # (WebKit/JavaScriptCore) port needed.
 add_crt_test(pthread_native_tls_test pthread_native_tls_test.c)
+if(CRT_TARGET_OS STREQUAL "windows")
+  # thread_local lowers to compiler-rt's emutls.c (-femulated-tls, crt_build_flags). Pulling
+  # that archive member needs the same three link accommodations libcrtgfx documents for
+  # Skia's thread_local: UCRT-entry stubs for its fatal-error path, uuid.lib (lld looks for
+  # libuuid.a otherwise), and keeping libc's own fprintf over the member's internal one.
+  target_sources(pthread_native_tls_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
+  find_file(CRT_TLS_TEST_UUID_LIB NAMES Uuid.Lib uuid.lib
+    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES} NO_DEFAULT_PATH)
+  if(CRT_TLS_TEST_UUID_LIB)
+    target_link_libraries(pthread_native_tls_test PRIVATE "${CRT_TLS_TEST_UUID_LIB}")
+  endif()
+  target_link_options(pthread_native_tls_test PRIVATE -Wl,--allow-multiple-definition)
+endif()
 set_tests_properties(pthread_native_tls_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_native_tls_test: ok"
 )
