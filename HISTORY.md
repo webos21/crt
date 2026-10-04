@@ -63,6 +63,12 @@ libc relink and passes alone; the cause was not investigated.
 
 ## 2026-10-04
 
+- **macOS CI: `bionic_surface_test` failed (`gettid()` in a forked child != `getpid()`).** The macOS
+  `gettid()` maps the initial thread to the pid by comparing with the thread id recorded at startup, and a forked
+  child's thread has an Apple thread id of its own, so the child fell through to the raw id. The Windows fix
+  (child re-records its thread as initial in `__crt_atfork_child`) now applies to macOS too. The failure was not
+  seen locally because the test binary was stale; with the fix removed the rebuilt test fails here as in CI.
+
 - **Web Tranche 1C replayed on macOS/arm64: the JavaScriptCore Baseline JIT runs on the CRT runtime.** Clean
   `--mode baseline-jit` build 153 s; assembly interpreter (no code compiled), JIT script (2,340 compile reports),
   1B script under the JIT, VM cycles on 0/1/4/8 threads, a watchdog that kills compiled code on main and worker

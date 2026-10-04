@@ -458,10 +458,11 @@ long __crt_sys_thread_id(void);
 extern long __crt_initial_thread_id;
 
 void __crt_atfork_child(crt_thread_context* current_context) {
-#if defined(CRT_TARGET_OS_WINDOWS)
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
   /* The child's only thread is a new native thread, not the parent's initial one whose id the
    * copied .data still holds; as on Linux (child tid == child pid) it becomes the "initial"
-   * thread that gettid() maps to getpid(). */
+   * thread that gettid() maps to getpid(). (macOS: the id of a forked child's thread is not
+   * guaranteed to equal the parent's; it did on a developer machine and not on the CI runner.) */
   __crt_initial_thread_id = __crt_sys_thread_id();
 #endif
   __crt_thread_after_fork_child(current_context);
