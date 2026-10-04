@@ -18,8 +18,17 @@ the lifecycle test program -> run the acceptance (a JavaScript script through th
 shell, and a C API program that creates, uses and releases JS contexts 150 times and on
 several threads while watching resident memory).
 
-First-green configuration (Web Tranche 1B): interpreter only (the C_LOOP interpreter, JIT,
-FTL and WebAssembly off), the Generic event loop (no GLib). Tranche 1C turns the JIT on.
+Two build modes, one new runtime assumption each (Web Tranche 1B and 1C):
+
+  interpreter   the C_LOOP interpreter; JIT, DFG, FTL, WebAssembly and the sampling profiler off
+  baseline-jit  the assembly interpreter plus the JIT tiers compiled in (a smaller JIT build does
+                not compile, see MODE_OPTIONS); the DFG, FTL and WebAssembly tiers are disabled at
+                run time, so only the Baseline JIT generates code. The sampling profiler is off
+
+both with the Generic event loop (no GLib). In baseline-jit mode the same binary is run twice:
+with JSC_useJIT=false (the assembly interpreter alone: the whole 1B acceptance must still pass and
+no code may be compiled) and with the Baseline JIT on, where the compile report must prove that
+machine code was generated.
 Nothing in the WebKit tree is patched; every deviation is a CMake option or a compiler
 flag, listed in CONFIGURE_OPTIONS below with the reason.
 """
@@ -27,7 +36,7 @@ flag, listed in CONFIGURE_OPTIONS below with the reason.
 import argparse
 import json
 import os
-import resource
+import re
 import shutil
 import subprocess
 import sys
@@ -145,22 +154,52 @@ def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
     return env
 
 
-CONFIGURE_OPTIONS = [
+COMMON_OPTIONS = [
     ("-DPORT=JSCOnly", "JavaScriptCore alone (no WebCore/WebKit)"),
     ("-DCMAKE_BUILD_TYPE=Release", ""),
     ("-DUSE_HEADER_MAPS=OFF", "the release tarball omits Tools/Scripts/hmaptool, which "
                               "header maps need; an upstream option, no source change"),
-    ("-DENABLE_JIT=OFF", "Tranche 1B interpreter first-green; 1C enables the JIT"),
-    ("-DENABLE_C_LOOP=ON", "the portable C++ interpreter (no assembly LLInt, no JIT)"),
-    ("-DENABLE_FTL_JIT=OFF", ""),
-    ("-DENABLE_WEBASSEMBLY=OFF", "needs the JIT tiers"),
-    ("-DENABLE_SAMPLING_PROFILER=OFF", "needs signal-based thread suspension"),
     ("-DENABLE_API_TESTS=OFF", "upstream disables them on Windows; CRT has its own acceptance"),
     ("-DDEVELOPER_MODE=OFF", ""),
+    ("-DENABLE_SAMPLING_PROFILER=OFF", "needs signal-based thread suspension (and conflicts with C_LOOP)"),
 ]
 
+MODE_OPTIONS = {
+    "interpreter": [
+        ("-DENABLE_JIT=OFF", "Tranche 1B interpreter first-green"),
+        ("-DENABLE_C_LOOP=ON", "the portable C++ interpreter (no assembly LLInt, no JIT)"),
+        ("-DENABLE_DFG_JIT=OFF", ""),
+        ("-DENABLE_FTL_JIT=OFF", ""),
+        ("-DENABLE_WEBASSEMBLY=OFF", "conflicts with C_LOOP"),
+    ],
+    "baseline-jit": [
+        ("-DENABLE_JIT=ON", "Tranche 1C: generated code"),
+        ("-DENABLE_C_LOOP=OFF", "the JIT conflicts with C_LOOP; this is the offlineasm assembly LLInt"),
+        ("-DENABLE_DFG_JIT=ON", "the tiers are compiled in and the Baseline JIT is isolated at run time "
+                                "(JSC_useDFGJIT/useFTLJIT/useWasm=false). A smaller JIT build does not compile "
+                                "(upstream builds only the full default set): with DFG or WebAssembly off, "
+                                "bytecode/InlineCacheCompiler.h uses CCallHelpers::Jump but only the DFG/"
+                                "WebAssembly headers happen to include CCallHelpers.h before it, and the WebAssembly "
+                                "sources need B3, which exists only with FTL"),
+        ("-DENABLE_FTL_JIT=ON", "see above"),
+        ("-DENABLE_WEBASSEMBLY=ON", "see above"),
+    ],
+}
 
-def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_os: str, arch: str):
+# Run-time JSC options (the JSC_<name> environment variables) for each acceptance run.
+JIT_OFF_OPTIONS = {"JSC_useJIT": "false", "JSC_reportBaselineCompileTimes": "true",
+                   "JSC_validateOptions": "true"}
+JIT_ON_OPTIONS = {"JSC_useJIT": "true", "JSC_useBaselineJIT": "true", "JSC_useDFGJIT": "false",
+                  "JSC_useFTLJIT": "false", "JSC_useConcurrentJIT": "false", "JSC_useWasm": "false",
+                  "JSC_jitPolicyScale": "0.01", "JSC_crashIfCantAllocateJITMemory": "true",
+                  "JSC_reportBaselineCompileTimes": "true", "JSC_validateOptions": "true"}
+
+
+def configure_options(mode: str):
+    return COMMON_OPTIONS + MODE_OPTIONS[mode]
+
+
+def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_os: str, arch: str, mode: str):
     toolchain = sdk / "crt-toolchain.cmake"
     if not toolchain.is_file():
         raise SystemExit(f"{toolchain} not found: --sdk-root must be an installed CRT SDK")
@@ -181,7 +220,7 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         shutil.rmtree(build)
     command = ["cmake", "-S", tree, "-B", build, "-G", "Ninja",
                f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", f"-DICU_ROOT={deps}"]
-    command += [option for option, _ in CONFIGURE_OPTIONS]
+    command += [option for option, _ in configure_options(mode)]
     command += [f"-DCMAKE_C_FLAGS={' '.join(c_flags)}", f"-DCMAKE_CXX_FLAGS={' '.join(c_flags)}"]
     if link_flags:
         command += [f"-DCMAKE_EXE_LINKER_FLAGS={' '.join(link_flags)}",
@@ -198,51 +237,107 @@ def runtime_library_path(sdk: Path, deps: Path, build: Path, target_os: str, env
     return run_env
 
 
-def build_cycle_program(sdk: Path, build: Path, env: dict, target_os: str) -> Path:
-    output = build / "bin" / "jsc_context_cycle"
+def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str) -> dict:
+    """The C API test programs (libcrtweb/tests/jsc/*.cpp), linked against the built library."""
+    programs = {}
     compile_env = dict(env)
     compile_env["CRT_SYSROOT"] = str(sdk)
     if target_os == "linux":
         compile_env["CRT_TARGET_OS"] = "linux"
-    command = [sdk / "tools" / "crt-c++", f"-I{build / 'JavaScriptCore' / 'Headers'}",
-               TESTS / "jsc_context_cycle.cpp", "-o", output, f"-L{build / 'lib'}",
-               "-lJavaScriptCore", f"-Wl,-rpath,{build / 'lib'}"]
-    if target_os == "linux":
-        command.append("-Wl,--allow-shlib-undefined")
-    run(command, env=compile_env)
-    return output
+    for name in ("jsc_context_cycle", "jsc_watchdog_test"):
+        output = build / "bin" / name
+        command = [sdk / "tools" / "crt-c++", f"-I{build / 'JavaScriptCore' / 'Headers'}",
+                   TESTS / f"{name}.cpp", "-o", output, f"-L{build / 'lib'}",
+                   "-lJavaScriptCore", f"-Wl,-rpath,{build / 'lib'}"]
+        if target_os == "linux":
+            command.append("-Wl,--allow-shlib-undefined")
+        run(command, env=compile_env)
+        programs[name] = output
+    return programs
 
 
-def run_acceptance(build: Path, run_env: dict, cycle_program: Path) -> dict:
-    results = {}
-    jsc = build / "bin" / "jsc"
-    # Peak resident memory of the script run alone: a fresh Python process runs the shell
-    # as its only child and reports RUSAGE_CHILDREN (in this process it would be the
-    # largest of every child ever waited for, the build's compilers included).
-    measure = ("import resource, subprocess, sys;"
-               "code = subprocess.run(sys.argv[1:]).returncode;"
-               "print('PEAK_RSS_KB=%d' % resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss);"
-               "sys.exit(code)")
-    completed = run([sys.executable, "-c", measure, jsc, TESTS / "jsc_acceptance.js"],
-                    env=run_env, check=False, capture=True)
+# Peak resident memory of a run is measured by a fresh Python process that runs the program as
+# its only child and reports RUSAGE_CHILDREN (in this process it would be the largest of every
+# child ever waited for, the build's compilers included).
+MEASURE = ("import resource, subprocess, sys;"
+           "code = subprocess.run(sys.argv[1:]).returncode;"
+           "print('PEAK_RSS_KB=%d' % resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss);"
+           "sys.exit(code)")
+
+# The line JavaScriptCore prints for each function the Baseline JIT compiles when
+# JSC_reportBaselineCompileTimes=true.
+BASELINE_COMPILE_REPORT = re.compile(r"Baseline", re.IGNORECASE)
+
+
+def measured(command, env) -> dict:
+    completed = run([sys.executable, "-c", MEASURE] + [str(part) for part in command],
+                    env=env, check=False, capture=True)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     peak = 0
     for line in completed.stdout.splitlines():
         if line.startswith("PEAK_RSS_KB="):
             peak = int(line.split("=", 1)[1])
-    ok = completed.returncode == 0 and "jsc_acceptance: ok" in completed.stdout
-    results["script"] = {"ok": ok, "peak_rss_kb": peak,
-                         "within_rss_bound": 0 < peak <= ACCEPTANCE_MAX_RSS_KB}
-    for threads in CYCLE_THREAD_COUNTS:
-        completed = run([cycle_program, str(threads)], env=run_env, check=False, capture=True)
-        print(completed.stdout, end="")
-        print(completed.stderr, end="", file=sys.stderr)
-        results[f"context_cycle_threads_{threads}"] = {
-            "ok": completed.returncode == 0 and "jsc_context_cycle: ok" in completed.stdout}
+    return {"returncode": completed.returncode, "stdout": completed.stdout,
+            "stderr": completed.stderr, "peak_rss_kb": peak,
+            "compile_reports": sum(1 for line in (completed.stdout + completed.stderr).splitlines()
+                                   if BASELINE_COMPILE_REPORT.search(line) and "jsc_" not in line)}
+
+
+def script_result(run_result: dict, marker: str) -> dict:
+    return {"ok": run_result["returncode"] == 0 and marker in run_result["stdout"],
+            "peak_rss_kb": run_result["peak_rss_kb"],
+            "within_rss_bound": 0 < run_result["peak_rss_kb"] <= ACCEPTANCE_MAX_RSS_KB,
+            "baseline_compile_reports": run_result["compile_reports"]}
+
+
+def program_ok(env, command, marker) -> dict:
+    completed = run(command, env=env, check=False, capture=True)
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    return {"ok": completed.returncode == 0 and marker in completed.stdout}
+
+
+def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict) -> dict:
+    results = {}
+    jsc = build / "bin" / "jsc"
+    cycle = programs["jsc_context_cycle"]
+    if mode == "interpreter":
+        results["script"] = script_result(measured([jsc, TESTS / "jsc_acceptance.js"], run_env),
+                                          "jsc_acceptance: ok")
+        for threads in CYCLE_THREAD_COUNTS:
+            results[f"context_cycle_threads_{threads}"] = program_ok(
+                run_env, [cycle, str(threads)], "jsc_context_cycle: ok")
+    else:
+        off_env = {**run_env, **JIT_OFF_OPTIONS}
+        on_env = {**run_env, **JIT_ON_OPTIONS}
+        # Step 1: the assembly interpreter alone. The whole 1B acceptance must pass and nothing
+        # may be compiled.
+        off = script_result(measured([jsc, TESTS / "jsc_acceptance.js"], off_env), "jsc_acceptance: ok")
+        off["no_code_compiled"] = off["baseline_compile_reports"] == 0
+        results["step1_assembly_interpreter_script"] = off
+        # Step 2: the Baseline JIT. The compile report is the proof that generated code ran.
+        jit = script_result(measured([jsc, TESTS / "jsc_jit_acceptance.js"], on_env), "jsc_jit_acceptance: ok")
+        jit["compiled_code_proven"] = jit["baseline_compile_reports"] > 0
+        results["step2_jit_script"] = jit
+        again = script_result(measured([jsc, TESTS / "jsc_acceptance.js"], on_env), "jsc_acceptance: ok")
+        results["step2_1b_script_with_jit"] = again
+        for threads in CYCLE_THREAD_COUNTS:
+            results[f"step2_context_cycle_threads_{threads}"] = program_ok(
+                on_env, [cycle, str(threads)], "jsc_context_cycle: ok")
+        # The watchdog interrupts an infinite loop with a signal; the loop must have been
+        # compiled (the report names `spin`, the function the loop runs in), or the test would
+        # only be exercising the interpreter's trap.
+        watchdog = measured([programs["jsc_watchdog_test"]], on_env)
+        compiled_spin = any("spin" in line and BASELINE_COMPILE_REPORT.search(line)
+                            for line in (watchdog["stdout"] + watchdog["stderr"]).splitlines())
+        results["step2_watchdog_signal_vm_traps"] = {
+            "ok": watchdog["returncode"] == 0 and "jsc_watchdog_test: ok" in watchdog["stdout"],
+            "spin_function_compiled": compiled_spin}
     results["passed"] = all(
-        (value["ok"] and value.get("within_rss_bound", True)) for value in results.values()
-        if isinstance(value, dict))
+        value["ok"] and value.get("within_rss_bound", True) and value.get("no_code_compiled", True)
+        and value.get("compiled_code_proven", True) and value.get("spin_function_compiled", True)
+        for value in results.values() if isinstance(value, dict))
     return results
 
 
@@ -286,7 +381,7 @@ def host_abi_audit(sdk: Path, deps: Path, build: Path, binaries, run_env: dict) 
             "libraries": inventory}
 
 
-def write_fingerprint(work: Path, recipe: Path, sdk: Path, deps: Path, tools: dict, arch: str):
+def write_fingerprint(work: Path, recipe: Path, sdk: Path, deps: Path, tools: dict, arch: str, mode: str):
     """What this configuration was built from, so a later success or failure can be tied to
     exactly these inputs."""
     import hashlib
@@ -301,10 +396,12 @@ def write_fingerprint(work: Path, recipe: Path, sdk: Path, deps: Path, tools: di
         "icu_prefix": str(deps),
         "icu_recipe_sha256": hashlib.sha256((ROOT / "porting/recipes/icu.json").read_bytes()).hexdigest(),
         "host_tools": tools,
-        "configuration": {"port": "JSCOnly", "jit": False, "c_loop": True, "event_loop": "Generic",
-                          "options": [option for option, _ in CONFIGURE_OPTIONS]},
+        "configuration": {"port": "JSCOnly", "mode": mode, "jit": mode == "baseline-jit",
+                          "c_loop": mode == "interpreter", "event_loop": "Generic",
+                          "options": [option for option, _ in configure_options(mode)],
+                          "jit_run_options": JIT_ON_OPTIONS if mode == "baseline-jit" else {}},
     }
-    (work / "webkit-jsc-config.json").write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
+    (work / f"webkit-jsc-config-{mode}.json").write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -316,6 +413,8 @@ def main() -> int:
                         help="install prefix holding the CRT ICU port")
     parser.add_argument("--work-root", type=Path, required=True)
     parser.add_argument("--cache", type=Path, help="download cache (default: <work-root>/cache)")
+    parser.add_argument("--mode", choices=sorted(MODE_OPTIONS), default="interpreter",
+                        help="interpreter (1B, default) or baseline-jit (1C); each mode has its own build tree")
     parser.add_argument("--skip-build", action="store_true",
                         help="reuse an existing build tree and only run the acceptance")
     args = parser.parse_args()
@@ -326,7 +425,8 @@ def main() -> int:
     cache = (args.cache or work / "cache").resolve()
     work.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
-    build = work / "build-jsc"
+    mode = args.mode
+    build = work / f"build-{mode}"
 
     target_os, arch = sdk_target(sdk)
     if target_os != "linux":
@@ -343,27 +443,27 @@ def main() -> int:
         with phases.measure("check host build tools"):
             host_tools = require_host_tools()
             print(json.dumps(host_tools))
-            write_fingerprint(work, args.recipe, sdk, deps, host_tools, arch)
+            write_fingerprint(work, args.recipe, sdk, deps, host_tools, arch, mode)
         env = build_environment(sdk, deps, target_os)
         if not args.skip_build:
             with phases.measure("fetch, verify and extract WebKit"):
                 tree = fetch_and_extract(args.recipe, cache, work)
-            with phases.measure("configure JavaScriptCore (JSCOnly)"):
-                configure(tree, build, sdk, deps, env, target_os, arch)
+            with phases.measure(f"configure JavaScriptCore (JSCOnly, {mode})"):
+                configure(tree, build, sdk, deps, env, target_os, arch, mode)
             with phases.measure("build jsc"):
                 run(["ninja", "-C", build, "jsc"], env=env)
         run_env = runtime_library_path(sdk, deps, build, target_os, env)
-        with phases.measure("build the context lifecycle program"):
-            cycle_program = build_cycle_program(sdk, build, env, target_os)
-        with phases.measure("run the acceptance"):
-            results = run_acceptance(build, run_env, cycle_program)
+        with phases.measure("build the C API test programs"):
+            programs = build_test_programs(sdk, build, env, target_os)
+        with phases.measure(f"run the {mode} acceptance"):
+            results = run_acceptance(mode, build, run_env, programs)
         with phases.measure("host ABI audit"):
             audit = host_abi_audit(
                 sdk, deps, build,
-                [build / "bin" / "jsc", build / "lib" / "libJavaScriptCore.so.1", cycle_program], run_env)
+                [build / "bin" / "jsc", build / "lib" / "libJavaScriptCore.so.1", *programs.values()], run_env)
             print(json.dumps(audit, indent=2))
             results["host_abi"] = {"ok": audit["ok"], **audit}
-        (work / "acceptance.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+        (work / f"acceptance-{mode}.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
         results["passed"] = results["passed"] and results["host_abi"]["ok"]
         if not results["passed"]:
             raise SystemExit("JSC acceptance FAILED: " + json.dumps(results))

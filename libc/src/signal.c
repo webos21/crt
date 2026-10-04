@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -160,14 +161,30 @@ int sigaction(int sig, const struct sigaction* act, struct sigaction* oldact) {
     } else {
       backend_action = CRT_SIGNAL_BACKEND_DISPATCH;
     }
-    if (__crt_signal_backend_set_action(sig, backend_action) != 0) {
+    if (__crt_signal_backend_set_action_ex(sig, backend_action, (int)act->sa_flags, &act->sa_mask) != 0) {
       return -1;
     }
   }
   return 0;
 }
 
+/* The calling thread's signal mask. On Linux it is the kernel's, per thread; elsewhere it is
+ * this file's software mask (see the backend notes in private/crt_signal_backend.h). */
+static sigset_t current_signal_mask(void) {
+  sigset_t current = 0;
+
+  if (__crt_signal_backend_sigprocmask(SIG_BLOCK, 0, &current) == 1) {
+    return signal_mask;
+  }
+  return current;
+}
+
 int sigprocmask(int how, const sigset_t* set, sigset_t* oldset) {
+  int result = __crt_signal_backend_sigprocmask(how, set, oldset);
+
+  if (result != 1) {
+    return result;
+  }
   if (oldset != 0) {
     *oldset = signal_mask;
   }
@@ -194,13 +211,40 @@ int pthread_sigmask(int how, const sigset_t* set, sigset_t* oldset) {
   return sigprocmask(how, set, oldset);
 }
 
+/* pause(): wait until a signal has been delivered to a handler, then fail with EINTR
+ * (POSIX/Bionic). Waits by polling the signal-delivery generation every 10 ms rather
+ * than blocking in the kernel: CRT delivers a signal to its own handlers through this
+ * file, on every host, and each delivery bumps the generation just before it calls the
+ * handler (so the wait can end while the handler is still running). */
+int pause(void) {
+  unsigned long generation = __crt_signal_delivery_generation();
+  struct timespec interval;
+
+  interval.tv_sec = 0;
+  interval.tv_nsec = 10L * 1000L * 1000L;
+  while (__crt_signal_delivery_generation() == generation) {
+    nanosleep(&interval, 0);
+  }
+  errno = EINTR;
+  return -1;
+}
+
 int sigsuspend(const sigset_t* mask) {
-  sigset_t old_mask = signal_mask;
+  sigset_t old_mask;
+  int result;
 
   if (mask == 0) {
     errno = EINVAL;
     return -1;
   }
+  /* Linux: really wait (rt_sigsuspend). WTF's thread suspend/resume parks the target thread here
+   * until the resume signal arrives; returning at once would let a thread that another thread
+   * believes is stopped keep running. */
+  result = __crt_signal_backend_sigsuspend(mask);
+  if (result != 1) {
+    return result;
+  }
+  old_mask = signal_mask;
   signal_mask = *mask;
   signal_mask = old_mask;
   errno = EINTR;
@@ -209,7 +253,7 @@ int sigsuspend(const sigset_t* mask) {
 
 void __crt_signal_get_mask(sigset64_t* mask) {
   if (mask != 0) {
-    *mask = (sigset64_t)signal_mask;
+    *mask = (sigset64_t)current_signal_mask();
   }
 }
 
@@ -279,6 +323,17 @@ static void deliver_signal(int sig, const siginfo_t* host_info, void* host_conte
   if (handler == SIG_IGN) {
     return;
   }
+  if (handler != SIG_DFL && handler != 0 && (action->sa_flags & SA_RESETHAND) != 0) {
+    /* One-shot handler: restore the default disposition before the handler runs. */
+    struct sigaction one_shot = *action;
+
+    action->sa_handler = SIG_DFL;
+    action->sa_flags = 0;
+    action->sa_mask = 0;
+    __crt_signal_backend_set_action(sig, CRT_SIGNAL_BACKEND_DEFAULT);
+    action = &one_shot;
+    handler = action->sa_handler;
+  }
   if ((action->sa_flags & SA_SIGINFO) != 0 && action->sa_sigaction != 0) {
     siginfo_t info;
 
@@ -312,7 +367,7 @@ int raise(int sig) {
     errno = EINVAL;
     return -1;
   }
-  if ((signal_mask & signal_bit(sig)) != 0) {
+  if ((current_signal_mask() & signal_bit(sig)) != 0) {
     return 0;
   }
   deliver_signal(sig, 0, 0);

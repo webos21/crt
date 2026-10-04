@@ -34,6 +34,9 @@ void __crt_thread_after_fork_child(crt_thread_context* current);
 long* __crt_windows_tls_index_ptr(void);
 #endif
 void* __crt_thread_control(void);
+#if defined(CRT_TARGET_OS_LINUX)
+int __crt_thread_control_is_live(void* control);
+#endif
 int* __crt_thread_errno(void);
 int* __crt_thread_h_errno(void);
 void** __crt_thread_key_values(void);

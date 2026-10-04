@@ -78,7 +78,9 @@ to Linux, macOS, and Windows.
   8 MiB if unlimited); elsewhere it returns default attributes.
 - Linux threads get a native ELF TLS block (x86_64), see
   `linux_pthread_lifecycle.md`.
-- `pthread_kill` is real on Linux (`tgkill`); toward another thread it fails with
+- `pthread_kill` is real on Linux (`tgkill`). A `pthread_t` is the control block only for a thread
+  created by `pthread_create`; the initial thread's is its kernel tid, so the handle is validated against
+  the registry of live CRT threads before it is dereferenced. Toward another thread it fails with
   `ENOTSUP` on macOS and Windows, which have no delivery mechanism yet.
 - `pthread_gettid_np` returns the backend thread id when the project has a
   control block. For the current thread it asks the backend directly.

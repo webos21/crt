@@ -6,16 +6,19 @@ tranche order and evidence: [`docs/crtweb_acceptance.md`](../docs/crtweb_accepta
 upstream mapping: [`docs/crtweb_porting.md`](../docs/crtweb_porting.md).
 
 **Status: bring-up.** Web Tranche 0 (scope, version and license freeze) is closed.
-Tranche 1 (JavaScriptCore) is green on Linux/x86_64 for 1A (the ICU and gperf ports)
-and 1B (the interpreter acceptance), built by `tools/build_webkit_jsc.py` from the
-verified pin against an installed SDK; the JIT (1C) and the Windows and macOS replays
-remain. No WebCore, WebKit, `PlatformCRT` or `crtweb` API code exists yet, and
+Tranche 1 (JavaScriptCore) is green on Linux/x86_64 for 1A (the ICU and gperf ports),
+1B (the interpreter acceptance) and 1C (the Baseline JIT, with a compile proof and a
+watchdog that terminates compiled code), built by `tools/build_webkit_jsc.py` from the
+verified pin against an installed SDK; the Windows and macOS replays, W^X hardening and
+the DFG/FTL/WebAssembly tiers remain. No WebCore, WebKit, `PlatformCRT` or `crtweb` API code exists yet, and
 `libcrtweb` is not part of the root CMake build.
 
 ## Layout
 
-- `tests/jsc/` -- the JavaScriptCore acceptance: `jsc_acceptance.js` (run through the
-  `jsc` shell) and `jsc_context_cycle.cpp` (VM create/use/release on several threads).
+- `tests/jsc/` -- the JavaScriptCore acceptance: `jsc_acceptance.js` and
+  `jsc_jit_acceptance.js` (run through the `jsc` shell), `jsc_context_cycle.cpp` (VM
+  create/use/release on several threads) and `jsc_watchdog_test.cpp` (terminating compiled
+  code with a signal-based trap).
 - `third_party/webkit/` -- the pinned WPE WebKit 2.54.0 reference: `recipe.json`
   (URL, size, SHA-256, signed tag and commit, license and security policy),
   `license-inventory.json` (the archive's 64 license/notice files and bundled

@@ -11,6 +11,7 @@
 #define SYS_sendfile 71
 #define SYS_fallocate 47
 #define SYS_tgkill 131
+#define SYS_rt_sigsuspend 133
 #define SYS_sched_setparam 118
 #define SYS_sched_setscheduler 119
 #define SYS_sched_getscheduler 120
@@ -27,6 +28,7 @@
 #define SYS_sendfile 40
 #define SYS_fallocate 285
 #define SYS_tgkill 234
+#define SYS_rt_sigsuspend 130
 #define SYS_sched_setparam 142
 #define SYS_sched_getparam 143
 #define SYS_sched_setscheduler 144
@@ -66,6 +68,7 @@
 #define __NR_sched_setparam SYS_sched_setparam
 #define __NR_sched_setscheduler SYS_sched_setscheduler
 #define __NR_tgkill SYS_tgkill
+#define __NR_rt_sigsuspend SYS_rt_sigsuspend
 #define __NR_sysinfo SYS_sysinfo
 #define __NR_sendfile SYS_sendfile
 

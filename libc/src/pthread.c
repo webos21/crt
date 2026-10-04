@@ -2115,8 +2115,12 @@ int pthread_kill(pthread_t thread, int sig) {
   }
 #if defined(CRT_TARGET_OS_LINUX)
   {
-    crt_pthread_control* control = (crt_pthread_control*)(uintptr_t)thread;
-    long result = syscall(SYS_tgkill, (long)getpid(), (long)control->tid, (long)sig);
+    /* A thread created by pthread_create() is its control block; any other pthread_t (the
+     * initial thread's, from pthread_self()) is the kernel tid itself. */
+    long tid = __crt_thread_control_is_live((void*)(uintptr_t)thread)
+                   ? ((crt_pthread_control*)(uintptr_t)thread)->tid
+                   : (long)thread;
+    long result = syscall(SYS_tgkill, (long)getpid(), tid, (long)sig);
 
     return result < 0 ? errno : 0;
   }

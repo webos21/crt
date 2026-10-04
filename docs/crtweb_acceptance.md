@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A and 1B are green on Linux/x86_64, the JIT (1C) and the Windows/macOS replays remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64; the Windows/macOS replays, W^X hardening and the DFG/FTL/WebAssembly tiers (1D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -173,23 +173,28 @@ threads, WebAssembly and the sampling profiler are later steps (1D and after), a
 policy is a hardening follow-up (below).
 
 *Why not just `ENABLE_JIT=ON`.* Checked against the pinned `Source/cmake/WebKitFeatures.cmake`:
-`ENABLE_JIT` conflicts with `ENABLE_C_LOOP`; with the JIT on, `ENABLE_DFG_JIT` defaults to
-ON (and `ENABLE_FTL_JIT` depends on DFG, WebAssembly's BBQ/OMG tiers on FTL); WebAssembly and
-the sampling profiler also conflict with `C_LOOP`. So the harness grows
-`--mode interpreter|baseline-jit` and the Baseline profile pins every one of them:
+`ENABLE_JIT` conflicts with `ENABLE_C_LOOP`; with the JIT on, `ENABLE_DFG_JIT` defaults to ON
+(`ENABLE_FTL_JIT` depends on DFG, WebAssembly's BBQ/OMG tiers on FTL); WebAssembly and the
+sampling profiler conflict with `C_LOOP`. The harness therefore has `--mode
+interpreter|baseline-jit`. **The planned "Baseline-only build" does not compile**, which the
+first 1C build found: with DFG or WebAssembly compiled out, `bytecode/InlineCacheCompiler.h`
+uses `CCallHelpers::Jump` but only the DFG/WebAssembly headers happen to include
+`CCallHelpers.h` before it (`LLIntOffsetsExtractor.cpp` fails), and the WebAssembly sources
+need B3, which exists only with FTL. Upstream builds only the full default tier set, and the
+header-order dependency cannot be patched here. So the 1C build compiles every tier in and the
+Baseline JIT is isolated **at run time**:
 
-| | 1B `interpreter` | 1C `baseline-jit` |
+| | 1B `interpreter` build | 1C `baseline-jit` build |
 | --- | --- | --- |
-| `ENABLE_JIT` | OFF | ON |
-| `ENABLE_C_LOOP` | ON | OFF (the offlineasm assembly LLInt) |
-| `ENABLE_DFG_JIT` / `ENABLE_FTL_JIT` | OFF | OFF |
-| `ENABLE_WEBASSEMBLY` / `ENABLE_SAMPLING_PROFILER` | OFF | OFF |
+| `ENABLE_JIT` / `ENABLE_C_LOOP` | OFF / ON | ON / OFF (the offlineasm assembly LLInt) |
+| `ENABLE_DFG_JIT`, `ENABLE_FTL_JIT`, `ENABLE_WEBASSEMBLY` | OFF | ON (compiled in) |
+| `ENABLE_SAMPLING_PROFILER` | OFF | OFF |
+| run-time isolation | -- | `JSC_useDFGJIT=false`, `useFTLJIT=false`, `useWasm=false`, `useConcurrentJIT=false` |
 
-Turning `C_LOOP` off also switches to the assembly interpreter, a second new assumption,
-so 1C runs in two steps over **the same binary**, chosen at run time with JSC options:
-(1) `JSC_useJIT=false` -- the assembly LLInt with no generated code, rerunning the whole 1B
-acceptance; (2) `JSC_useJIT=true JSC_useBaselineJIT=true JSC_useDFGJIT=false
-JSC_useFTLJIT=false`.
+Turning `C_LOOP` off also switches to the assembly interpreter, a second new assumption, so
+1C runs in two steps over **the same binary**, chosen with JSC options: (1) `JSC_useJIT=false`
+-- the assembly LLInt with no generated code, rerunning the whole 1B acceptance and requiring
+that nothing is compiled; (2) the Baseline JIT with the options above.
 
 *Proof that machine code ran.* Passing the interpreter script on a JIT build proves
 nothing. Step (2) runs `jsc_jit_acceptance.js` with `JSC_jitPolicyScale=0.01` (compile
@@ -309,6 +314,53 @@ glibc's own `libc.so.6` into the process next to CRT's `libc.so`; the libc++ rec
 the loader-provided `__tls_get_addr` (the accepted Linux dynamic-loader boundary, a gap only once
 CRT owns a loader), which is why the harness links with `--allow-shlib-undefined`; the default thread stack is 1 MiB (as in Bionic), far less than
 JavaScriptCore wants, so an embedder must size the stacks of threads that run script.
+
+**Linux/x86_64 1C result (2026-10-04): the Baseline JIT is green**, built from the installed `05-ui`
+SDK (the stage contract's predecessor of `06-web`; 1B was rerun from it first, from a fresh
+configure and build, and also passes) by `tools/build_webkit_jsc.py --mode baseline-jit`.
+The pre-JIT gate is closed: `--mode`, the profiles above, `jit_memory_test` (CRT's own
+RW-to-RX-to-RW, one-call RWX and reserve-then-commit executable-memory contract, 3 shapes),
+gperf out of the JSCOnly checks, `libatomic` gone from libc++, 1B on `05-ui`, stale docs.
+
+- *Step 1* (`JSC_useJIT=false`, assembly interpreter): the whole 1B script passes, zero functions compiled.
+- *Step 2* (Baseline JIT): `jsc_jit_acceptance.js`, eight groups (hot arithmetic, hot calls and
+  class dispatch, arrays/typed arrays/polymorphic properties, exceptions thrown through compiled
+  frames including a stack overflow in compiled code, a full GC while compiled closures are live,
+  1,500 `new Function` and 400 `eval` compilations, RegExp and string work, an async loop) passes.
+  **Proof that generated code ran:** the compile report lists 2,340 lines such as
+  `Optimized mix#...: LLIntFunctionCall ... using Baseline with Baseline into 1360 bytes`, none
+  with the JIT off. The 1B script under the JIT, the VM create/use/release cycle (150 times, and on
+  1/4/8 threads; RSS flat, growth under 0.1 MB after warm-up) and the host-ABI audit also pass.
+- *Signal-based VM traps:* `jsc_watchdog_test` terminates a compiled infinite loop (the report names
+  `spin`) with a 250 ms execution-time limit -- 3 times on the main thread and 3 on workers, each
+  at 0.25 s -- and a crash reporter built on the forwarded `siginfo`/`ucontext` names any fault.
+- *Stability:* 10 of 10 harness runs, and 150 of 150 watchdog runs (8 of 100 crashed before the fixes below).
+
+**What the JIT work found in CRT (all fixed there):**
+
+1. *`pthread_kill` crashed on the initial thread* (my own new code): a `pthread_t` not created by
+   `pthread_create` is the plain kernel tid, and it was dereferenced as a control block. Found as the
+   intermittent watchdog crash (faulting address = the pid); now handles are validated against the
+   registry of live CRT threads (`__crt_thread_control_is_live`). `bionic_surface_test` signals the initial
+   thread from a worker (a SEGFAULT with the fix reverted).
+2. *`sigsuspend` returned immediately.* WTF suspends a thread by signalling it and parking it in `sigsuspend`;
+   with the stub the thread kept running while another believed it stopped, and JSC patched code under it.
+   `sigsuspend` is now `rt_sigsuspend` on Linux.
+3. *`sigaction` dropped `sa_mask` and the flags* (`SA_NODEFER`, `SA_ONSTACK`, `SA_RESTART`, ...): WTF's handlers
+   block every other signal while they run, so a second signal could interrupt one mid-way. Both are now handed
+   to the kernel (`SA_RESETHAND` is emulated), and `SA_ONSTACK`/`SA_NODEFER`/`SA_RESETHAND` exist in `<signal.h>`.
+4. *The signal mask was one software value for the whole process*; it is per thread in the kernel and
+   `sigprocmask`/`pthread_sigmask` now read and write the calling thread's real mask on Linux.
+   `signal_threads_test` covers 2-4 (stubbing `sigsuspend` fails four of its checks).
+5. *`pause()` was missing* (`jsc.cpp` needs it): polls the signal-delivery generation, then fails with EINTR.
+
+macOS and Windows keep the software mask and the stub `sigsuspend` (their backends return "not
+provided"); that is compile-checked, not run, and is the likely first problem of their JIT replays.
+
+*Not part of this green:* W^X policy (upstream's default does not exercise an RW-to-RX transition),
+the DFG, FTL and WebAssembly tiers (compiled in, disabled at run time; 1D), the sampling profiler,
+concurrent compiler threads, aarch64, and the Windows and macOS replays. Default thread stack stays
+1 MiB; the baseline JIT needed no more.
 
 ### 2. Linux WPE reference baseline
 

@@ -28,6 +28,25 @@ static crt_thread_context* linux_find_context(long tid) {
   return 0;
 }
 
+/* Whether `control` is the control block of a live thread created by pthread_create(): such a
+ * thread registers its context here (crt_thread_context.control) and unregisters it when it
+ * ends. A pthread_t that is not one -- the initial thread's, which is its kernel tid -- must
+ * not be dereferenced as a pointer. */
+int __crt_thread_control_is_live(void* control) {
+  crt_thread_context* context;
+  int live = 0;
+
+  crt_spin_lock(&thread_lock);
+  for (context = thread_head; context != 0; context = context->next) {
+    if (context->control == control) {
+      live = 1;
+      break;
+    }
+  }
+  crt_spin_unlock(&thread_lock);
+  return live;
+}
+
 static void linux_register_context(crt_thread_context* context) {
   if (context == 0) {
     return;

@@ -1,6 +1,8 @@
 #include <errno.h>
 #include <signal.h>
 #include <stddef.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <private/crt_signal_backend.h>
 
@@ -84,10 +86,11 @@ static void crt_linux_signal_entry(int sig, siginfo_t* info, void* uctx) {
   __crt_signal_dispatch_info(sig, info, uctx);
 }
 
-int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_action action) {
+int __crt_signal_backend_set_action_ex(int bionic_sig, enum crt_signal_backend_action action,
+                                       int flags, const sigset_t* mask) {
   struct crt_kernel_sigaction sa;
 
-  sa.sa_mask = 0;
+  sa.sa_mask = (mask != 0 && action == CRT_SIGNAL_BACKEND_DISPATCH) ? *mask : 0;
   sa.sa_flags = 0;
   sa.sa_restorer = 0;
   switch (action) {
@@ -100,7 +103,8 @@ int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_acti
     case CRT_SIGNAL_BACKEND_DISPATCH:
     default:
       sa.handler.handler_siginfo = crt_linux_signal_entry;
-      sa.sa_flags = SA_SIGINFO;
+      /* SA_RESETHAND is emulated by signal.c (it resets its own table), not passed down. */
+      sa.sa_flags = SA_SIGINFO | (flags & (SA_RESTART | SA_NODEFER | SA_ONSTACK | SA_NOCLDSTOP | SA_NOCLDWAIT));
 #if defined(__x86_64__)
       sa.sa_flags |= CRT_KERNEL_SA_RESTORER;
       sa.sa_restorer = __crt_signal_restore_rt;
@@ -108,6 +112,20 @@ int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_acti
       break;
   }
   return normalize_syscall_result(__crt_sys_rt_sigaction(bionic_sig, &sa, 0, sizeof(unsigned long)));
+}
+
+int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_action action) {
+  return __crt_signal_backend_set_action_ex(bionic_sig, action, 0, 0);
+}
+
+int __crt_signal_backend_sigprocmask(int how, const sigset_t* set, sigset_t* oldset) {
+  return normalize_syscall_result(__crt_sys_rt_sigprocmask(how, (const unsigned long*)set,
+                                                          (unsigned long*)oldset, sizeof(unsigned long))) < 0 ? -1 : 0;
+}
+
+int __crt_signal_backend_sigsuspend(const sigset_t* mask) {
+  /* The public syscall() already returns -1 with errno set (EINTR when a handler ran). */
+  return syscall(SYS_rt_sigsuspend, (long)mask, (long)sizeof(unsigned long)) < 0 ? -1 : 0;
 }
 
 int __crt_signal_backend_set_mask(int how, const sigset_t* set) {

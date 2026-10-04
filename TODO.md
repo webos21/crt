@@ -76,14 +76,16 @@ then macOS/arm64.
 * [ ] **1. JavaScriptCore / JSCOnly bring-up.** Linux/x86_64 1A (dependency ports) and 1B
   (interpreter first-green) are done 2026-10-04 (`HISTORY.md`, `docs/crtweb_acceptance.md`),
   built by `tools/build_webkit_jsc.py` against an installed SDK.
-  * [ ] **1C. Baseline JIT** (plan: `docs/crtweb_acceptance.md`). Pre-JIT gate first: harness
-    `--mode interpreter|baseline-jit` (JIT=ON, C_LOOP=OFF, DFG/FTL/Wasm/profiler OFF),
-    `jit_memory_test`, rerun 1B from the installed `05-ui` SDK; then `JSC_useJIT=false` rerun,
-    `jsc_jit_acceptance.js` with a Baseline-compile proof, a watchdog test of signal-based VM traps,
-    threads and RSS. Not in 1C: W^X policy (upstream's default does not exercise it), DFG/FTL
-    (1D), WebAssembly, the sampling profiler.
+  * [x] **1C. Baseline JIT.** Done on Linux/x86_64 2026-10-04 (`HISTORY.md`,
+    `docs/crtweb_acceptance.md`): pre-JIT gate, assembly-interpreter and Baseline-JIT runs with a
+    compile proof, watchdog termination of compiled code, threads, host-ABI audit.
+  * [ ] **1D and hardening.** DFG/FTL/WebAssembly tiers (compiled in, disabled at run time) with
+    concurrent compiler threads and the thread-stack question; W^X policy (upstream default does not
+    exercise it); the sampling profiler.
   * [ ] **Replays.** Windows/x64 and macOS/arm64: the ICU/gperf ports, the harness, the
-    clocks/`sched_*`/signal-record code compile-checked there but never run; aarch64 Linux
+    clocks/`sched_*`/signal code (macOS and Windows still have the software signal mask and a stub
+    `sigsuspend`) compile-checked there but never run, `jit_memory_test` and the executable-memory
+    shapes (`MAP_JIT` on macOS, `VirtualAlloc` on Windows); aarch64 Linux
     needs native thread TLS (variant I) first.
   * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided
     `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed

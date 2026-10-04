@@ -228,6 +228,46 @@ static void test_pthread_kill(void) {
 }
 #endif
 
+#if defined(__linux__)
+static volatile long initial_thread_handler_tid;
+
+static void on_usr2_initial(int sig, siginfo_t* info, void* context) {
+  (void)sig;
+  (void)info;
+  (void)context;
+  initial_thread_handler_tid = syscall(SYS_gettid);
+}
+
+static pthread_t initial_thread;
+
+static void* signal_initial_thread(void* argument) {
+  (void)argument;
+  /* The initial thread was not created by pthread_create(): its pthread_t is its kernel tid,
+   * not a control-block pointer, and pthread_kill must still reach it (WTF suspends the VM's
+   * thread this way; dereferencing the handle crashed). */
+  CHECK(pthread_kill(initial_thread, SIGUSR2) == 0, "pthread_kill of the initial thread");
+  return 0;
+}
+
+static void test_kill_initial_thread(void) {
+  struct sigaction action;
+  pthread_t helper;
+  int i;
+
+  initial_thread = pthread_self();
+  memset(&action, 0, sizeof(action));
+  action.sa_sigaction = on_usr2_initial;
+  action.sa_flags = SA_SIGINFO;
+  CHECK(sigaction(SIGUSR2, &action, 0) == 0, "sigaction(SIGUSR2)");
+  CHECK(pthread_create(&helper, 0, signal_initial_thread, 0) == 0, "create the helper");
+  for (i = 0; i < 2000 && initial_thread_handler_tid == 0; ++i) {
+    usleep(1000);
+  }
+  pthread_join(helper, 0);
+  CHECK(initial_thread_handler_tid == syscall(SYS_gettid), "the handler ran on the initial thread");
+}
+#endif
+
 int main(void) {
   test_memmem();
   test_usleep();
@@ -239,6 +279,7 @@ int main(void) {
 #if defined(__linux__)
   test_linux_extras();
   test_pthread_kill();
+  test_kill_initial_thread();
 #endif
   if (failures != 0) {
     fprintf(stderr, "bionic_surface_test: %d check(s) failed\n", failures);

@@ -217,3 +217,24 @@ int __crt_signal_backend_set_mask(int how, const sigset_t* set) {
   }
   return 0;
 }
+
+/* macOS and Windows: no per-thread real mask and no host sigsuspend here -- signal.c keeps its
+ * own software bookkeeping (return value 1). */
+int __crt_signal_backend_set_action_ex(int bionic_sig, enum crt_signal_backend_action action,
+                                       int flags, const sigset_t* mask) {
+  (void)flags;
+  (void)mask;
+  return __crt_signal_backend_set_action(bionic_sig, action);
+}
+
+int __crt_signal_backend_sigprocmask(int how, const sigset_t* set, sigset_t* oldset) {
+  (void)how;
+  (void)set;
+  (void)oldset;
+  return 1;
+}
+
+int __crt_signal_backend_sigsuspend(const sigset_t* mask) {
+  (void)mask;
+  return 1;
+}

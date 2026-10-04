@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-10-04
 
+- **Web Tranche 1C closed on Linux/x86_64: the JavaScriptCore Baseline JIT runs on CRT, and the work
+  found five more signal/thread defects.** The pre-JIT gate (harness `--mode`, the CRT
+  `jit_memory_test`, 1B rerun from the installed `05-ui` SDK, `libatomic` and gperf cleanups) is closed;
+  the JIT build compiles every tier in (a Baseline-only build does not compile: upstream header-order and
+  B3 dependencies) and isolates the Baseline JIT with JSC options. Results: the 1B script with the JIT
+  off compiles nothing; the JIT script, 1B script, VM cycles on 1/4/8 threads and a watchdog that kills a
+  compiled infinite loop on main and worker threads all pass, with 2,340 `using Baseline ... into N bytes`
+  compile lines as proof; 10/10 harness runs and 150/150 watchdog runs. Details and the W^X/DFG/FTL
+  boundaries are in `docs/crtweb_acceptance.md`.
+
+  An intermittent watchdog crash (8 in 100) led to the fixes: `pthread_kill` dereferenced the initial
+  thread's tid-valued `pthread_t` (my own code; now validated against live CRT threads); `sigsuspend` was a
+  stub, so a thread WTF believed suspended kept running; `sigaction` discarded `sa_mask` and the flags;
+  the signal mask was process-wide instead of per thread (all four now real on Linux); and `pause()` was
+  missing. New tests `signal_threads_test`, an initial-thread case in `bionic_surface_test`, and
+  `jit_memory_test`; mutations of `sigsuspend` and `pthread_kill` fail them. ctest 158/159 serially (the
+  sound-card test; two capture tests contend for the now-attached webcam only under `-j4`), tooling 102/102.
+
 - **Web Tranche 1C plan refined (documentation).** Checked against the pinned WebKit: the JIT conflicts
   with `C_LOOP`, DFG defaults on with the JIT and FTL depends on DFG, `ENABLE_MPROTECT_RX_TO_RWX` is 0
   and Linux executable memory is created RWX at once without `MAP_JIT`, and the JIT enables

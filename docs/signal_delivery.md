@@ -119,6 +119,16 @@ save into the same slots. macOS and Windows keep the private, opaque `mcontext_t
 the synthesized record (a self-directed `raise()` also synthesizes it everywhere).
 `stack_t` follows the kernel order (`ss_sp`, `ss_flags`, `ss_size`).
 
+**Per-thread masks, `sa_mask`/flags and a real `sigsuspend` on Linux (2026-10-04).** The signal mask is
+the calling thread's real kernel mask (`sigprocmask`/`pthread_sigmask` use `rt_sigprocmask`; a new thread
+inherits its creator's); `sigaction` passes `sa_mask` and `SA_RESTART`/`SA_NODEFER`/`SA_ONSTACK`/
+`SA_NOCLDSTOP`/`SA_NOCLDWAIT` to the kernel (`SA_RESETHAND` is emulated by resetting CRT's table before the
+handler runs); `sigsuspend` is `rt_sigsuspend`, so it blocks until a handler has run. WTF suspends a thread
+by signalling it and parking it in `sigsuspend`; the old stub returned at once and let a "suspended"
+thread run on. `pause()` polls the delivery generation (10 ms) on every host. macOS and Windows keep the
+software mask and the stub `sigsuspend` (the backends report "not provided"), and `pthread_kill` toward
+another thread is `ENOTSUP` there. `signal_threads_test` covers the Linux behaviour.
+
 x86_64's `rt_sigaction` requires `SA_RESTORER` plus a real, executable
 restorer address (a tiny trampoline the kernel jumps to after running the
 handler, whose only job is `rt_sigreturn(2)`); aarch64 needs neither --

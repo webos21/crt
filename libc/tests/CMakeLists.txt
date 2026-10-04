@@ -456,6 +456,18 @@ set_tests_properties(pthread_native_tls_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_native_tls_test: ok"
 )
 
+# Executable-memory contract for a JIT (Web Tranche 1C).
+add_crt_test(jit_memory_test jit_memory_test.c)
+set_tests_properties(jit_memory_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "jit_memory_test: ok"
+)
+
+# Per-thread signal masks, sa_mask and a blocking sigsuspend (WTF thread suspend, JSC VM traps).
+add_crt_test(signal_threads_test signal_threads_test.c)
+set_tests_properties(signal_threads_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "signal_threads_test: ok"
+)
+
 add_crt_test(bionic_surface_test bionic_surface_test.c)
 set_tests_properties(bionic_surface_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "bionic_surface_test: ok"

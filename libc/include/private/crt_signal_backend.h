@@ -38,6 +38,26 @@ int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_acti
  * the host mask in sync. Returns 0 on success, -1 with errno set on failure. */
 int __crt_signal_backend_set_mask(int how, const sigset_t* set);
 
+/* The fuller forms. Return 1 when the host backend does not provide the operation
+ * (macOS and Windows: signal.c then keeps its own software bookkeeping), 0 on success,
+ * -1 with errno set on failure.
+ *
+ * set_action_ex: like set_action(DISPATCH) but also hands the host the handler's sa_flags
+ * (SA_RESTART, SA_NODEFER, SA_ONSTACK, SA_NOCLDSTOP, SA_NOCLDWAIT) and its sa_mask: the signals
+ * blocked while the handler runs. A handler that depends on them -- WTF's, which blocks every
+ * other signal for the duration -- is otherwise interrupted by a second signal in the middle of
+ * its work.
+ *
+ * sigprocmask: the calling thread's real mask (it is per thread in the kernel), read and written
+ * in one step; `oldset` receives the previous mask.
+ *
+ * sigsuspend: atomically replace the thread's mask and wait for a signal whose handler returns;
+ * fails with EINTR. */
+int __crt_signal_backend_set_action_ex(int bionic_sig, enum crt_signal_backend_action action,
+                                       int flags, const sigset_t* mask);
+int __crt_signal_backend_sigprocmask(int how, const sigset_t* set, sigset_t* oldset);
+int __crt_signal_backend_sigsuspend(const sigset_t* mask);
+
 /* Implemented once, in libc/src/signal.c. Every backend's own OS-level signal
  * entry point calls this after translating the host's native signal number
  * back to Bionic/Linux numbering. Looks up signal_actions[bionic_sig] and
