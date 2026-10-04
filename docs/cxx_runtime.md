@@ -151,6 +151,32 @@ order and marks each entry as called so repeated finalization is safe.
 `atexit` stack. This lets C++ destructors work when `libc++.a` is linked while
 keeping plain C programs independent of the C++ runtime archive.
 
+## Building upstream C++ programs and libraries
+
+`tools/crt-c++` is also the compiler for ports (gperf, ICU) and for WebKit. Defaults suit
+the CRT's own freestanding runtime, and an unmodified upstream project opts out of them
+with environment variables, set in a port recipe's `build.env` or by the stage driver:
+
+- `CRT_CXX_ENABLE_EXCEPTIONS=1`, `CRT_CXX_ENABLE_RTTI=1`: compile with exceptions / RTTI
+  (the default is `-fno-exceptions -fno-rtti`).
+- `CRT_CXX_HOSTED=1`: pass `-fhosted`. CRT compiles with `-ffreestanding`, under which `main`
+  is an ordinary function and an upstream `int main(int, char**)` gets a mangled name that
+  `crt1` cannot call (CRT's own tests write `extern "C" int main`). It also drops a
+  caller-supplied `-ffreestanding` (the packaged `crt-toolchain.cmake` adds one), which would
+  otherwise win by coming later. Opt-in because it changes `__STDC_HOSTED__` for the libc++/
+  Skia builds that have always been freestanding.
+- `CRT_CXX_RUNTIME_LINKAGE=shared`: link libc++/libc++abi/libunwind **and libc/libm/libdl**
+  dynamically into the executable. Use it whenever the executable loads CRT shared libraries:
+  with the static default the process holds two libcs (the executable's `libc.a` and the
+  libraries' `libc.so`), each with its own thread/key registry and allocator, and threads
+  created by one are unknown to the other.
+
+On Linux a stray `-lm`/`-ldl` from an upstream makefile is dropped in a static-runtime link
+(the static link already names `libm.a`/`libdl.a`; the extra option would add a
+`NEEDED libm.so` with no rpath, which the host loader resolves to glibc's linker script),
+and a `-shared` link gets `crtbegin_so.o` for the per-object `__dso_handle` that C++ static
+destructors register against.
+
 ## Exceptions, RTTI, And Unwind
 
 The bootstrap `cxx` library still defaults to `-fno-exceptions` and

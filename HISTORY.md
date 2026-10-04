@@ -8,6 +8,42 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-04
+
+- **Web Tranche 1 on Linux/x86_64: JavaScriptCore (JSCOnly) builds with the CRT toolchain
+  and passes the interpreter acceptance (1A and 1B); the exercise found and fixed several
+  fundamental CRT/PAL defects.** `tools/build_webkit_jsc.py` builds the pinned WPE WebKit
+  2.54.0 against an installed SDK (C_LOOP interpreter, JIT/FTL/WebAssembly off, Generic
+  event loop, CRT ICU/gperf ports, host Ruby) and runs `libcrtweb/tests/jsc/`: an eight-group
+  script (arithmetic, objects, JSON, RegExp, ICU-backed Unicode/Intl, exceptions, GC stress,
+  microtasks; peak RSS 198 MB) and a C API program that creates/uses/releases a whole VM 150
+  times and 20 times on each of 1/4/8 concurrent threads with flat memory. A clean run takes
+  about six minutes. Details in `docs/crtweb_acceptance.md` (Tranche 1).
+
+  The defects, each found by a failure in this work and fixed in CRT, not in WebKit:
+  `thread_local`/`__thread` was shared by all CRT threads on Linux (clone without
+  `CLONE_SETTLS`) -- native per-thread TLS blocks built from `PT_TLS` images and the
+  initial thread's dtv (x86_64; aarch64 not yet); an executable linked `libc.a` while the
+  shared libraries used `libc.so`, giving the process two libcs with separate thread
+  registries and allocators (`CRT_CXX_RUNTIME_LINKAGE=shared` now links libc.so into the
+  executable); `siginfo_t` lacked `si_addr`, `ucontext_t` was private and `SA_SIGINFO`
+  handlers got a synthesized record and a null context (Bionic/kernel layouts, real
+  forwarding on Linux); `open(O_CLOEXEC)` silently ignored the flag; GNU ld.bfd produced a
+  PIE with a stray `.rela.plt` entry when `PT_TLS` was present (CTest executables now use
+  LLD); and a long list of missing Bionic surface (`pthread_kill`, `pthread_getattr_np` for the
+  initial thread, `sched_*`, `memmem`, `usleep`, `mkostemp`, `fallocate`, `sysinfo`,
+  `sendfile`, `getprogname`, the extra clock ids, `sys/ucontext.h`, `SYS_gettid`/`__NR_*`,
+  `<cxxabi.h>`, ELF32/Nhdr in `<elf.h>`). New tests: `pthread_native_tls_test` (mutation:
+  disabling the TLS setup fails it) and `bionic_surface_test`. Verified: full build, ctest
+  156/157 (sound-card test only), tooling 102/102, `crt-c-dist`; the changed libc sources
+  also syntax-check for aarch64 Linux, macOS and Windows (not run there).
+
+- **Review of the `06-web` plan folded into the docs.** Checked against the pinned 2.54.0
+  source: `PlatformCRT` is a new WebKit port (WPEPlatform only the Linux prototype
+  boundary); `WPEProcessManager` is built only for Android; the tarball has no Windows IPC
+  backend; Tranche 1 split 1A/1B/1C; the frame-producer and input contracts are to be frozen
+  before Tranche 3A, with IME deferred past v1.
+
 ## 2026-10-03
 
 - **Web Tranche 1A (in progress): `gperf` and `icu` ported as CRT recipes on

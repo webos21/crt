@@ -27,8 +27,9 @@ to Linux, macOS, and Windows.
   behind that adapter.
 - Linux uses project-owned `clone` threads and a detached-thread reaper. Joinable
   threads release their control block and owned stack during `pthread_join`.
-  Until the Linux backend grows a Bionic-style TCB/ELF TLS setup, its `crt_tls`
-  backend uses a runtime thread-context registry keyed by kernel tid.
+  Its `crt_tls` backend uses a runtime thread-context registry keyed by kernel
+  tid, and each created thread additionally gets a native ELF TLS block on x86_64
+  (`linux_pthread_lifecycle.md`).
 - macOS keeps the project pthread ABI and calls libSystem pthread entry points
   behind the adaptation layer for native thread lifecycle. Its `crt_tls` backend
   may use compiler TLS because libSystem creates threads with a valid native TLS
@@ -72,7 +73,13 @@ to Linux, macOS, and Windows.
 ## Bionic extension policy
 
 - `pthread_getattr_np` returns the stored project pthread attributes. For the
-  main thread, it returns default attributes.
+  initial thread on Linux it reports the real stack (the end of the
+  `/proc/self/maps` mapping holding the stack pointer, sized by `RLIMIT_STACK`,
+  8 MiB if unlimited); elsewhere it returns default attributes.
+- Linux threads get a native ELF TLS block (x86_64), see
+  `linux_pthread_lifecycle.md`.
+- `pthread_kill` is real on Linux (`tgkill`); toward another thread it fails with
+  `ENOTSUP` on macOS and Windows, which have no delivery mechanism yet.
 - `pthread_gettid_np` returns the backend thread id when the project has a
   control block. For the current thread it asks the backend directly.
 - Thread names are stored in the project thread context.

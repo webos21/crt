@@ -53,6 +53,20 @@
     },
     "build_targets": ["cxxabi"]
   },
+  "post_install_copy": {
+    "linux": [
+      {"from": "include/cxxabi.h", "to": "include/c++/v1/cxxabi.h"},
+      {"from": "include/__cxxabi_config.h", "to": "include/c++/v1/__cxxabi_config.h"}
+    ],
+    "macos": [
+      {"from": "include/cxxabi.h", "to": "include/c++/v1/cxxabi.h"},
+      {"from": "include/__cxxabi_config.h", "to": "include/c++/v1/__cxxabi_config.h"}
+    ],
+    "windows": [
+      {"from": "include/cxxabi.h", "to": "include/c++/v1/cxxabi.h"},
+      {"from": "include/__cxxabi_config.h", "to": "include/c++/v1/__cxxabi_config.h"}
+    ]
+  },
   "extra_files": [
     {
       "path": "src/__crt_dso_handle.cpp",

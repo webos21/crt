@@ -10,6 +10,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/syscall.h>
 #include <sys/uio.h>
 #include <sys/vfs.h>
 #include <unistd.h>
@@ -1745,7 +1746,13 @@ ssize_t pwrite(int fd, const void* buf, size_t count, off_t offset) {
 
 int open(const char* path, int flags, ...) {
   unsigned int mode = 0;
+#if defined(CRT_TARGET_OS_LINUX)
+  /* The kernel's own O_CLOEXEC value, applied atomically by the open itself. */
+  int syscall_flags = flags;
+#else
+  /* Applied below through fcntl(F_SETFD): this project's O_CLOEXEC value is not the host's. */
   int syscall_flags = flags & ~O_CLOEXEC;
+#endif
   va_list args;
   int fd;
 #if !defined(CRT_TARGET_OS_WINDOWS)
@@ -1791,6 +1798,15 @@ int open(const char* path, int flags, ...) {
   if (fd < 0) {
     return -1;
   }
+#if !defined(CRT_TARGET_OS_LINUX)
+  if ((flags & O_CLOEXEC) != 0 && __crt_fd_set_cloexec(fd, 1) != 0) {
+    int saved_errno = errno;
+
+    close(fd);
+    errno = saved_errno;
+    return -1;
+  }
+#endif
   if ((flags & O_DIRECTORY) != 0) {
     struct stat st;
 
@@ -1902,7 +1918,7 @@ int openat(int dirfd, const char* path, int flags, ...) {
   return open(resolved, flags, mode);
 }
 
-static char* fill_temp_template(char* template_path, int create_file, int* fd_out) {
+static char* fill_temp_template(char* template_path, int create_file, int open_flags, int* fd_out) {
   static unsigned long counter;
   size_t length;
   size_t suffix;
@@ -1936,7 +1952,7 @@ static char* fill_temp_template(char* template_path, int create_file, int* fd_ou
       value = value / 62UL + 0x9e3779b9UL;
     }
     if (create_file) {
-      int fd = open(template_path, O_CREAT | O_EXCL | O_RDWR, 0600);
+      int fd = open(template_path, O_CREAT | O_EXCL | O_RDWR | open_flags, 0600);
       if (fd >= 0) {
         if (fd_out != 0) {
           *fd_out = fd;
@@ -1959,7 +1975,7 @@ static char* fill_temp_template(char* template_path, int create_file, int* fd_ou
 }
 
 char* mktemp(char* template_path) {
-  char* result = fill_temp_template(template_path, 0, 0);
+  char* result = fill_temp_template(template_path, 0, 0, 0);
 
   if (result == 0 && template_path != 0) {
     template_path[0] = 0;
@@ -1970,14 +1986,48 @@ char* mktemp(char* template_path) {
 int mkstemp(char* template_path) {
   int fd = -1;
 
-  if (fill_temp_template(template_path, 1, &fd) == 0) {
+  if (fill_temp_template(template_path, 1, 0, &fd) == 0) {
+    return -1;
+  }
+  return fd;
+}
+
+int fallocate(int fd, int mode, off_t offset, off_t length) {
+#if defined(CRT_TARGET_OS_LINUX)
+  long result = syscall(SYS_fallocate, (long)fd, (long)mode, (long)offset, (long)length);
+
+  if (result < 0) {
+    return -1;
+  }
+  return 0;
+#else
+  (void)fd;
+  (void)mode;
+  (void)offset;
+  (void)length;
+  errno = ENOTSUP;
+  return -1;
+#endif
+}
+
+int fallocate64(int fd, int mode, off_t offset, off_t length) {
+  return fallocate(fd, mode, offset, length);
+}
+
+/* mkostemp(): Bionic (API 23) -- mkstemp() with extra open(2) flags; the flags
+ * Bionic documents are O_CLOEXEC, O_APPEND and O_SYNC; O_SYNC is not defined by
+ * this <fcntl.h> yet, so it is not passed through. */
+int mkostemp(char* template_path, int flags) {
+  int fd = -1;
+
+  if (fill_temp_template(template_path, 1, flags & (O_CLOEXEC | O_APPEND), &fd) == 0) {
     return -1;
   }
   return fd;
 }
 
 char* mkdtemp(char* template_path) {
-  char* result = fill_temp_template(template_path, 0, 0);
+  char* result = fill_temp_template(template_path, 0, 0, 0);
 
   if (result == 0) {
     return 0;

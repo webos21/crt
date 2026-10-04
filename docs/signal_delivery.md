@@ -106,6 +106,19 @@ translation table is needed. `sigset_t` is a plain 64-bit `unsigned long`,
 the same size the kernel expects for the `sigsetsize` argument the raw
 syscalls require, so masks pass straight through too.
 
+
+**Real `siginfo_t` and `ucontext_t` on Linux (2026-10-04).** `siginfo_t` has the
+Bionic/Linux layout (a 128-byte record with the `si_pid`/`si_uid`/`si_status`/
+`si_addr`/`si_value`/... accessors over its union) on every host, and on Linux the
+signal backend now forwards the kernel's own `siginfo_t` and `ucontext_t` to an
+`SA_SIGINFO` handler (`__crt_signal_dispatch_info`) instead of a synthesized record
+and a null context. `ucontext_t`/`mcontext_t` are the Bionic/kernel layouts on Linux
+x86_64 (`uc_mcontext.gregs[REG_RIP]`, ...) and aarch64 (the sigcontext), because
+JavaScriptCore reads them in its thread-suspend handler; `getcontext`/`swapcontext`
+save into the same slots. macOS and Windows keep the private, opaque `mcontext_t` and
+the synthesized record (a self-directed `raise()` also synthesizes it everywhere).
+`stack_t` follows the kernel order (`ss_sp`, `ss_flags`, `ss_size`).
+
 x86_64's `rt_sigaction` requires `SA_RESTORER` plus a real, executable
 restorer address (a tiny trampoline the kernel jumps to after running the
 handler, whose only job is `rt_sigreturn(2)`); aarch64 needs neither --

@@ -40,6 +40,39 @@ struct crt_makecontext_frame {
 
 extern void __crt_makecontext_trampoline(void);
 
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+/* Linux: Bionic/kernel ucontext_t. The register slots are named by
+ * private/crt_ucontext_offsets.h (shared with the assembly); every one is checked
+ * against the real structure here so the two cannot drift apart. */
+#include <stddef.h>
+
+#include <private/crt_ucontext_offsets.h>
+
+#define CRT_UC_CHECK(name, expr) typedef char crt_uc_check_##name[(expr) ? 1 : -1]
+#if defined(__x86_64__)
+CRT_UC_CHECK(rbx, offsetof(ucontext_t, uc_mcontext.gregs[REG_RBX]) == CRT_UC_RBX);
+CRT_UC_CHECK(rbp, offsetof(ucontext_t, uc_mcontext.gregs[REG_RBP]) == CRT_UC_RBP);
+CRT_UC_CHECK(r12, offsetof(ucontext_t, uc_mcontext.gregs[REG_R12]) == CRT_UC_R12);
+CRT_UC_CHECK(r13, offsetof(ucontext_t, uc_mcontext.gregs[REG_R13]) == CRT_UC_R13);
+CRT_UC_CHECK(r14, offsetof(ucontext_t, uc_mcontext.gregs[REG_R14]) == CRT_UC_R14);
+CRT_UC_CHECK(r15, offsetof(ucontext_t, uc_mcontext.gregs[REG_R15]) == CRT_UC_R15);
+CRT_UC_CHECK(rsp, offsetof(ucontext_t, uc_mcontext.gregs[REG_RSP]) == CRT_UC_RSP);
+CRT_UC_CHECK(rip, offsetof(ucontext_t, uc_mcontext.gregs[REG_RIP]) == CRT_UC_RIP);
+#define CRT_MCTX_SP_NEEDS_ODD_ALIGN 1
+#else
+CRT_UC_CHECK(x19, offsetof(ucontext_t, uc_mcontext.regs[19]) == CRT_UC_X19);
+CRT_UC_CHECK(x21, offsetof(ucontext_t, uc_mcontext.regs[21]) == CRT_UC_X21);
+CRT_UC_CHECK(x23, offsetof(ucontext_t, uc_mcontext.regs[23]) == CRT_UC_X23);
+CRT_UC_CHECK(x25, offsetof(ucontext_t, uc_mcontext.regs[25]) == CRT_UC_X25);
+CRT_UC_CHECK(x27, offsetof(ucontext_t, uc_mcontext.regs[27]) == CRT_UC_X27);
+CRT_UC_CHECK(x29, offsetof(ucontext_t, uc_mcontext.regs[29]) == CRT_UC_X29);
+CRT_UC_CHECK(x30, offsetof(ucontext_t, uc_mcontext.regs[30]) == CRT_UC_X30);
+CRT_UC_CHECK(sp, offsetof(ucontext_t, uc_mcontext.sp) == CRT_UC_SP);
+CRT_UC_CHECK(pc, offsetof(ucontext_t, uc_mcontext.pc) == CRT_UC_PC);
+CRT_UC_CHECK(d8, offsetof(ucontext_t, uc_mcontext.__reserved) == CRT_UC_D8);
+#define CRT_MCTX_SP_NEEDS_ODD_ALIGN 0
+#endif
+#else
 #if defined(CRT_TARGET_OS_WINDOWS) && (defined(__x86_64__) || defined(_M_X64))
 #define CRT_MCTX_BOOTSTRAP_OFFSET 0
 #define CRT_MCTX_SP_OFFSET 64
@@ -62,6 +95,7 @@ extern void __crt_makecontext_trampoline(void);
 static void mctx_store_ptr(mcontext_t* mc, size_t byte_offset, void* value) {
   memcpy(mc->__opaque + byte_offset, &value, sizeof(value));
 }
+#endif
 
 void makecontext(ucontext_t* ucp, void (*func)(void), int argc, ...) {
   struct crt_makecontext_frame* frame;
@@ -112,9 +146,20 @@ void makecontext(ucontext_t* ucp, void (*func)(void), int argc, ...) {
   aligned_sp -= 8;
 #endif
 
+#if defined(__linux__) && defined(__x86_64__)
+  ucp->uc_mcontext.gregs[REG_RBX] = (greg_t)(uintptr_t)frame;
+  ucp->uc_mcontext.gregs[REG_RSP] = (greg_t)aligned_sp;
+  ucp->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)__crt_makecontext_trampoline;
+#elif defined(__linux__) && defined(__aarch64__)
+  ucp->uc_mcontext.regs[19] = (unsigned long long)(uintptr_t)frame;
+  ucp->uc_mcontext.sp = (unsigned long long)aligned_sp;
+  ucp->uc_mcontext.regs[30] = (unsigned long long)(uintptr_t)__crt_makecontext_trampoline;
+  ucp->uc_mcontext.pc = (unsigned long long)(uintptr_t)__crt_makecontext_trampoline;
+#else
   mctx_store_ptr(&ucp->uc_mcontext, CRT_MCTX_BOOTSTRAP_OFFSET, frame);
   mctx_store_ptr(&ucp->uc_mcontext, CRT_MCTX_SP_OFFSET, (void*)aligned_sp);
   mctx_store_ptr(&ucp->uc_mcontext, CRT_MCTX_PC_OFFSET, (void*)__crt_makecontext_trampoline);
+#endif
 
 #if defined(CRT_TARGET_OS_WINDOWS) && (defined(__x86_64__) || defined(_M_X64))
   /*

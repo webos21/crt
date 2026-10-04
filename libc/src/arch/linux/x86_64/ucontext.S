@@ -31,22 +31,27 @@
  * not independently re-verified on real Linux hardware from this
  * Windows-only dev session.
  */
+#include <private/crt_ucontext_offsets.h>
+
+/* Register slots: the Bionic/kernel gregs[] slots of ucontext_t (see
+ * include/ucontext.h and private/crt_ucontext_offsets.h), not the private
+ * 0/8/.../56 layout the comment above describes for macOS/Windows. */
 .text
 
 .globl getcontext
 .type getcontext, @function
 .p2align 4, 0x90
 getcontext:
-  movq %rbx, 0(%rdi)
-  movq %rbp, 8(%rdi)
-  movq %r12, 16(%rdi)
-  movq %r13, 24(%rdi)
-  movq %r14, 32(%rdi)
-  movq %r15, 40(%rdi)
+  movq %rbx, CRT_UC_RBX(%rdi)
+  movq %rbp, CRT_UC_RBP(%rdi)
+  movq %r12, CRT_UC_R12(%rdi)
+  movq %r13, CRT_UC_R13(%rdi)
+  movq %r14, CRT_UC_R14(%rdi)
+  movq %r15, CRT_UC_R15(%rdi)
   leaq 8(%rsp), %rax
-  movq %rax, 48(%rdi)
+  movq %rax, CRT_UC_RSP(%rdi)
   movq (%rsp), %rax
-  movq %rax, 56(%rdi)
+  movq %rax, CRT_UC_RIP(%rdi)
   xorl %eax, %eax
   retq
 .size getcontext, . - getcontext
@@ -55,37 +60,37 @@ getcontext:
 .type setcontext, @function
 .p2align 4, 0x90
 setcontext:
-  movq 0(%rdi), %rbx
-  movq 8(%rdi), %rbp
-  movq 16(%rdi), %r12
-  movq 24(%rdi), %r13
-  movq 32(%rdi), %r14
-  movq 40(%rdi), %r15
-  movq 48(%rdi), %rsp
-  jmp *56(%rdi)
+  movq CRT_UC_RBX(%rdi), %rbx
+  movq CRT_UC_RBP(%rdi), %rbp
+  movq CRT_UC_R12(%rdi), %r12
+  movq CRT_UC_R13(%rdi), %r13
+  movq CRT_UC_R14(%rdi), %r14
+  movq CRT_UC_R15(%rdi), %r15
+  movq CRT_UC_RSP(%rdi), %rsp
+  jmp *CRT_UC_RIP(%rdi)
 .size setcontext, . - setcontext
 
 .globl swapcontext
 .type swapcontext, @function
 .p2align 4, 0x90
 swapcontext:
-  movq %rbx, 0(%rdi)
-  movq %rbp, 8(%rdi)
-  movq %r12, 16(%rdi)
-  movq %r13, 24(%rdi)
-  movq %r14, 32(%rdi)
-  movq %r15, 40(%rdi)
-  movq %rsp, 48(%rdi)
+  movq %rbx, CRT_UC_RBX(%rdi)
+  movq %rbp, CRT_UC_RBP(%rdi)
+  movq %r12, CRT_UC_R12(%rdi)
+  movq %r13, CRT_UC_R13(%rdi)
+  movq %r14, CRT_UC_R14(%rdi)
+  movq %r15, CRT_UC_R15(%rdi)
+  movq %rsp, CRT_UC_RSP(%rdi)
   leaq 1f(%rip), %rax
-  movq %rax, 56(%rdi)
-  movq 0(%rsi), %rbx
-  movq 8(%rsi), %rbp
-  movq 16(%rsi), %r12
-  movq 24(%rsi), %r13
-  movq 32(%rsi), %r14
-  movq 40(%rsi), %r15
-  movq 48(%rsi), %rsp
-  jmp *56(%rsi)
+  movq %rax, CRT_UC_RIP(%rdi)
+  movq CRT_UC_RBX(%rsi), %rbx
+  movq CRT_UC_RBP(%rsi), %rbp
+  movq CRT_UC_R12(%rsi), %r12
+  movq CRT_UC_R13(%rsi), %r13
+  movq CRT_UC_R14(%rsi), %r14
+  movq CRT_UC_R15(%rsi), %r15
+  movq CRT_UC_RSP(%rsi), %rsp
+  jmp *CRT_UC_RIP(%rsi)
 1:
   xorl %eax, %eax
   retq

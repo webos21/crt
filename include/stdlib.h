@@ -111,6 +111,7 @@ int unsetenv(const char* name);
 char* realpath(const char* path, char* resolved_path);
 char* mktemp(char* template_path);
 int mkstemp(char* template_path);
+int mkostemp(char* template_path, int flags);
 char* mkdtemp(char* template_path);
 int mblen(const char* s, size_t n);
 size_t mbstowcs(wchar_t* dst, const char* src, size_t n);

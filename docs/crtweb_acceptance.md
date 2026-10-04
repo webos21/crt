@@ -134,6 +134,66 @@ create/destroy with a leak check. Linux, then Windows and macOS.
 JIT stress, exception/unwind, repeated execution. Kept separate so a failure is
 attributed to basic runtime/PAL behaviour (1B) or to executable memory (1C).
 
+**Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
+macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the
+verified pin against an installed SDK (`02-cxx` here) and runs the acceptance; the
+whole run from an empty work root takes about six minutes (build 297 s) and passes.
+
+- *1A.* JSCOnly needs ICU >= 70.1 (`data`, `uc`, `i18n`), gperf and Ruby. ICU 78.3 and
+  gperf 3.3 are CRT ports (`porting/recipes/icu.json`, `gperf.json`, both passing their
+  recipe tests); Ruby is the one host build tool. The first-green configuration is the
+  C_LOOP interpreter (JIT, FTL, WebAssembly and the sampling profiler off) with the
+  `Generic` event loop, no GLib; every deviation is a CMake option or compiler flag
+  recorded in the harness with its reason (`USE_HEADER_MAPS=OFF` because the release
+  tarball omits `hmaptool`, `-mcx16`, `-ftls-model=initial-exec`).
+- *1B acceptance.* `libcrtweb/tests/jsc/jsc_acceptance.js` runs eight groups through the
+  `jsc` shell -- arithmetic (including BigInt), objects/arrays/classes/Proxy, JSON,
+  RegExp (named groups, lookbehind, Unicode properties), Unicode through ICU
+  (`toUpperCase` of sharp s, NFD/NFC, surrogate pairs, `Intl.Collator` for `sv` versus
+  `en`, `Intl.NumberFormat`, Turkish dotless i, `Intl.Segmenter`), exceptions (including
+  stack-overflow detection), GC stress (about 400 MB of short-lived objects across full
+  collections, survivors checked, WeakRef/FinalizationRegistry, a 200,000-object live set),
+  and Promise/async microtask ordering -- and passes with a peak RSS of 198 MB (bound
+  450 MB). `jsc_context_cycle` creates, uses and releases a JS global context (a whole VM)
+  150 times, then runs 20 create/use/release iterations on each of 1, 4 and 8 threads
+  concurrently, checking results and resident memory: 0 failures in every configuration, with
+  resident memory flat (growth within +/-1 MB after warm-up; 6 of 6 repeated 8-thread runs
+  clean).
+- *Mutation.* Making `__crt_linux_thread_tls_size()` decline reverts threads to shared TLS
+  and fails `pthread_native_tls_test` (and, before the fix, every JSC thread test); restored.
+- *Not covered.* The JIT (1C), any host but Linux/x86_64, aarch64 (native thread TLS is not
+  implemented there, so threaded JSC would still misbehave), and the sampling profiler and
+  WebAssembly (they need the JIT tiers and signal-based thread suspension).
+
+**CRT gaps this exposed (all fixed in CRT/PAL, none by changing WebKit):**
+
+1. *`thread_local` was shared by every CRT thread on Linux* (one address, values bleeding):
+   native per-thread ELF TLS blocks, control block and dtv for `pthread_create` threads
+   (`docs/linux_pthread_lifecycle.md`).
+2. *An executable linked its own `libc.a` while the shared libraries used `libc.so`*, so a
+   process had two libcs with separate thread/key registries and allocators (a library's
+   `pthread_getspecific` returned the main thread's value in every worker; heap panics).
+   Under shared runtime linkage (`CRT_CXX_RUNTIME_LINKAGE=shared`) `crt-c++` now links
+   `libc.so`/`libm.so`/`libdl.so` into the executable too.
+3. *`siginfo_t` had no `si_addr`, `ucontext_t` was a private blob and handlers got a null
+   context*: Bionic/kernel layouts and real forwarding on Linux (`docs/signal_delivery.md`).
+4. *`open(..., O_CLOEXEC)` silently ignored the flag* on Linux (the descriptor leaked into
+   exec'd children); now applied atomically (Linux) or with `fcntl` (elsewhere).
+5. *Bionic surface JSC/WTF needs*: `pthread_kill` (`tgkill`), `pthread_getattr_np` for the
+   initial thread, `sched_*` and `SCHED_BATCH/IDLE`, `memmem`, `usleep`, `mkostemp`,
+   `fallocate`, `sysinfo`, `sendfile`, `getprogname`, `CLOCK_BOOTTIME`/`_COARSE`/`_RAW` and the
+   CPU-time clocks, `sys/ucontext.h`, `SYS_gettid`/`__NR_*`, `<cxxabi.h>` in the C++ SDK.
+   `bionic_surface_test` covers them; the macOS and Windows implementations of the clocks,
+   `sched_*` and the signal record are compile-checked there but not run.
+6. *GNU ld.bfd links a PIE that has `PT_TLS` with a stray `.rela.plt` entry the loader
+   rejects*: the Linux CTest executables now link with LLD, the project's primary linker.
+
+*Recorded, not fixed:* `libc++.so.1` records `NEEDED libatomic.so.1` (a host library); the
+ICU shared libraries and `libc++abi.so` use the global-dynamic TLS model and so reference
+the loader-provided `__tls_get_addr`, which is why the harness links with
+`--allow-shlib-undefined`; the default thread stack is 1 MiB (as in Bionic), far less than
+JavaScriptCore wants, so an embedder must size the stacks of threads that run script.
+
 ### 2. Linux WPE reference baseline
 
 Build upstream WPE unchanged and render local HTML with its own built-in

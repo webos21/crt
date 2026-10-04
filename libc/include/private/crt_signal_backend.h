@@ -44,4 +44,12 @@ int __crt_signal_backend_set_mask(int how, const sigset_t* set);
  * invokes it the same way raise() does for a self-directed signal. */
 void __crt_signal_dispatch(int bionic_sig);
 
+/* Same, for a backend that received the host's own siginfo_t and ucontext_t
+ * (Linux: the kernel's records, which are the Bionic layouts in <signal.h> and
+ * <ucontext.h>). An SA_SIGINFO handler is then called with that real siginfo_t
+ * and ucontext_t -- si_addr for a fault, uc_mcontext.gregs[] for a thread that was
+ * interrupted -- instead of the synthesized record raise() builds. `uctx` is
+ * passed through untouched and may be null. */
+void __crt_signal_dispatch_info(int bionic_sig, const siginfo_t* info, void* uctx);
+
 #endif

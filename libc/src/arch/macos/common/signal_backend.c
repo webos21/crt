@@ -43,9 +43,12 @@ struct crt_darwin_siginfo {
   int si_signo;
   int si_errno;
   int si_code;
-  int32_t si_pid;
-  uint32_t si_uid;
-  int si_status;
+  /* Named host_* because <signal.h> #defines si_pid/si_uid/si_status as
+   * accessors for this project's own siginfo_t (Bionic spelling), which would
+   * otherwise rewrite these member names too. */
+  int32_t host_si_pid;
+  uint32_t host_si_uid;
+  int host_si_status;
   /* remaining fields (si_addr, si_value, si_band, reserved padding) are not
    * used here and are intentionally omitted from this declaration. */
 };

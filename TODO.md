@@ -73,15 +73,17 @@ then macOS/arm64.
   2.54.0 pinned and verified (`libcrtweb/third_party/webkit/`: recomputed SHA-256, signed
   tag, license-file inventory), upstream mapping written, security/SBOM policy
   confirmed; evidence in `HISTORY.md` and `docs/crtweb_acceptance.md`.
-* [ ] **1. JavaScriptCore / JSCOnly bring-up.** Linux first, then a quick
-  Windows and macOS replay; built against the installed SDK by
-  `tools/build_webkit_jsc.py`, never host clang.
-  * [ ] **1A. Dependency ports.** `gperf` and `icu` are done on Linux (recipes
-    pass; `HISTORY.md` 2026-10-03). Remaining: Ruby (>= 2.5) installed by the
-    maintainer, `tools/build_webkit_jsc.py`, and the Windows/macOS port replays.
-  * [ ] **1B. Interpreter first-green.** JIT off, `Generic` event loop; the CRT
-    acceptance list is in `docs/crtweb_acceptance.md`.
-  * [ ] **1C. JIT.** Executable memory, W^X, GC+JIT stress, unwind.
+* [ ] **1. JavaScriptCore / JSCOnly bring-up.** Linux/x86_64 1A (dependency ports) and 1B
+  (interpreter first-green) are done 2026-10-04 (`HISTORY.md`, `docs/crtweb_acceptance.md`),
+  built by `tools/build_webkit_jsc.py` against an installed SDK.
+  * [ ] **1C. JIT.** Executable memory, W^X, GC+JIT stress, unwind (Linux first).
+  * [ ] **Replays.** Windows/x64 and macOS/arm64: the ICU/gperf ports, the harness, the
+    clocks/`sched_*`/signal-record code compile-checked there but never run; aarch64 Linux
+    needs native thread TLS (variant I) first.
+  * [ ] **Follow-ups found.** `libc++.so` records `NEEDED libatomic.so.1` (host library); ICU
+    and libc++abi use global-dynamic TLS (loader-provided `__tls_get_addr`); the default
+    thread stack is 1 MiB; run the harness from the installed `05-ui` SDK and from the
+    isolated stage chain (Tranche 10).
 * [ ] **2. Linux WPE reference baseline.** Upstream WPE unchanged rendering
   local HTML; the known-good baseline to diff `PlatformCRT` against.
 * [ ] **3. `PlatformCRT` graphics and input prototype.** 3A: Linux WPEPlatform

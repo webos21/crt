@@ -48,6 +48,7 @@ set(CRT_LIBC_SOURCES
   src/stack_protector.c
   src/stdio.c
   src/syslog.c
+  src/sysinfo.c
   src/syscall_public.c
   src/strtol.c
   src/strtoll.c
@@ -69,6 +70,7 @@ set(CRT_LIBC_SOURCES
   src/xattr.c
   src/string/memchr.c
   src/string/memrchr.c
+  src/string/memmem.c
   src/string/memccpy.c
   src/string/memcmp.c
   src/string/memcpy.c
@@ -204,6 +206,9 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   # getauxval() (include/sys/auxv.h) -- Linux-only, no macOS/Windows
   # equivalent kernel mechanism exists (see that file's own comment).
   set(CRT_LINUX_AUXV_FILE src/arch/linux/common/auxv.c)
+  # Native ELF TLS block/TCB/dtv for pthread_create()'d threads (see that file's
+  # own comment: without it every thread shares the creator's thread_local data).
+  set(CRT_LINUX_THREAD_TLS_FILE src/arch/linux/common/thread_tls.c)
   # Real ioctl(TCGETS/TCSETS*)-backed tcgetattr()/tcsetattr()/etc -- see
   # that file's own comment for the round-trip bug this replaces.
   set(CRT_LINUX_TERMIOS_FILE src/arch/linux/common/termios.c)
@@ -278,7 +283,7 @@ if(CRT_TARGET_OS STREQUAL "macos")
 endif()
 target_sources(c PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
 if(CRT_TARGET_OS STREQUAL "linux")
-  target_sources(c PRIVATE ${CRT_LINUX_AUXV_FILE})
+  target_sources(c PRIVATE ${CRT_LINUX_AUXV_FILE} ${CRT_LINUX_THREAD_TLS_FILE})
   target_sources(c PRIVATE ${CRT_LINUX_TERMIOS_FILE})
   target_sources(c PRIVATE ${CRT_LINUX_CXA_ATEXIT_FILE})
 endif()
@@ -289,6 +294,7 @@ target_sources(c PRIVATE $<TARGET_OBJECTS:crt_setjmp>)
 
 add_library(crt_ucontext OBJECT ${CRT_UCONTEXT_FILE})
 target_link_libraries(crt_ucontext PRIVATE crt_build_flags)
+target_include_directories(crt_ucontext PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_sources(c PRIVATE $<TARGET_OBJECTS:crt_ucontext>)
 
 if(CRT_TARGET_OS STREQUAL "windows")
@@ -405,7 +411,7 @@ if(CRT_TARGET_OS STREQUAL "macos")
 endif()
 target_sources(c_shared PRIVATE ${CRT_SIGNAL_BACKEND_FILE})
 if(CRT_TARGET_OS STREQUAL "linux")
-  target_sources(c_shared PRIVATE ${CRT_LINUX_AUXV_FILE})
+  target_sources(c_shared PRIVATE ${CRT_LINUX_AUXV_FILE} ${CRT_LINUX_THREAD_TLS_FILE})
   target_sources(c_shared PRIVATE ${CRT_LINUX_TERMIOS_FILE})
   target_sources(c_shared PRIVATE ${CRT_LINUX_CXA_ATEXIT_FILE})
 endif()

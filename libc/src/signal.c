@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <private/crt_signal.h>
@@ -271,7 +272,7 @@ unsigned long __crt_signal_delivery_generation(void) {
  * OS-delivered signal reaching __crt_signal_dispatch() was already allowed
  * through by the host's own mask, kept in sync by
  * __crt_signal_backend_set_mask()). */
-static void deliver_signal(int sig) {
+static void deliver_signal(int sig, const siginfo_t* host_info, void* host_context) {
   struct sigaction* action = &signal_actions[sig];
   sighandler_t handler = action->sa_handler;
 
@@ -281,14 +282,19 @@ static void deliver_signal(int sig) {
   if ((action->sa_flags & SA_SIGINFO) != 0 && action->sa_sigaction != 0) {
     siginfo_t info;
 
-    info.si_signo = sig;
-    info.si_errno = 0;
-    info.si_code = 0;
-    info.si_pid = getpid();
-    info.si_uid = geteuid();
-    info.si_status = 0;
+    if (host_info != 0) {
+      info = *host_info;
+    } else {
+      memset(&info, 0, sizeof(info));
+      info.si_signo = sig;
+      info.si_errno = 0;
+      info.si_code = 0;
+      info.si_pid = getpid();
+      info.si_uid = geteuid();
+      info.si_status = 0;
+    }
     ++signal_delivery_generation;
-    action->sa_sigaction(sig, &info, 0);
+    action->sa_sigaction(sig, &info, host_context);
     return;
   }
   if (handler != SIG_DFL && handler != 0) {
@@ -309,7 +315,7 @@ int raise(int sig) {
   if ((signal_mask & signal_bit(sig)) != 0) {
     return 0;
   }
-  deliver_signal(sig);
+  deliver_signal(sig, 0, 0);
   return 0;
 }
 
@@ -320,7 +326,14 @@ void __crt_signal_dispatch(int sig) {
   if (!signal_valid(sig)) {
     return;
   }
-  deliver_signal(sig);
+  deliver_signal(sig, 0, 0);
+}
+
+void __crt_signal_dispatch_info(int sig, const siginfo_t* info, void* uctx) {
+  if (!signal_valid(sig)) {
+    return;
+  }
+  deliver_signal(sig, info, uctx);
 }
 
 void abort(void) {

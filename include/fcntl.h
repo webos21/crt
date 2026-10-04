@@ -83,6 +83,10 @@ int open(const char* path, int flags, ...);
 int openat(int dirfd, const char* path, int flags, ...);
 int creat(const char* path, mode_t mode);
 int fcntl(int fd, int cmd, ...);
+/* fallocate(): Bionic <fcntl.h>. Linux only underneath; elsewhere it fails with
+ * ENOTSUP, and callers fall back to ftruncate()/write(). */
+int fallocate(int fd, int mode, off_t offset, off_t length);
+int fallocate64(int fd, int mode, off_t offset, off_t length);
 
 #ifdef __cplusplus
 }

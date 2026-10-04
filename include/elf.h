@@ -192,6 +192,24 @@ typedef struct {
 #define ELFMAG "\177ELF"
 #define SELFMAG 4
 
+/* Note sections/segments (PT_NOTE): the header common to both classes. */
+typedef struct {
+  Elf32_Word n_namesz;
+  Elf32_Word n_descsz;
+  Elf32_Word n_type;
+} Elf32_Nhdr;
+
+typedef struct {
+  Elf64_Word n_namesz;
+  Elf64_Word n_descsz;
+  Elf64_Word n_type;
+} Elf64_Nhdr;
+
+#define NT_GNU_ABI_TAG 1
+#define NT_GNU_HWCAP 2
+#define NT_GNU_BUILD_ID 3
+#define NT_GNU_GOLD_VERSION 4
+
 #define EV_NONE 0
 #define EV_CURRENT 1
 #define EV_NUM 2

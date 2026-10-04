@@ -394,6 +394,16 @@ int timer_getoverrun(timer_t timer) {
   return __set_errno(ENOTSUP);
 }
 
+/* usleep(): Bionic's unistd.h (marked obsolescent by POSIX, still provided).
+ * Built on nanosleep(); like Bionic it returns 0, or -1 with errno (EINTR). */
+int usleep(useconds_t microseconds) {
+  struct timespec request;
+
+  request.tv_sec = (time_t)(microseconds / 1000000U);
+  request.tv_nsec = (long)(microseconds % 1000000U) * 1000L;
+  return nanosleep(&request, 0);
+}
+
 clock_t clock(void) {
   struct timespec ts;
 
@@ -405,6 +415,26 @@ clock_t clock(void) {
 
 #if defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_clock_gettime(clockid_t clock_id, struct timespec* tp) {
+  /* Linux/Bionic clock ids that Darwin has no separate counter for: the coarse
+   * and raw variants read the same source, and CLOCK_BOOTTIME is approximated by
+   * CLOCK_MONOTONIC (mach_absolute_time does not advance while the machine is
+   * asleep, so BOOTTIME under-counts across a suspend). */
+  if (clock_id == CLOCK_REALTIME_COARSE) {
+    clock_id = CLOCK_REALTIME;
+  } else if (clock_id == CLOCK_MONOTONIC_RAW || clock_id == CLOCK_MONOTONIC_COARSE ||
+             clock_id == CLOCK_BOOTTIME) {
+    clock_id = CLOCK_MONOTONIC;
+  }
+  if (clock_id == CLOCK_PROCESS_CPUTIME_ID || clock_id == CLOCK_THREAD_CPUTIME_ID) {
+    /* Darwin's own ids: CLOCK_PROCESS_CPUTIME_ID is 12, CLOCK_THREAD_CPUTIME_ID is 16. */
+    uint64_t cpu_nsec = clock_gettime_nsec_np(clock_id == CLOCK_PROCESS_CPUTIME_ID ? 12 : 16);
+    if (cpu_nsec == 0) {
+      return -EINVAL;
+    }
+    tp->tv_sec = (time_t)(cpu_nsec / UINT64_C(1000000000));
+    tp->tv_nsec = (long)(cpu_nsec % UINT64_C(1000000000));
+    return 0;
+  }
   if (clock_id == CLOCK_REALTIME) {
     struct timeval tv;
     if (gettimeofday(&tv, 0) != 0) {

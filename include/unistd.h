@@ -194,6 +194,8 @@ int execve(const char* path, char* const argv[], char* const envp[]);
 int execv(const char* path, char* const argv[]);
 int execvp(const char* file, char* const argv[]);
 long syscall(long number, ...);
+typedef unsigned int useconds_t;
+int usleep(useconds_t microseconds);
 void _exit(int status) __attribute__((noreturn));
 
 #define F_OK 0

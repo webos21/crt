@@ -1,13 +1,19 @@
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <time.h>
 
 #include <private/crt_atomic.h>
+#include <private/crt_thread_tls.h>
 #include <private/crt_tls.h>
 #include <private/crt_wait.h>
 #if defined(CRT_TARGET_OS_MACOS)
@@ -129,6 +135,7 @@ long __crt_sys_futex(int* addr, int op, int value, const void* timeout, int* add
 #define CRT_CLONE_PARENT_SETTID 0x00100000UL
 #define CRT_CLONE_CHILD_CLEARTID 0x00200000UL
 #define CRT_CLONE_CHILD_SETTID 0x01000000UL
+#define CRT_CLONE_SETTLS 0x00080000UL
 #define CRT_CLONE_THREAD_FLAGS \
   (CRT_CLONE_VM | CRT_CLONE_FS | CRT_CLONE_FILES | CRT_CLONE_SIGHAND | CRT_CLONE_THREAD | \
    CRT_CLONE_SYSVSEM | CRT_CLONE_PARENT_SETTID | CRT_CLONE_CHILD_CLEARTID | \
@@ -1634,6 +1641,72 @@ int pthread_attr_setscope(pthread_attr_t* attr, int scope) {
   return EINVAL;
 }
 
+#if defined(CRT_TARGET_OS_LINUX)
+/* Stack of the calling thread when it was not created by pthread_create() (the
+ * process's initial thread): the end of the /proc/self/maps mapping that holds the
+ * current stack pointer is the stack top, and the stack's size is RLIMIT_STACK (8 MiB
+ * if unlimited). The initial stack grows on demand, so the limit -- not the pages
+ * mapped so far -- is the contract, which is also what Bionic and glibc report for
+ * the main thread. Returns 0 on success. */
+static int pthread_current_stack_from_maps(void** base, size_t* size) {
+  char buffer[4096];
+  char line[256];
+  size_t line_length = 0;
+  uintptr_t here = (uintptr_t)&line_length;
+  int fd = open("/proc/self/maps", O_RDONLY);
+  int found = -1;
+  ssize_t count;
+
+  if (fd < 0) {
+    return -1;
+  }
+  while (found != 0 && (count = read(fd, buffer, sizeof(buffer))) > 0) {
+    ssize_t i;
+
+    for (i = 0; i < count && found != 0; ++i) {
+      if (buffer[i] != '\n') {
+        if (line_length < sizeof(line) - 1) {
+          line[line_length++] = buffer[i];
+        }
+        continue;
+      }
+      line[line_length] = 0;
+      line_length = 0;
+      {
+        char* cursor = line;
+        uintptr_t start = 0;
+        uintptr_t end = 0;
+
+        while (*cursor != 0 && *cursor != '-') {
+          start = (start << 4) | (uintptr_t)(*cursor <= '9' ? *cursor - '0' : (*cursor | 32) - 'a' + 10);
+          ++cursor;
+        }
+        if (*cursor == '-') {
+          ++cursor;
+        }
+        while (*cursor != 0 && *cursor != ' ') {
+          end = (end << 4) | (uintptr_t)(*cursor <= '9' ? *cursor - '0' : (*cursor | 32) - 'a' + 10);
+          ++cursor;
+        }
+        if (here >= start && here < end) {
+          struct rlimit limit;
+          unsigned long stack_size = 8UL * 1024UL * 1024UL;
+
+          if (getrlimit(RLIMIT_STACK, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY) {
+            stack_size = (unsigned long)limit.rlim_cur;
+          }
+          *size = stack_size;
+          *base = (void*)(end - stack_size);
+          found = 0;
+        }
+      }
+    }
+  }
+  close(fd);
+  return found;
+}
+#endif
+
 int pthread_getattr_np(pthread_t thread, pthread_attr_t* attr) {
   crt_pthread_control* control;
 
@@ -1645,7 +1718,24 @@ int pthread_getattr_np(pthread_t thread, pthread_attr_t* attr) {
     *attr = control->attr;
     return 0;
   }
-  return pthread_attr_init(attr);
+  {
+    int result = pthread_attr_init(attr);
+
+#if defined(CRT_TARGET_OS_LINUX)
+    /* The initial thread has no control block; describe its real stack, which
+     * stack-bounds consumers (WTF::StackBounds, Boehm-style collectors) rely on. */
+    if (result == 0 && pthread_is_current_thread(thread)) {
+      void* base = 0;
+      size_t size = 0;
+
+      if (pthread_current_stack_from_maps(&base, &size) == 0) {
+        attr->stack_base = base;
+        attr->stack_size = size;
+      }
+    }
+#endif
+    return result;
+  }
 }
 
 int pthread_create(
@@ -1735,14 +1825,33 @@ int pthread_create(
       return EAGAIN;
     }
   }
-  control->tid = __crt_sys_clone_thread(
-      (char*)control->stack + control->stack_size,
-      pthread_start,
-      control,
-      CRT_CLONE_THREAD_FLAGS,
-      &control->tid_word,
-      &control->tid_word,
-      0);
+  {
+    /* A native ELF TLS block for the new thread (see thread_tls.c): carved from the
+     * top of its stack, which is freed with the stack. A thread that cannot get one
+     * keeps the creator's thread pointer, as before. */
+    char* stack_end = (char*)control->stack + control->stack_size;
+    unsigned long clone_flags = CRT_CLONE_THREAD_FLAGS;
+    void* thread_pointer = 0;
+    size_t tls_size = __crt_linux_thread_tls_size();
+
+    if (tls_size != 0 && tls_size < control->stack_size / 2) {
+      char* region_end = stack_end;
+
+      thread_pointer = __crt_linux_thread_tls_setup(region_end);
+      if (thread_pointer != 0) {
+        stack_end = (char*)(((uintptr_t)region_end - tls_size) & ~(uintptr_t)63);
+        clone_flags |= CRT_CLONE_SETTLS;
+      }
+    }
+    control->tid = __crt_sys_clone_thread(
+        stack_end,
+        pthread_start,
+        control,
+        clone_flags,
+        &control->tid_word,
+        &control->tid_word,
+        thread_pointer);
+  }
   if (control->tid < 0) {
     if (control->stack_owned) {
       munmap(control->mapping, control->mapping_size);
@@ -1988,6 +2097,32 @@ int pthread_setschedprio(pthread_t thread, int priority) {
   }
   param.sched_priority = priority;
   return pthread_setschedparam(thread, SCHED_OTHER, &param);
+}
+
+/* pthread_kill(): POSIX/Bionic -- send `sig` to one thread of this process.
+ * Returns 0 or an errno value (never sets errno). Linux: tgkill(2) on the
+ * thread's kernel tid, so the signal reaches exactly that thread (WTF uses it
+ * to suspend a thread for stack scanning). Signal 0 only checks that the thread
+ * exists. The current thread is handled by raise(), which also covers macOS and
+ * Windows; delivering to *another* thread has no CRT mechanism there yet, so it
+ * fails with ENOTSUP rather than pretending. */
+int pthread_kill(pthread_t thread, int sig) {
+  if (thread == 0 || sig < 0 || sig > 64) {
+    return EINVAL;
+  }
+  if (pthread_is_current_thread(thread)) {
+    return sig == 0 ? 0 : (raise(sig) == 0 ? 0 : errno);
+  }
+#if defined(CRT_TARGET_OS_LINUX)
+  {
+    crt_pthread_control* control = (crt_pthread_control*)(uintptr_t)thread;
+    long result = syscall(SYS_tgkill, (long)getpid(), (long)control->tid, (long)sig);
+
+    return result < 0 ? errno : 0;
+  }
+#else
+  return ENOTSUP;
+#endif
 }
 
 pid_t pthread_gettid_np(pthread_t thread) {

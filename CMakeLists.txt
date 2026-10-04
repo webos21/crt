@@ -819,7 +819,12 @@ function(add_crt_test test_name source_file)
     )
     target_link_libraries(${test_name} PRIVATE System)
   elseif(CRT_TARGET_OS STREQUAL "linux")
+    # LLD, the project's primary linker (tools/crt-c++ already links with it): GNU ld.bfd
+    # leaves an empty-but-present .rela.plt holding one R_X86_64_NONE entry in a PIE that
+    # has a PT_TLS segment, which the dynamic loader then rejects at startup
+    # ("unexpected PLT reloc type 0x00") -- found by pthread_native_tls_test.
     target_link_options(${test_name} PRIVATE
+      -fuse-ld=lld
       -Wl,-e,_start
       -Wl,--gc-sections
     )

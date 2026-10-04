@@ -6166,7 +6166,44 @@ long __crt_sys_gettimeofday(struct timeval* tv) {
   return 0;
 }
 
+struct crt_win_filetime {
+  unsigned long low;
+  unsigned long high;
+};
+__declspec(dllimport) BOOL CRT_WINAPI GetProcessTimes(HANDLE process, struct crt_win_filetime* creation,
+    struct crt_win_filetime* exit_time, struct crt_win_filetime* kernel, struct crt_win_filetime* user);
+__declspec(dllimport) HANDLE CRT_WINAPI GetCurrentThread(void);
+__declspec(dllimport) BOOL CRT_WINAPI GetThreadTimes(HANDLE thread, struct crt_win_filetime* creation,
+    struct crt_win_filetime* exit_time, struct crt_win_filetime* kernel, struct crt_win_filetime* user);
+
+static unsigned long long crt_win_filetime_100ns(const struct crt_win_filetime* value) {
+  return ((unsigned long long)value->high << 32) | value->low;
+}
+
 long __crt_sys_clock_gettime(clockid_t clock_id, struct timespec* tp) {
+  /* Linux/Bionic clock ids with no separate Windows counter: coarse/raw read the
+   * same source, and QueryPerformanceCounter already advances across suspend, so
+   * CLOCK_BOOTTIME shares CLOCK_MONOTONIC's implementation. */
+  if (clock_id == CLOCK_REALTIME_COARSE) {
+    clock_id = CLOCK_REALTIME;
+  } else if (clock_id == CLOCK_MONOTONIC_RAW || clock_id == CLOCK_MONOTONIC_COARSE ||
+             clock_id == CLOCK_BOOTTIME) {
+    clock_id = CLOCK_MONOTONIC;
+  }
+  if (clock_id == CLOCK_PROCESS_CPUTIME_ID || clock_id == CLOCK_THREAD_CPUTIME_ID) {
+    struct crt_win_filetime creation, exit_time, kernel, user;
+    unsigned long long total;
+    BOOL ok = clock_id == CLOCK_PROCESS_CPUTIME_ID
+        ? GetProcessTimes(GetCurrentProcess(), &creation, &exit_time, &kernel, &user)
+        : GetThreadTimes(GetCurrentThread(), &creation, &exit_time, &kernel, &user);
+    if (!ok) {
+      return fail_last_error();
+    }
+    total = (crt_win_filetime_100ns(&kernel) + crt_win_filetime_100ns(&user)) * 100ULL;
+    tp->tv_sec = (time_t)(total / 1000000000ULL);
+    tp->tv_nsec = (long)(total % 1000000000ULL);
+    return 0;
+  }
   if (clock_id == CLOCK_REALTIME) {
     struct timeval tv;
     long result = __crt_sys_gettimeofday(&tv);

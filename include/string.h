@@ -11,6 +11,7 @@ extern "C" {
 void* memcpy(void* dst, const void* src, size_t n);
 void* memchr(const void* s, int c, size_t n);
 void* memrchr(const void* s, int c, size_t n);
+void* memmem(const void* haystack, size_t haystack_len, const void* needle, size_t needle_len);
 void* memccpy(void* dst, const void* src, int c, size_t n);
 int memcmp(const void* s1, const void* s2, size_t n);
 void* memmove(void* dst, const void* src, size_t n);

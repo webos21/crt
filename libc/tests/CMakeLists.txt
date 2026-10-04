@@ -448,6 +448,19 @@ set_tests_properties(ucontext_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "ucontext_test: ok"
 )
 
+# Native TLS for pthread_create()'d threads (Linux used to share the creator's
+# thread_local data between all threads) and the Bionic surface the Web Runtime
+# (WebKit/JavaScriptCore) port needed.
+add_crt_test(pthread_native_tls_test pthread_native_tls_test.c)
+set_tests_properties(pthread_native_tls_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_native_tls_test: ok"
+)
+
+add_crt_test(bionic_surface_test bionic_surface_test.c)
+set_tests_properties(bionic_surface_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "bionic_surface_test: ok"
+)
+
 add_crt_test(wait_test wait_test.c)
 set_tests_properties(wait_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wait_test: ok"

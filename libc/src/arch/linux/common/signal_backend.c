@@ -79,9 +79,9 @@ static int normalize_syscall_result(long result) {
  * by the kernel with a normal C calling convention (via the sa_restorer
  * trampoline on x86_64, or the kernel/vDSO default restorer on aarch64). */
 static void crt_linux_signal_entry(int sig, siginfo_t* info, void* uctx) {
-  (void)info;
-  (void)uctx;
-  __crt_signal_dispatch(sig);
+  /* The kernel's siginfo_t and ucontext_t are the Bionic layouts, so they are
+   * handed to an SA_SIGINFO handler as they are (si_addr, uc_mcontext.gregs[]). */
+  __crt_signal_dispatch_info(sig, info, uctx);
 }
 
 int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_action action) {

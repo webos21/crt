@@ -192,6 +192,16 @@ while [ "$i" -lt "$original_argc" ]; do
       # own prior real use was compile-only through this stage's own
       # in-tree calling context, which never hits this wrapper at all).
       ;;
+    -ffreestanding)
+      # CRT_CXX_HOSTED=1 asks for -fhosted (see common_flags below); a caller-supplied
+      # -ffreestanding -- CMake's CMAKE_CXX_FLAGS_INIT in the packaged
+      # crt-toolchain.cmake adds one to every compile -- would come later on the
+      # command line and win, silently turning `main` back into an ordinary,
+      # mangled C++ function (found building JavaScriptCore's LLIntSettingsExtractor).
+      if [ "${CRT_CXX_HOSTED:-0}" = "1" ]; then
+        keep_arg=0
+      fi
+      ;;
     -lpthread|-lrt)
       # Bionic merged these historical libraries into libc. Let the CRT libc
       # selected below satisfy their symbols instead of leaking a host
@@ -1031,9 +1041,20 @@ if [ "$target_os" = linux ]; then
     if [ -n "${cxx_abi_lib:-}" ]; then set -- "$@" "$cxx_abi_lib"; fi
     if [ -n "${cxx_unwind_lib:-}" ]; then set -- "$@" "$cxx_unwind_lib"; fi
   fi
-  set -- "$@" "${CRT_SYSROOT}/lib/libc.a" \
-    "${CRT_SYSROOT}/lib/libm.a" "${CRT_SYSROOT}/lib/libdl.a" \
-    "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -Wl,--end-group
+  if [ "$runtime_linkage" = shared ]; then
+    # Shared runtime linkage means ONE libc in the process: the shared libraries
+    # (libc++.so, libJavaScriptCore.so, ...) all use libc.so, so the executable must
+    # too. Embedding libc.a here would give the process a second, independent libc --
+    # its own pthread/key/TLS registry and allocator -- and a thread created by the
+    # executable would be unknown to the libc.so copy that a library calls
+    # (pthread_getspecific() then returns the main thread's value for every thread).
+    set -- "$@" "${CRT_SYSROOT}/lib/libc.so" \
+      "${CRT_SYSROOT}/lib/libm.so" "${CRT_SYSROOT}/lib/libdl.so"
+  else
+    set -- "$@" "${CRT_SYSROOT}/lib/libc.a" \
+      "${CRT_SYSROOT}/lib/libm.a" "${CRT_SYSROOT}/lib/libdl.a"
+  fi
+  set -- "$@" "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -Wl,--end-group
   if [ "$runtime_linkage" = shared ]; then
     run_cxx -nostdlib -nostartfiles -nodefaultlibs \
       -Wl,-e,_start -Wl,--gc-sections \

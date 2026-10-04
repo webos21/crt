@@ -180,6 +180,7 @@ int pthread_getschedparam(pthread_t thread, int* policy, struct sched_param* par
 int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param* param);
 int pthread_setschedprio(pthread_t thread, int priority);
 pid_t pthread_gettid_np(pthread_t thread);
+int pthread_kill(pthread_t thread, int sig);
 int pthread_getcpuclockid(pthread_t thread, clockid_t* clock_id);
 int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(void));
 int pthread_setname_np(pthread_t thread, const char* name);
