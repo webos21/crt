@@ -40,6 +40,27 @@ substantive update.
   `crtui-lvgl-fetch` target cannot run while configure fails (an existing "Small UI follow-up"). Open on aarch64:
   DFG/FTL/WebAssembly and W^X (1D), and a shared-library TLS case inside `pthread_native_tls_test` itself.
 
+### Windows: thread_local in the in-tree build (`pthread_native_tls_test`)
+
+`pthread_native_tls_test` did not link on Windows (`undefined symbol: _tls_index`): the freestanding
+startup has no PE TLS directory, and `tools/crt-cc` already lowers `thread_local`/`__thread` to
+`__emutls_get_address()` (`-femulated-tls`, compiler-rt on Win32 TLS slots) for every port, but the
+in-tree CMake build did not. `crt_build_flags` now adds `-femulated-tls` on Windows, and the test
+links `emutls_link_stubs.c`, `uuid.lib` and `--allow-multiple-definition` (the accommodations
+`libcrtgfx` documents for Skia's `thread_local`; a duplicate-`fprintf` warning in the archive member
+is expected). The test now passes (6 threads: distinct addresses, `.tdata`/`.tbss` initial values,
+isolation, creator untouched); the 28 pthread/tls/fork/thread/signal tests and 151 of 152 in the
+full Windows CTest pass. No native PE TLS was implemented: the emulated scheme is the existing
+decision (`docs/import_bionic.md`, Errno TLS Tranche). `bionic_surface_test` also failed on
+Windows (`gettid()` on the initial thread != `getpid()`): `GetCurrentThreadId()` is not the pid, so
+the macOS mapping (initial thread's id recorded at startup returns the pid, other threads keep
+their own) in `gettid()` (`libc/src/process.c`) now applies to Windows too. Full Windows CTest 152/152
+(two timeouts in the first parallel run right after a libc relink passed on rerun). A forked child's
+only thread is a new native thread, so `__crt_atfork_child()` re-records it as the initial thread
+(Windows only); `bionic_surface_test` checks `gettid() == getpid()` in a child (mutation: removing
+the re-record fails exactly that check). The sweep test timed out in parallel runs right after a
+libc relink and passes alone; the cause was not investigated.
+
 ## 2026-10-04
 
 - **Web Tranche 1C replayed on macOS/arm64: the JavaScriptCore Baseline JIT runs on the CRT runtime.** Clean

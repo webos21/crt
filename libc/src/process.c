@@ -454,7 +454,16 @@ static void crt_atfork_run_user_child(void) {
   }
 }
 
+long __crt_sys_thread_id(void);
+extern long __crt_initial_thread_id;
+
 void __crt_atfork_child(crt_thread_context* current_context) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  /* The child's only thread is a new native thread, not the parent's initial one whose id the
+   * copied .data still holds; as on Linux (child tid == child pid) it becomes the "initial"
+   * thread that gettid() maps to getpid(). */
+  __crt_initial_thread_id = __crt_sys_thread_id();
+#endif
   __crt_thread_after_fork_child(current_context);
   __crt_pthread_after_fork_child();
   __crt_malloc_after_fork_child();
@@ -639,16 +648,14 @@ long __crt_sys_posix_spawn(
 }
 #endif
 
-long __crt_sys_thread_id(void);
-extern long __crt_initial_thread_id;
 
 /* gettid(): Bionic's <unistd.h> (the kernel thread id). The initial thread's id equals the pid, as
- * on Linux; on macOS the native thread id differs from the pid, so the initial thread is mapped to
+ * on Linux; on macOS and Windows the native thread id differs from the pid, so the initial thread is mapped to
  * it and every other thread keeps its own (distinct) id. */
 pid_t gettid(void) {
   long tid = __crt_sys_thread_id();
 
-#if defined(CRT_TARGET_OS_MACOS)
+#if defined(CRT_TARGET_OS_MACOS) || defined(CRT_TARGET_OS_WINDOWS)
   if (__crt_initial_thread_id != 0 && tid == __crt_initial_thread_id) {
     return getpid();
   }

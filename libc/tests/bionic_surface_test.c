@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -53,6 +54,18 @@ static void test_gettid(void) {
   CHECK(pthread_create(&thread, 0, report_gettid, &worker_tid) == 0, "pthread_create for gettid");
   CHECK(pthread_join(thread, 0) == 0, "pthread_join for gettid");
   CHECK(worker_tid > 0 && worker_tid != (long)getpid(), "a worker thread's gettid() differs from the pid");
+  {
+    /* The forked child's only thread is its initial thread: gettid() == getpid() there too. */
+    pid_t child = fork();
+    int status = 0;
+
+    if (child == 0) {
+      _exit((long)gettid() == (long)getpid() ? 0 : 3);
+    }
+    CHECK(child > 0, "fork for gettid");
+    CHECK(child > 0 && waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+          "gettid() in a forked child equals its getpid()");
+  }
 #if defined(__linux__) || defined(__APPLE__)
   CHECK(syscall(SYS_gettid) == (long)gettid(), "syscall(SYS_gettid) matches gettid()");
   CHECK(syscall(SYS_getpid) == (long)getpid(), "syscall(SYS_getpid) matches getpid()");
