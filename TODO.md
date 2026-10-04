@@ -87,7 +87,7 @@ then macOS/arm64.
     carried patches, see `docs/crtweb_acceptance.md`); macOS/x86_64 has no signal conversion or JIT permissions.
     Linux/x86_64 re-verified after the macOS replay (2026-10-04, no regression). Linux/aarch64: 1A/1B/1C
     done 2026-10-05 after implementing native thread TLS (variant I); full ctest 136/136, interpreter and Baseline-JIT
-    acceptance green (`HISTORY.md`, `docs/crtweb_acceptance.md`); **next: the same checklist on Windows**
+    acceptance green (`HISTORY.md`, `docs/crtweb_acceptance.md`); Windows/x64 shared-code checks done 2026-10-05 (ctest 152/152, `crt-ui-dist`, tooling tests); **next: a Windows path in the JSC harness**
     ("Linux verification of the macOS replay" in the same document).
     Windows/x64: the ICU/gperf ports, the
     harness, the clocks/`sched_*`/signal code (software signal mask and a stub `sigsuspend`),

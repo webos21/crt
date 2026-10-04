@@ -477,7 +477,7 @@ keys these on the object format instead of `OS(DARWIN)`, or CRT presents macOS a
 *Open on macOS.* x86_64 macOS has neither the signal conversion nor JIT permissions; the DFG/FTL/WebAssembly tiers and
 concurrent compiler threads are 1D; the harness is run from the in-tree `05-ui` SDK, not yet from the isolated stage chain.
 
-**Linux verification of the macOS replay (done on Linux/x86_64 2026-10-04 at `cd954c9` and on Linux/aarch64 2026-10-05; Windows not yet).** The macOS work changed shared
+**Linux verification of the macOS replay (done on Linux/x86_64 2026-10-04 at `cd954c9` and on Linux/aarch64 2026-10-05; Windows/x64 shared-code checks 2026-10-05, JSC harness not yet).** The macOS work changed shared
 libc, headers, wrappers, recipes and the harness. Nothing below has been built or run on Linux (or Windows) since
 Linux/x86_64 closed 1C (`c8d5c11`); the macOS-only code is guarded by `CRT_TARGET_OS_MACOS`, but these shared
 pieces are not, and are what to check:
@@ -522,6 +522,16 @@ No shared-code regression found in the table above. *Wrapper check:* `tools/crt-
 `c8d5c11` and at HEAD were run against a stub compiler that prints its argv, on the Linux SDK, for compile, exe-link
 and `-shared` lines (including `-lm -ldl` and the new `-fdebug-types-section -Wl,--no-undefined`) under six
 `CRT_CXX_*` environments: 54 cases, output byte-identical. *Not checked on that run:* no aarch64 Linux host was available (the aarch64 run follows).
+
+*Result (Windows/x64, 2026-10-05, shared-code checks only).* Incremental build of the existing `out/windows-host-ninja-debug`
+(Skia and LVGL ON) at HEAD after the Linux/aarch64 commit: exit 0, one linker warning (the intended duplicate `fprintf`
+of `pthread_native_tls_test`, below). Full `ctest` 152/152; `crt-ui-dist` builds and `verify_dist` passes;
+`test_verify_dist` 15 and `test_text_relocate` 7 (one POSIX-only skip) pass. The `time.h` row (`_timezone`/`_daylight`
+clashes) compiled clean. Two Windows-only defects the checklist had not named were found and fixed first: the in-tree build
+lacked `-femulated-tls` (so `pthread_native_tls_test` did not link) and `gettid()` on the initial thread, also in a fork
+child, was not the pid (`bionic_surface_test`). *Not done:* the wrapper byte-comparison, and the JSC harness --
+`tools/build_webkit_jsc.py` has no Windows path yet (no ICU/gperf ports for the CRT Windows target, no DLL/`jsc.exe`
+library lookup, `LD_LIBRARY_PATH`/ELF audit only), so 1A/1B/1C on Windows are not started.
 
 **Linux/aarch64 replay, 1A/1B/1C (2026-10-05): green, after implementing native thread TLS for aarch64.**
 Host: Ubuntu 26.04 aarch64 (a QEMU guest, 4 CPUs, kernel 7.0, 4 KiB pages), Clang 21.1.8, from a deleted `out/`.
