@@ -561,6 +561,16 @@ growth about 200 KiB); `jsc_watchdog_test` terminates a compiled `spin` loop on 
 `JSC_usePollingTraps=true`, the first Windows run by decision: the CRT's software signal mask and stub `sigsuspend` are a gate of
 their own), the sampling profiler, DFG/FTL/WebAssembly, W^X, Windows/ARM64.
 
+*Update (2026-10-05): the Windows signal VM-trap gate.* The same Windows/x64 Baseline-JIT binary now runs with
+`JSC_usePollingTraps=false` (the harness no longer overrides it; `JIT_ON_OPTIONS` sets it explicitly): the watchdog's
+VM traps are real signals on the CRT's per-thread signal implementation (`docs/signal_delivery.md`, "Windows:
+thread-directed signals"). Acceptance is unchanged and green (compile proof 2,340 reports, `jsc_watchdog_test` main x3 and
+worker x3 with the compiled `spin` named in the report, 1B again with the JIT, thread cycles, PE audit), and
+`jsc_watchdog_test` was run 100 times with no failure or hang. The first measurement of that loop was 8 hangs in 60 runs:
+WTF's thread suspension signals a thread and waits for its handler, and the target was parked in `pthread_cond_wait`,
+where the CRT did not run handlers; the CRT's blocking waits were made interruptible. Sampling profiler, DFG/FTL,
+concurrent compilation and WebAssembly are 1D.
+
 *What the JIT needed, beyond 1B (carried patch 0003-coff-assembler-flavor, Windows only; nothing else in the tree changes):*
 
 1. *The assembler flavour.* The persona makes offlineasm and the inline assembly take their ELF branches but the object format

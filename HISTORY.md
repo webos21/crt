@@ -10,6 +10,31 @@ substantive update.
 
 ## 2026-10-05
 
+- **Windows/x64: thread-directed signals, per-thread masks and a real `sigsuspend`; JavaScriptCore's Baseline JIT now runs
+  with `JSC_usePollingTraps=false` (Web Tranche 1, signal VM-trap gate).** Windows has no kernel signal delivery, so the CRT
+  builds it in the PAL (`libc/src/arch/windows/common/signal_backend.c`), not in WebKit. Each thread owns a mask/pending
+  set/wake event (`crt_signal_state` inside `crt_thread_context`); `pthread_kill` to a CRT thread (worker or initial)
+  suspends the target, captures its CONTEXT, builds a signal frame (saved CONTEXT, Linux-x86_64-layout `ucontext_t`,
+  `siginfo_t`) on its stack, puts the handler's mask in place while it cannot run, redirects it to a stub that runs the
+  handler and then restores the (possibly rewritten) context with `RtlRestoreContext`. Hardware faults become signals through a
+  vectored handler (`int3`->SIGTRAP with RIP after the instruction, AV->SIGSEGV, illegal instruction->SIGILL, divide->SIGFPE).
+  `sigaction` honours `sa_mask`, `SA_NODEFER`, `SA_RESETHAND`; `pthread_sigmask`/`sigprocmask` are per-thread and a new
+  thread inherits its creator's; `sigsuspend` blocks atomically and returns EINTR after the handler. `ucontext_t` is the
+  Linux x86_64 layout on Windows too (JSC reads and rewrites `REG_RIP`); `getcontext`/`makecontext` keep the Windows-only
+  state (xmm6-15, TEB stack bounds) in unused slots. A thread parked in operating-system code is never interrupted (loader/heap
+  locks, mid-syscall contexts), so the CRT's own blocking waits (`__crt_wait32` behind mutex/cond/sem/once, `pthread_join`,
+  `nanosleep`) are interruptible instead: the sender wakes them (`WakeByAddressAll`/the thread's event) and the handler runs
+  on the waiting thread with a `getcontext` snapshot (what WTF's thread suspension and JSC's conservative scan need). Bugs found
+  by running it: a signal that coalesced while a handler ran was later delivered with a null `ucontext_t`; the new-thread mask
+  was wiped by the context init; `sigsuspend` did not deliver what its temporary mask had held back; a hang that turned out
+  to be a test teardown race; and, only in JSC, a VMTraps sender blocked forever in `sem_wait` because the target sat in
+  `pthread_cond_wait` (8 hangs in 60 runs before the interruptible waits). Verification: `signal_vmtrap_test` (int3, loop
+  interruption of a worker and of the initial thread, 8 threads x 300 rounds, blocked waits) 100/100 and `signal_threads_test`
+  green, full Windows ctest 135/135, JSC Baseline-JIT acceptance with polling traps off (compile proof 2,340 reports,
+  `jsc_watchdog_test` main x3 + worker x3) and the 1B interpreter acceptance green; `jsc_watchdog_test` 100/100 runs, no hang
+  or crash. Not covered (by design): `kill(pid)`/process groups/SIGCHLD from other processes, `poll`/`select`/file I/O waits
+  (a signal there stays pending until the call returns), and threads not created by `pthread_create`.
+
 - **Web Tranche 1 replayed on Linux/aarch64: native thread TLS implemented for aarch64, and the JavaScriptCore
   interpreter and Baseline JIT run on the CRT runtime.** First verification of the shared libc/headers/wrappers/
   recipes/harness work on an aarch64 Linux host (Ubuntu 26.04 aarch64 QEMU guest, Clang 21.1.8, from a deleted
