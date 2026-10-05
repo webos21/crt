@@ -187,9 +187,29 @@ static void record_initial_stack_top(char** envp) {
 #endif
 }
 
+#if defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_current_stack_bounds(void** base, size_t* size);
+
+/* The initial thread's real stack size (the PE's SizeOfStackReserve, 1 MiB by default), recorded
+ * here because this runs on that thread: getrlimit(RLIMIT_STACK) reports it, and WTF::StackBounds
+ * sizes the main thread's stack from that limit (a fixed 8 MiB let JavaScriptCore recurse past the
+ * real stack end). */
+size_t __crt_initial_stack_size;
+#endif
+
 void __crt_env_set_initial(char** envp) {
   __crt_initial_envp = envp;
   __crt_initial_thread_id = __crt_sys_thread_id();
+#if defined(CRT_TARGET_OS_WINDOWS)
+  {
+    void* base = 0;
+    size_t size = 0;
+
+    if (__crt_sys_current_stack_bounds(&base, &size) == 0) {
+      __crt_initial_stack_size = size;
+    }
+  }
+#endif
   record_initial_stack_top(envp);
 }
 

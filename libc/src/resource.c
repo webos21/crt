@@ -5,6 +5,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(CRT_TARGET_OS_WINDOWS)
+extern size_t __crt_initial_stack_size;
+#endif
 #if defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_getrusage(int who, struct rusage* usage);
 #elif defined(CRT_TARGET_OS_WINDOWS)
@@ -24,6 +27,13 @@ int getrlimit(int resource, struct rlimit* rlim) {
     case RLIMIT_STACK:
       rlim->rlim_cur = 8 * 1024 * 1024;
       rlim->rlim_max = RLIM_INFINITY;
+#if defined(CRT_TARGET_OS_WINDOWS)
+      /* The main thread's stack is what the executable reserved, not a POSIX 8 MiB. */
+      if (__crt_initial_stack_size != 0) {
+        rlim->rlim_cur = (rlim_t)__crt_initial_stack_size;
+        rlim->rlim_max = (rlim_t)__crt_initial_stack_size;
+      }
+#endif
       return 0;
     case RLIMIT_CORE:
     case RLIMIT_CPU:
