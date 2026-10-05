@@ -11,8 +11,12 @@
 #define CRT_WINAPI
 #endif
 
-#define CRT_ARG_MAX 256
-#define CRT_COMMAND_LINE_MAX 8192
+/* Windows' own limit is 32767 characters for the whole command line (CreateProcess), so
+ * these hold anything the OS can deliver: a limit below it silently dropped the tail of
+ * a long argument list (a 280-argument link line lost its libraries). A line of N
+ * characters has at most (N + 1) / 2 arguments. */
+#define CRT_ARG_MAX 16385
+#define CRT_COMMAND_LINE_MAX 32768
 
 __declspec(dllimport) char* CRT_WINAPI GetCommandLineA(void);
 

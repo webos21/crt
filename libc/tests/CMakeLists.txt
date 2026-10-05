@@ -451,6 +451,12 @@ set_tests_properties(ucontext_test_runs PROPERTIES
 # Native TLS for pthread_create()'d threads (Linux used to share the creator's
 # thread_local data between all threads) and the Bionic surface the Web Runtime
 # (WebKit/JavaScriptCore) port needed.
+# Every spawned argument reaches the child (Windows startup once kept 255 / 8191 characters).
+add_crt_test(long_argv_test long_argv_test.c)
+set_tests_properties(long_argv_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "long_argv_test: ok"
+)
+
 add_crt_test(pthread_native_tls_test pthread_native_tls_test.c)
 if(CRT_TARGET_OS STREQUAL "windows")
   # thread_local lowers to compiler-rt's emutls.c (-femulated-tls, crt_build_flags). Pulling

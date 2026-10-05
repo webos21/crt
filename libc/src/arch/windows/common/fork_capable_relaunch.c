@@ -60,7 +60,7 @@ typedef unsigned long long SIZE_T;
 #define CRT_INFINITE 0xFFFFFFFFUL
 #define CRT_HANDLE_FLAG_INHERIT 0x00000001UL
 #define CRT_PROCESS_ASLR_POLICY 1
-#define CRT_COMMAND_LINE_MAX 8192
+#define CRT_COMMAND_LINE_MAX 32768
 #define CRT_CREATE_SUSPENDED 0x00000004UL
 
 struct crt_startupinfoex_relaunch {

@@ -1540,6 +1540,37 @@ static int append_command_arg(char* buffer, size_t size, size_t* pos, const char
   return 0;
 }
 
+/* MSYS/Cygwin-style program lookup: a name with no extension that does not exist, but whose
+ * ".exe" does, resolves to the ".exe". ICU's data Makefile runs `../bin/icupkg`, a tool its own
+ * build produced as icupkg.exe, and every Unix-shaped build assumes that works. Returns the
+ * ".exe" spelling in `buffer`, or 0 when the name exists as given, already has an extension,
+ * or no such program exists. */
+static const char* windows_exe_suffix_fallback(const char* host_path, char* buffer, size_t size) {
+  const char* slash;
+  const char* backslash;
+  const char* base = host_path;
+  size_t length;
+
+  if (host_path == 0 || GetFileAttributesA(host_path) != INVALID_FILE_ATTRIBUTES) {
+    return 0;
+  }
+  slash = strrchr(host_path, '/');
+  backslash = strrchr(host_path, '\\');
+  if (slash != 0 && slash + 1 > base) {
+    base = slash + 1;
+  }
+  if (backslash != 0 && backslash + 1 > base) {
+    base = backslash + 1;
+  }
+  length = strlen(host_path);
+  if (*base == 0 || strchr(base, '.') != 0 || length + 5 > size) {
+    return 0;
+  }
+  memcpy(buffer, host_path, length);
+  memcpy(buffer + length, ".exe", 5);
+  return GetFileAttributesA(buffer) != INVALID_FILE_ATTRIBUTES ? buffer : 0;
+}
+
 static long resolve_process_application_path(
     const char* path,
     int search_path,
@@ -1597,6 +1628,18 @@ static long resolve_process_application_path(
 
     if (found != 0 && found < sizeof(searched_path)) {
       host_path = searched_path;
+    }
+  }
+  {
+    char with_exe[4096];
+    const char* fallback = windows_exe_suffix_fallback(host_path, with_exe, sizeof(with_exe));
+
+    if (fallback != 0) {
+      if (strlen(fallback) >= size) {
+        return -ENAMETOOLONG;
+      }
+      strcpy(buffer, fallback);
+      return 0;
     }
   }
   if (strlen(host_path) >= size) {
@@ -4100,6 +4143,15 @@ long __crt_sys_access(const char* path, int mode) {
     return 0;
   }
   attrs = GetFileAttributesA(host_path);
+  if (attrs == INVALID_FILE_ATTRIBUTES && (mode & X_OK) != 0) {
+    char with_exe[4096];
+    const char* fallback = windows_exe_suffix_fallback(host_path, with_exe, sizeof(with_exe));
+
+    if (fallback != 0) {
+      host_path = fallback;
+      attrs = GetFileAttributesA(host_path);
+    }
+  }
   if (attrs == INVALID_FILE_ATTRIBUTES) {
     return fail_last_error();
   }
@@ -5756,6 +5808,14 @@ long __crt_sys_stat_path(const char* path, struct stat* st) {
   if (path_is_dev_zero(path)) {
     return stat_virtual_dev_zero(st);
   }
+  {
+    char with_exe[4096];
+    const char* fallback = windows_exe_suffix_fallback(host_path, with_exe, sizeof(with_exe));
+
+    if (fallback != 0) {
+      host_path = fallback;
+    }
+  }
   handle = CreateFileA(host_path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, 0);
   if (handle == INVALID_HANDLE_VALUE) {
@@ -6548,7 +6608,7 @@ static BOOL crt_createprocess_with_retry(
 
 struct crt_windows_spawn_context {
   char application_path[4096];
-  char command_line[8192];
+  char command_line[32768];  /* CreateProcess's own limit is 32767 */
   struct crt_startupinfo startup;
   struct crt_process_information process;
   char current_directory_buffer[4096];
@@ -6557,7 +6617,7 @@ struct crt_windows_spawn_context {
   char shebang_interpreter[4096];
   char shebang_arg[4096];
   char shebang_script_path[4096];
-  char* shebang_argv[256];
+  char* shebang_argv[16388];
 };
 
 long __crt_sys_posix_spawn(
