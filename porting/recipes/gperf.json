@@ -25,7 +25,19 @@
       "CRT_CXX_ENABLE_EXCEPTIONS": "1"
     },
     "make_args": [],
-    "sysroot_stage": "02-cxx"
+    "sysroot_stage": "02-cxx",
+    "target_overrides": {
+      "windows": {
+        "configure_args": [
+          "--build=x86_64-unknown-linux-android"
+        ],
+        "env": {
+          "CFLAGS": "-O2 -U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER -U__MINGW32__ -U__MINGW64__ -U_WIN64 -UWIN64",
+          "CXXFLAGS": "-O2 -U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER -U__MINGW32__ -U__MINGW64__ -U_WIN64 -UWIN64",
+          "CPPFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER -U__MINGW32__ -U__MINGW64__ -U_WIN64 -UWIN64"
+        }
+      }
+    }
   },
   "tests": [
     {
@@ -40,12 +52,14 @@
   ],
   "status": {
     "linux": "configure-pass",
-    "macos": "configure-pass"
+    "macos": "configure-pass",
+    "windows": "configure-pass"
   },
   "notes": [
     "Added 2026-10-03 for Web Tranche 1: WebKit's CMake (Source/cmake/WebKitCommon.cmake, find_package(Gperf 3.0.1 REQUIRED)) needs gperf to generate perfect-hash tables for WebCore. It is a build tool that runs on the build machine (a C++ program that depends only on the C++ runtime), built as a CRT port like every other tool the project owns rather than taken from the host.",
     "3.3 is the newest release in ftp.gnu.org/gnu/gperf as of 2026-10-03; WebKit requires >= 3.0.1. No upstream patch.",
     "build.sysroot_stage=02-cxx: gperf is a C++ program, so it builds against the cumulative 02-cxx SDK (libc++) instead of the C-only 01-c sysroot every earlier recipe used (tools/crt-port-build.py port_sysroot_for(); the CMake port-build target depends on crt-libcxx-sysroot). build.env.CRT_CXX_HOSTED=1 makes tools/crt-c++ pass -fhosted: CRT compiles C++ with -ffreestanding, under which `main` is an ordinary function and an unmodified `int main(int, char**)` gets a mangled name that crt1 cannot call. Removal condition: when crt-c++ is hosted by default.",
-    "build.env.CRT_CXX_ENABLE_EXCEPTIONS=1: gperf's lib/arraylist.cc does `throw std::bad_alloc()`, and tools/crt-c++ compiles with -fno-exceptions unless a port opts in."
+    "build.env.CRT_CXX_ENABLE_EXCEPTIONS=1: gperf's lib/arraylist.cc does `throw std::bad_alloc()`, and tools/crt-c++ compiles with -fno-exceptions unless a port opts in.",
+    "Windows/x64 (2026-10-05): target_overrides.windows declares --build=x86_64-unknown-linux-android, not the usual @CRT_MINGW_TRIPLE@. gperf bundles gnulib, which keys its replacement layer on the configured host OS: with a mingw triple it substitutes Windows headers and wrappers (an io.h include, `struct stat` redefined to _stati64, rpl_fstat), none of which exist in this POSIX/Bionic-shaped sysroot, and undefining _WIN32/__MINGW32__ afterwards does not undo them. The Bionic/Android host is the CRT's own identity and gnulib has a mature path for it; it also lets configure's runtime probes run, since the build and host are then the same. The _WIN32 family is undefined in CFLAGS/CXXFLAGS/CPPFLAGS as for the other Windows ports. config.guess cannot guess a Windows `uname` at all, which is why a triple is needed."
   ]
 }

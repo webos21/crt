@@ -61,6 +61,16 @@ only thread is a new native thread, so `__crt_atfork_child()` re-records it as t
 the re-record fails exactly that check). The sweep test timed out in parallel runs right after a
 libc relink and passes alone; the cause was not investigated.
 
+### Windows/x64: gperf port (Web Tranche 1 Windows replay)
+
+`gperf` (needed for WebCore's build, not JavaScriptCore's) builds on Windows and its `generate-hash` recipe test
+passes. It needed only a recipe override: `--build=x86_64-unknown-linux-android` instead of the usual MinGW
+triple. gperf bundles gnulib, which chooses its replacement layer from the configured host OS; for a mingw
+host it substitutes Windows headers (`io.h`), `struct stat` -> `_stati64` and `rpl_fstat`, none of which this
+POSIX/Bionic-shaped sysroot has, and undefining `_WIN32`/`__MINGW32__` afterwards does not undo them (tried first:
+the build failed in `stat-time.h` and `fstat.c`). The Bionic host is the CRT's own identity and also makes
+configure's runtime probes run. No CRT defect was found by this port.
+
 ### Windows/x64: ICU port and three PAL defects it exposed (Web Tranche 1 Windows replay)
 
 The first step of the JavaScriptCore replay on Windows is the ICU port. It builds and both recipe tests pass

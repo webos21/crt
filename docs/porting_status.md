@@ -91,7 +91,7 @@ queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
 `gperf` and `icu` (both added 2026-10-03) are the first **C++** ports and exist for
 the Web Runtime (`06-web`): JavaScriptCore/WTF need ICU >= 70.1 (`data`, `uc`,
 `i18n`) and WebCore's build needs gperf (JavaScriptCore alone does not). Linux and macOS/arm64 so far (`gperf`
-`configure-pass`, `icu` `shared-pass`); `icu` also builds on Windows/x64 (`shared-pass`, 2026-10-05), `gperf` on Windows is not attempted. See
+`configure-pass`, `icu` `shared-pass`); `icu` also builds on Windows/x64 (`shared-pass`, 2026-10-05), `gperf` also builds on Windows/x64 (`configure-pass`, 2026-10-05). See
 the `gperf` and `icu` sections below.
 
 `expat` and `freetype` (both added 2026-08-24) are graphics-stack dependencies
@@ -107,10 +107,12 @@ their package-specific status remains in the sections below.
 - Build system: `configure` (a C++ program; `build.sysroot_stage: 02-cxx`)
 - Dependencies: `make`
 - Status:
-  - Linux, macOS: `configure-pass`
-  - Windows: not attempted
+  - Linux, macOS, Windows/x64: `configure-pass`
 - Automated recipe tests:
   - `generate-hash`
+
+On Windows the recipe declares a Bionic (`x86_64-unknown-linux-android`) build triple instead of the usual MinGW one: gperf's bundled gnulib
+substitutes Windows headers and `_stati64` for a mingw host, which this POSIX-shaped sysroot does not have (see the recipe's notes).
 
 The test runs the freshly built `gperf -t` on a four-keyword set and checks the
 emitted perfect-hash function. This is the first C++ port, which exposed several
