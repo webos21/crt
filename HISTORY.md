@@ -61,6 +61,33 @@ only thread is a new native thread, so `__crt_atfork_child()` re-records it as t
 the re-record fails exactly that check). The sweep test timed out in parallel runs right after a
 libc relink and passes alone; the cause was not investigated.
 
+### Windows/x64: ICU port and three PAL defects it exposed (Web Tranche 1 Windows replay)
+
+The first step of the JavaScriptCore replay on Windows is the ICU port. It builds and both recipe tests pass
+(`unicode-static`, `unicode-shared`; ICU 78.3 with its embedded data). Getting there found three real CRT
+defects, fixed in the PAL rather than worked around in the recipe:
+
+- **Silent argument truncation.** The Windows startup (`libc/src/arch/windows/common/crt1.c`) kept at most 255
+  arguments and 8191 command-line characters (and the fork relaunch and spawn paths had the same 8192 limit).
+  ICU's `libicuin` link has about 280 arguments, so the tail -- the libraries -- vanished and the link failed with
+  undefined symbols far from the cause. Limits are now the OS's (32767 characters, at most 16385 arguments); spawn
+  already failed explicitly with `E2BIG`. New `long_argv_test` spawns itself with 700 arguments (mutation: the old
+  limits give `argc=241`).
+- **Programs without `.exe`.** ICU's data Makefile runs `../bin/icupkg`, a tool its own build produced as
+  `icupkg.exe`. `stat()`, `access(X_OK)` and spawn now find `name.exe` when `name` does not exist and has no
+  extension (MSYS/Cygwin behaviour; mksh checks with `stat`/`access` before it runs a command). Covered by
+  `long_argv_test` (mutation fails it). The widened `stat` is a semantic change on Windows: only ICU and zlib/libpng
+  port tests were re-run, not every Windows port.
+- **Port test `PATH`.** `tools/crt-port-build.py` did not put the SDK `bin` directory (libc.dll) on the `PATH` of a
+  test that loads a port DLL.
+
+Recipe-only accommodations (none patch ICU): see `porting/recipes/icu.json` notes -- the POSIX platform path, the
+64-bit MinGW configure fragment (`icu_cv_host_frag=mh-mingw64`; the `-U__MINGW64__` the POSIX path needs made
+configure pick the 32-bit one, giving an underscore-prefixed data symbol and a mis-named data DLL), and `;`
+`PATH` in ICU's `INVOKE`. A first diagnosis blamed literal quotes in `ICULIBS_*`; that was wrong, the arguments
+were being truncated. Full Windows CTest 153/153; zlib and libpng port tests pass. Not done: expat/pcre2 and the
+other ports were not re-run, gperf on Windows, Windows/ARM64.
+
 ## 2026-10-04
 
 - **macOS CI: `bionic_surface_test` failed (`gettid()` in a forked child != `getpid()`).** The macOS

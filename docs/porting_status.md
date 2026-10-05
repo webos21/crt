@@ -91,7 +91,7 @@ queue) are fixed -- see the mbedTLS/curl sections below and `HISTORY.md`'s
 `gperf` and `icu` (both added 2026-10-03) are the first **C++** ports and exist for
 the Web Runtime (`06-web`): JavaScriptCore/WTF need ICU >= 70.1 (`data`, `uc`,
 `i18n`) and WebCore's build needs gperf (JavaScriptCore alone does not). Linux and macOS/arm64 so far (`gperf`
-`configure-pass`, `icu` `shared-pass`); Windows is not attempted. See
+`configure-pass`, `icu` `shared-pass`); `icu` also builds on Windows/x64 (`shared-pass`, 2026-10-05), `gperf` on Windows is not attempted. See
 the `gperf` and `icu` sections below.
 
 `expat` and `freetype` (both added 2026-08-24) are graphics-stack dependencies
@@ -149,11 +149,12 @@ bare names such as `libicudata.78.dylib` that only resolve through `DYLD_LIBRARY
   C++, `build.sysroot_stage: 02-cxx`)
 - Dependencies: `make`
 - Status:
-  - Linux, macOS: `shared-pass`
-  - Windows: not attempted
+  - Linux, macOS, Windows/x64: `shared-pass`
 - Automated recipe tests:
   - `unicode-static`
   - `unicode-shared`
+
+On Windows ICU needs several recipe accommodations (POSIX platform path, the 64-bit MinGW configure fragment, a `;` `PATH` for its build tools; static libraries are `libsicu*.a`, the data library is installed under `bin/`) -- see the recipe's notes. Building it exposed three CRT defects, fixed in the PAL: startup truncating arguments beyond 255 or 8191 characters, `.exe`-less program names, and the port test `PATH` lacking `libc.dll`. Windows/ARM64 untested.
 
 Built without tests, samples and extras; RTTI is enabled for the port
 (`CRT_CXX_ENABLE_RTTI=1`, ICU uses `dynamic_cast`/`typeid`). The test exercises
