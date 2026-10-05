@@ -155,6 +155,8 @@ __declspec(dllimport) BOOL CRT_WINAPI WaitOnAddress(
 __declspec(dllimport) void CRT_WINAPI WakeByAddressSingle(void* Address);
 __declspec(dllimport) void CRT_WINAPI WakeByAddressAll(void* Address);
 
+#include <private/crt_signal_wait.h>
+
 static int map_windows_wait_error(DWORD error) {
   switch (error) {
     case 0:
@@ -191,9 +193,18 @@ int __crt_wait32(int* addr, int expected) {
   if (__atomic_load_n(addr, __ATOMIC_ACQUIRE) != expected) {
     return 0;
   }
-  if (!WaitOnAddress(addr, &expected, sizeof(expected), CRT_INFINITE)) {
-    return map_windows_wait_error(GetLastError());
+  /* A thread-directed signal wakes this wait and runs its handler here; the caller re-checks. */
+  if (__crt_windows_signal_wait_begin(addr)) {
+    (void)__crt_windows_signal_wait_end();
+    return 0;
   }
+  if (!WaitOnAddress(addr, &expected, sizeof(expected), CRT_INFINITE)) {
+    int error = map_windows_wait_error(GetLastError());
+
+    (void)__crt_windows_signal_wait_end();
+    return error;
+  }
+  (void)__crt_windows_signal_wait_end();
   return 0;
 }
 
@@ -207,9 +218,17 @@ int __crt_wait32_timed(int* addr, int expected, const struct timespec* timeout) 
   if (timeout_is_zero_or_negative(timeout)) {
     return ETIMEDOUT;
   }
-  if (!WaitOnAddress(addr, &expected, sizeof(expected), timeout_to_milliseconds(timeout))) {
-    return map_windows_wait_error(GetLastError());
+  if (__crt_windows_signal_wait_begin(addr)) {
+    (void)__crt_windows_signal_wait_end();
+    return 0;
   }
+  if (!WaitOnAddress(addr, &expected, sizeof(expected), timeout_to_milliseconds(timeout))) {
+    int error = map_windows_wait_error(GetLastError());
+
+    (void)__crt_windows_signal_wait_end();
+    return error;
+  }
+  (void)__crt_windows_signal_wait_end();
   return 0;
 }
 

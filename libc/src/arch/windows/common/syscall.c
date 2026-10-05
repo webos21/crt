@@ -6452,6 +6452,8 @@ long __crt_sys_clock_gettime(clockid_t clock_id, struct timespec* tp) {
   return -EINVAL;
 }
 
+int __crt_windows_signal_sleep(unsigned long milliseconds);
+
 long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem) {
   unsigned long long ms;
   (void)rem;
@@ -6463,7 +6465,10 @@ long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem) {
   if (ms > 0xffffffffULL) {
     ms = 0xffffffffULL;
   }
-  Sleep((DWORD)ms);
+  if (__crt_windows_signal_sleep((unsigned long)ms) != 0) {
+    /* A signal handler ran on this thread during the sleep: EINTR, `rem` is not tracked here. */
+    return -EINTR;
+  }
   return 0;
 }
 

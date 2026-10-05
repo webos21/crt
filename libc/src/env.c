@@ -189,6 +189,7 @@ static void record_initial_stack_top(char** envp) {
 
 #if defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_current_stack_bounds(void** base, size_t* size);
+void __crt_windows_signal_attach_initial(void);
 
 /* The initial thread's real stack size (the PE's SizeOfStackReserve, 1 MiB by default), recorded
  * here because this runs on that thread: getrlimit(RLIMIT_STACK) reports it, and WTF::StackBounds
@@ -209,6 +210,8 @@ void __crt_env_set_initial(char** envp) {
       __crt_initial_stack_size = size;
     }
   }
+  /* The initial thread can be signalled by pthread_kill() from now on. */
+  __crt_windows_signal_attach_initial();
 #endif
   record_initial_stack_top(envp);
 }

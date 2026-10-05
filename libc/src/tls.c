@@ -83,6 +83,8 @@ static void linux_unregister_context(crt_thread_context* context) {
   crt_spin_unlock(&thread_lock);
 }
 #elif defined(CRT_TARGET_OS_WINDOWS)
+void __crt_windows_signal_after_fork_child(void);
+
 typedef unsigned long DWORD;
 typedef int BOOL;
 
@@ -222,6 +224,7 @@ void __crt_thread_after_fork_child(crt_thread_context* current) {
     current = &fallback_context;
   }
   __crt_thread_set_current(current);
+  __crt_windows_signal_after_fork_child();
 #else
   if (current == 0) {
     current = &main_context;

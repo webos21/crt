@@ -24,7 +24,17 @@
 long __crt_sys_thread_id(void);
 #if defined(CRT_TARGET_OS_MACOS)
 extern unsigned long __crt_initial_stack_top;
+#endif
+#if defined(CRT_TARGET_OS_MACOS) || defined(CRT_TARGET_OS_WINDOWS)
 extern long __crt_initial_thread_id;
+#endif
+#if defined(CRT_TARGET_OS_WINDOWS)
+void __crt_windows_signal_attach_current(void);
+unsigned long __crt_windows_signal_current_mask(void);
+unsigned long __crt_windows_signal_wait_handle(void* handle, unsigned long milliseconds);
+void __crt_windows_signal_detach_current(void);
+int __crt_windows_signal_send(crt_signal_state* target, int sig);
+crt_signal_state* __crt_windows_signal_state_of_initial_thread(void);
 #endif
 void __crt_sys_thread_exit(int status) __attribute__((noreturn));
 
@@ -577,8 +587,14 @@ static int pthread_start(void* arg) {
   int detached;
 
   __crt_thread_set_current(&control->context);
+#if defined(CRT_TARGET_OS_WINDOWS)
+  __crt_windows_signal_attach_current();
+#endif
   control->result = control->start_routine(control->arg);
   pthread_run_key_destructors();
+#if defined(CRT_TARGET_OS_WINDOWS)
+  __crt_windows_signal_detach_current();
+#endif
   __crt_thread_clear_current(&control->context);
   detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   if (detached) {
@@ -1823,6 +1839,10 @@ int pthread_create(
   context_tid_word = &control->tid_word;
 #endif
   __crt_thread_context_init(&control->context, control, context_tid_word);
+#if defined(CRT_TARGET_OS_WINDOWS)
+  /* The new thread starts with the creator's signal mask (POSIX), then has its own. */
+  control->context.signal.mask = __crt_windows_signal_current_mask();
+#endif
   if (attr != 0) {
     control->attr = *attr;
   } else {
@@ -2078,7 +2098,7 @@ int pthread_join(pthread_t thread, void** retval) {
   }
 
 #if defined(CRT_TARGET_OS_WINDOWS)
-  if (WaitForSingleObject(control->handle, CRT_INFINITE) != CRT_WAIT_OBJECT_0) {
+  if (__crt_windows_signal_wait_handle(control->handle, CRT_INFINITE) != CRT_WAIT_OBJECT_0) {
     return EINVAL;
   }
   if (retval != 0) {
@@ -2197,6 +2217,16 @@ int pthread_kill(pthread_t thread, int sig) {
                              : (void*)((crt_pthread_control*)(uintptr_t)thread)->native_thread;
 
     return __crt_macos_thread_kill(apple_thread, sig);
+  }
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  {
+    /* The initial thread's pthread_t is its native thread id; any other one is the control block
+     * of a thread made by pthread_create(), whose context holds its signal state. */
+    crt_signal_state* target = (long)thread == __crt_initial_thread_id
+                                   ? __crt_windows_signal_state_of_initial_thread()
+                                   : &((crt_pthread_control*)(uintptr_t)thread)->context.signal;
+
+    return __crt_windows_signal_send(target, sig);
   }
 #else
   return ENOTSUP;
