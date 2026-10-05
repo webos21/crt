@@ -61,6 +61,32 @@ only thread is a new native thread, so `__crt_atfork_child()` re-records it as t
 the re-record fails exactly that check). The sweep test timed out in parallel runs right after a
 libc relink and passes alone; the cause was not investigated.
 
+### Windows/x64: JavaScriptCore 1B (interpreter) green, and eight CRT gaps it exposed (Web Tranche 1 Windows replay)
+
+With Ruby installed on the build host, the pinned WPE WebKit 2.54.0 builds `jsc` on Windows/x64 from the installed `05-ui` SDK
+and passes the 1B acceptance: `jsc_acceptance.js` (8 groups, peak 74 MB) and `jsc_context_cycle` (150 cycles on 0/1/4/8 threads,
+0 failures, about 60 KiB growth), with a clean PE import audit. The persona is Linux-shaped, as on macOS, because the pinned
+tarball has no WIN32 sources. Getting there fixed eight CRT gaps, each with a test where the host allows it: libm `atanf`;
+`libc.dll` exporting `environ`; a weak `_fltused` for DLLs; one libc per process (executables link `libc.dll` under shared
+linkage, `CRT_CXX_STL_LINKAGE` for libc++); `syscall(SYS_gettid/SYS_getpid)`; partial `munmap`, reserve-only `PROT_NONE` and
+commit-on-`mprotect`; `size_t` instead of 32-bit `unsigned long` lengths in the memory-map entry points (a 16 GiB mapping was
+truncated to 0); and the real stack in `pthread_getattr_np`. New tests: `long_argv_test` (earlier), `mmap_partial_test`,
+`pthread_stack_bounds_test`, and the extended `bionic_surface_test`; the new ones fail on the old behaviour (mutation-checked).
+Not understood: libc++.dll's missing `<sstream>` exports, so the Windows lane links libc++ statically
+(`docs/crtweb_acceptance.md`). Not done: 1C, the watchdog, the isolated stage chain, ARM64.
+
+### Windows/x64: getrusage, the JSC harness's Windows lane (Web Tranche 1 Windows replay)
+
+`getrusage(RUSAGE_SELF)` on Windows returned zeros; it now reports the user/kernel CPU time (`GetProcessTimes`) and the
+peak working set as `ru_maxrss` in KiB (`K32GetProcessMemoryInfo`), with `RUSAGE_CHILDREN` and `RUSAGE_THREAD` still zero
+(Windows keeps no such accounting). `bionic_surface_test` runs its `getrusage` case on Windows, and
+`jsc_context_cycle.cpp` reads the peak through it instead of `/proc/self/statm`. `tools/build_webkit_jsc.py` gained a
+Windows lane: PATH-based DLL lookup, `JavaScriptCore.dll`, no rpath, a polled peak-working-set measurement (Python has no
+`resource` module on Windows), and a PE import audit via `llvm-objdump -p` with the distribution's own Windows contract
+(`crt_dist_prerequisites.py`) as the OS-DLL allowlist. Checked on real data only: the audit passes the CRT-built ICU tools
+and rejects `python.exe`; the measurement reports 214 MB for a 200 MB allocation. JavaScriptCore itself has not been
+configured on Windows: the host has no Ruby. `jit_memory_test` already passes in full on Windows/x64.
+
 ### Windows/x64: gperf port (Web Tranche 1 Windows replay)
 
 `gperf` (needed for WebCore's build, not JavaScriptCore's) builds on Windows and its `generate-hash` recipe test

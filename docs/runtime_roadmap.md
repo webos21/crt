@@ -30,7 +30,8 @@ Development and release follow the cumulative stages defined in
    [`crtui_acceptance.md`](crtui_acceptance.md).
 6. **Web Runtime (`06-web`)** — JavaScriptCore, WebCore, the WebKit
    multi-process runtime, a `PlatformCRT` port, and `crtweb`/WebView
-   integration. In progress (Tranche 0 closed); see [`crtweb_acceptance.md`](crtweb_acceptance.md)
+   integration. In progress (Tranche 0 closed; Tranche 1 JSCOnly: 1C green on Linux/x86_64, Linux/aarch64 and
+   macOS/arm64, the Windows replay open); see [`crtweb_acceptance.md`](crtweb_acceptance.md)
    and [`crtweb_porting.md`](crtweb_porting.md).
 
 The earlier plan named a QuickJS stage (`05-js`). It is superseded: WebKit
@@ -146,7 +147,7 @@ comparisons; promote Scudo only if repeatable evidence exceeds the baseline.
    acceptance.~~ **Complete 2026-10-03** (`HISTORY.md`): Windows/x64,
    macOS/arm64 and Linux/x86_64 pass Tranches 0-7, including the isolated
    `04-gfx-media -> 05-ui` stage. See `crtui_acceptance.md`.
-7. **Web Runtime (`06-web`) — In Progress (Tranche 0 closed).** JavaScriptCore/JSCOnly bring-up, a Linux WPE
+7. **Web Runtime (`06-web`) — In Progress (Tranche 0 closed, Tranche 1 replaying on Windows).** JavaScriptCore/JSCOnly bring-up, a Linux WPE
    reference baseline, `PlatformCRT` graphics/input, `libcrtweb` and the
    WebView, multi-process lifecycle, then Windows and macOS replay, CRT
    subsystem substitution, GPU integration, and distribution/security

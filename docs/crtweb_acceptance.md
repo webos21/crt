@@ -237,8 +237,9 @@ predecessor of `06-web`; 1B was run from `02-cxx`); gperf removed from the JSCOn
 
 *1C is complete when:* the Baseline-JIT acceptance, the `JSC_useJIT=false` rerun of 1B and the
 watchdog test pass on Linux/x86_64; the compile proof is present; resident memory stays
-bounded; the host-ABI audit is clean; and the Windows and macOS replays are recorded as
-separate steps.
+bounded; and the host-ABI audit is clean. That is the *reference acceptance* (done). The *host
+replays* are recorded separately and are not part of that definition: Linux/aarch64 and
+macOS/arm64 done, Windows/x64 open. "1C done" therefore does not mean three-host closure.
 
 *Deliberately unchanged.* The default thread stack stays 1 MiB (1B already showed correct
 stack-overflow detection and 1/4/8-thread VMs; JSC's own defaults are 5 MB per-thread usage,
@@ -532,6 +533,77 @@ lacked `-femulated-tls` (so `pthread_native_tls_test` did not link) and `gettid(
 child, was not the pid (`bionic_surface_test`). *Not done:* the wrapper byte-comparison, and the JSC harness --
 `tools/build_webkit_jsc.py` has no Windows path yet (no ICU/gperf ports for the CRT Windows target, no DLL/`jsc.exe`
 library lookup, `LD_LIBRARY_PATH`/ELF audit only), so 1A/1B/1C on Windows are not started.
+
+**Windows/x64 replay of Tranche 1 (started 2026-10-05).** *Done and evidenced:* the ICU and gperf ports build and pass
+their recipe tests; the shared CRT checks above pass (full CTest 153/153); `jit_memory_test` passes in full on
+Windows/x64 (RW to RX, RWX, 256 MiB reserve then commit, generated code executed), so the executable-memory contract
+holds through the PAL's `VirtualAlloc`/`VirtualProtect` mapping; `getrusage(RUSAGE_SELF)` now reports the CPU times
+and the peak working set on Windows (it returned zeros, and the context-cycle test read `/proc`, which does not exist
+there), covered by `bionic_surface_test`. `tools/build_webkit_jsc.py` has a Windows lane (PATH-based DLL lookup,
+`JavaScriptCore.dll`, no rpath, a polled peak-working-set measurement because Python has no `resource` module there, and
+a PE import audit through `llvm-objdump -p` whose OS-DLL allowlist is the distribution's own Windows contract in
+`tools/crt_dist_prerequisites.py`); the audit was checked on real data (it accepts the CRT-built ICU tools and their
+`libc.dll`/`KERNEL32.dll` imports and rejects `python.exe`'s `python311.dll`/`VCRUNTIME140.dll`) and the measurement
+reports about 214 MB for a 200 MB allocation.
+
+*Result: Windows/x64 1B (interpreter) is green (2026-10-05).* From the installed `05-ui` SDK, with Ruby 4.0.7 on the build host
+(a build tool, not a CRT artifact), the pinned WPE WebKit 2.54.0 configures (about 125 s) and `jsc` builds (about 520 s, every
+JavaScriptCore source compiled); `jsc_acceptance.js` passes all 8 groups (peak 74 MB, bound 450 MB) and `jsc_context_cycle`
+passes 150 cycles on 0, 1, 4 and 8 threads with 0 failures and about 60 KiB of growth; the PE import audit is clean (every
+import is a CRT DLL, the CRT ICU or KERNEL32/api-ms-win-core). Not done: 1C on Windows, the watchdog, the sampling profiler.
+
+*Decision taken: the Linux-shaped persona.* The first configure showed that the pinned tarball does not contain WebKit's WIN32
+sources (`Source/WTF/wtf/text/win/StringWin.cpp` is named by CMake and absent), so a WIN32 build is not possible from this pin at
+all, apart from the objections above. `libcrtweb/cmake/crt_webkit_platform.cmake` turns off WIN32/MINGW/MSVC for WebKit's CMake
+and the harness undefines every Windows macro clang predefines for `*-w64-mingw32` (13 of them; undefining only four let
+bmalloc pick `<process.h>`) and defines `__linux__`. Nothing in the WebKit tree is patched for 1B.
+
+*CRT gaps this exposed, all fixed in the CRT/PAL (none by changing WebKit):*
+
+1. `atanf` was missing from libm (a cast-wrapper over `atan`, like `atan2f`).
+2. `libc.dll` did not export `environ` (CMake's export-all list omitted it, unlike `optarg` or `timezone`); it is exported
+   explicitly together with `--export-all-symbols`, because one explicit export turns lld's automatic export off.
+3. `_fltused` was defined only in `libc.a`, so a DLL built with `dllcrt.o` could not link; a weak definition is in `dllcrt.c`.
+4. A Windows executable always linked its own static `libc.a` while DLLs used `libc.dll`: two libcs in one process, each with its
+   own malloc, TLS registry and initial-thread id. `crt-c++` now links the executable against `libc.dll` when
+   `CRT_CXX_RUNTIME_LINKAGE=shared`, and a new `CRT_CXX_STL_LINKAGE` picks libc++ separately.
+5. `syscall(SYS_gettid)` returned ENOSYS on Windows, so WTF never recognised the main thread
+   (`getpid() == syscall(SYS_gettid)`) and aborted in `initializeMainThread`; Windows now maps `SYS_gettid` and `SYS_getpid`
+   as macOS does.
+6. `munmap()` ignored its length and always released a whole VirtualAlloc allocation (failing for an interior address), so
+   the 'reserve more, trim the head and tail' pattern of `WTF::OSAllocator` aborted. Partial unmaps are now emulated: a range
+   whose neighbours are plain reservations is released and the rest re-reserved at the same addresses; otherwise the pages
+   are decommitted and the address range stays reserved (documented limit, never a data loss). An anonymous `PROT_NONE`
+   mapping is now a reservation that costs no commit charge, and `mprotect()` commits on demand.
+7. The memory-map entry points took `unsigned long length`, 32 bits on Windows, so any mapping of 4 GiB or more was truncated
+   (JavaScriptCore reserves multi-GiB regions); they take `size_t` now.
+8. `pthread_getattr_np()` reported no stack on Windows, so `VM::setLastStackTop` aborted; it now reports the real stack from
+   `GetCurrentThreadStackLimits` (the initial thread, and recorded at start for threads the CRT creates).
+
+*Open and not understood:* `libc.dll`'s sibling `libc++.dll` does not export the `<sstream>` explicit instantiations
+(`basic_stringbuf`, `basic_ostringstream` and their vtables) although `ios.instantiations.cpp.obj` defines them, so
+JavaScriptCore.dll cannot link against it. lld's automatic export is not the whole story: `/OPT:NOREF` and
+`-export-all-symbols` did not change the export count, the symbols were exported when the object was linked alone only for
+other classes, and libc++'s headers do use `__declspec(dllexport)` (`_LIBCPP_EXPORTED_FROM_ABI`). The Windows lane therefore
+links libc++ statically (like the CRT ICU DLLs) and `libc.dll` shared, which works because only libc state has to be one per
+process. A single shared libc++ for Windows needs this export gap understood first.
+
+*Decisions to take before the first Windows configure* (proposals, not yet decided):
+
+1. *Platform persona.* macOS already presents itself to WebKit as a Linux-shaped CRT target. For Windows the choice is
+   between that and upstream's WIN32 branches. The WIN32 branches include `<windows.h>` and the Microsoft C runtime
+   throughout WTF, bmalloc and libpas, and this sysroot has neither by design (the boundary is the CRT's own libc and
+   libc++, with real Windows SDK headers only scoped per file). The proposal is the same Linux-shaped persona as macOS,
+   with the COFF assembly differences (offlineasm emits ELF `.type`/`.size`, as it did for Mach-O) as a narrow carried patch,
+   and the audit above as the guard against any OS-owned dependency beyond the contract. Upstream WIN32 code stays a reference
+   for specific mechanics (executable memory, thread suspension), not a build mode.
+2. *Watchdog.* Two questions are separate: does a compiled infinite loop terminate on Windows (the 1C gate), and does the
+   CRT's POSIX signal emulation deliver it the way Linux does (a PAL gate only if JavaScriptCore needs it). Windows has a
+   software signal mask and a stub `sigsuspend`, and `jsc_watchdog_test.cpp` uses `ucontext_t`, `REG_RIP`, `dladdr` and
+   `syscall(SYS_gettid)`. The first Windows run can use JavaScriptCore's polling traps (`JSC_usePollingTraps=true`) to
+   separate a Baseline-JIT problem from a signal problem, and the signal path is then promoted to a gate on its own.
+3. *Order.* Windows `jit_memory_test` (done), then the interpreter (1B), then the Baseline JIT (1C); no DFG/FTL/concurrent
+   compiler threads before that, so a failure can be attributed.
 
 **Linux/aarch64 replay, 1A/1B/1C (2026-10-05): green, after implementing native thread TLS for aarch64.**
 Host: Ubuntu 26.04 aarch64 (a QEMU guest, 4 CPUs, kernel 7.0, 4 KiB pages), Clang 21.1.8, from a deleted `out/`.

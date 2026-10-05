@@ -87,14 +87,14 @@ then macOS/arm64.
     carried patches, see `docs/crtweb_acceptance.md`); macOS/x86_64 has no signal conversion or JIT permissions.
     Linux/x86_64 re-verified after the macOS replay (2026-10-04, no regression). Linux/aarch64: 1A/1B/1C
     done 2026-10-05 after implementing native thread TLS (variant I); full ctest 136/136, interpreter and Baseline-JIT
-    acceptance green (`HISTORY.md`, `docs/crtweb_acceptance.md`); Windows/x64 shared-code checks done 2026-10-05 (ctest 152/152, `crt-ui-dist`, tooling tests); ICU port builds on Windows (2026-10-05, `HISTORY.md`); gperf too; **next: a Windows path in the JSC harness**
+    acceptance green (`HISTORY.md`, `docs/crtweb_acceptance.md`); Windows/x64: 1A and 1B done 2026-10-05 (interpreter acceptance, thread cycles and the PE audit pass; Linux-shaped persona; `HISTORY.md`, `docs/crtweb_acceptance.md`); **next: 1C on Windows** (COFF assembler flavour for offlineasm, the Baseline JIT, the watchdog; polling traps first), and understand why libc++.dll lacks the `<sstream>` exports (Windows links libc++ statically meanwhile)
     ("Linux verification of the macOS replay" in the same document).
     Windows/x64: the ICU/gperf ports, the
     harness, the clocks/`sched_*`/signal code (software signal mask and a stub `sigsuspend`),
     `jit_memory_test` and `VirtualAlloc` shapes.
   * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided
     `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed
-    `05-ui` SDK and from the isolated stage chain (Tranche 10); the Windows/macOS replays must
+    `tools/crt_dist_prerequisites.py` and `docs/distribution.md` still list `libatomic.so.1` as a required Linux `02-cxx` host dependency, but the libc++ recipe now sets `LIBCXX_HAS_ATOMIC_LIB=OFF` and the 1C audit found it gone: on Linux/x86_64 and aarch64 regenerate a fresh `02-cxx`, check `readelf -d` of `libc++.so`, then drop the prerequisite and the doc text; `05-ui` SDK and from the isolated stage chain (Tranche 10); the Windows/macOS replays must
     include the host-ABI audit (`llvm-readobj`/`dumpbin`, `otool -L`).
   * [ ] **Build-tool/target split.** Before `06-web` is the embedded product stage, separate
     build-host tools (gperf, ICU's data generators, Perl/Python/Ruby) from target libraries so

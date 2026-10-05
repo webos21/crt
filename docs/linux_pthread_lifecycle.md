@@ -84,8 +84,8 @@ must terminate the whole process, not only the initial thread.
 
 The remaining lifecycle work is:
 
-- native TLS exists for x86_64 (above); implement it for aarch64 (variant I) and
-  decide how the eventual CRT-owned linker's TLS module table replaces the
+- native TLS exists for x86_64 and aarch64 (above); decide how the eventual
+  CRT-owned linker's TLS module table replaces the
   loader-layout cloning; then move the `crt_tls` registry's current-thread lookup
   (a `gettid` system call per access) onto the thread pointer;
 - define signal, cancellation, and robust mutex interaction with thread exit;
