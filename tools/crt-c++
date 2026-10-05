@@ -299,6 +299,17 @@ case "$runtime_linkage" in
     exit 1
     ;;
 esac
+# Windows: which libc++ the link names, independent of which libc (CRT_CXX_RUNTIME_LINKAGE).
+# `shared` picks libc.dll for executables too (one libc in the process) while this can still
+# pick the static libc++ (CRT_CXX_STL_LINKAGE=static).
+stl_linkage="${CRT_CXX_STL_LINKAGE:-$runtime_linkage}"
+case "$stl_linkage" in
+  static|shared) ;;
+  *)
+    echo "crt-c++: CRT_CXX_STL_LINKAGE must be static or shared" >&2
+    exit 1
+    ;;
+esac
 for arg in "$@"; do
   case "$arg" in
     -c|-E|-S) compile_only=1 ;;
@@ -821,7 +832,7 @@ case "$target_os" in
     fi
     if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" = 1 ]; then
       cxx_runtime_libs=""
-    elif [ "$runtime_linkage" = shared ]; then
+    elif [ "$stl_linkage" = shared ]; then
       cxx_runtime_libs=""
       for candidate in libc++.dll.a libc++_dll.lib c++_dll.lib; do
         if [ -f "${CRT_SYSROOT}/lib/$candidate" ]; then
@@ -918,7 +929,14 @@ case "$target_os" in
       # chained together in one process (one importing the other).
       entry="-Wl,--exclude-symbols=_pei386_runtime_relocator -Wl,--exclude-symbols=_crt_install_dwarf_unwind_safety_net -Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld"
     else
-      libs="$libs $cxx_runtime_libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+      if [ "$runtime_linkage" = shared ]; then
+        # One libc in the process: the executable imports libc.dll like every DLL does, instead of
+        # carrying a second copy (its own malloc, TLS registry and initial-thread id) that a DLL
+        # of the same program cannot see.
+        libs="$libs $cxx_runtime_libs ${CRT_SYSROOT}/lib/libc_dll.dll.a ${CRT_SYSROOT}/lib/libm_dll.dll.a ${CRT_SYSROOT}/lib/libdl_dll.dll.a ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+      else
+        libs="$libs $cxx_runtime_libs ${CRT_SYSROOT}/lib/libc.a ${CRT_SYSROOT}/lib/libm.a ${CRT_SYSROOT}/lib/libdl.a ${CRT_WINDOWS_SYSTEM_LIBS:--Wl,kernel32.lib -Wl,synchronization.lib}"
+      fi
       entry="-Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld"
       # __crt_run_init_array()/__crt_run_fini_array() Windows/PE support,
       # and crt1_pseudo_reloc.o (_pei386_runtime_relocator()): see
@@ -991,8 +1009,16 @@ if [ "$target_os" = windows ]; then
     if [ -n "$cxx_main_lib" ]; then set -- "$@" "$cxx_main_lib"; fi
     if [ -n "$cxx_abi_selected" ]; then set -- "$@" "$cxx_abi_selected"; fi
     if [ -n "$cxx_unwind_selected" ]; then set -- "$@" "$cxx_unwind_selected"; fi
-    set -- "$@" "${CRT_SYSROOT}/lib/libc.a" \
-      "${CRT_SYSROOT}/lib/libm.a" "${CRT_SYSROOT}/lib/libdl.a"
+    if [ "$runtime_linkage" = shared ]; then
+      # One libc in the process: the executable imports libc.dll like every DLL does, instead of
+      # carrying a second copy (its own malloc, TLS registry and initial-thread id) that a DLL of
+      # the same program cannot see.
+      set -- "$@" "${CRT_SYSROOT}/lib/libc_dll.dll.a" \
+        "${CRT_SYSROOT}/lib/libm_dll.dll.a" "${CRT_SYSROOT}/lib/libdl_dll.dll.a"
+    else
+      set -- "$@" "${CRT_SYSROOT}/lib/libc.a" \
+        "${CRT_SYSROOT}/lib/libm.a" "${CRT_SYSROOT}/lib/libdl.a"
+    fi
   fi
   # shellcheck disable=SC2086
   set -- "$@" $windows_system_libs

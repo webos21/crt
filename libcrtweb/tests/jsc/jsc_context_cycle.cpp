@@ -11,16 +11,17 @@
 #include <string.h>
 #include <unistd.h>
 
-#if defined(__APPLE__) || defined(CRT_TARGET_OS_MACOS)
+#if defined(__APPLE__) || defined(CRT_TARGET_OS_MACOS) || defined(_WIN32) || defined(__MINGW32__)
 #include <sys/resource.h>
 
-// macOS has no /proc. The peak resident size (ru_maxrss) never shrinks, so it
+// macOS and Windows have no /proc; the CRT's getrusage() reports the peak resident size there
+// (Windows: the peak working set, in KiB). The peak resident size (ru_maxrss) never shrinks, so it
 // cannot show memory being returned, but a leak across the cycles still raises it, which is what
 // the bounded-growth check below is for.
 static long resident_kilobytes() {
   struct rusage usage;
   if (getrusage(RUSAGE_SELF, &usage) != 0) return -1;
-  return usage.ru_maxrss;  // KiB: CRT's getrusage() converts Darwin's bytes to Bionic's unit
+  return usage.ru_maxrss;  // KiB: Bionic's unit (CRT's getrusage() converts Darwin's bytes)
 }
 #else
 static long resident_kilobytes() {

@@ -6,11 +6,13 @@ tranche order and evidence: [`docs/crtweb_acceptance.md`](../docs/crtweb_accepta
 upstream mapping: [`docs/crtweb_porting.md`](../docs/crtweb_porting.md).
 
 **Status: bring-up.** Web Tranche 0 (scope, version and license freeze) is closed.
-Tranche 1 (JavaScriptCore) is green on Linux/x86_64 for 1A (the ICU and gperf ports),
-1B (the interpreter acceptance) and 1C (the Baseline JIT, with a compile proof and a
-watchdog that terminates compiled code), built by `tools/build_webkit_jsc.py` from the
-verified pin against an installed SDK; the Windows and macOS replays, W^X hardening and
-the DFG/FTL/WebAssembly tiers remain. No WebCore, WebKit, `PlatformCRT` or `crtweb` API code exists yet, and
+Tranche 1 (JavaScriptCore) is green for 1A (the ICU and gperf ports), 1B (the interpreter
+acceptance) and 1C (the Baseline JIT, with a compile proof and a watchdog that terminates
+compiled code) on Linux/x86_64, Linux/aarch64 and macOS/arm64, built by
+`tools/build_webkit_jsc.py` from the verified pin against an installed SDK. The Windows
+replay is open (the ICU and gperf ports and the shared CRT checks pass; the harness's Windows
+lane exists but has not built JavaScriptCore yet); W^X hardening and the DFG/FTL/WebAssembly
+tiers remain. No WebCore, WebKit, `PlatformCRT` or `crtweb` API code exists yet, and
 `libcrtweb` is not part of the root CMake build.
 
 ## Layout

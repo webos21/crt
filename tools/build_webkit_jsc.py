@@ -100,7 +100,8 @@ def tool_version(command) -> str:
 def require_host_tools() -> dict:
     """The build-host tools (they run on the build machine, whatever the target) and
     their versions, which also go into the configure fingerprint."""
-    missing = [tool for tool in ("cmake", "ninja", "perl", "python3") if shutil.which(tool) is None]
+    # Windows has no `python3` command; the interpreter running this script is the Python.
+    missing = [tool for tool in ("cmake", "ninja", "perl") if shutil.which(tool) is None]
     ruby = shutil.which("ruby")
     if ruby is None:
         missing.append("ruby (>= 2.5: JavaScriptCore generates its interpreter with Ruby scripts)")
@@ -192,8 +193,29 @@ def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
     # (libJavaScriptCore.so, ICU) use libc.so; an executable linking libc.a would carry a
     # second libc with its own thread/key/TLS registry and allocator.
     env["CRT_CXX_RUNTIME_LINKAGE"] = "shared"
+    if target_os == "windows":
+        # libc.dll for the executables too (one libc in the process: a second copy in jsc.exe has its own
+        # initial-thread id, so JavaScriptCore.dll never recognised the main thread), but libc++ linked
+        # statically, like the CRT ICU DLLs: libc++.dll does not export the explicit instantiations of
+        # <sstream> (docs/crtweb_acceptance.md, Windows replay), which JavaScriptCore.dll needs.
+        env["CRT_CXX_STL_LINKAGE"] = "static"
     # WebKit's `jsc` and its tools define a plain `int main`; see tools/crt-c++.
     env["CRT_CXX_HOSTED"] = "1"
+    if target_os == "windows":
+        # What the SDK's activate.cmd sets for a consumer: the wrappers (crt-cc.cmd) need the CRT
+        # shell and rootfs, and PATH finds the SDK's tools and runtime DLLs before the host's.
+        root = str(sdk).replace("\\", "/")
+        env["CRT_SYSROOT"] = root
+        env["CRT_ROOTFS"] = root
+        env["CRT_TARGET_OS"] = "windows"
+        env["CRT_MKSH_EXE"] = f"{root}/system/bin/mksh.exe"
+        for variable, command in (("CRT_HOST_CC", "clang"), ("CRT_HOST_CXX", "clang++")):
+            if not env.get(variable):
+                found = shutil.which(command)
+                if found:
+                    env[variable] = found.replace("\\", "/")
+        env["PATH"] = os.pathsep.join(
+            [str(sdk / "tools"), str(sdk / "system" / "bin"), str(sdk / "bin"), env.get("PATH", "")])
     if target_os == "macos":
         # Read by patched offlineasm/asm.rb (libcrtweb/patches, 0002): no ELF .size/.type debug
         # directives although CMake is told the system is Linux.
@@ -273,6 +295,25 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         macos_options = [f"-DCMAKE_C_COMPILER={sdk / 'tools' / 'crt-cc'}",
                          f"-DCMAKE_CXX_COMPILER={sdk / 'tools' / 'crt-c++'}",
                          f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
+    if target_os == "windows":
+        # Linux-shaped presentation, as on macOS (libcrtweb/cmake/crt_webkit_platform.cmake): the pinned
+        # tarball has no WIN32 sources, and WebKit's WIN32 branches need windows.h and the Microsoft C
+        # runtime, which the CRT sysroot does not have. __linux__ makes WTF/bmalloc take OS(LINUX).
+        # Every Windows/MinGW macro clang predefines for *-w64-mingw32 (WebKit tests WIN32, _WIN32,
+        # WINNT and __MINGW32__ in different places), then the Linux one.
+        c_flags += [f"-U{name}" for name in (
+            "WIN32", "WIN64", "WINNT", "_WIN32", "_WIN64", "__WIN32", "__WIN32__", "__WIN64", "__WIN64__",
+            "__WINNT", "__WINNT__", "__MINGW32__", "__MINGW64__")] + ["-D__linux__=1"]
+        macos_options = [f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
+        # thread_local is lowered to compiler-rt's emulated TLS (the wrapper's -femulated-tls), whose
+        # emutls.c names two UCRT entry points that only its fatal-error path reaches; the stubs and
+        # --allow-multiple-definition are the accommodation libcrtgfx documents for Skia's thread_local.
+        # Data exported by one CRT DLL and read by another (environ, libc++'s vtables) is auto-imported.
+        stubs = build.parent / "emutls_link_stubs.o"
+        stubs.parent.mkdir(parents=True, exist_ok=True)
+        run([sdk / "tools" / "crt-cc.cmd", "-c", ROOT / "libc" / "src" / "arch" / "windows" / "common" /
+             "emutls_link_stubs.c", "-o", stubs], env=env)
+        link_flags += [str(stubs).replace("\\", "/"), "-Wl,--allow-multiple-definition", "-Wl,--enable-auto-import"]
     if target_os == "linux":
         # Native TLS in a shared library: the initial-exec model avoids __tls_get_addr, which
         # only the (host) dynamic loader defines.
@@ -301,7 +342,12 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
 def runtime_library_path(sdk: Path, deps: Path, build: Path, target_os: str, env: dict) -> dict:
     run_env = dict(env)
     paths = [build / "lib", deps / "lib", sdk / "lib"]
-    variable = "DYLD_LIBRARY_PATH" if target_os == "macos" else "LD_LIBRARY_PATH"
+    if target_os == "windows":
+        # DLLs are found through PATH: the build's own (JavaScriptCore.dll sits next to jsc.exe),
+        # the CRT ICU port's, and the SDK's runtime (libc.dll, libc++.dll, ...) in bin/.
+        paths = [build / "bin", build / "lib", deps / "bin", deps / "lib", sdk / "bin", sdk / "lib"]
+    variable = ("DYLD_LIBRARY_PATH" if target_os == "macos" else "PATH" if target_os == "windows"
+                else "LD_LIBRARY_PATH")
     existing = run_env.get(variable)
     run_env[variable] = os.pathsep.join(str(path) for path in paths) + (os.pathsep + existing if existing else "")
     return run_env
@@ -317,10 +363,13 @@ def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str, mode:
     # The watchdog test interrupts compiled code with a signal and reads the forwarded machine
     # context, so it belongs to the JIT step only.
     for name in (("jsc_context_cycle", "jsc_watchdog_test") if mode == "baseline-jit" else ("jsc_context_cycle",)):
-        output = build / "bin" / name
-        command = [sdk / "tools" / "crt-c++", f"-I{build / 'JavaScriptCore' / 'Headers'}",
-                   TESTS / f"{name}.cpp", "-o", output, f"-L{build / 'lib'}",
-                   "-lJavaScriptCore", f"-Wl,-rpath,{build / 'lib'}"]
+        output = build / "bin" / (name + (".exe" if target_os == "windows" else ""))
+        command = [sdk / "tools" / ("crt-c++.cmd" if target_os == "windows" else "crt-c++"),
+                   f"-I{build / 'JavaScriptCore' / 'Headers'}",
+                   TESTS / f"{name}.cpp", "-o", output, f"-L{build / 'lib'}", f"-L{build / 'bin'}",
+                   "-lJavaScriptCore"]
+        if target_os != "windows":  # no rpath in PE: the DLL is found through PATH
+            command.append(f"-Wl,-rpath,{build / 'lib'}")
         if target_os == "linux":
             command.append("-Wl,--allow-shlib-undefined")
         if target_os == "macos":
@@ -334,7 +383,36 @@ def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str, mode:
 
 # Peak resident memory of a run is measured by a fresh Python process that runs the program as
 # its only child and reports RUSAGE_CHILDREN (in this process it would be the largest of every
-# child ever waited for, the build's compilers included).
+# child ever waited for, the build's compilers included). Windows has no RUSAGE_CHILDREN and
+# Python has no `resource` module there: the measuring process polls the child's peak working
+# set instead (monotonic, so the last sample before exit is within one poll interval of the peak).
+MEASURE_WINDOWS = r"""
+import ctypes, subprocess, sys, time
+from ctypes import wintypes
+
+class Counters(ctypes.Structure):
+    _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+process = subprocess.Popen(sys.argv[1:])
+peak = 0
+while True:
+    counters = Counters()
+    counters.cb = ctypes.sizeof(counters)
+    if kernel32.K32GetProcessMemoryInfo(int(process._handle), ctypes.byref(counters), counters.cb):
+        peak = max(peak, counters.PeakWorkingSetSize)
+    if process.poll() is not None:
+        break
+    time.sleep(0.02)
+print("PEAK_RSS_KB=%d" % (peak // 1024))
+sys.exit(process.returncode)
+"""
+
 MEASURE = ("import resource, subprocess, sys;"
            "code = subprocess.run(sys.argv[1:]).returncode;"
            "peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss;"
@@ -348,7 +426,8 @@ BASELINE_COMPILE_REPORT = re.compile(r"Baseline", re.IGNORECASE)
 
 
 def measured(command, env) -> dict:
-    completed = run([sys.executable, "-c", MEASURE] + [str(part) for part in command],
+    script = MEASURE_WINDOWS if sys.platform == "win32" else MEASURE
+    completed = run([sys.executable, "-c", script] + [str(part) for part in command],
                     env=env, check=False, capture=True)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
@@ -426,6 +505,12 @@ KNOWN_HOST_LIBRARIES: dict[str, str] = {}
 
 def jsc_library(build: Path, target_os: str) -> Path:
     """The built JavaScriptCore shared library (its file name differs per host)."""
+    if target_os == "windows":
+        for directory in (build / "bin", build / "lib"):
+            found = sorted(directory.glob("*JavaScriptCore*.dll"))
+            if found:
+                return found[0]
+        raise SystemExit(f"JavaScriptCore.dll not found under {build / 'bin'} or {build / 'lib'}")
     patterns = ("libJavaScriptCore*.dylib*",) if target_os == "macos" else ("libJavaScriptCore.so.*", "libJavaScriptCore.so")
     for pattern in patterns:
         found = sorted(path for path in (build / "lib").glob(pattern) if not path.is_symlink())
@@ -479,6 +564,55 @@ def host_abi_audit_macos(sdk: Path, deps: Path, build: Path, binaries) -> dict:
             "libraries": inventory}
 
 
+def windows_system_dlls() -> set:
+    """The OS DLLs a CRT process may import: the canonical Windows runtime contract of the
+    distribution (tools/crt_dist_prerequisites.py), lower-cased; the api-ms-win-* API-set
+    family is allowed by prefix at the call site."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from crt_dist_prerequisites import external_prerequisites_for
+    names = set()
+    for item in external_prerequisites_for("windows", "02-cxx"):
+        if item.get("kind") == "os-runtime":
+            names.update(name.lower() for name in item["components"])
+    return names
+
+
+def host_abi_audit_windows(sdk: Path, deps: Path, build: Path, binaries) -> dict:
+    """PE twin of the Linux audit, from `llvm-objdump -p` on every binary and the DLLs they
+    import: each import must resolve to a DLL inside the CRT SDK, the CRT-built ICU or this
+    build tree, or be an OS runtime DLL of the distribution's own Windows contract (KERNEL32 and
+    the api-ms-win-core API sets). The Microsoft C runtime (ucrtbase, vcruntime, msvcp) or any
+    other host DLL would mean a native build that merely ran."""
+    import shutil
+    objdump = shutil.which("llvm-objdump") or shutil.which("llvm-objdump.exe")
+    if objdump is None:
+        raise SystemExit("llvm-objdump is required for the Windows host ABI audit")
+    system = windows_system_dlls()
+    search = [build / "bin", build / "lib", deps / "bin", deps / "lib", sdk / "bin", sdk / "lib"]
+    violations, inventory, pending, seen = [], {}, [Path(b) for b in binaries], set()
+    while pending:
+        binary = pending.pop()
+        if binary in seen:
+            continue
+        seen.add(binary)
+        completed = run([objdump, "-p", binary], capture=True, check=False)
+        imports = [line.split("DLL Name:", 1)[1].strip() for line in completed.stdout.splitlines()
+                   if "DLL Name:" in line]
+        for name in imports:
+            lowered = name.lower()
+            resolved = next((directory / name for directory in search if (directory / name).is_file()), None)
+            if resolved is not None:
+                pending.append(resolved.resolve())
+            elif lowered in system or lowered.startswith("api-ms-win-"):
+                continue
+            else:
+                violations.append(f"{binary.name}: imports {name}, which is neither a CRT artifact nor "
+                                  f"an OS runtime DLL of the distribution contract")
+        inventory[binary.name] = sorted(set(imports))
+    return {"ok": not violations, "violations": violations, "known_host_libraries": {},
+            "libraries": inventory}
+
+
 def host_abi_audit(sdk: Path, deps: Path, build: Path, binaries, run_env: dict, target_os: str = "linux") -> dict:
     """The Host ABI firewall for the JavaScriptCore bring-up (Linux): every shared object the
     binaries load must come from the CRT SDK, the CRT-built ICU or this build tree. A native
@@ -487,6 +621,8 @@ def host_abi_audit(sdk: Path, deps: Path, build: Path, binaries, run_env: dict, 
     loader itself (the host's, by design until CRT owns one) and the vDSO are allowed."""
     if target_os == "macos":
         return host_abi_audit_macos(sdk, deps, build, binaries)
+    if target_os == "windows":
+        return host_abi_audit_windows(sdk, deps, build, binaries)
     allowed = [sdk.resolve(), deps.resolve(), build.resolve()]
     violations, known, inventory = [], {}, {}
     for binary in binaries:
@@ -564,9 +700,8 @@ def main() -> int:
     build = work / f"build-{mode}"
 
     target_os, arch = sdk_target(sdk)
-    if target_os not in ("linux", "macos"):
-        raise SystemExit(f"JSC bring-up is verified on Linux and macOS only so far (SDK target is "
-                         f"{target_os!r}); the Windows replay is a separate Tranche 1 step")
+    if target_os not in ("linux", "macos", "windows"):
+        raise SystemExit(f"JSC bring-up supports Linux, macOS and Windows SDKs (SDK target is {target_os!r})")
     if not (sdk / "include" / "c++" / "v1").is_dir():
         raise SystemExit(f"{sdk} has no libc++ headers: use a 02-cxx or later SDK")
     needed = deps / "include" / "unicode" / "utypes.h"
