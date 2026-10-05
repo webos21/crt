@@ -5,11 +5,31 @@
     "type": "git",
     "repository": "https://android.googlesource.com/toolchain/llvm-project",
     "ref": "37f38d1f3276b62fba09462ab4807dce846c732d",
-    "sparse_paths": ["libcxx", "cmake", "runtimes/cmake", "libc/shared", "libc/src/__support", "libc/hdr", "libc/include", "libc/src/errno"],
+    "sparse_paths": [
+      "libcxx",
+      "cmake",
+      "runtimes/cmake",
+      "libc/shared",
+      "libc/src/__support",
+      "libc/hdr",
+      "libc/include",
+      "libc/src/errno"
+    ],
     "checkout_subdir": "libcxx",
-    "extra_checkout_dirs": ["cmake", "runtimes/cmake", "libc/shared", "libc/src/__support", "libc/hdr", "libc/include", "libc/src/errno"]
+    "extra_checkout_dirs": [
+      "cmake",
+      "runtimes/cmake",
+      "libc/shared",
+      "libc/src/__support",
+      "libc/hdr",
+      "libc/include",
+      "libc/src/errno"
+    ]
   },
-  "dependencies": ["libcxxabi", "libunwind"],
+  "dependencies": [
+    "libcxxabi",
+    "libunwind"
+  ],
   "cmake": {
     "driver": "libstdc++/third_party/libcxx/standalone",
     "options": [
@@ -43,11 +63,18 @@
         ]
       }
     },
-    "build_targets": ["cxx", "cxx_experimental", "generate-cxx-headers"]
+    "build_targets": [
+      "cxx",
+      "cxx_experimental",
+      "generate-cxx-headers"
+    ]
   },
   "post_install_copy": {
     "macos": [
-      {"from": "lib/notweak.exp", "to": "lib/libc++.notweak.exp"}
+      {
+        "from": "lib/notweak.exp",
+        "to": "lib/libc++.notweak.exp"
+      }
     ]
   },
   "extra_files": [
@@ -282,6 +309,12 @@
       "find": "  bool assign() {\n    if (!wcscmp(__data_.cFileName, L\".\") || !wcscmp(__data_.cFileName, L\"..\"))\n      return false;\n    __entry_.__assign_iter_entry(\n        __root_ / __data_.cFileName,",
       "replace": "  bool assign() {\n    std::wstring __real_name = __crt_widen_find_data_filename(__data_.cFileName);\n    if (__real_name == L\".\" || __real_name == L\"..\")\n      return false;\n    __entry_.__assign_iter_entry(\n        __root_ / __real_name,",
       "reason": "Companion to this file's own cFileName-width patch above -- assign() is the only place that reads __data_.cFileName's raw bytes (both for the \".\"/\"..\" self/parent-entry skip and for building each entry's own path), so both uses are routed through the same real-width widen() helper at once. Confirmed for real (2026-08-31, see HISTORY.md): without this, directory_iterator's own entry.path().filename() came back as a single garbled character instead of the real filename, even after temp_directory_path()/path::string()/the FindFirstFileW input-narrowing fix above were already in place."
+    },
+    {
+      "file": "include/__configuration/availability.h",
+      "find": "#if !defined(_LIBCPP_COMPILER_GCC) && !defined(_WIN32)\n#  define _LIBCPP_AVAILABILITY_HAS_ADDITIONAL_IOSTREAM_EXPLICIT_INSTANTIATIONS_1 _LIBCPP_INTRODUCED_IN_LLVM_12",
+      "replace": "// CRT: a consumer that hides _WIN32 (the Linux-shaped persona of the Web Runtime, which undefines every\n// Windows macro for WebKit) must see the same value the library was built with; CRT_TARGET_OS_WINDOWS comes\n// from tools/crt-c++.\n#if !defined(_LIBCPP_COMPILER_GCC) && !defined(_WIN32) && !defined(CRT_TARGET_OS_WINDOWS)\n#  define _LIBCPP_AVAILABILITY_HAS_ADDITIONAL_IOSTREAM_EXPLICIT_INSTANTIATIONS_1 _LIBCPP_INTRODUCED_IN_LLVM_12",
+      "reason": "Upstream turns the additional iostream explicit instantiations (basic_stringbuf/stringstream/ostringstream/istringstream<char>) off on Windows (LLVM PR41018), so the Windows libc++.dll defines them but does not export them, and a Windows consumer instantiates them itself. A consumer compiled with _WIN32 undefined took the other branch, declared them `extern template`, and could not link (undefined vtable for basic_ostringstream, found linking JavaScriptCore.dll). Gating on CRT_TARGET_OS_WINDOWS too gives every CRT Windows consumer the library's own configuration. Remove when upstream enables the instantiations on Windows (PR41018) or the persona no longer hides _WIN32."
     }
   ],
   "notes": [
