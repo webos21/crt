@@ -79,23 +79,21 @@ then macOS/arm64.
   * [x] **1C. Baseline JIT.** Done on Linux/x86_64 and macOS/arm64 2026-10-04 (`HISTORY.md`,
     `docs/crtweb_acceptance.md`): pre-JIT gate, assembly-interpreter and Baseline-JIT runs with a
     compile proof, watchdog termination of compiled code, threads, host-ABI audit.
-  * [ ] **1D and hardening.** DFG/FTL/WebAssembly tiers (compiled in, disabled at run time) with
-    concurrent compiler threads and the thread-stack question; W^X policy (upstream default does not
-    exercise it); the sampling profiler.
-  * [ ] **Replays.** macOS/arm64: 1A/1B/1C done 2026-10-04 (interpreter and Baseline-JIT acceptance, thread
-    cycles, watchdog and the Mach-O host-ABI audit pass; WebKit is presented as a Linux-shaped platform with two
-    carried patches, see `docs/crtweb_acceptance.md`); macOS/x86_64 has no signal conversion or JIT permissions.
-    Linux/x86_64 re-verified after the macOS replay (2026-10-04, no regression). Linux/aarch64: 1A/1B/1C
-    done 2026-10-05 after implementing native thread TLS (variant I); full ctest 136/136, interpreter and Baseline-JIT
-    acceptance green (`HISTORY.md`, `docs/crtweb_acceptance.md`); Windows/x64: 1A, 1B and 1C done 2026-10-05 (interpreter and Baseline-JIT acceptance, thread cycles, watchdog, PE audit; Linux-shaped persona; `HISTORY.md`, `docs/crtweb_acceptance.md`) and the Windows signal VM-trap gate 2026-10-05 (real per-thread signals, polling traps off, watchdog 100/100; `HISTORY.md`); **next: 1D on Windows** (`poll`/`select`/I/O waits do not yet run handlers), then
-    ("Linux verification of the macOS replay" in the same document).
-    Windows/x64: the ICU/gperf ports, the
-    harness, the clocks/`sched_*`/signal code (software signal mask and a stub `sigsuspend`),
-    `jit_memory_test` and `VirtualAlloc` shapes.
+  * [ ] **1D. Higher JIT tiers, split by risk** (all compiled in, off at run time unless named). **1D-A DFG +
+    concurrent compiler threads: done on Linux/x86_64 2026-10-05** (`HISTORY.md`, `docs/crtweb_acceptance.md`);
+    **next: replay 1D-A on Linux/aarch64, then macOS/arm64 and Windows/x64** (the Windows signal backend gets its new
+    consumer there). 1D-B FTL/B3, 1D-C WebAssembly, 1D-D sampling profiler and the W^X policy are not Tranche 2
+    blockers (1D-A is the gate); raise them when WebCore shows the need. Thread-stack sizing (1 MiB default) is
+    still open: DFG compiler threads ran fine at it.
+  * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64
+    (signal VM-trap gate: real per-thread signals, polling traps off, watchdog 100/100); macOS/x86_64 has no signal
+    conversion or JIT permissions. Windows signal gaps that are *not* gates (backlog until a consumer needs them):
+    `poll`/`select`/file-I/O waits running handlers, threads not made by `pthread_create`, process-directed
+    `kill(pid)`/process groups (the Toybox `timeout` item), console Ctrl-C.
   * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided
-    `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed
-    `tools/crt_dist_prerequisites.py` and `docs/distribution.md` still list `libatomic.so.1` as a required Linux `02-cxx` host dependency, but the libc++ recipe now sets `LIBCXX_HAS_ATOMIC_LIB=OFF` and the 1C audit found it gone: on Linux/x86_64 and aarch64 regenerate a fresh `02-cxx`, check `readelf -d` of `libc++.so`, then drop the prerequisite and the doc text; `05-ui` SDK and from the isolated stage chain (Tranche 10); the Windows/macOS replays must
-    include the host-ABI audit (`llvm-readobj`/`dumpbin`, `otool -L`).
+    `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed `05-ui` SDK
+    and from the isolated stage chain (Tranche 10); the Windows/macOS replays must include the host-ABI audit
+    (`llvm-readobj`/`dumpbin`, `otool -L`).
   * [ ] **Build-tool/target split.** Before `06-web` is the embedded product stage, separate
     build-host tools (gperf, ICU's data generators, Perl/Python/Ruby) from target libraries so
     a cross build (x86_64 host, Linux/aarch64 target) works; native three-host builds are

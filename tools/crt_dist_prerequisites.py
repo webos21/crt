@@ -43,26 +43,10 @@ _BASE = {
 _CXX = {
     "windows": (),
     "macos": (),
-    "linux": ({
-        "id": "linux-libatomic-runtime",
-        "kind": "host-library",
-        "required_for": ["base-runtime"],
-        # libatomic.so.1 (2026-09-14, Linux ELF dependency acceptance): a
-        # real, confirmed DT_NEEDED entry of libc++.so/libc++.so.1 (`readelf
-        # -d` shows it directly, ahead of even libc++abi.so.1) from the
-        # earliest stage libc++ exists -- 02-cxx -- onward, so every later
-        # cumulative stage (03-gfx-simple, 04-gfx-media, ...) inherits it
-        # too. Clang's libc++ uses out-of-line atomic operations for wide
-        # (e.g. 16-byte) values on aarch64 and links libatomic.so.1 to
-        # provide them; unlike CoreFoundation.framework on macOS, this is
-        # not conditional on any of this project's own link flags -- it is
-        # baked into libc++'s own build. Found the same way as the macOS
-        # CoreFoundation.framework gap: regenerating a fresh SDK (02-cxx
-        # through 03-gfx-simple) and diffing its actual binaries' NEEDED
-        # entries against this file's own canonical list.
-        "components": ["libatomic.so.1"],
-        "bundled": False,
-    },),
+    # Linux: no entry. libc++.so used to record NEEDED libatomic.so.1 because its build linked
+    # the host libatomic; the recipe now sets LIBCXX_HAS_ATOMIC_LIB=OFF (Web Tranche 1C) and a fresh
+    # 02-cxx..05-ui SDK on Linux/x86_64 and aarch64 has no libatomic DT_NEEDED (the host-ABI audit).
+    "linux": (),
 }
 
 _GFX_SIMPLE = {

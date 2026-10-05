@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64 and macOS/arm64; the Windows replay, W^X hardening and the DFG/FTL/WebAssembly tiers (1D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on Linux/x86_64 and awaits its replays, and FTL/WebAssembly/profiler/W^X (1D-B..D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -248,8 +248,38 @@ arrive. `__tls_get_addr`: JSC itself avoids it with `-ftls-model=initial-exec`; 
 `libc++abi` still reference it. On Linux the host's dynamic loader is CRT's loader today, so
 this is the *accepted current loader boundary*, and becomes a gap only when CRT owns a loader.
 
-**1D and after (not planned in detail):** DFG with concurrent compilation threads, FTL,
-WebAssembly, the sampling profiler, and the W^X hardening above.
+**1D is split by what each step adds** (the 1C binary already has every tier compiled in; each step turns
+one on and isolates it with JSC run-time options):
+
+| Step | Turns on | New assumption under test |
+|---|---|---|
+| 1D-A | DFG + concurrent compiler threads | compiler threads, DFG code, cross-thread VM/code lifecycle |
+| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs |
+| 1D-C | WebAssembly | wasm tiers, their memory/trap handling |
+| 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads |
+
+W^X is hardening, not a tier. Order: Linux/x86_64 first, so a failure is a JSC-tier problem and not a signal
+emulation or persona problem, then Linux/aarch64, macOS/arm64 and Windows/x64. **Only 1D-A gates Tranche 2**; the
+rest are raised when WebCore needs them.
+
+**1D-A result, Linux/x86_64 (2026-10-05).** `tools/build_webkit_jsc.py --mode baseline-jit` gained "step 3", run on
+the *same* binary as 1C with `JSC_useDFGJIT=true`, `JSC_useConcurrentJIT=true`, four compiler threads
+(`JSC_numberOfDFGCompilerThreads=4`), FTL and WebAssembly still off and polling traps off:
+
+* `libcrtweb/tests/jsc/jsc_dfg_acceptance.js` (7 groups: hot int/double code and overflow exits, OSR exit and
+  re-optimisation after type/shape changes, inlining and callee replacement, exceptions through optimised frames,
+  GC with live DFG code, many functions compiling concurrently while being invalidated, typed arrays/strings) passes at
+  jitPolicyScale 0.01, at the default thresholds, and with `useConcurrentJIT=false`.
+* The proof that DFG code ran is the `JSC_reportDFGCompileTimes` report ("using DFG"): 108-137 reports per script run; there
+  must be none for FTL. With `JSC_useDFGJIT=false` the same script yields zero DFG reports (the check is not vacuous).
+  The compiler threads exist (`JITWorker` threads in `/proc/<pid>/task` with concurrent JIT on, none with it off).
+* The 1B and 1C scripts pass again under DFG; the context cycle passes on 0/1/4/8 threads (250 DFG reports on 4
+  threads); the watchdog terminates an infinite loop whose `spin` function was compiled by DFG; host-ABI audit clean.
+* Stress: the DFG script 100/100, the watchdog 100/100, 4- and 8-thread context cycles 40/40 (no failures); the
+  interpreter mode is unchanged and passes. The first run was green; nothing in CRT had to change for DFG.
+
+*Not covered by 1D-A:* FTL, WebAssembly, the sampling profiler, W^X, TSAN/ASAN builds, a long soak, and any host other
+than Linux/x86_64.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the

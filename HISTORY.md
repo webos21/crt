@@ -10,6 +10,21 @@ substantive update.
 
 ## 2026-10-05
 
+- **Web Tranche 1D-A on Linux/x86_64: JavaScriptCore's DFG tier with concurrent compiler threads runs on the CRT runtime;
+  the `libatomic.so.1` prerequisite is removed.** The 1C binary already contains DFG, so 1D-A is a run-time step in
+  `tools/build_webkit_jsc.py` (`--mode baseline-jit`, "step 3"): `DFG_ON_OPTIONS` (DFG and concurrent JIT on, four compiler
+  threads, FTL/WebAssembly off, polling traps off), the same at default thresholds and with serial compilation, the 1B/1C
+  scripts under DFG, context cycles on 0/1/4/8 threads and the watchdog with a DFG-compiled `spin`; each step requires DFG
+  compile reports and no FTL report. New `libcrtweb/tests/jsc/jsc_dfg_acceptance.js` (7 groups). Everything passed on the
+  first run with no CRT change (DFG script 100/100, watchdog 100/100, 4/8-thread cycles 40/40; 108-137 DFG reports per
+  script; the report count is zero with DFG off; `JITWorker` threads present with concurrent JIT on and absent without it).
+  Evidence and limits: `docs/crtweb_acceptance.md` ("1D-A result"). Replays on aarch64/macOS/Windows are open.
+  Also: `libatomic.so.1` dropped from `tools/crt_dist_prerequisites.py`, `docs/distribution.md` and `docs/release_preview.md`
+  (a fresh `02-cxx`..`05-ui` SDK has no libatomic `DT_NEEDED` on Linux/x86_64 and the aarch64 replay's host-ABI audit
+  was clean; `crt-ui-dist`, `verify_dist` and the 102 tooling tests pass). `TODO.md` lost its stale Windows
+  software-signal-mask text and now points 1D-A's replays at Linux/aarch64, macOS/arm64, then Windows/x64.
+
+
 - **Windows/x64: thread-directed signals, per-thread masks and a real `sigsuspend`; JavaScriptCore's Baseline JIT now runs
   with `JSC_usePollingTraps=false` (Web Tranche 1, signal VM-trap gate).** Windows has no kernel signal delivery, so the CRT
   builds it in the PAL (`libc/src/arch/windows/common/signal_backend.c`), not in WebKit. Each thread owns a mask/pending

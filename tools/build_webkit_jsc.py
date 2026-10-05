@@ -259,6 +259,18 @@ JIT_ON_OPTIONS = {"JSC_useJIT": "true", "JSC_useBaselineJIT": "true", "JSC_useDF
                   "JSC_jitPolicyScale": "0.01", "JSC_usePollingTraps": "false", "JSC_crashIfCantAllocateJITMemory": "true",
                   "JSC_reportBaselineCompileTimes": "true", "JSC_validateOptions": "true"}
 
+# Tranche 1D-A: the DFG tier and concurrent compilation on top of the Baseline JIT. FTL and
+# WebAssembly stay off (1D-B/1D-C). Four compiler threads, so concurrent compilation is
+# exercised even on a small host; jitPolicyScale makes functions tier up almost at once.
+DFG_ON_OPTIONS = {**JIT_ON_OPTIONS, "JSC_useDFGJIT": "true", "JSC_useConcurrentJIT": "true",
+                  "JSC_numberOfDFGCompilerThreads": "4", "JSC_reportDFGCompileTimes": "true"}
+# The same tier at the default tiering thresholds (what a real page would see).
+DFG_DEFAULT_THRESHOLD_OPTIONS = {k: v for k, v in DFG_ON_OPTIONS.items() if k != "JSC_jitPolicyScale"}
+# Compilation on the executing thread only: the answers must not depend on the compiler threads.
+DFG_SERIAL_OPTIONS = {**DFG_ON_OPTIONS, "JSC_useConcurrentJIT": "false"}
+DFG_COMPILE_REPORT = re.compile(r"\busing DFG\b")
+FTL_COMPILE_REPORT = re.compile(r"\busing FTL\b|\bFTL\b.*\binto \d+ bytes")
+
 
 def configure_options(mode: str):
     return COMMON_OPTIONS + MODE_OPTIONS[mode]
@@ -438,14 +450,19 @@ def measured(command, env) -> dict:
     return {"returncode": completed.returncode, "stdout": completed.stdout,
             "stderr": completed.stderr, "peak_rss_kb": peak,
             "compile_reports": sum(1 for line in (completed.stdout + completed.stderr).splitlines()
-                                   if BASELINE_COMPILE_REPORT.search(line) and "jsc_" not in line)}
+                                   if BASELINE_COMPILE_REPORT.search(line) and "jsc_" not in line),
+            # Compiler threads print without a lock, so a report can share a line with other
+            # output; count matches in the whole text.
+            "dfg_reports": len(DFG_COMPILE_REPORT.findall(completed.stdout + completed.stderr)),
+            "ftl_reports": len(FTL_COMPILE_REPORT.findall(completed.stdout + completed.stderr))}
 
 
 def script_result(run_result: dict, marker: str) -> dict:
     return {"ok": run_result["returncode"] == 0 and marker in run_result["stdout"],
             "peak_rss_kb": run_result["peak_rss_kb"],
             "within_rss_bound": 0 < run_result["peak_rss_kb"] <= ACCEPTANCE_MAX_RSS_KB,
-            "baseline_compile_reports": run_result["compile_reports"]}
+            "baseline_compile_reports": run_result["compile_reports"],
+            "dfg_compile_reports": run_result["dfg_reports"], "ftl_compile_reports": run_result["ftl_reports"]}
 
 
 def program_ok(env, command, marker) -> dict:
@@ -453,6 +470,39 @@ def program_ok(env, command, marker) -> dict:
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     return {"ok": completed.returncode == 0 and marker in completed.stdout}
+
+
+def run_dfg_acceptance(results: dict, build: Path, run_env: dict, programs: dict) -> None:
+    """Tranche 1D-A: the DFG tier with concurrent compilation, on the same binary (FTL and
+    WebAssembly are compiled in but stay off). Each step needs the DFG compile reports as proof
+    that optimised code ran, and no FTL report, which would mean the isolation failed."""
+    jsc = build / "bin" / "jsc"
+
+    def dfg_script(name, script, marker, options):
+        result = script_result(measured([jsc, TESTS / script], {**run_env, **options}), marker)
+        result["dfg_code_proven"] = result["dfg_compile_reports"] > 0
+        result["no_ftl_code"] = result["ftl_compile_reports"] == 0
+        results[name] = result
+
+    dfg_script("step3_dfg_script", "jsc_dfg_acceptance.js", "jsc_dfg_acceptance: ok", DFG_ON_OPTIONS)
+    dfg_script("step3_dfg_script_default_thresholds", "jsc_dfg_acceptance.js", "jsc_dfg_acceptance: ok",
+               DFG_DEFAULT_THRESHOLD_OPTIONS)
+    dfg_script("step3_dfg_script_serial_compiler", "jsc_dfg_acceptance.js", "jsc_dfg_acceptance: ok",
+               DFG_SERIAL_OPTIONS)
+    # The earlier acceptance scripts must still pass when the functions they run reach DFG.
+    dfg_script("step3_1b_script_with_dfg", "jsc_acceptance.js", "jsc_acceptance: ok", DFG_ON_OPTIONS)
+    dfg_script("step3_jit_script_with_dfg", "jsc_jit_acceptance.js", "jsc_jit_acceptance: ok", DFG_ON_OPTIONS)
+    dfg_env = {**run_env, **DFG_ON_OPTIONS}
+    for threads in CYCLE_THREAD_COUNTS:
+        results[f"step3_context_cycle_threads_{threads}"] = program_ok(
+            dfg_env, [programs["jsc_context_cycle"], str(threads)], "jsc_context_cycle: ok")
+    watchdog = measured([programs["jsc_watchdog_test"]], dfg_env)
+    results["step3_watchdog_signal_vm_traps"] = {
+        "ok": watchdog["returncode"] == 0 and "jsc_watchdog_test: ok" in watchdog["stdout"],
+        "spin_function_dfg_compiled": any(
+            "spin" in line and DFG_COMPILE_REPORT.search(line)
+            for line in (watchdog["stdout"] + watchdog["stderr"]).splitlines()),
+        "no_ftl_code": watchdog["ftl_reports"] == 0}
 
 
 def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict) -> dict:
@@ -491,9 +541,13 @@ def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict) -> dic
         results["step2_watchdog_signal_vm_traps"] = {
             "ok": watchdog["returncode"] == 0 and "jsc_watchdog_test: ok" in watchdog["stdout"],
             "spin_function_compiled": compiled_spin}
+    if mode == "baseline-jit":
+        run_dfg_acceptance(results, build, run_env, programs)
     results["passed"] = all(
         value["ok"] and value.get("within_rss_bound", True) and value.get("no_code_compiled", True)
         and value.get("compiled_code_proven", True) and value.get("spin_function_compiled", True)
+        and value.get("dfg_code_proven", True) and value.get("no_ftl_code", True)
+        and value.get("spin_function_dfg_compiled", True)
         for value in results.values() if isinstance(value, dict))
     return results
 
