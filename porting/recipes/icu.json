@@ -33,6 +33,22 @@
     "make_args": [],
     "make_subdir": "source",
     "target_overrides": {
+      "windows": {
+        "make_args": [
+          "INVOKE=PATH=\"$(LIBDIR);$(top_builddir)/stubdata;$(top_builddir)/tools/ctestfw;$(CRT_SYSROOT)/bin;$$PATH\"",
+          "PKGDATA_INVOKE=PATH=\"$(top_builddir)/stubdata;$(top_builddir)/tools/ctestfw;$(LIBDIR);$(CRT_SYSROOT)/bin;$$PATH\""
+        ],
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@"
+        ],
+        "env": {
+          "CFLAGS": "-O2 -U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER -U__MINGW32__ -U__MINGW64__ -U_WIN64 -UWIN64",
+          "CXXFLAGS": "-O2 -U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER -U__MINGW32__ -U__MINGW64__ -U_WIN64 -UWIN64",
+          "CPPFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER -U__MINGW32__ -U__MINGW64__ -U_WIN64 -UWIN64",
+          "lt_cv_deplibs_check_method": "pass_all",
+          "icu_cv_host_frag": "mh-mingw64"
+        }
+      },
       "macos": {
         "configure_args": [
           "--enable-rpath"
@@ -53,16 +69,30 @@
         "-I@PORT_PREFIX@/include",
         "-DU_STATIC_IMPLEMENTATION"
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libicui18n.a",
-        "@PORT_PREFIX@/lib/libicuuc.a",
-        "@PORT_PREFIX@/lib/libicudata.a"
-      ],
       "expect_stdout": "icu_unicode_test: ok",
       "target_overrides": {
         "macos": {
           "cflags": [
             "-std=c++17"
+          ],
+          "link_args": [
+            "@PORT_PREFIX@/lib/libicui18n.a",
+            "@PORT_PREFIX@/lib/libicuuc.a",
+            "@PORT_PREFIX@/lib/libicudata.a"
+          ]
+        },
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libicui18n.a",
+            "@PORT_PREFIX@/lib/libicuuc.a",
+            "@PORT_PREFIX@/lib/libicudata.a"
+          ]
+        },
+        "windows": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libsicuin.a",
+            "@PORT_PREFIX@/lib/libsicuuc.a",
+            "@PORT_PREFIX@/bin/libsicudt.a"
           ]
         }
       }
@@ -96,9 +126,9 @@
         },
         "windows": {
           "link_args": [
-            "@PORT_PREFIX@/lib/libicui18n.so",
-            "@PORT_PREFIX@/lib/libicuuc.so",
-            "@PORT_PREFIX@/lib/libicudata.so"
+            "@PORT_PREFIX@/lib/libicuin.dll.a",
+            "@PORT_PREFIX@/lib/libicuuc.dll.a",
+            "@PORT_PREFIX@/lib/libicudt.dll.a"
           ]
         }
       }
@@ -106,7 +136,8 @@
   ],
   "status": {
     "linux": "shared-pass",
-    "macos": "shared-pass"
+    "macos": "shared-pass",
+    "windows": "shared-pass"
   },
   "notes": [
     "Added 2026-10-03 for Web Tranche 1: JavaScriptCore/WTF require ICU >= 70.1 with the data, uc and i18n components (Source/cmake/OptionsJSCOnly.cmake, find_package(ICU 70.1 REQUIRED COMPONENTS data i18n uc)). It is a CRT port so the 06-web SDK does not depend on a host ICU (which would differ per OS and break the package boundary).",
@@ -115,6 +146,7 @@
     "build.env.CRT_CXX_ENABLE_RTTI=1: ICU uses dynamic_cast/typeid (normalizer2.cpp, rbbi.cpp), and tools/crt-c++ compiles with -fno-rtti unless a port opts in.",
     "Web Tranche 1 macOS replay (2026-10-04): build.target_overrides.macos.env.CRT_CXX_RUNTIME_LINKAGE=shared. ICU's own build runs the tools it just built (icupkg, genrb, pkgdata) against the shared libicuuc.dylib, which depends on @rpath/libc.dylib; a tool linked with the static runtime has no rpath to the CRT sysroot (and Apple's make/sh strip DYLD_LIBRARY_PATH under SIP), so dyld aborted with 'Library not loaded: @rpath/libc.dylib' while generating icudata.lst. Shared runtime linkage gives the tools the sysroot rpath and, as in Tranche 1B, one libc in the process.",
     "Test changes for macOS (2026-10-04): the unicode tests pass -std=c++17 on macOS because Apple clang defaults to an older C++ dialect than ICU's headers need (std::is_same_v, auto template parameters), and the shared test now names libicu*.dylib per host like freetype.json/zlib.json instead of .so on every host.",
-    "macOS install names (2026-10-04): target_overrides.macos.configure_args --enable-rpath. ICU's Darwin makefile otherwise records a bare install name (libicuuc.78.dylib) that dyld cannot resolve without DYLD_LIBRARY_PATH (and a host-ABI audit cannot tell from a host library); --enable-rpath gives the absolute install-prefix name, the same convention as the sqlite amalgamation recipe, which the isolated-stage packaging rewrites to @rpath."
+    "macOS install names (2026-10-04): target_overrides.macos.configure_args --enable-rpath. ICU's Darwin makefile otherwise records a bare install name (libicuuc.78.dylib) that dyld cannot resolve without DYLD_LIBRARY_PATH (and a host-ABI audit cannot tell from a host library); --enable-rpath gives the absolute install-prefix name, the same convention as the sqlite amalgamation recipe, which the isolated-stage packaging rewrites to @rpath.",
+    "Windows/x64 (2026-10-05, Web Tranche 1 Windows replay): both recipe tests pass. build.target_overrides.windows: (1) --build=@CRT_MINGW_TRIPLE@ and the -U_WIN32/_WIN64/__MINGW32__/__MINGW64__ family in CFLAGS/CXXFLAGS/CPPFLAGS so ICU's platform.h picks its POSIX path (no windows.h exists in this sysroot), the recipe convention of curl/libpng; (2) env icu_cv_host_frag=mh-mingw64, because configure selects mh-mingw64 only if __MINGW64__ is defined at configure time and the -U above made it choose the 32-bit mh-mingw (a leading underscore on the embedded data symbol, icudt78_dat, so the static data library did not link, and a lib-prefixed data DLL that icuuc78.dll could not find); (3) make_args INVOKE/PKGDATA_INVOKE put PATH with ';' separators and the SDK bin directory (libc.dll) on the PATH of the tools ICU runs while building (icupkg, genrb, pkgdata; its own colon-separated value is not a Windows PATH, and the tools exit with STATUS_DLL_NOT_FOUND). The static libraries are named libsicu*.a (the data library is installed into bin/, not lib/), the import libraries libicu*.dll.a, the DLLs icu*78.dll. Three CRT/PAL defects were found and fixed by this port, none by patching ICU: the Windows startup kept at most 255 arguments and 8191 command-line characters and dropped the rest silently (ICU's 280-object libicuin link lost its libraries), a program named without .exe (`../bin/icupkg`) was not found by stat/access/spawn, and the port test environment lacked the SDK bin directory for DLLs built against libc.dll (tools/crt-port-build.py)."
   ]
 }

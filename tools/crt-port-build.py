@@ -1741,6 +1741,11 @@ def port_test_env(env, port_prefix, target_os):
     elif target_os == "windows":
         name = "PATH"
         search_dirs = [lib_dir, port_prefix / "bin"]
+        # A DLL built against the CRT imports libc.dll (and libc++.dll, ...), which live in
+        # the SDK's bin directory, so a test that loads a port DLL needs it on PATH too.
+        sysroot_bin = Path(test_env["CRT_SYSROOT"]) / "bin" if test_env.get("CRT_SYSROOT") else None
+        if sysroot_bin is not None and sysroot_bin.is_dir():
+            search_dirs.append(sysroot_bin)
     else:
         return test_env
     current = test_env.get(name, "")
