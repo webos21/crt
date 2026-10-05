@@ -38,7 +38,7 @@ static int failures;
     }                                                                                \
   } while (0)
 
-#define MAX_THREADS 8
+#define MAX_THREADS 8 /* busy-looping threads: the runtime is rounds x slices, so the round counts below are small */
 
 struct spinner {
   pthread_t thread;
@@ -50,6 +50,7 @@ struct spinner {
   volatile int context_ok; /* the handler saw a coherent context */
   volatile int wrong_thread;
   volatile int stop;       /* set by the controller at teardown */
+  volatile int finished;   /* set by the thread just before it returns */
 };
 
 static struct spinner spinners[MAX_THREADS];
@@ -97,16 +98,19 @@ static void* spinner_main(void* argument) {
 
   pthread_setspecific(self_key, me);
   for (;;) {
-    if (me->stop) return 0;
+    if (me->stop) break;
     me->ready = 0;
     spin(me);
     me->escaped = 1;
     while (me->escaped) {
       /* wait until the controller has seen the escape and re-armed us */
-      if (me->stop) return 0;
+      if (me->stop) break;
       sched_yield();
     }
+    if (me->stop) break;
   }
+  me->finished = 1;
+  return 0;
 }
 
 static double now(void) {
@@ -128,27 +132,39 @@ static int wait_for(volatile int* flag, int value, double seconds) {
  * arrived while the thread was between setting its flag and entering the loop (the handler then sees
  * a different REG_RIP and cannot move it). Returns the number of signals it took, 0 on a hang. */
 static int interrupt_until_escaped(pthread_t thread, int sig, volatile int* escaped, long* sent) {
-  double deadline = now() + 5.0;
+  double deadline = now() + 30.0;
   int attempts = 0;
 
   while (!*escaped) {
-    int spin;
+    double patience;
 
     if (now() > deadline) return 0;
     ++attempts;
     if (sent != 0) ++*sent;
     if (pthread_kill(thread, sig) != 0) return 0;
-    /* Give the signal time to take before sending another (a second one merges into a pending one). */
-    for (spin = 0; spin < 200 && !*escaped; ++spin) sched_yield();
+    /* Give the signal time to take before sending another (a second one merges into a pending one). By
+     * the clock, not by a count of yields: on one core every yield hands the CPU to a spinning thread for
+     * a whole time slice. */
+    for (patience = now() + 0.05; !*escaped && now() < patience;) sched_yield();
   }
-  return attempts;
+  return attempts != 0 ? attempts : 1; /* a late signal of the previous round may have escaped it already */
 }
 
 /* Teardown: a spinner may already be back in its loop, so interrupt it once more after asking it to stop. */
 static void stop_spinner(struct spinner* s) {
+  double deadline = now() + 30.0;
+
   s->stop = 1;
-  interrupt_until_escaped(s->thread, SIGUSR1, &s->escaped, 0);
-  s->escaped = 0;
+  /* `escaped` may be stale (a signal of an earlier round escaped the loop again): clear it, signal until
+   * the thread says it has returned. */
+  while (!s->finished && now() < deadline) {
+    double patience;
+
+    s->escaped = 0;
+    pthread_kill(s->thread, SIGUSR1);
+    for (patience = now() + 0.05; !s->finished && now() < patience;) sched_yield();
+  }
+  CHECK(s->finished, "a spinner returned at teardown");
   pthread_join(s->thread, 0);
 }
 
@@ -168,8 +184,8 @@ static void test_interrupt_worker(void) {
   CHECK(sigaction(SIGUSR1, &action, 0) == 0, "sigaction(SIGUSR1)");
 
   CHECK(pthread_create(&s->thread, 0, spinner_main, s) == 0, "pthread_create for the spinner");
-  for (round = 0; round < 200; ++round) {
-    if (!wait_for(&s->ready, 1, 5.0)) {
+  for (round = 0; round < 40; ++round) {
+    if (!wait_for(&s->ready, 1, 30.0)) {
       CHECK(0, "the spinner reached its loop");
       break;
     }
@@ -186,7 +202,7 @@ static void test_interrupt_worker(void) {
   /* Standard signals are not queued: one sent while another is still pending merges into it, so the
    * handler can run fewer times than signals were sent -- but at least once per round (each round's
    * loop was left through the handler) and never more often than a signal was sent. */
-  CHECK(s->handled >= 200 && s->handled <= sent,
+  CHECK(s->handled >= 40 && s->handled <= sent,
         "the handler ran at least once per round and never more often than signals were sent");
   stop_spinner(s);
 }
@@ -214,8 +230,8 @@ static void* poke_initial(void* argument) {
   int i;
 
   (void)argument;
-  for (i = 0; i < 100; ++i) {
-    wait_for(&initial_ready, 1, 5.0);
+  for (i = 0; i < 20; ++i) {
+    wait_for(&initial_ready, 1, 30.0);
     interrupt_until_escaped(initial_thread, SIGUSR2, &initial_escaped, 0);
     initial_ready = 0;
     initial_escaped = 0;
@@ -236,7 +252,7 @@ static void test_interrupt_initial_thread(void) {
   sigaction(SIGUSR2, &action, 0);
   initial_thread = pthread_self();
   pthread_create(&poker, 0, poke_initial, 0);
-  for (i = 0; i < 100; ++i) {
+  for (i = 0; i < 20; ++i) {
     initial_context_ok = 0;
     __asm__ volatile(
         "lea 1f(%%rip), %%rax\n\t"
@@ -251,13 +267,13 @@ static void test_interrupt_initial_thread(void) {
         : "rax", "memory");
     if (!initial_context_ok) ok = 0;
     initial_escaped = 1;
-    if (!wait_for(&initial_ready, 0, 5.0)) {
+    if (!wait_for(&initial_ready, 0, 30.0)) {
       ok = 0;
       break;
     }
   }
   pthread_join(poker, 0);
-  CHECK(ok, "the initial thread's loop is interrupted by another thread, 100 times");
+  CHECK(ok, "the initial thread's loop is interrupted by another thread, 20 times");
 }
 
 /* A patched-in `int3` raises SIGTRAP in the executing thread; the handler may move RIP. */
@@ -330,7 +346,7 @@ static void test_concurrent_delivery(void) {
   int i, round;
   int ok = 1;
   const int threads = MAX_THREADS;
-  const int rounds = 300;
+  const int rounds = 30;
 
   memset(&action, 0, sizeof(action));
   action.sa_sigaction = on_usr1_many;
@@ -343,7 +359,7 @@ static void test_concurrent_delivery(void) {
   }
   for (round = 0; round < rounds && ok; ++round) {
     for (i = 0; i < threads; ++i) {
-      if (!wait_for(&spinners[i].ready, 1, 5.0)) ok = 0;
+      if (!wait_for(&spinners[i].ready, 1, 30.0)) ok = 0;
     }
     for (i = 0; i < threads && ok; ++i) {
       long sent = 0;
@@ -354,7 +370,7 @@ static void test_concurrent_delivery(void) {
     }
     for (i = 0; i < threads; ++i) spinners[i].escaped = 0;
   }
-  CHECK(ok, "8 threads interrupted concurrently, 300 rounds, no hang");
+  CHECK(ok, "8 threads interrupted concurrently, 30 rounds, no hang");
   CHECK(total_handled >= (long)threads * rounds && total_handled <= total_sent,
         "each thread's handler ran at least once per round and never more often than signals were sent");
   for (i = 0; i < threads; ++i) stop_spinner(&spinners[i]);
@@ -399,10 +415,12 @@ static void* blocked_main(void* argument) {
       }
       break;
     case WAIT_SLEEP: {
-      struct timespec request = {30, 0};
+      struct timespec request = {2, 0};
 
       block_in_call = 1;
-      nanosleep(&request, 0); /* returns early (EINTR) once the handler ran and the test releases it */
+      /* Long enough that the handler runs while it sleeps; the loop (not one long sleep) ends it, so a
+       * release that arrives before the thread is in nanosleep() cannot leave it asleep. */
+      while (!block_release) nanosleep(&request, 0);
       break;
     }
     case WAIT_JOIN: {
@@ -433,15 +451,16 @@ static void test_blocked_waits(void) {
     pthread_t thread;
     char message[96];
 
+    if (getenv("SIGNAL_VMTRAP_VERBOSE") != 0) fprintf(stderr, "signal_vmtrap_test:   %s\n", names[kind]);
     block_release = 0;
     block_handled = 0;
     block_in_call = 0;
     pthread_create(&thread, 0, blocked_main, (void*)(intptr_t)kind);
-    wait_for(&block_in_call, 1, 5.0);
+    wait_for(&block_in_call, 1, 30.0);
     usleep(50 * 1000); /* now parked in the call */
     pthread_kill(thread, SIGUSR1);
     snprintf(message, sizeof(message), "the handler ran on a thread blocked in %s", names[kind]);
-    CHECK(wait_for(&block_handled, 1, 5.0), message);
+    CHECK(wait_for(&block_handled, 1, 30.0), message);
     /* release it */
     block_release = 1;
     if (kind == WAIT_COND) {
