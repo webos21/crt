@@ -31,6 +31,14 @@ void _pei386_runtime_relocator(void);
  * genuine gap, redundant-but-correct). */
 void _crt_install_dwarf_unwind_safety_net(void);
 
+/* Clang emits a reference to _fltused for x86_64 COFF objects that use floating point; an
+ * executable gets the definition from compiler_abi.c (libc.a), a DLL built with this entry
+ * file gets it here (found linking JavaScriptCore.dll). Weak, so libc.dll, which also links
+ * compiler_abi.o, does not conflict. */
+#if defined(__x86_64__) || defined(_M_X64)
+__attribute__((weak)) int _fltused = 0;
+#endif
+
 int crtDllMainCRTStartup(void* module, unsigned long reason, void* reserved) {
   (void)module;
   (void)reserved;

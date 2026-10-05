@@ -437,6 +437,11 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set_target_properties(c_shared PROPERTIES
     ARCHIVE_OUTPUT_NAME c_dll
   )
+  # `environ` is part of the public surface (<unistd.h>) but CMake's export-all .def leaves it out
+  # (every other data symbol, optarg/timezone/tzname, is exported); a DLL that reads it, such as
+  # JavaScriptCore, then fails to link with `undefined symbol: environ`.
+  # An explicit export turns lld's automatic export-everything off, so ask for both.
+  target_link_options(c_shared PRIVATE "-Wl,--export-all-symbols" "SHELL:-Xlinker /export:environ,DATA")
 endif()
 if(CRT_TARGET_OS STREQUAL "linux")
   # CRT_1.0 ELF symbol-version namespace (2026-09-14): this library's own

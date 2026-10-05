@@ -273,6 +273,12 @@ float atan2f(float y, float x) {
   return (float)atan2((double)y, (double)x);
 }
 
+/* atanf: same gap and same cast-wrapper (found 2026-10-05 linking JavaScriptCore on Windows:
+ * `undefined symbol: atanf` from Math.atan's float path). */
+float atanf(float x) {
+  return (float)atan((double)x);
+}
+
 double cosh(double x) {
   double ex = exp(x);
   return 0.5 * (ex + 1.0 / ex);
