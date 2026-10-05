@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on Linux/x86_64 and awaits its replays, and FTL/WebAssembly/profiler/W^X (1D-B..D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on Linux/x86_64 and macOS/arm64 and awaits the other replays, and FTL/WebAssembly/profiler/W^X (1D-B..D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -279,7 +279,20 @@ the *same* binary as 1C with `JSC_useDFGJIT=true`, `JSC_useConcurrentJIT=true`, 
   interpreter mode is unchanged and passes. The first run was green; nothing in CRT had to change for DFG.
 
 *Not covered by 1D-A:* FTL, WebAssembly, the sampling profiler, W^X, TSAN/ASAN builds, a long soak, and any host other
-than Linux/x86_64.
+than Linux/x86_64 and macOS/arm64 (below).
+
+**1D-A replay, macOS/arm64 (2026-10-06): green on the first run, nothing in CRT or the carried patches changed.**
+Rebuilt `crt-ui-dist` from the tree after the pull (verified), then `tools/build_webkit_jsc.py --mode baseline-jit`
+from an empty work root (build 133 s, acceptance 19 s). Every 1B/1C step passes again, and all of step 3:
+the DFG script at jitPolicyScale 0.01 (124 `using DFG` reports), at default thresholds (106), with serial compilation
+(137), the 1B script (9) and the JIT script (44) under DFG, context cycles on 0/1/4/8 threads, and the watchdog killing a
+DFG-compiled `spin`; host-ABI audit clean. Beyond the harness: the DFG script 100/100, the watchdog 100/100 and
+4/8-thread context cycles 40/40 with no failure; with `useDFGJIT=false` the same script gives zero DFG reports and
+FTL gives none in either configuration. macOS has no `/proc/<pid>/task`, so the compiler threads were checked by
+sampling a running process (`sample`): with concurrent JIT on, `JITPlan::compileInThread` runs under
+`JITWorklistThread::work` on worker threads; with it off it runs inside the main thread. DFG code is written under the
+same `MAP_JIT` plus per-thread write-protect toggle as Baseline, which the compiler threads' finalization and the
+concurrent invalidation exercised without a fault.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the

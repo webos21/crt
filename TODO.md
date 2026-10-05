@@ -81,8 +81,8 @@ then macOS/arm64.
     compile proof, watchdog termination of compiled code, threads, host-ABI audit.
   * [ ] **1D. Higher JIT tiers, split by risk** (all compiled in, off at run time unless named). **1D-A DFG +
     concurrent compiler threads: done on Linux/x86_64 2026-10-05** (`HISTORY.md`, `docs/crtweb_acceptance.md`);
-    **next: replay 1D-A on Linux/aarch64, then macOS/arm64 and Windows/x64** (the Windows signal backend gets its new
-    consumer there). 1D-B FTL/B3, 1D-C WebAssembly, 1D-D sampling profiler and the W^X policy are not Tranche 2
+    macOS/arm64 replay done 2026-10-06; **next: replay 1D-A on Linux/aarch64 and Windows/x64** (the Windows signal
+    backend gets its new consumer there). 1D-B FTL/B3, 1D-C WebAssembly, 1D-D sampling profiler and the W^X policy are not Tranche 2
     blockers (1D-A is the gate); raise them when WebCore shows the need. Thread-stack sizing (1 MiB default) is
     still open: DFG compiler threads ran fine at it.
   * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64

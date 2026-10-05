@@ -8,6 +8,14 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-06
+
+- **Web Tranche 1D-A replayed on macOS/arm64: DFG with concurrent compiler threads is green on the first run.**
+  Fresh `crt-ui-dist` and an empty-tree `--mode baseline-jit` build; all 1B/1C steps and step 3 (DFG at 0.01/default
+  thresholds/serial, 1B and JIT scripts under DFG, context cycles on 0/1/4/8 threads, watchdog on DFG code) pass,
+  host-ABI audit clean; stress DFG 100/100, watchdog 100/100, cycles 40/40; DFG-off gives zero reports and FTL none;
+  compiler threads confirmed by `sample` (no `/proc` on macOS). No CRT or patch change was needed.
+
 ## 2026-10-05
 
 - **Web Tranche 1D-A on Linux/x86_64: JavaScriptCore's DFG tier with concurrent compiler threads runs on the CRT runtime;
