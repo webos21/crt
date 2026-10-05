@@ -550,7 +550,37 @@ reports about 214 MB for a 200 MB allocation.
 (a build tool, not a CRT artifact), the pinned WPE WebKit 2.54.0 configures (about 125 s) and `jsc` builds (about 520 s, every
 JavaScriptCore source compiled); `jsc_acceptance.js` passes all 8 groups (peak 74 MB, bound 450 MB) and `jsc_context_cycle`
 passes 150 cycles on 0, 1, 4 and 8 threads with 0 failures and about 60 KiB of growth; the PE import audit is clean (every
-import is a CRT DLL, the CRT ICU or KERNEL32/api-ms-win-core). Not done: 1C on Windows, the watchdog, the sampling profiler.
+import is a CRT DLL, the CRT ICU or KERNEL32/api-ms-win-core). 1C follows below.
+
+*Result: Windows/x64 1C (Baseline JIT) is green (2026-10-05), with polling traps.* Same pinned tarball, same SDK, the JIT
+tiers compiled in and DFG/FTL/WebAssembly off at run time. `jsc_acceptance.js` passes with `JSC_useJIT=false` and compiles
+nothing (the assembly interpreter alone); `jsc_jit_acceptance.js` passes with a compile report of 2,340 entries, the same
+number as Linux/x86_64; 1B passes again with the JIT on; `jsc_context_cycle` passes 150 cycles on 0/1/4/8 threads (failures 0,
+growth about 200 KiB); `jsc_watchdog_test` terminates a compiled `spin` loop on the main thread and on workers, 3 times each
+(`spin_function_compiled`); the PE audit is clean. *Not covered:* signal-based VM traps (this run uses
+`JSC_usePollingTraps=true`, the first Windows run by decision: the CRT's software signal mask and stub `sigsuspend` are a gate of
+their own), the sampling profiler, DFG/FTL/WebAssembly, W^X, Windows/ARM64.
+
+*What the JIT needed, beyond 1B (carried patch 0003-coff-assembler-flavor, Windows only; nothing else in the tree changes):*
+
+1. *The assembler flavour.* The persona makes offlineasm and the inline assembly take their ELF branches but the object format
+   is COFF: `.hidden`, `.size`, `.type name, function`, `name@plt` and `.previous` are rejected. Selected by
+   `-DWTF_CRT_COFF_ASM` and the `WTF_CRT_COFF_ASM` environment variable (the same mechanism as the Mach-O variant).
+2. *The calling convention.* JavaScriptCore's x86_64 JIT and LLInt pass System V argument registers on every OS and, on
+   Windows, call each JIT operation and host function through `__attribute__((sysv_abi))`, selected by `OS(WINDOWS)`; under the
+   Linux-shaped persona those macros were empty, so the C++ helpers used the Microsoft ABI the target defaults to and
+   `LLInt::initialize()` aborted in `llint_crash` on the first call. The conditions (`PlatformCallingConventions.h`,
+   `FunctionTraits.h`, `FunctionPtr.h`, `CodePtr.h`, `AbstractMacroAssembler.h`, `StackPointer.cpp`) and offlineasm's
+   `--platform=Windows` (`CMakeLists.txt`, through `CRT_WINDOWS_ABI` from the persona include) now include the CRT Windows
+   flavour. `CallFrame.h`'s Windows branch (`_AddressOfReturnAddress`, an MSVC intrinsic mingw clang lacks) is deliberately
+   not taken; the generic `__builtin_frame_address(1)` path ran correctly under all of the acceptance.
+3. *GNU bit-field layout* (`-mno-ms-bitfields`): `RegisterAtOffset` packs an `unsigned` and a `ptrdiff_t` bit-field into 8 bytes,
+   which the Microsoft layout MinGW defaults to does not (16 bytes, a `static_assert`).
+4. *CRT:* `getrlimit(RLIMIT_STACK)` promised a fixed 8 MiB while the executable's real stack is 1 MiB; `WTF::StackBounds` sizes the
+   main thread's stack from that limit, so the assembly interpreter recursed past the real stack end and crashed instead of
+   throwing a RangeError. It now reports the real size (recorded at startup, `pthread_stack_bounds_test`). Raising the default
+   executable stack to 8 MiB (`/stack:`) is a separate decision, not taken.
+5. *Test:* `jsc_watchdog_test.cpp`'s crash reporter reads the Linux-layout `ucontext_t` and is not built on Windows.
 
 *Decision taken: the Linux-shaped persona.* The first configure showed that the pinned tarball does not contain WebKit's WIN32
 sources (`Source/WTF/wtf/text/win/StringWin.cpp` is named by CMake and absent), so a WIN32 build is not possible from this pin at
@@ -566,7 +596,7 @@ bmalloc pick `<process.h>`) and defines `__linux__`. Nothing in the WebKit tree 
 3. `_fltused` was defined only in `libc.a`, so a DLL built with `dllcrt.o` could not link; a weak definition is in `dllcrt.c`.
 4. A Windows executable always linked its own static `libc.a` while DLLs used `libc.dll`: two libcs in one process, each with its
    own malloc, TLS registry and initial-thread id. `crt-c++` now links the executable against `libc.dll` when
-   `CRT_CXX_RUNTIME_LINKAGE=shared`, and a new `CRT_CXX_STL_LINKAGE` picks libc++ separately.
+   `CRT_CXX_RUNTIME_LINKAGE=shared`, and a new `CRT_CXX_STL_LINKAGE` picks libc++ separately (not needed by the harness now).
 5. `syscall(SYS_gettid)` returned ENOSYS on Windows, so WTF never recognised the main thread
    (`getpid() == syscall(SYS_gettid)`) and aborted in `initializeMainThread`; Windows now maps `SYS_gettid` and `SYS_getpid`
    as macOS does.
@@ -580,13 +610,16 @@ bmalloc pick `<process.h>`) and defines `__linux__`. Nothing in the WebKit tree 
 8. `pthread_getattr_np()` reported no stack on Windows, so `VM::setLastStackTop` aborted; it now reports the real stack from
    `GetCurrentThreadStackLimits` (the initial thread, and recorded at start for threads the CRT creates).
 
-*Open and not understood:* `libc.dll`'s sibling `libc++.dll` does not export the `<sstream>` explicit instantiations
-(`basic_stringbuf`, `basic_ostringstream` and their vtables) although `ios.instantiations.cpp.obj` defines them, so
-JavaScriptCore.dll cannot link against it. lld's automatic export is not the whole story: `/OPT:NOREF` and
-`-export-all-symbols` did not change the export count, the symbols were exported when the object was linked alone only for
-other classes, and libc++'s headers do use `__declspec(dllexport)` (`_LIBCPP_EXPORTED_FROM_ABI`). The Windows lane therefore
-links libc++ statically (like the CRT ICU DLLs) and `libc.dll` shared, which works because only libc state has to be one per
-process. A single shared libc++ for Windows needs this export gap understood first.
+*Explained (was open): the missing `<sstream>` exports of `libc++.dll`.* Upstream libc++ turns the additional iostream explicit
+instantiations (`basic_stringbuf`, `basic_stringstream`, `basic_ostringstream`, `basic_istringstream<char>`) off on Windows
+(`__configuration/availability.h`, `!defined(_WIN32)`, LLVM PR41018): the library still defines them but `.drectve` exports only
+the `dllexport`-annotated symbols (an explicit export disables lld's automatic export, which is why `/OPT:NOREF` and
+`-export-all-symbols` changed nothing), and a Windows consumer instantiates them itself. A consumer that hides `_WIN32`, as
+the Linux-shaped persona does, took the other branch, declared them `extern template` and could not link. It was a
+configuration mismatch between library and consumer, not a missing export. A recipe patch to `libcxx/recipe.json`
+(`CRT_TARGET_OS_WINDOWS` joins the condition, removal condition in the patch) gives CRT Windows consumers the library's own
+configuration; JavaScriptCore.dll now links against the shared `libc++.dll` and the whole 1B acceptance passes with one libc
+and one libc++ in the process (peak 73 MB, 150 cycles on 0/1/4/8 threads, audit clean).
 
 *Decisions to take before the first Windows configure* (proposals, not yet decided):
 

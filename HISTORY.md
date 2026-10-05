@@ -61,6 +61,18 @@ only thread is a new native thread, so `__crt_atfork_child()` re-records it as t
 the re-record fails exactly that check). The sweep test timed out in parallel runs right after a
 libc relink and passes alone; the cause was not investigated.
 
+### Windows/x64: JavaScriptCore 1C (Baseline JIT) green with polling traps (Web Tranche 1 Windows replay)
+
+The Baseline JIT passes its acceptance on Windows/x64: the assembly interpreter alone compiles nothing, the JIT script produces
+2,340 compile reports (the Linux/x86_64 number), 1B passes again with the JIT, 150-cycle contexts on 0/1/4/8 threads, the
+watchdog terminates a compiled loop on the main thread and on workers, and the PE audit is clean. It needed one carried patch
+(`libcrtweb/patches/0003-coff-assembler-flavor`: COFF assembler directives, and the System V argument-register/`sysv_abi`
+conventions JavaScriptCore selects with `OS(WINDOWS)`, plus offlineasm's `--platform=Windows`), `-mno-ms-bitfields`, and a CRT
+fix: `getrlimit(RLIMIT_STACK)` reported 8 MiB for a 1 MiB main stack, so the assembly interpreter overflowed the real stack
+instead of throwing a RangeError. A libc++ recipe patch gives Windows consumers that hide `_WIN32` the library's own iostream
+configuration (so JavaScriptCore.dll links the shared libc++.dll). Signal-based VM traps, the sampling profiler, DFG/FTL and
+ARM64 are not covered; the first run uses `JSC_usePollingTraps=true` by decision.
+
 ### Windows/x64: JavaScriptCore 1B (interpreter) green, and eight CRT gaps it exposed (Web Tranche 1 Windows replay)
 
 With Ruby installed on the build host, the pinned WPE WebKit 2.54.0 builds `jsc` on Windows/x64 from the installed `05-ui` SDK
@@ -72,8 +84,10 @@ linkage, `CRT_CXX_STL_LINKAGE` for libc++); `syscall(SYS_gettid/SYS_getpid)`; pa
 commit-on-`mprotect`; `size_t` instead of 32-bit `unsigned long` lengths in the memory-map entry points (a 16 GiB mapping was
 truncated to 0); and the real stack in `pthread_getattr_np`. New tests: `long_argv_test` (earlier), `mmap_partial_test`,
 `pthread_stack_bounds_test`, and the extended `bionic_surface_test`; the new ones fail on the old behaviour (mutation-checked).
-Not understood: libc++.dll's missing `<sstream>` exports, so the Windows lane links libc++ statically
-(`docs/crtweb_acceptance.md`). Not done: 1C, the watchdog, the isolated stage chain, ARM64.
+libc++.dll's missing `<sstream>` exports turned out to be a configuration mismatch: upstream disables those explicit
+instantiations on Windows (LLVM PR41018) and a consumer that hides `_WIN32` took the other branch; a libc++ recipe patch fixes
+it and the lane now links the shared libc++.dll (one libc and one libc++ per process). Not done: 1C, the watchdog, the
+isolated stage chain, ARM64.
 
 ### Windows/x64: getrusage, the JSC harness's Windows lane (Web Tranche 1 Windows replay)
 

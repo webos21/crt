@@ -10,9 +10,8 @@ Tranche 1 (JavaScriptCore) is green for 1A (the ICU and gperf ports), 1B (the in
 acceptance) and 1C (the Baseline JIT, with a compile proof and a watchdog that terminates
 compiled code) on Linux/x86_64, Linux/aarch64 and macOS/arm64, built by
 `tools/build_webkit_jsc.py` from the verified pin against an installed SDK. The Windows
-replay is open (the ICU and gperf ports and the shared CRT checks pass; the harness's Windows
-lane exists but has not built JavaScriptCore yet); W^X hardening and the DFG/FTL/WebAssembly
-tiers remain. No WebCore, WebKit, `PlatformCRT` or `crtweb` API code exists yet, and
+replay is green for 1A, 1B and 1C on Windows/x64 too (polling traps; signal-based traps are
+open); W^X hardening and the DFG/FTL/WebAssembly tiers remain. No WebCore, WebKit, `PlatformCRT` or `crtweb` API code exists yet, and
 `libcrtweb` is not part of the root CMake build.
 
 ## Layout

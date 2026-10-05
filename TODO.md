@@ -87,7 +87,7 @@ then macOS/arm64.
     carried patches, see `docs/crtweb_acceptance.md`); macOS/x86_64 has no signal conversion or JIT permissions.
     Linux/x86_64 re-verified after the macOS replay (2026-10-04, no regression). Linux/aarch64: 1A/1B/1C
     done 2026-10-05 after implementing native thread TLS (variant I); full ctest 136/136, interpreter and Baseline-JIT
-    acceptance green (`HISTORY.md`, `docs/crtweb_acceptance.md`); Windows/x64: 1A and 1B done 2026-10-05 (interpreter acceptance, thread cycles and the PE audit pass; Linux-shaped persona; `HISTORY.md`, `docs/crtweb_acceptance.md`); **next: 1C on Windows** (COFF assembler flavour for offlineasm, the Baseline JIT, the watchdog; polling traps first), and understand why libc++.dll lacks the `<sstream>` exports (Windows links libc++ statically meanwhile)
+    acceptance green (`HISTORY.md`, `docs/crtweb_acceptance.md`); Windows/x64: 1A, 1B and 1C done 2026-10-05 (interpreter and Baseline-JIT acceptance, thread cycles, watchdog with polling traps, PE audit; Linux-shaped persona; `HISTORY.md`, `docs/crtweb_acceptance.md`); **next: signal-based VM traps on Windows** (the CRT's software signal mask and stub `sigsuspend` as a gate of their own), then 1D
     ("Linux verification of the macOS replay" in the same document).
     Windows/x64: the ICU/gperf ports, the
     harness, the clocks/`sched_*`/signal code (software signal mask and a stub `sigsuspend`),
