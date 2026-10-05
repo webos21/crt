@@ -495,6 +495,12 @@ set_tests_properties(jit_memory_test_runs PROPERTIES
 )
 
 # Per-thread signal masks, sa_mask and a blocking sigsuspend (WTF thread suspend, JSC VM traps).
+add_crt_test(signal_vmtrap_test signal_vmtrap_test.c)
+set_tests_properties(signal_vmtrap_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "signal_vmtrap_test: ok"
+  TIMEOUT 120
+)
+
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"

@@ -256,7 +256,7 @@ JIT_OFF_OPTIONS = {"JSC_useJIT": "false", "JSC_reportBaselineCompileTimes": "tru
                    "JSC_validateOptions": "true"}
 JIT_ON_OPTIONS = {"JSC_useJIT": "true", "JSC_useBaselineJIT": "true", "JSC_useDFGJIT": "false",
                   "JSC_useFTLJIT": "false", "JSC_useConcurrentJIT": "false", "JSC_useWasm": "false",
-                  "JSC_jitPolicyScale": "0.01", "JSC_crashIfCantAllocateJITMemory": "true",
+                  "JSC_jitPolicyScale": "0.01", "JSC_usePollingTraps": "false", "JSC_crashIfCantAllocateJITMemory": "true",
                   "JSC_reportBaselineCompileTimes": "true", "JSC_validateOptions": "true"}
 
 
@@ -468,10 +468,6 @@ def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict) -> dic
     else:
         off_env = {**run_env, **JIT_OFF_OPTIONS}
         on_env = {**run_env, **JIT_ON_OPTIONS}
-        if os.name == "nt":
-            # Windows' first Baseline-JIT run uses polling traps: the CRT's signal emulation there (a software
-            # signal mask, a stub sigsuspend, no machine context) is its own gate, kept apart from the JIT's.
-            on_env["JSC_usePollingTraps"] = "true"
         # Step 1: the assembly interpreter alone. The whole 1B acceptance must pass and nothing
         # may be compiled.
         off = script_result(measured([jsc, TESTS / "jsc_acceptance.js"], off_env), "jsc_acceptance: ok")

@@ -1,5 +1,5 @@
 /* Per-thread signal semantics a multi-threaded runtime (WTF/JavaScriptCore's thread suspend and
- * VM traps) depends on, Linux only: sigsuspend really blocks until a signal's handler has run,
+ * VM traps) depends on (Linux, macOS/arm64 and, since the Windows signal gate, Windows/x64): sigsuspend really blocks until a signal's handler has run,
  * the handler's sa_mask is applied while it runs (a second signal stays pending until the
  * handler returns), and the signal mask is per thread. CRT used to keep one software mask for
  * the process, ignore sa_mask and flags, and implement sigsuspend as a call that returned
@@ -16,7 +16,7 @@
 /* Real kernel signals reach CRT handlers on Linux and, since the Web Tranche 1 macOS replay, on
  * Apple Silicon (libc/src/arch/macos/common/signal_backend.c). macOS x86_64 still keeps the software
  * mask and a stub sigsuspend. */
-#if defined(__linux__) || (defined(__APPLE__) && defined(__aarch64__))
+#if defined(__linux__) || (defined(__APPLE__) && defined(__aarch64__)) ||     (defined(CRT_TARGET_OS_WINDOWS) && defined(__x86_64__))
 #define HAVE_REAL_SIGNALS 1
 #endif
 
