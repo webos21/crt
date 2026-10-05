@@ -2108,9 +2108,16 @@ int pthread_join(pthread_t thread, void** retval) {
   pthread_control_destroy(control);
   return 0;
 #elif defined(CRT_TARGET_OS_LINUX)
-  while (__atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE) != 0) {
+  for (;;) {
+    /* One load: the kernel clears tid_word when the thread exits, so a second load could read the 0
+     * and wait for "0 -> something" on a word that is already 0 and never gets woken again. */
     int tid = __atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE);
-    long wait_result = __crt_sys_futex(&control->tid_word, CRT_FUTEX_WAIT, tid, 0, 0, 0);
+    long wait_result;
+
+    if (tid == 0) {
+      break;
+    }
+    wait_result = __crt_sys_futex(&control->tid_word, CRT_FUTEX_WAIT, tid, 0, 0, 0);
     if (wait_result == -EINVAL) {
       sched_yield();
       continue;
