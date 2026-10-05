@@ -40,8 +40,9 @@ struct crt_makecontext_frame {
 
 extern void __crt_makecontext_trampoline(void);
 
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-/* Linux: Bionic/kernel ucontext_t. The register slots are named by
+#if (defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))) || \
+    (defined(CRT_TARGET_OS_WINDOWS) && defined(__x86_64__))
+/* Linux and Windows/x86_64: Bionic/kernel ucontext_t. The register slots are named by
  * private/crt_ucontext_offsets.h (shared with the assembly); every one is checked
  * against the real structure here so the two cannot drift apart. */
 #include <stddef.h>
@@ -58,6 +59,14 @@ CRT_UC_CHECK(r14, offsetof(ucontext_t, uc_mcontext.gregs[REG_R14]) == CRT_UC_R14
 CRT_UC_CHECK(r15, offsetof(ucontext_t, uc_mcontext.gregs[REG_R15]) == CRT_UC_R15);
 CRT_UC_CHECK(rsp, offsetof(ucontext_t, uc_mcontext.gregs[REG_RSP]) == CRT_UC_RSP);
 CRT_UC_CHECK(rip, offsetof(ucontext_t, uc_mcontext.gregs[REG_RIP]) == CRT_UC_RIP);
+#if defined(CRT_TARGET_OS_WINDOWS)
+CRT_UC_CHECK(rdi, offsetof(ucontext_t, uc_mcontext.gregs[REG_RDI]) == CRT_UC_RDI);
+CRT_UC_CHECK(rsi, offsetof(ucontext_t, uc_mcontext.gregs[REG_RSI]) == CRT_UC_RSI);
+CRT_UC_CHECK(xmm6, offsetof(ucontext_t, __fpregs_mem._xmm[6]) == CRT_UC_XMM6);
+CRT_UC_CHECK(xmm15, offsetof(ucontext_t, __fpregs_mem._xmm[15]) == CRT_UC_XMM15);
+CRT_UC_CHECK(teb_base, offsetof(ucontext_t, uc_mcontext.__reserved1[0]) == CRT_UC_TEB_STACK_BASE);
+CRT_UC_CHECK(teb_dealloc, offsetof(ucontext_t, uc_mcontext.__reserved1[2]) == CRT_UC_TEB_DEALLOCATION);
+#endif
 #define CRT_MCTX_SP_NEEDS_ODD_ALIGN 1
 #else
 CRT_UC_CHECK(x19, offsetof(ucontext_t, uc_mcontext.regs[19]) == CRT_UC_X19);
@@ -73,12 +82,7 @@ CRT_UC_CHECK(d8, offsetof(ucontext_t, uc_mcontext.__reserved) == CRT_UC_D8);
 #define CRT_MCTX_SP_NEEDS_ODD_ALIGN 0
 #endif
 #else
-#if defined(CRT_TARGET_OS_WINDOWS) && (defined(__x86_64__) || defined(_M_X64))
-#define CRT_MCTX_BOOTSTRAP_OFFSET 0
-#define CRT_MCTX_SP_OFFSET 64
-#define CRT_MCTX_PC_OFFSET 72
-#define CRT_MCTX_SP_NEEDS_ODD_ALIGN 1
-#elif defined(__x86_64__) || defined(_M_X64)
+#if defined(__x86_64__) || defined(_M_X64)
 #define CRT_MCTX_BOOTSTRAP_OFFSET 0
 #define CRT_MCTX_SP_OFFSET 48
 #define CRT_MCTX_PC_OFFSET 56
@@ -146,7 +150,7 @@ void makecontext(ucontext_t* ucp, void (*func)(void), int argc, ...) {
   aligned_sp -= 8;
 #endif
 
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__x86_64__) && (defined(__linux__) || defined(CRT_TARGET_OS_WINDOWS))
   ucp->uc_mcontext.gregs[REG_RBX] = (greg_t)(uintptr_t)frame;
   ucp->uc_mcontext.gregs[REG_RSP] = (greg_t)aligned_sp;
   ucp->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)__crt_makecontext_trampoline;
@@ -161,7 +165,7 @@ void makecontext(ucontext_t* ucp, void (*func)(void), int argc, ...) {
   mctx_store_ptr(&ucp->uc_mcontext, CRT_MCTX_PC_OFFSET, (void*)__crt_makecontext_trampoline);
 #endif
 
-#if defined(CRT_TARGET_OS_WINDOWS) && (defined(__x86_64__) || defined(_M_X64))
+#if defined(CRT_TARGET_OS_WINDOWS) && defined(__x86_64__)
   /*
    * Seed this context's TEB NT_TIB.StackBase/StackLimit/DeallocationStack
    * (mcontext offsets 240/248/256 -- see ucontext.S's own comment for why
@@ -171,8 +175,8 @@ void makecontext(ucontext_t* ucp, void (*func)(void), int argc, ...) {
    * these into the real TEB the moment this context actually starts
    * running.
    */
-  mctx_store_ptr(&ucp->uc_mcontext, 240, top);
-  mctx_store_ptr(&ucp->uc_mcontext, 248, ucp->uc_stack.ss_sp);
-  mctx_store_ptr(&ucp->uc_mcontext, 256, ucp->uc_stack.ss_sp);
+  ucp->uc_mcontext.__reserved1[0] = (unsigned long)(uintptr_t)top;
+  ucp->uc_mcontext.__reserved1[1] = (unsigned long)(uintptr_t)ucp->uc_stack.ss_sp;
+  ucp->uc_mcontext.__reserved1[2] = (unsigned long)(uintptr_t)ucp->uc_stack.ss_sp;
 #endif
 }

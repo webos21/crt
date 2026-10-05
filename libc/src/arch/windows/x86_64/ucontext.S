@@ -2,16 +2,19 @@
  * getcontext()/setcontext()/swapcontext() + the makecontext() trampoline,
  * Windows x86_64. Mirrors this same directory's setjmp.S register set
  * exactly (rbx/rbp/rdi/rsi/r12-r15 callee-saved GPRs + rsp + rip + the
- * Windows x64 ABI's callee-saved xmm6-xmm15). See include/ucontext.h for
- * the private mcontext_t byte-offset layout this file and ucontext.c
- * both rely on:
- *   0: rbx (doubles as the makecontext() bootstrap-frame pointer)
- *   8: rbp   16: rdi   24: rsi   32: r12   40: r13   48: r14   56: r15
- *   64: rsp  72: rip (resume address)
- *   80: xmm6  96: xmm7  112: xmm8  128: xmm9  144: xmm10  160: xmm11
- *   176: xmm12  192: xmm13  208: xmm14  224: xmm15
- *   240: TEB NT_TIB.StackBase   248: TEB NT_TIB.StackLimit
- *   256: TEB DeallocationStack
+ * Windows x64 ABI's callee-saved xmm6-xmm15).
+ *
+ * The context is the Linux/x86_64 (Bionic/kernel) ucontext_t, the same
+ * structure CRT's signal delivery hands to an SA_SIGINFO handler on this
+ * host (Web Tranche 1 Windows signal gate); include/ucontext.h has it and
+ * private/crt_ucontext_offsets.h names every byte offset used here (ucontext.c
+ * checks each against offsetof() at compile time). The register slots are the
+ * signal frame's own (gregs[]); the ones a signal frame does not need keep
+ * their own places:
+ *   rbx, rbp, rdi, rsi, r12-r15, rsp, rip in their gregs[] slots
+ *   xmm6..xmm15 in __fpregs_mem._xmm[6..15]
+ *   TEB NT_TIB.StackBase / StackLimit / DeallocationStack in mcontext
+ *   __reserved1[0..2]
  *
  * The TEB fields are the one piece of state this file's Linux/macOS
  * siblings don't need at all: setjmp()/longjmp() and plain getcontext()/
@@ -29,7 +32,7 @@
  * alongside the register set; makecontext() (ucontext.c) seeds them from
  * uc_stack for a context's first activation.
  *
- * swapcontext()'s SP slot (offset 64) is deliberately saved *unadjusted*
+ * swapcontext()'s SP slot is deliberately saved *unadjusted*
  * (plain %rsp, not %rsp+8 the way getcontext()/setcontext() save it):
  * its own resume point (the "1:" label below) completes via a real `retq`
  * -- which itself pops the return address and advances %rsp by 8 -- not
@@ -42,40 +45,43 @@
  * round trip, which reliably crashed (STATUS_ACCESS_VIOLATION jumping to
  * address 0) inside exactly this path.
  */
+#define CRT_TARGET_OS_WINDOWS 1
+#include <private/crt_ucontext_offsets.h>
+
 .text
 
 .globl getcontext
 .def getcontext; .scl 2; .type 32; .endef
 .p2align 4, 0x90
 getcontext:
-  movq %rbx, 0(%rcx)
-  movq %rbp, 8(%rcx)
-  movq %rdi, 16(%rcx)
-  movq %rsi, 24(%rcx)
-  movq %r12, 32(%rcx)
-  movq %r13, 40(%rcx)
-  movq %r14, 48(%rcx)
-  movq %r15, 56(%rcx)
+  movq %rbx, CRT_UC_RBX(%rcx)
+  movq %rbp, CRT_UC_RBP(%rcx)
+  movq %rdi, CRT_UC_RDI(%rcx)
+  movq %rsi, CRT_UC_RSI(%rcx)
+  movq %r12, CRT_UC_R12(%rcx)
+  movq %r13, CRT_UC_R13(%rcx)
+  movq %r14, CRT_UC_R14(%rcx)
+  movq %r15, CRT_UC_R15(%rcx)
   leaq 8(%rsp), %rax
-  movq %rax, 64(%rcx)
+  movq %rax, CRT_UC_RSP(%rcx)
   movq (%rsp), %rax
-  movq %rax, 72(%rcx)
-  movdqu %xmm6, 80(%rcx)
-  movdqu %xmm7, 96(%rcx)
-  movdqu %xmm8, 112(%rcx)
-  movdqu %xmm9, 128(%rcx)
-  movdqu %xmm10, 144(%rcx)
-  movdqu %xmm11, 160(%rcx)
-  movdqu %xmm12, 176(%rcx)
-  movdqu %xmm13, 192(%rcx)
-  movdqu %xmm14, 208(%rcx)
-  movdqu %xmm15, 224(%rcx)
+  movq %rax, CRT_UC_RIP(%rcx)
+  movdqu %xmm6, CRT_UC_XMM6(%rcx)
+  movdqu %xmm7, CRT_UC_XMM7(%rcx)
+  movdqu %xmm8, CRT_UC_XMM8(%rcx)
+  movdqu %xmm9, CRT_UC_XMM9(%rcx)
+  movdqu %xmm10, CRT_UC_XMM10(%rcx)
+  movdqu %xmm11, CRT_UC_XMM11(%rcx)
+  movdqu %xmm12, CRT_UC_XMM12(%rcx)
+  movdqu %xmm13, CRT_UC_XMM13(%rcx)
+  movdqu %xmm14, CRT_UC_XMM14(%rcx)
+  movdqu %xmm15, CRT_UC_XMM15(%rcx)
   movq %gs:0x08, %rax
-  movq %rax, 240(%rcx)
+  movq %rax, CRT_UC_TEB_STACK_BASE(%rcx)
   movq %gs:0x10, %rax
-  movq %rax, 248(%rcx)
+  movq %rax, CRT_UC_TEB_STACK_LIMIT(%rcx)
   movq %gs:0x1478, %rax
-  movq %rax, 256(%rcx)
+  movq %rax, CRT_UC_TEB_DEALLOCATION(%rcx)
   xorl %eax, %eax
   retq
 
@@ -83,94 +89,96 @@ getcontext:
 .def setcontext; .scl 2; .type 32; .endef
 .p2align 4, 0x90
 setcontext:
-  movq 0(%rcx), %rbx
-  movq 8(%rcx), %rbp
-  movq 16(%rcx), %rdi
-  movq 24(%rcx), %rsi
-  movq 32(%rcx), %r12
-  movq 40(%rcx), %r13
-  movq 48(%rcx), %r14
-  movq 56(%rcx), %r15
-  movq 64(%rcx), %rsp
-  movdqu 80(%rcx), %xmm6
-  movdqu 96(%rcx), %xmm7
-  movdqu 112(%rcx), %xmm8
-  movdqu 128(%rcx), %xmm9
-  movdqu 144(%rcx), %xmm10
-  movdqu 160(%rcx), %xmm11
-  movdqu 176(%rcx), %xmm12
-  movdqu 192(%rcx), %xmm13
-  movdqu 208(%rcx), %xmm14
-  movdqu 224(%rcx), %xmm15
-  movq 240(%rcx), %rax
+  movq CRT_UC_RBX(%rcx), %rbx
+  movq CRT_UC_RBP(%rcx), %rbp
+  movq CRT_UC_RDI(%rcx), %rdi
+  movq CRT_UC_RSI(%rcx), %rsi
+  movq CRT_UC_R12(%rcx), %r12
+  movq CRT_UC_R13(%rcx), %r13
+  movq CRT_UC_R14(%rcx), %r14
+  movq CRT_UC_R15(%rcx), %r15
+  movq CRT_UC_RSP(%rcx), %rsp
+  movdqu CRT_UC_XMM6(%rcx), %xmm6
+  movdqu CRT_UC_XMM7(%rcx), %xmm7
+  movdqu CRT_UC_XMM8(%rcx), %xmm8
+  movdqu CRT_UC_XMM9(%rcx), %xmm9
+  movdqu CRT_UC_XMM10(%rcx), %xmm10
+  movdqu CRT_UC_XMM11(%rcx), %xmm11
+  movdqu CRT_UC_XMM12(%rcx), %xmm12
+  movdqu CRT_UC_XMM13(%rcx), %xmm13
+  movdqu CRT_UC_XMM14(%rcx), %xmm14
+  movdqu CRT_UC_XMM15(%rcx), %xmm15
+  movq CRT_UC_TEB_STACK_BASE(%rcx), %rax
   movq %rax, %gs:0x08
-  movq 248(%rcx), %rax
+  movq CRT_UC_TEB_STACK_LIMIT(%rcx), %rax
   movq %rax, %gs:0x10
-  movq 256(%rcx), %rax
+  movq CRT_UC_TEB_DEALLOCATION(%rcx), %rax
   movq %rax, %gs:0x1478
-  jmp *72(%rcx)
+  jmp *CRT_UC_RIP(%rcx)
 
 .globl swapcontext
 .def swapcontext; .scl 2; .type 32; .endef
 .p2align 4, 0x90
 swapcontext:
-  movq %rbx, 0(%rcx)
-  movq %rbp, 8(%rcx)
-  movq %rdi, 16(%rcx)
-  movq %rsi, 24(%rcx)
-  movq %r12, 32(%rcx)
-  movq %r13, 40(%rcx)
-  movq %r14, 48(%rcx)
-  movq %r15, 56(%rcx)
-  movq %rsp, 64(%rcx)
-  movdqu %xmm6, 80(%rcx)
-  movdqu %xmm7, 96(%rcx)
-  movdqu %xmm8, 112(%rcx)
-  movdqu %xmm9, 128(%rcx)
-  movdqu %xmm10, 144(%rcx)
-  movdqu %xmm11, 160(%rcx)
-  movdqu %xmm12, 176(%rcx)
-  movdqu %xmm13, 192(%rcx)
-  movdqu %xmm14, 208(%rcx)
-  movdqu %xmm15, 224(%rcx)
+  movq %rbx, CRT_UC_RBX(%rcx)
+  movq %rbp, CRT_UC_RBP(%rcx)
+  movq %rdi, CRT_UC_RDI(%rcx)
+  movq %rsi, CRT_UC_RSI(%rcx)
+  movq %r12, CRT_UC_R12(%rcx)
+  movq %r13, CRT_UC_R13(%rcx)
+  movq %r14, CRT_UC_R14(%rcx)
+  movq %r15, CRT_UC_R15(%rcx)
+  movq %rsp, CRT_UC_RSP(%rcx)
+  movdqu %xmm6, CRT_UC_XMM6(%rcx)
+  movdqu %xmm7, CRT_UC_XMM7(%rcx)
+  movdqu %xmm8, CRT_UC_XMM8(%rcx)
+  movdqu %xmm9, CRT_UC_XMM9(%rcx)
+  movdqu %xmm10, CRT_UC_XMM10(%rcx)
+  movdqu %xmm11, CRT_UC_XMM11(%rcx)
+  movdqu %xmm12, CRT_UC_XMM12(%rcx)
+  movdqu %xmm13, CRT_UC_XMM13(%rcx)
+  movdqu %xmm14, CRT_UC_XMM14(%rcx)
+  movdqu %xmm15, CRT_UC_XMM15(%rcx)
   movq %gs:0x08, %rax
-  movq %rax, 240(%rcx)
+  movq %rax, CRT_UC_TEB_STACK_BASE(%rcx)
   movq %gs:0x10, %rax
-  movq %rax, 248(%rcx)
+  movq %rax, CRT_UC_TEB_STACK_LIMIT(%rcx)
   movq %gs:0x1478, %rax
-  movq %rax, 256(%rcx)
+  movq %rax, CRT_UC_TEB_DEALLOCATION(%rcx)
   leaq 1f(%rip), %rax
-  movq %rax, 72(%rcx)
-  movq 0(%rdx), %rbx
-  movq 8(%rdx), %rbp
-  movq 16(%rdx), %rdi
-  movq 24(%rdx), %rsi
-  movq 32(%rdx), %r12
-  movq 40(%rdx), %r13
-  movq 48(%rdx), %r14
-  movq 56(%rdx), %r15
-  movq 64(%rdx), %rsp
-  movdqu 80(%rdx), %xmm6
-  movdqu 96(%rdx), %xmm7
-  movdqu 112(%rdx), %xmm8
-  movdqu 128(%rdx), %xmm9
-  movdqu 144(%rdx), %xmm10
-  movdqu 160(%rdx), %xmm11
-  movdqu 176(%rdx), %xmm12
-  movdqu 192(%rdx), %xmm13
-  movdqu 208(%rdx), %xmm14
-  movdqu 224(%rdx), %xmm15
-  movq 240(%rdx), %rax
+  movq %rax, CRT_UC_RIP(%rcx)
+  movq CRT_UC_RBX(%rdx), %rbx
+  movq CRT_UC_RBP(%rdx), %rbp
+  movq CRT_UC_RDI(%rdx), %rdi
+  movq CRT_UC_RSI(%rdx), %rsi
+  movq CRT_UC_R12(%rdx), %r12
+  movq CRT_UC_R13(%rdx), %r13
+  movq CRT_UC_R14(%rdx), %r14
+  movq CRT_UC_R15(%rdx), %r15
+  movq CRT_UC_RSP(%rdx), %rsp
+  movdqu CRT_UC_XMM6(%rdx), %xmm6
+  movdqu CRT_UC_XMM7(%rdx), %xmm7
+  movdqu CRT_UC_XMM8(%rdx), %xmm8
+  movdqu CRT_UC_XMM9(%rdx), %xmm9
+  movdqu CRT_UC_XMM10(%rdx), %xmm10
+  movdqu CRT_UC_XMM11(%rdx), %xmm11
+  movdqu CRT_UC_XMM12(%rdx), %xmm12
+  movdqu CRT_UC_XMM13(%rdx), %xmm13
+  movdqu CRT_UC_XMM14(%rdx), %xmm14
+  movdqu CRT_UC_XMM15(%rdx), %xmm15
+  movq CRT_UC_TEB_STACK_BASE(%rdx), %rax
   movq %rax, %gs:0x08
-  movq 248(%rdx), %rax
+  movq CRT_UC_TEB_STACK_LIMIT(%rdx), %rax
   movq %rax, %gs:0x10
-  movq 256(%rdx), %rax
+  movq CRT_UC_TEB_DEALLOCATION(%rdx), %rax
   movq %rax, %gs:0x1478
-  jmp *72(%rdx)
+  jmp *CRT_UC_RIP(%rdx)
 1:
   xorl %eax, %eax
   retq
 
+/* The makecontext() bootstrap frame (libc/src/ucontext.c, struct crt_makecontext_frame) is
+ * addressed through %rbx: func at 0, argc 8, argv[0..3] at 16..40, link at 48. */
 .globl __crt_makecontext_trampoline
 .def __crt_makecontext_trampoline; .scl 2; .type 32; .endef
 .p2align 4, 0x90

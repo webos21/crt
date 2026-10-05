@@ -21,14 +21,18 @@ extern "C" {
  * <os>/<x86_64,aarch64>/setjmp.S) that this implementation mirrors
  * closely.
  *
- * On macOS and Windows this project's mcontext_t/ucontext_t are a private,
+ * On macOS and Windows/aarch64 this project's mcontext_t/ucontext_t are a private,
  * self-consistent layout -- NOT bit-compatible with the host's native
  * ucontext_t -- because signal delivery there does not hand a real ucontext_t
  * to SA_SIGINFO handlers, so get/set/swapcontext and makecontext only ever need
  * to agree with each other. On Linux (x86_64 and aarch64) the types are the
  * Bionic/kernel layouts below instead (2026-10-03, Web Tranche 1: JavaScriptCore
  * reads uc_mcontext.gregs[] in its thread-suspend signal handler), and the Linux
- * signal backend forwards the kernel's real siginfo_t and ucontext_t.
+ * signal backend forwards the kernel's real siginfo_t and ucontext_t. Windows/x86_64 has the
+ * Linux/x86_64 layout as well (Web Tranche 1 Windows signal gate): the CRT's own signal delivery
+ * there fills it from the thread's CONTEXT, and get/set/swapcontext keep their Windows-only
+ * slots (rdi, rsi, xmm6-xmm15, the TEB stack fields) in parts of the structure a signal frame
+ * does not use (see private/crt_ucontext_offsets.h).
  *
  * makecontext() supports up to 4 int-sized (pointer-width) arguments --
  * a real, documented scope limit (not a silent gap): 4 is the number of
@@ -47,9 +51,9 @@ typedef struct {
   size_t ss_size;
 } stack_t;
 
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__x86_64__) && (defined(__linux__) || defined(CRT_TARGET_OS_WINDOWS))
 
-/* Linux x86_64: the Bionic/kernel layout (bionic/libc/include/sys/ucontext.h), the
+/* Linux and Windows x86_64: the Bionic/kernel layout (bionic/libc/include/sys/ucontext.h), the
  * very structure the kernel hands to an SA_SIGINFO handler as its third
  * argument -- so a handler can read uc_mcontext.gregs[REG_RIP] and friends.
  * getcontext()/swapcontext() save the callee-saved registers into the same gregs
@@ -104,7 +108,9 @@ enum {
 #define REG_OLDMASK REG_OLDMASK
 #define REG_CR2 REG_CR2
 
-typedef long greg_t;
+/* 64 bits wide on every host: Windows is LLP64, where `long` is 32 bits and the whole structure
+ * (REG_*, offsetof) would shift. */
+typedef long long greg_t;
 typedef greg_t gregset_t[NGREG];
 
 struct _libc_fpxreg {
@@ -122,8 +128,8 @@ struct _libc_fpstate {
   unsigned short swd;
   unsigned short ftw;
   unsigned short fop;
-  unsigned long rip;
-  unsigned long rdp;
+  unsigned long long rip;
+  unsigned long long rdp;
   unsigned int mxcsr;
   unsigned int mxcr_mask;
   struct _libc_fpxreg _st[8];
@@ -136,11 +142,11 @@ typedef struct _libc_fpstate* fpregset_t;
 typedef struct {
   gregset_t gregs;
   fpregset_t fpregs;
-  unsigned long __reserved1[8];
+  unsigned long long __reserved1[8];
 } mcontext_t;
 
 typedef struct __crt_ucontext {
-  unsigned long uc_flags;
+  unsigned long long uc_flags;
   struct __crt_ucontext* uc_link;
   stack_t uc_stack;
   mcontext_t uc_mcontext;
