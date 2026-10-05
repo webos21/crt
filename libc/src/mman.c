@@ -7,18 +7,18 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int fd, long long offset);
-long __crt_sys_mprotect(void* addr, unsigned long length, int prot);
-long __crt_sys_munmap(void* addr, unsigned long length);
-long __crt_sys_msync(void* addr, unsigned long length, int flags);
-void* __crt_sys_mremap(void* old_addr, unsigned long old_size, unsigned long new_size, int flags, void* new_addr);
+void* __crt_sys_mmap(void* addr, size_t length, int prot, int flags, int fd, long long offset);
+long __crt_sys_mprotect(void* addr, size_t length, int prot);
+long __crt_sys_munmap(void* addr, size_t length);
+long __crt_sys_msync(void* addr, size_t length, int flags);
+void* __crt_sys_mremap(void* old_addr, size_t old_size, size_t new_size, int flags, void* new_addr);
 long __crt_sys_mlockall(int flags);
 long __crt_sys_munlockall(void);
-long __crt_sys_mlock(const void* addr, unsigned long length);
-long __crt_sys_mlock2(const void* addr, unsigned long length, int flags);
-long __crt_sys_munlock(const void* addr, unsigned long length);
-long __crt_sys_mincore(void* addr, unsigned long length, unsigned char* vector);
-long __crt_sys_madvise(void* addr, unsigned long length, int advice);
+long __crt_sys_mlock(const void* addr, size_t length);
+long __crt_sys_mlock2(const void* addr, size_t length, int flags);
+long __crt_sys_munlock(const void* addr, size_t length);
+long __crt_sys_mincore(void* addr, size_t length, unsigned char* vector);
+long __crt_sys_madvise(void* addr, size_t length, int advice);
 
 static int invalid_length(size_t length) {
   if (length == 0) {
@@ -76,7 +76,7 @@ void* mmap64(void* addr, size_t length, int prot, int flags, int fd, off64_t off
     return MAP_FAILED;
   }
 
-  result = __crt_sys_mmap(addr, (unsigned long)length, prot, host_mmap_flags(flags, prot), fd, (long long)offset);
+  result = __crt_sys_mmap(addr, length, prot, host_mmap_flags(flags, prot), fd, (long long)offset);
   value = (intptr_t)result;
   if (value < 0 && value >= -4095) {
     errno = (int)-value;
@@ -96,7 +96,7 @@ int munmap(void* addr, size_t length) {
     return -1;
   }
 
-  result = __crt_sys_munmap(addr, (unsigned long)length);
+  result = __crt_sys_munmap(addr, length);
   return (int)normalize_long(result);
 }
 
@@ -107,7 +107,7 @@ int mprotect(void* addr, size_t length, int prot) {
     return -1;
   }
 
-  result = __crt_sys_mprotect(addr, (unsigned long)length, prot);
+  result = __crt_sys_mprotect(addr, length, prot);
   return (int)normalize_long(result);
 }
 
@@ -121,7 +121,7 @@ int msync(void* addr, size_t length, int flags) {
     errno = EINVAL;
     return -1;
   }
-  result = __crt_sys_msync(addr, (unsigned long)length, flags);
+  result = __crt_sys_msync(addr, length, flags);
   return (int)normalize_long(result);
 }
 
@@ -141,7 +141,7 @@ void* mremap(void* old_addr, size_t old_size, size_t new_size, int flags, ...) {
     va_end(ap);
   }
 
-  result = __crt_sys_mremap(old_addr, (unsigned long)old_size, (unsigned long)new_size, flags, new_addr);
+  result = __crt_sys_mremap(old_addr, old_size, new_size, flags, new_addr);
   value = (intptr_t)result;
   if (value < 0 && value >= -4095) {
     errno = (int)-value;
@@ -169,21 +169,21 @@ int mlock(const void* addr, size_t length) {
   if (invalid_length(length)) {
     return -1;
   }
-  return (int)normalize_long(__crt_sys_mlock(addr, (unsigned long)length));
+  return (int)normalize_long(__crt_sys_mlock(addr, length));
 }
 
 int mlock2(const void* addr, size_t length, int flags) {
   if (invalid_length(length)) {
     return -1;
   }
-  return (int)normalize_long(__crt_sys_mlock2(addr, (unsigned long)length, flags));
+  return (int)normalize_long(__crt_sys_mlock2(addr, length, flags));
 }
 
 int munlock(const void* addr, size_t length) {
   if (invalid_length(length)) {
     return -1;
   }
-  return (int)normalize_long(__crt_sys_munlock(addr, (unsigned long)length));
+  return (int)normalize_long(__crt_sys_munlock(addr, length));
 }
 
 int mincore(void* addr, size_t length, unsigned char* vector) {
@@ -194,14 +194,14 @@ int mincore(void* addr, size_t length, unsigned char* vector) {
     errno = EFAULT;
     return -1;
   }
-  return (int)normalize_long(__crt_sys_mincore(addr, (unsigned long)length, vector));
+  return (int)normalize_long(__crt_sys_mincore(addr, length, vector));
 }
 
 int madvise(void* addr, size_t length, int advice) {
   if (invalid_length(length)) {
     return -1;
   }
-  return (int)normalize_long(__crt_sys_madvise(addr, (unsigned long)length, advice));
+  return (int)normalize_long(__crt_sys_madvise(addr, length, advice));
 }
 
 int posix_madvise(void* addr, size_t length, int advice) {
@@ -210,7 +210,7 @@ int posix_madvise(void* addr, size_t length, int advice) {
   if (length == 0) {
     return 0;
   }
-  result = __crt_sys_madvise(addr, (unsigned long)length, advice);
+  result = __crt_sys_madvise(addr, length, advice);
   if (result < 0 && result >= -4095) {
     return (int)-result;
   }

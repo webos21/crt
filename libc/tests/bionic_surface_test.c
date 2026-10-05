@@ -66,13 +66,13 @@ static void test_gettid(void) {
     CHECK(child > 0 && waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "gettid() in a forked child equals its getpid()");
   }
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(__MINGW32__) || defined(CRT_TARGET_OS_WINDOWS)
   CHECK(syscall(SYS_gettid) == (long)gettid(), "syscall(SYS_gettid) matches gettid()");
   CHECK(syscall(SYS_getpid) == (long)getpid(), "syscall(SYS_getpid) matches getpid()");
 #endif
 }
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32) || defined(__MINGW32__) || defined(CRT_TARGET_OS_WINDOWS)
 #include <sys/resource.h>
 
 static void test_getrusage(void) {
@@ -368,7 +368,7 @@ static void test_kill_initial_thread(void) {
 int main(void) {
   test_memmem();
   test_memset_explicit();
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32) || defined(__MINGW32__) || defined(CRT_TARGET_OS_WINDOWS)
   test_getrusage();
 #endif
   test_gettid();

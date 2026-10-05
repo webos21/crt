@@ -476,6 +476,18 @@ set_tests_properties(pthread_native_tls_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_native_tls_test: ok"
 )
 
+# The calling thread's real stack from pthread_getattr_np() (WTF::StackBounds, Web Tranche 1 Windows replay).
+add_crt_test(pthread_stack_bounds_test pthread_stack_bounds_test.c)
+set_tests_properties(pthread_stack_bounds_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_stack_bounds_test: ok"
+)
+
+# Partial munmap and PROT_NONE reservations (WTF::OSAllocator, Web Tranche 1 Windows replay).
+add_crt_test(mmap_partial_test mmap_partial_test.c)
+set_tests_properties(mmap_partial_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "mmap_partial_test: ok"
+)
+
 # Executable-memory contract for a JIT (Web Tranche 1C).
 add_crt_test(jit_memory_test jit_memory_test.c)
 set_tests_properties(jit_memory_test_runs PROPERTIES

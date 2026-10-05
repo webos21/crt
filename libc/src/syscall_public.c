@@ -59,12 +59,14 @@ long syscall(long number, ...) {
   }
   return result;
 }
-#elif defined(CRT_TARGET_OS_MACOS)
+#elif defined(CRT_TARGET_OS_MACOS) || defined(CRT_TARGET_OS_WINDOWS)
 #include <sys/syscall.h>
 
-/* macOS has no Linux syscall table. Code written against Bionic (WTF, bmalloc, ...) calls
+/* macOS and Windows have no Linux syscall table. Code written against Bionic (WTF, bmalloc, ...) calls
  * syscall() only for a handful of numbers whose meaning CRT can provide through its own PAL;
- * those are mapped here and everything else stays an honest ENOSYS. */
+ * those are mapped here and everything else stays an honest ENOSYS. (Windows: WTF decides which
+ * thread is the main one with `getpid() == syscall(SYS_gettid)`, which was ENOSYS there and made
+ * JavaScriptCore abort in WTF::initializeMainThread.) */
 long syscall(long number, ...) {
   switch (number) {
     case SYS_gettid:

@@ -141,6 +141,10 @@ struct crt_memory_status_ex {
 #define MEM_COMMIT 0x00001000
 #define MEM_RESERVE 0x00002000
 #define MEM_RELEASE 0x00008000
+#define MEM_DECOMMIT 0x00004000
+#define MEM_FREE 0x00010000
+#define MEM_PRIVATE 0x00020000
+#define MEM_MAPPED 0x00040000
 #define PAGE_NOACCESS 0x01
 #define PAGE_READONLY 0x02
 #define PAGE_READWRITE 0x04
@@ -483,6 +487,23 @@ __declspec(dllimport) BOOL CRT_WINAPI SetFileInformationByHandle(
     const void* lpFileInformation,
     DWORD dwBufferSize);
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentProcess(void);
+struct crt_win_process_memory_counters {
+  DWORD cb;
+  DWORD PageFaultCount;
+  size_t PeakWorkingSetSize;
+  size_t WorkingSetSize;
+  size_t QuotaPeakPagedPoolUsage;
+  size_t QuotaPagedPoolUsage;
+  size_t QuotaPeakNonPagedPoolUsage;
+  size_t QuotaNonPagedPoolUsage;
+  size_t PagefileUsage;
+  size_t PeakPagefileUsage;
+};
+/* kernel32's export of psapi's GetProcessMemoryInfo (Windows 7 and later). */
+__declspec(dllimport) BOOL CRT_WINAPI K32GetProcessMemoryInfo(
+    HANDLE hProcess,
+    struct crt_win_process_memory_counters* counters,
+    DWORD cb);
 __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
     HANDLE hSourceProcessHandle,
     HANDLE hSourceHandle,
@@ -558,6 +579,20 @@ __declspec(dllimport) void* CRT_WINAPI VirtualAlloc(
     size_t dwSize,
     DWORD flAllocationType,
     DWORD flProtect);
+struct crt_memory_basic_information {
+  void* BaseAddress;
+  void* AllocationBase;
+  DWORD AllocationProtect;
+  DWORD PartitionId;
+  size_t RegionSize;
+  DWORD State;
+  DWORD Protect;
+  DWORD Type;
+};
+__declspec(dllimport) size_t CRT_WINAPI VirtualQuery(
+    const void* lpAddress,
+    struct crt_memory_basic_information* lpBuffer,
+    size_t dwLength);
 __declspec(dllimport) BOOL CRT_WINAPI VirtualFree(
     void* lpAddress,
     size_t dwSize,
@@ -6080,7 +6115,7 @@ static DWORD windows_mapping_access(int prot, int flags) {
   return access == 0 ? FILE_MAP_READ : access;
 }
 
-void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int fd, long long offset) {
+void* __crt_sys_mmap(void* addr, size_t length, int prot, int flags, int fd, long long offset) {
   DWORD protect;
   void* result;
 
@@ -6093,7 +6128,11 @@ void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int 
       return (void*)(intptr_t)-EINVAL;
     }
     protect = windows_page_protect(prot);
-    result = VirtualAlloc(addr, (size_t)length, MEM_RESERVE | MEM_COMMIT, protect);
+    /* PROT_NONE is a reservation: it must not be charged against the commit limit (JavaScriptCore
+     * reserves multi-GiB regions this way). mprotect() commits the pages when they become
+     * accessible. */
+    result = VirtualAlloc(addr, (size_t)length,
+                          prot == PROT_NONE ? MEM_RESERVE : (MEM_RESERVE | MEM_COMMIT), protect);
     if (result == 0) {
       return (void*)(intptr_t)-map_windows_error(GetLastError());
     }
@@ -6129,26 +6168,144 @@ void* __crt_sys_mmap(void* addr, unsigned long length, int prot, int flags, int 
   }
 }
 
-long __crt_sys_mprotect(void* addr, unsigned long length, int prot) {
-  DWORD old_protect;
+__declspec(dllimport) void CRT_WINAPI GetCurrentThreadStackLimits(size_t* low_limit, size_t* high_limit);
 
-  if (!VirtualProtect(addr, (size_t)length, windows_page_protect(prot), &old_protect)) {
+/* The calling thread's stack: lowest committed-or-reserved address and its size. Exact for any
+ * thread (the initial one and CreateThread's), which is what pthread_getattr_np() has to report
+ * for stack-bounds consumers such as WTF::StackBounds. */
+long __crt_sys_current_stack_bounds(void** base, size_t* size) {
+  size_t low = 0;
+  size_t high = 0;
+
+  GetCurrentThreadStackLimits(&low, &high);
+  if (high <= low) {
+    return -ENOSYS;
+  }
+  *base = (void*)low;
+  *size = high - low;
+  return 0;
+}
+
+long __crt_sys_mprotect(void* addr, size_t length, int prot) {
+  unsigned char* cursor = (unsigned char*)addr;
+  unsigned char* end = cursor + length;
+  DWORD protect = windows_page_protect(prot);
+
+  /* Walk the range region by region: pages that are only reserved are committed with the new
+   * protection (a PROT_NONE mapping is a reservation, see mmap), pages that are committed just
+   * change protection, and a gap is ENOMEM as in POSIX. */
+  while (cursor < end) {
+    struct crt_memory_basic_information info;
+    unsigned char* region_end;
+    size_t span;
+    DWORD old_protect;
+
+    if (VirtualQuery(cursor, &info, sizeof(info)) == 0) {
+      return fail_last_error();
+    }
+    region_end = (unsigned char*)info.BaseAddress + info.RegionSize;
+    if (region_end > end) {
+      region_end = end;
+    }
+    span = (size_t)(region_end - cursor);
+    if (info.State == MEM_FREE) {
+      return -ENOMEM;
+    }
+    if (info.State == MEM_RESERVE) {
+      if (prot != PROT_NONE && VirtualAlloc(cursor, span, MEM_COMMIT, protect) == 0) {
+        return fail_last_error();
+      }
+    } else if (!VirtualProtect(cursor, span, protect, &old_protect)) {
+      return fail_last_error();
+    }
+    cursor = region_end;
+  }
+  return 0;
+}
+
+/* munmap(addr, length). A VirtualAlloc reservation can only be released whole, and only from its
+ * base address, so a POSIX partial unmap (the head or tail trim that WTF::OSAllocator and every
+ * "reserve more, keep the aligned part" allocator does) needs emulating:
+ *  - the unmapped range is the whole allocation: release it;
+ *  - otherwise, when everything that is kept is still plain reservation (no committed page, so
+ *    no data to lose) and the kept pieces start on the 64 KiB allocation granularity, release the
+ *    whole allocation and reserve the kept pieces again at the same addresses;
+ *  - otherwise decommit the unmapped pages and leave the address space reserved: the memory is
+ *    given back, the address range stays unusable (documented limitation, never a data loss).
+ * File views (MEM_MAPPED) are unmapped whole, from their base. */
+#define CRT_ALLOCATION_GRANULARITY 0x10000UL
+
+long __crt_sys_munmap(void* addr, size_t length) {
+  struct crt_memory_basic_information info;
+  unsigned char* start = (unsigned char*)addr;
+  unsigned char* stop;
+  unsigned char* base;
+  unsigned char* walk;
+  unsigned char* allocation_end;
+  int kept_is_plain_reservation = 1;
+
+  if (VirtualQuery(start, &info, sizeof(info)) == 0) {
+    return fail_last_error();
+  }
+  if (info.State == MEM_FREE) {
+    return 0; /* munmap of an unmapped range succeeds */
+  }
+  if (info.Type == MEM_MAPPED) {
+    if (!UnmapViewOfFile(info.AllocationBase)) {
+      return fail_last_error();
+    }
+    return 0;
+  }
+  base = (unsigned char*)info.AllocationBase;
+  stop = start + ((length + 0xFFFUL) & ~0xFFFUL);
+
+  /* Find the end of the whole allocation and whether everything outside [start, stop) is only
+   * reserved. */
+  walk = base;
+  for (;;) {
+    struct crt_memory_basic_information part;
+    unsigned char* part_end;
+
+    if (VirtualQuery(walk, &part, sizeof(part)) == 0 || part.AllocationBase != (void*)base ||
+        part.State == MEM_FREE) {
+      break;
+    }
+    part_end = (unsigned char*)part.BaseAddress + part.RegionSize;
+    if (part.State == MEM_COMMIT && ((unsigned char*)part.BaseAddress < start || part_end > stop)) {
+      kept_is_plain_reservation = 0; /* a committed page outside the range would lose its data */
+    }
+    walk = part_end;
+  }
+  allocation_end = walk;
+  if (stop > allocation_end) {
+    stop = allocation_end;
+  }
+
+  if (start == base && stop == allocation_end) {
+    return VirtualFree(base, 0, MEM_RELEASE) ? 0 : fail_last_error();
+  }
+  if (kept_is_plain_reservation &&
+      ((size_t)start % CRT_ALLOCATION_GRANULARITY) == 0 && ((size_t)stop % CRT_ALLOCATION_GRANULARITY) == 0 &&
+      (start == base || ((size_t)base % CRT_ALLOCATION_GRANULARITY) == 0)) {
+    /* Nothing committed outside the range: drop the allocation and reserve the kept pieces again. */
+    if (!VirtualFree(base, 0, MEM_RELEASE)) {
+      return fail_last_error();
+    }
+    if (start > base && VirtualAlloc(base, (size_t)(start - base), MEM_RESERVE, PAGE_NOACCESS) == 0) {
+      return -ENOMEM;
+    }
+    if (stop < allocation_end && VirtualAlloc(stop, (size_t)(allocation_end - stop), MEM_RESERVE, PAGE_NOACCESS) == 0) {
+      return -ENOMEM;
+    }
+    return 0;
+  }
+  if (!VirtualFree(start, (size_t)(stop - start), MEM_DECOMMIT)) {
     return fail_last_error();
   }
   return 0;
 }
 
-long __crt_sys_munmap(void* addr, unsigned long length) {
-  (void)length;
-  if (!VirtualFree(addr, 0, MEM_RELEASE)) {
-    if (!UnmapViewOfFile(addr)) {
-      return fail_last_error();
-    }
-  }
-  return 0;
-}
-
-long __crt_sys_msync(void* addr, unsigned long length, int flags) {
+long __crt_sys_msync(void* addr, size_t length, int flags) {
   (void)flags;
   if (!FlushViewOfFile(addr, (size_t)length)) {
     return fail_last_error();
@@ -6156,7 +6313,7 @@ long __crt_sys_msync(void* addr, unsigned long length, int flags) {
   return 0;
 }
 
-void* __crt_sys_mremap(void* old_addr, unsigned long old_size, unsigned long new_size, int flags, void* new_addr) {
+void* __crt_sys_mremap(void* old_addr, size_t old_size, size_t new_size, int flags, void* new_addr) {
   (void)old_addr;
   (void)old_size;
   (void)new_size;
@@ -6174,35 +6331,35 @@ long __crt_sys_munlockall(void) {
   return -ENOSYS;
 }
 
-long __crt_sys_mlock(const void* addr, unsigned long length) {
+long __crt_sys_mlock(const void* addr, size_t length) {
   if (!VirtualLock((void*)addr, (size_t)length)) {
     return fail_last_error();
   }
   return 0;
 }
 
-long __crt_sys_mlock2(const void* addr, unsigned long length, int flags) {
+long __crt_sys_mlock2(const void* addr, size_t length, int flags) {
   if (flags != 0) {
     return -EINVAL;
   }
   return __crt_sys_mlock(addr, length);
 }
 
-long __crt_sys_munlock(const void* addr, unsigned long length) {
+long __crt_sys_munlock(const void* addr, size_t length) {
   if (!VirtualUnlock((void*)addr, (size_t)length)) {
     return fail_last_error();
   }
   return 0;
 }
 
-long __crt_sys_mincore(void* addr, unsigned long length, unsigned char* vector) {
+long __crt_sys_mincore(void* addr, size_t length, unsigned char* vector) {
   (void)addr;
   (void)length;
   (void)vector;
   return -ENOSYS;
 }
 
-long __crt_sys_madvise(void* addr, unsigned long length, int advice) {
+long __crt_sys_madvise(void* addr, size_t length, int advice) {
   (void)addr;
   (void)length;
   if (advice == MADV_NORMAL || advice == MADV_RANDOM || advice == MADV_SEQUENTIAL ||
@@ -6312,6 +6469,34 @@ long __crt_sys_nanosleep(const struct timespec* req, struct timespec* rem) {
 
 long __crt_sys_sched_yield(void) {
   Sleep(0);
+  return 0;
+}
+
+/* getrusage(RUSAGE_SELF) for libc/src/resource.c: CPU times from GetProcessTimes (100 ns
+ * units, returned in microseconds) and the peak working set in KiB (Bionic's ru_maxrss unit).
+ * Windows keeps no accounting of terminated children and none per thread here, so those
+ * callers get zeros from resource.c. */
+long __crt_sys_getrusage_self(long long* user_us, long long* system_us, long* max_rss_kib, long* page_faults) {
+  struct crt_win_filetime creation;
+  struct crt_win_filetime exit_time;
+  struct crt_win_filetime kernel;
+  struct crt_win_filetime user;
+  struct crt_win_process_memory_counters counters;
+
+  *user_us = 0;
+  *system_us = 0;
+  *max_rss_kib = 0;
+  *page_faults = 0;
+  if (GetProcessTimes(GetCurrentProcess(), &creation, &exit_time, &kernel, &user)) {
+    *user_us = (long long)((((unsigned long long)user.high << 32) | user.low) / 10ULL);
+    *system_us = (long long)((((unsigned long long)kernel.high << 32) | kernel.low) / 10ULL);
+  }
+  memset(&counters, 0, sizeof(counters));
+  counters.cb = (DWORD)sizeof(counters);
+  if (K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, (DWORD)sizeof(counters))) {
+    *max_rss_kib = (long)(counters.PeakWorkingSetSize / 1024);
+    *page_faults = (long)counters.PageFaultCount;
+  }
   return 0;
 }
 

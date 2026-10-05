@@ -617,7 +617,19 @@ static void* pthread_macos_start(void* arg) {
 #endif
 
 #if defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_current_stack_bounds(void** base, size_t* size);
+
 static DWORD CRT_WINAPI pthread_windows_start(void* arg) {
+  crt_pthread_control* control = (crt_pthread_control*)arg;
+  void* base = 0;
+  size_t size = 0;
+
+  /* Record the real stack (the caller gave at most a size) for pthread_getattr_np(). */
+  if ((control->attr.flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) == 0 &&
+      __crt_sys_current_stack_bounds(&base, &size) == 0) {
+    control->attr.stack_base = base;
+    control->attr.stack_size = size;
+  }
   return (DWORD)pthread_start(arg);
 }
 #endif
@@ -1756,6 +1768,17 @@ int pthread_getattr_np(pthread_t thread, pthread_attr_t* attr) {
       size_t size = 0;
 
       if (pthread_current_stack_from_maps(&base, &size) == 0) {
+        attr->stack_base = base;
+        attr->stack_size = size;
+      }
+    }
+#elif defined(CRT_TARGET_OS_WINDOWS)
+    /* The initial thread has no control block; the OS knows its stack. */
+    if (result == 0 && pthread_is_current_thread(thread)) {
+      void* base = 0;
+      size_t size = 0;
+
+      if (__crt_sys_current_stack_bounds(&base, &size) == 0) {
         attr->stack_base = base;
         attr->stack_size = size;
       }

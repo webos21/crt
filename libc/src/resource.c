@@ -7,6 +7,8 @@
 
 #if defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_getrusage(int who, struct rusage* usage);
+#elif defined(CRT_TARGET_OS_WINDOWS)
+long __crt_sys_getrusage_self(long long* user_us, long long* system_us, long* max_rss_kib, long* page_faults);
 #endif
 
 int getrlimit(int resource, struct rlimit* rlim) {
@@ -89,6 +91,22 @@ int getrusage(int who, struct rusage* usage) {
     usage->ru_utime.tv_usec = (int)usage->ru_utime.tv_usec;
     usage->ru_stime.tv_usec = (int)usage->ru_stime.tv_usec;
     usage->ru_maxrss /= 1024;
+  }
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  /* Only the process's own usage is known (see the PAL); children and threads report zeros. */
+  if (who == RUSAGE_SELF) {
+    long long user_us;
+    long long system_us;
+    long max_rss_kib;
+    long page_faults;
+
+    __crt_sys_getrusage_self(&user_us, &system_us, &max_rss_kib, &page_faults);
+    usage->ru_utime.tv_sec = (time_t)(user_us / 1000000);
+    usage->ru_utime.tv_usec = (long)(user_us % 1000000);
+    usage->ru_stime.tv_sec = (time_t)(system_us / 1000000);
+    usage->ru_stime.tv_usec = (long)(system_us % 1000000);
+    usage->ru_maxrss = max_rss_kib;
+    usage->ru_minflt = page_faults;
   }
 #endif
   return 0;
