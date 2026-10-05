@@ -5,16 +5,23 @@
 // worker thread, several times -- instead of hanging or crashing. Run with the JIT options.
 #include <JavaScriptCore/JavaScript.h>
 
-#include <dlfcn.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <ucontext.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+
+// The crash reporter below reads the Linux-layout ucontext_t the CRT forwards to SA_SIGINFO
+// handlers on Linux and macOS. Windows has no such machine context (and its first run uses polling
+// traps, with no signal at all), so the reporter is not built there.
+#if !defined(_WIN32) && !defined(__MINGW32__) && !defined(CRT_TARGET_OS_WINDOWS)
+#define JSC_WATCHDOG_CRASH_REPORTER 1
+#include <dlfcn.h>
+#include <ucontext.h>
+#endif
 
 // Declared in JSContextRefPrivate.h, which the build does not install; exported by the library.
 typedef bool (*JSShouldTerminateCallback)(JSContextRef ctx, void* context);
@@ -27,6 +34,7 @@ static int callback_calls;
 // A fatal-signal reporter, so a crash in the signal-based trap path names the faulting
 // instruction and thread instead of dying silently. It uses the real siginfo_t and
 // ucontext_t the CRT forwards to SA_SIGINFO handlers (and so also checks that they arrive).
+#if JSC_WATCHDOG_CRASH_REPORTER
 static void report_crash(int sig, siginfo_t* info, void* context) {
   char line[512];
   int n = 0;
@@ -78,6 +86,7 @@ static void report_crash(int sig, siginfo_t* info, void* context) {
   }
   _exit(139);
 }
+#endif // JSC_WATCHDOG_CRASH_REPORTER
 
 static bool should_terminate(JSContextRef, void*) {
   __atomic_fetch_add(&callback_calls, 1, __ATOMIC_RELAXED);
@@ -122,12 +131,14 @@ static void* worker(void* argument) {
 }
 
 int main() {
+#if JSC_WATCHDOG_CRASH_REPORTER
   struct sigaction crash;
   memset(&crash, 0, sizeof crash);
   crash.sa_sigaction = report_crash;
   crash.sa_flags = SA_SIGINFO;
   sigaction(SIGSEGV, &crash, nullptr);
   sigaction(SIGBUS, &crash, nullptr);
+#endif
   bool ok = true;
   for (int i = 0; i < 3; ++i) ok = run_one("main") && ok;
   for (int i = 0; i < 3; ++i) {

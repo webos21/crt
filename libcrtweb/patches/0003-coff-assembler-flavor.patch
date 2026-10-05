@@ -1,0 +1,164 @@
+--- a/Source/WTF/wtf/InlineASM.h
++++ b/Source/WTF/wtf/InlineASM.h
+@@ -43,7 +43,7 @@
+ #define THUMB_FUNC_PARAM(name)
+ #endif
+ 
+-#if (OS(LINUX) || OS(FREEBSD) || OS(HAIKU) || OS(QNX)) && CPU(X86_64)
++#if (OS(LINUX) || OS(FREEBSD) || OS(HAIKU) || OS(QNX)) && CPU(X86_64) && !defined(WTF_CRT_COFF_ASM)
+ #define GLOBAL_REFERENCE(name) #name "@plt"
+ #elif OS(LINUX) && CPU(X86) && defined(__PIC__)
+ #define GLOBAL_REFERENCE(name) SYMBOL_STRING(name) "@plt"
+@@ -57,7 +57,10 @@
+ #define LABEL_REFERENCE(name) GLOBAL_REFERENCE(name)
+ #endif
+ 
+-#if OS(DARWIN)
++#if defined(WTF_CRT_COFF_ASM)
++    // COFF: no symbol visibility directive (the CRT presents Windows as a Linux-shaped platform)
++#define HIDE_SYMBOL(name)
++#elif OS(DARWIN)
+     // Mach-O platform
+ #define HIDE_SYMBOL(name) ".private_extern _" #name
+ #elif OS(AIX)
+--- a/Source/JavaScriptCore/offlineasm/asm.rb
++++ b/Source/JavaScriptCore/offlineasm/asm.rb
+@@ -328,7 +328,7 @@
+ end
+ 
+ # We want this in all ELF systems we support, except for C_LOOP (we'll disable it later on if we are building cloop)
+-$emitELFDebugDirectives = $options.has_key?(:binary_format) && $options[:binary_format] == "ELF"
++$emitELFDebugDirectives = $options.has_key?(:binary_format) && $options[:binary_format] == "ELF" && !ENV.key?("WTF_CRT_COFF_ASM")
+ 
+ inputHash =
+     "// offlineasm input hash: " + parseHash(asmFile, $options) +
+--- a/Source/JavaScriptCore/assembler/MacroAssemblerX86_64.cpp
++++ b/Source/JavaScriptCore/assembler/MacroAssemblerX86_64.cpp
+@@ -231,7 +231,7 @@
+     "movaps " STRINGIZE_VALUE_OF(PROBE_CPU_XMM15_VECTOR_OFFSET) "(%rbp), %xmm15" "\n"
+ #endif // !OS(DARWIN)
+ 
+-#if COMPILER(MSVC)
++#if COMPILER(MSVC) || defined(WTF_CRT_COFF_ASM)
+ #define ASM_PREVIOUS_SECTION
+ #else
+ #define ASM_PREVIOUS_SECTION ".previous" "\n"
+--- a/Source/JavaScriptCore/jit/ThunkGenerators.cpp
++++ b/Source/JavaScriptCore/jit/ThunkGenerators.cpp
+@@ -1008,6 +1008,12 @@
+ enum MathThunkCallingConvention { };
+ typedef MathThunkCallingConvention(*MathThunk)(MathThunkCallingConvention);
+ 
++#if defined(WTF_CRT_COFF_ASM)
++#define CRT_PREVIOUS_SECTION_DIRECTIVE ""
++#else
++#define CRT_PREVIOUS_SECTION_DIRECTIVE ".previous\n"
++#endif
++
+ #if CPU(X86_64) && COMPILER(GCC_COMPATIBLE) && (OS(DARWIN) || OS(LINUX))
+ 
+ #define defineUnaryDoubleOpWrapper(function) \
+@@ -1020,7 +1026,7 @@
+         "call " GLOBAL_REFERENCE(function) "\n" \
+         "popq %rcx\n" \
+         "ret\n" \
+-        ".previous\n" \
++        CRT_PREVIOUS_SECTION_DIRECTIVE \
+     );\
+     extern "C" { \
+         MathThunkCallingConvention function##Thunk(MathThunkCallingConvention); \
+--- a/Source/WTF/wtf/PlatformCallingConventions.h
++++ b/Source/WTF/wtf/PlatformCallingConventions.h
+@@ -33,7 +33,7 @@
+ 
+ /* Macros for specifing specific calling conventions. */
+ 
+-#if OS(WINDOWS) && CPU(X86_64)
++#if (OS(WINDOWS) || defined(WTF_CRT_COFF_ASM)) && CPU(X86_64)
+ #define SYSV_ABI __attribute__((sysv_abi))
+ #else
+ #define SYSV_ABI
+@@ -80,7 +80,7 @@
+ 
+ #if ENABLE(JIT) && CALLING_CONVENTION_IS_STDCALL
+ #define JIT_OPERATION_ATTRIBUTES CDECL
+-#elif OS(WINDOWS)
++#elif OS(WINDOWS) || defined(WTF_CRT_COFF_ASM)
+ #define JIT_OPERATION_ATTRIBUTES SYSV_ABI
+ #else
+ #define JIT_OPERATION_ATTRIBUTES
+--- a/Source/WTF/wtf/FunctionTraits.h
++++ b/Source/WTF/wtf/FunctionTraits.h
+@@ -80,7 +80,7 @@
+ 
+ };
+ 
+-#if OS(WINDOWS) && CPU(X86_64)
++#if (OS(WINDOWS) || defined(WTF_CRT_COFF_ASM)) && CPU(X86_64)
+ template<typename Result, typename... Args>
+ struct FunctionTraits<Result SYSV_ABI(Args...)> : public FunctionTraits<Result(Args...)> {
+ };
+@@ -90,7 +90,7 @@
+ struct FunctionTraits<Result(*)(Args...)> : public FunctionTraits<Result(Args...)> {
+ };
+ 
+-#if OS(WINDOWS) && CPU(X86_64)
++#if (OS(WINDOWS) || defined(WTF_CRT_COFF_ASM)) && CPU(X86_64)
+ template<typename Result, typename... Args>
+ struct FunctionTraits<Result SYSV_ABI (*)(Args...)> : public FunctionTraits<Result(Args...)> {
+ };
+--- a/Source/WTF/wtf/FunctionPtr.h
++++ b/Source/WTF/wtf/FunctionPtr.h
+@@ -88,7 +88,7 @@
+         : m_ptr(encode(ptr))
+     { }
+ 
+-#if OS(WINDOWS) && CPU(X86_64)
++#if (OS(WINDOWS) || defined(WTF_CRT_COFF_ASM)) && CPU(X86_64)
+     constexpr FunctionPtr(Out(SYSV_ABI *ptr)(In...))
+         : m_ptr(encode(ptr))
+     { }
+--- a/Source/WTF/wtf/CodePtr.h
++++ b/Source/WTF/wtf/CodePtr.h
+@@ -91,7 +91,7 @@
+         : m_value(encodeFunc(ptr))
+     { }
+ 
+-#if OS(WINDOWS) && CPU(X86_64)
++#if (OS(WINDOWS) || defined(WTF_CRT_COFF_ASM)) && CPU(X86_64)
+     template<typename Out, typename... In>
+     constexpr CodePtr(Out(SYSV_ABI *ptr)(In...))
+         : m_value(encodeFunc(ptr))
+--- a/Source/JavaScriptCore/assembler/AbstractMacroAssembler.h
++++ b/Source/JavaScriptCore/assembler/AbstractMacroAssembler.h
+@@ -305,7 +305,7 @@
+         {
+         }
+ 
+-#if OS(WINDOWS) && CPU(X86_64)
++#if (OS(WINDOWS) || defined(WTF_CRT_COFF_ASM)) && CPU(X86_64)
+         template<typename ReturnType, typename... Arguments>
+         explicit TrustedImmPtr(ReturnType(SYSV_ABI *value)(Arguments...))
+             : m_value(reinterpret_cast<void*>(value))
+--- a/Source/WTF/wtf/StackPointer.cpp
++++ b/Source/WTF/wtf/StackPointer.cpp
+@@ -53,7 +53,7 @@
+     ".previous" "\n"
+ );
+ 
+-#elif CPU(X86_64) && OS(WINDOWS)
++#elif CPU(X86_64) && (OS(WINDOWS) || defined(WTF_CRT_COFF_ASM))
+ 
+ __asm__(
+     ".text" "\n"
+--- a/Source/JavaScriptCore/CMakeLists.txt
++++ b/Source/JavaScriptCore/CMakeLists.txt
+@@ -223,7 +223,7 @@
+ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+     list(APPEND OFFLINE_ASM_FORMAT_ARGS --binary-format=ELF)
+ endif ()
+-if (MSVC AND NOT ENABLE_C_LOOP)
++if ((MSVC OR CRT_WINDOWS_ABI) AND NOT ENABLE_C_LOOP)
+     list(APPEND OFFLINE_ASM_FORMAT_ARGS --platform=Windows)
+ endif ()
+ if (USE_APPLE_INTERNAL_SDK)

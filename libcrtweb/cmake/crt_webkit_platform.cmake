@@ -17,4 +17,7 @@ if(WIN32)
   set(MINGW OFF)
   set(MSVC OFF)
   set(UNIX ON)
+  # Read by the carried patch to Source/JavaScriptCore/CMakeLists.txt (libcrtweb/patches, 0003): the
+  # target's calling convention is the Microsoft x64 one, so offlineasm lowers with --platform=Windows.
+  set(CRT_WINDOWS_ABI ON)
 endif()

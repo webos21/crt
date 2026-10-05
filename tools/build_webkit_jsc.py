@@ -193,12 +193,6 @@ def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
     # (libJavaScriptCore.so, ICU) use libc.so; an executable linking libc.a would carry a
     # second libc with its own thread/key/TLS registry and allocator.
     env["CRT_CXX_RUNTIME_LINKAGE"] = "shared"
-    if target_os == "windows":
-        # libc.dll for the executables too (one libc in the process: a second copy in jsc.exe has its own
-        # initial-thread id, so JavaScriptCore.dll never recognised the main thread), but libc++ linked
-        # statically, like the CRT ICU DLLs: libc++.dll does not export the explicit instantiations of
-        # <sstream> (docs/crtweb_acceptance.md, Windows replay), which JavaScriptCore.dll needs.
-        env["CRT_CXX_STL_LINKAGE"] = "static"
     # WebKit's `jsc` and its tools define a plain `int main`; see tools/crt-c++.
     env["CRT_CXX_HOSTED"] = "1"
     if target_os == "windows":
@@ -209,6 +203,8 @@ def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
         env["CRT_ROOTFS"] = root
         env["CRT_TARGET_OS"] = "windows"
         env["CRT_MKSH_EXE"] = f"{root}/system/bin/mksh.exe"
+        # Read by patched offlineasm/asm.rb (libcrtweb/patches, 0003): no ELF .size/.type directives.
+        env["WTF_CRT_COFF_ASM"] = "1"
         for variable, command in (("CRT_HOST_CC", "clang"), ("CRT_HOST_CXX", "clang++")):
             if not env.get(variable):
                 found = shutil.which(command)
@@ -303,7 +299,11 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         # WINNT and __MINGW32__ in different places), then the Linux one.
         c_flags += [f"-U{name}" for name in (
             "WIN32", "WIN64", "WINNT", "_WIN32", "_WIN64", "__WIN32", "__WIN32__", "__WIN64", "__WIN64__",
-            "__WINNT", "__WINNT__", "__MINGW32__", "__MINGW64__")] + ["-D__linux__=1"]
+            "__WINNT", "__WINNT__", "__MINGW32__", "__MINGW64__")] + ["-D__linux__=1", "-DWTF_CRT_COFF_ASM=1",
+                                                                         # GNU bit-field layout, as on Linux: WebKit packs bit-fields of different
+                                                                         # underlying types (RegisterAtOffset: unsigned and ptrdiff_t, 8 bytes), which
+                                                                         # the Microsoft layout MinGW targets default to does not.
+                                                                         "-mno-ms-bitfields"]
         macos_options = [f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
         # thread_local is lowered to compiler-rt's emulated TLS (the wrapper's -femulated-tls), whose
         # emutls.c names two UCRT entry points that only its fatal-error path reaches; the stubs and
@@ -468,6 +468,10 @@ def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict) -> dic
     else:
         off_env = {**run_env, **JIT_OFF_OPTIONS}
         on_env = {**run_env, **JIT_ON_OPTIONS}
+        if os.name == "nt":
+            # Windows' first Baseline-JIT run uses polling traps: the CRT's signal emulation there (a software
+            # signal mask, a stub sigsuspend, no machine context) is its own gate, kept apart from the JIT's.
+            on_env["JSC_usePollingTraps"] = "true"
         # Step 1: the assembly interpreter alone. The whole 1B acceptance must pass and nothing
         # may be compiled.
         off = script_result(measured([jsc, TESTS / "jsc_acceptance.js"], off_env), "jsc_acceptance: ok")
