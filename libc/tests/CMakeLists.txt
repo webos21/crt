@@ -501,6 +501,10 @@ set_tests_properties(signal_vmtrap_test_runs PROPERTIES
   TIMEOUT 120
 )
 
+add_crt_test(memcpy_atomicity_test memcpy_atomicity_test.c)
+set_tests_properties(memcpy_atomicity_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "memcpy_atomicity_test: ok"
+  TIMEOUT 120)
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"

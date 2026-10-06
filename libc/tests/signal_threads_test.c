@@ -7,6 +7,7 @@
 #define _GNU_SOURCE 1
 #include <errno.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -148,12 +149,100 @@ static void test_mask_is_per_thread(void) {
   CHECK(sigismember(&current, SIGUSR2) == 1, "the child's change did not touch this thread's mask");
   pthread_sigmask(SIG_UNBLOCK, &block, 0);
 }
+
+/* WTF's thread suspend/resume, in miniature: SIGUSR1 parks the target in its handler (sigsuspend with
+ * only SIGUSR1 open), a second SIGUSR1 -- sent with pthread_kill(), which needs pthread_self() and the
+ * thread registry -- releases it. The target spends its whole life in errno/pthread_self/
+ * pthread_getspecific, so the signal lands inside the registry's lookup path almost every time.
+ * The registry used to be one global spin lock: the parked thread then held it and the thread sent
+ * to resume it spun on it forever (found by the JavaScriptCore WebAssembly acceptance). */
+static volatile int hot_stop;
+static volatile int hot_started;
+static volatile int park_phase;
+static volatile int parked, released;
+
+static void park_handler(int sig) {
+  (void)sig;
+  if (park_phase == 0) {
+    sigset_t open_mask;
+    park_phase = 1;
+    parked = 1;
+    sigfillset(&open_mask);
+    sigdelset(&open_mask, SIGUSR1);
+    sigsuspend(&open_mask);
+    park_phase = 0;
+    released = 1;
+  }
+}
+
+static void* hot_thread(void* argument) {
+  unsigned long spins = 0;
+  (void)argument;
+  hot_started = 1;
+  while (!hot_stop) {
+    errno = (int)(spins & 7);
+    spins += (unsigned long)(errno + (pthread_self() != 0) + (pthread_getspecific(0) == 0));
+  }
+  return (void*)spins;
+}
+
+static int wait_for(volatile int* flag, double seconds) {
+  double deadline = now() + seconds;
+  while (!*flag) {
+    if (now() > deadline) {
+      return 0;
+    }
+    sched_yield();
+  }
+  return 1;
+}
+
+static void test_suspend_resume_in_hot_thread(void) {
+  struct sigaction action;
+  pthread_t thread;
+  int round;
+  int stuck = 0;
+
+  memset(&action, 0, sizeof action);
+  action.sa_handler = park_handler;
+  sigemptyset(&action.sa_mask);
+  sigaddset(&action.sa_mask, SIGUSR1);
+  sigaction(SIGUSR1, &action, 0);
+  pthread_create(&thread, 0, hot_thread, 0);
+  /* A new thread joins the registry as it starts; pthread_kill() before that cannot find it
+   * (a documented gap, docs/signal_delivery.md), and the runtimes that use this protocol only
+   * signal threads that have finished starting. */
+  wait_for(&hot_started, 10.0);
+  for (round = 0; round < 3000 && !stuck; ++round) {
+    parked = 0;
+    released = 0;
+    pthread_kill(thread, SIGUSR1);
+    if (!wait_for(&parked, 10.0)) {
+      fprintf(stderr, "signal_threads_test: the target never parked\n");
+      stuck = 1;
+      break;
+    }
+    pthread_kill(thread, SIGUSR1);
+    if (!wait_for(&released, 10.0)) {
+      fprintf(stderr, "signal_threads_test: the parked target was never released\n");
+      stuck = 1;
+    }
+  }
+  CHECK(!stuck, "a thread parked in a signal handler could not be resumed (registry lock held by the parked thread?)");
+  if (stuck) {
+    fprintf(stderr, "signal_threads_test: stuck at round %d\n", round);
+    _exit(1);
+  }
+  hot_stop = 1;
+  pthread_join(thread, 0);
+}
 #endif
 
 int main(void) {
 #if defined(HAVE_REAL_SIGNALS)
   test_sigsuspend_blocks();
   test_mask_is_per_thread();
+  test_suspend_resume_in_hot_thread();
   if (failures != 0) {
     fprintf(stderr, "signal_threads_test: %d check(s) failed\n", failures);
     return 1;

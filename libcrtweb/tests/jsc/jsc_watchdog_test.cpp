@@ -100,16 +100,16 @@ static double now_seconds() {
 }
 
 // Returns true when the loop was terminated by the time limit.
+static const char* spin_source = nullptr;
+static const char* loop_kind = "js";
+
 static bool run_one(const char* label) {
   JSContextGroupRef group = JSContextGroupCreate();
   JSGlobalContextRef context = JSGlobalContextCreateInGroup(group, nullptr);
   JSContextGroupSetExecutionTimeLimit(group, 0.25, should_terminate, nullptr);
   // The loop runs inside a function that is entered many times first, so the JIT has
   // compiled it before it is made to spin.
-  const char* source =
-      "function spin(limit) { var n = 0; for (var i = 0; i < limit; i++) n += i & 3; return n; }"
-      "for (var warm = 0; warm < 3000; warm++) spin(200);"
-      "var counter = 0; for (;;) counter += spin(1000);";
+  const char* source = spin_source;
   JSStringRef script = JSStringCreateWithUTF8CString(source);
   JSValueRef exception = nullptr;
   double started = now_seconds();
@@ -117,7 +117,7 @@ static bool run_one(const char* label) {
   double elapsed = now_seconds() - started;
   JSStringRelease(script);
   bool terminated = value == nullptr && exception != nullptr && elapsed < 10.0;
-  printf("jsc_watchdog_test: %s terminated=%d elapsed=%.2fs\n", label, terminated ? 1 : 0, elapsed);
+  printf("jsc_watchdog_test: %s %s terminated=%d elapsed=%.2fs\n", loop_kind, label, terminated ? 1 : 0, elapsed);
   JSContextGroupClearExecutionTimeLimit(group);
   JSGlobalContextRelease(context);
   JSContextGroupRelease(group);
@@ -130,7 +130,33 @@ static void* worker(void* argument) {
   return nullptr;
 }
 
-int main() {
+// The loop is an exported WebAssembly function, entered many times first so that the Wasm
+// tiers (BBQ/OMG, when enabled) have compiled it, then made to run forever. The forever loop
+// calls `spin` on every iteration: JSC delivers a VM trap (watchdog, termination) to Wasm code
+// at function entry only (the prologue stack check, via WasmIPIntSlowPaths/the soft stack
+// limit), so a Wasm loop with no call in it is not interruptible by the execution time limit
+// in upstream either; that is a documented limitation, not something this test can cover.
+static const char* const js_loop_source =
+    "function spin(limit) { var n = 0; for (var i = 0; i < limit; i++) n += i & 3; return n; }"
+    "for (var warm = 0; warm < 3000; warm++) spin(200);"
+    "var counter = 0; for (;;) counter += spin(1000);";
+
+static const char* const wasm_loop_source =
+    "function sec(id, b) { return [id, b.length].concat(b); }"
+    "var bytes = [0,97,115,109,1,0,0,0]"
+    "  .concat(sec(1, [2, 0x60,1,0x7f,1,0x7f, 0x60,0,0]), sec(3, [2, 0, 1]),"
+    "    sec(7, [2, 4,115,112,105,110,0,0, 7,102,111,114,101,118,101,114,0,1]),"
+    "    sec(10, [2, 39, 1,2,0x7f, 2,0x40,3,0x40, 0x20,2,0x20,0,0x48,0x45,0x0d,1,"
+    "      0x20,1,0x20,2,0x41,3,0x6c,0x6a,0x21,1, 0x20,2,0x41,1,0x6a,0x21,2, 0x0c,0,0x0b,0x0b, 0x20,1,0x0b,"
+    "      13, 0, 3,0x40, 0x41,1,0x10,0,0x1a, 0x0c,0,0x0b,0x0b]));"
+    "var exports = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(bytes))).exports;"
+    "for (var warm = 0; warm < 3000; warm++) exports.spin(200);"
+    "exports.forever();";
+
+int main(int argc, char** argv) {
+  const bool wasm = argc > 1 && strcmp(argv[1], "wasm") == 0;
+  spin_source = wasm ? wasm_loop_source : js_loop_source;
+  loop_kind = wasm ? "wasm" : "js";
 #if JSC_WATCHDOG_CRASH_REPORTER
   struct sigaction crash;
   memset(&crash, 0, sizeof crash);
@@ -152,6 +178,6 @@ int main() {
     pthread_attr_destroy(&attributes);
     ok = thread_ok && ok;
   }
-  printf("jsc_watchdog_test: %s callback_calls=%d\n", ok ? "ok" : "FAILED", callback_calls);
+  printf("jsc_watchdog_test: %s callback_calls=%d loop=%s\n", ok ? "ok" : "FAILED", callback_calls, loop_kind);
   return ok ? 0 : 1;
 }

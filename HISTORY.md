@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-10-06
 
+- **Web Tranche 1D-B (FTL) and 1D-C (WebAssembly) on Linux/x86_64; two CRT bugs fixed that only concurrent Wasm tier-up
+  exposed.** `tools/build_webkit_jsc.py` gained step 4 (`run_ftl_acceptance`) and step 5 (`run_wasm_acceptance`) on the same
+  `baseline-jit` binary, each requiring evidence of its tier: FTL compile reports (108-252 per script run; zero with FTL off),
+  Wasm interpreter-only / BBQ / BBQ+OMG separated by `useBBQJIT`/`useOMGJIT` and proven by the tier's disassembly dump, fast
+  memory proven by `strace` counting the SIGSEGVs JSC's fault handler handled (50 vs 0 with software bounds checks), watchdog
+  termination of a Wasm loop on main and worker threads. New `jsc_ftl_acceptance.js`, `jsc_wasm_acceptance.js` (raw-byte
+  modules, nine trap kinds, 400 instances, async), `jsc_wasm_oob_probe.js`; `jsc_watchdog_test wasm`.
+  The Wasm script first hung (~1 in 10 runs under 4-way CPU contention) and then crashed (~1 in 100). A hang's backtrace
+  (gdb as the parent; ptrace attach is blocked) showed every thread in `crt_spin_lock(thread_lock)` of `libc/src/tls.c`: the
+  registry lookup behind errno/`pthread_self` held a global lock, WTF parked the holder in its SIGUSR1 suspend handler and
+  the resumer needed `pthread_self` for `pthread_kill`. The registry is now a lock-free-reader table keyed by tid (writers
+  only take the lock). Crashes in JIT code (SIGSEGV/SIGILL) remained until the second bug: CRT's OpenBSD `memcpy` copied 4
+  bytes as four byte stores, and WTF patches call displacements with `memcpy` while another thread executes them (BBQ->OMG
+  call-site patching); glibc builds compile the same copy to one `mov`, the CRT wrapper's `-fno-builtin` does not. Copies up to
+  16 bytes are now single overlapping 2/4/8-byte accesses, as in Bionic. A native glibc build of the same source ran 1,200
+  runs without failure and the CRT runtime 0 in 800 after both fixes (before: ~1% crashes plus the hangs). New tests:
+  `signal_threads_test` park/resume in a thread hot in errno (fails every run on the old registry) and
+  `memcpy_atomicity_test` (over a million torn 4-byte values before, none after). Verified: full `ctest` 163/163 serial
+  (the sound-card test excluded), tooling 102/102, `crt-ui-dist`/`verify_dist`, interpreter and baseline-jit harness passes
+  from the installed `05-ui` SDK, stress FTL/Wasm/watchdog 100/100 each. Details and limits: `docs/crtweb_acceptance.md`
+  ("1D-B and 1D-C result"). Open: replays of 1D-B/C on the other hosts (needs the libc fixes), the sampling profiler (1D-D),
+  SIMD and Wasm threads, and a Wasm loop with no call is not interruptible by the watchdog (upstream).
+
 - **Windows/arm64: thread-directed signals, per-thread masks and fault-to-signal mapping (same gate as Windows/x64).**
   180e43c had written `libc/src/arch/windows/common/signal_backend.c` against the x64 `CONTEXT` and the Linux x86_64
   `ucontext_t`, which broke the windows-arm64 CI build (`greg_t`/`REG_R8` undeclared); first guarded to keep masks, waits and

@@ -254,13 +254,15 @@ one on and isolates it with JSC run-time options):
 | Step | Turns on | New assumption under test |
 |---|---|---|
 | 1D-A | DFG + concurrent compiler threads | compiler threads, DFG code, cross-thread VM/code lifecycle |
-| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs |
-| 1D-C | WebAssembly | wasm tiers, their memory/trap handling |
+| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs (Linux/x86_64 done) |
+| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (Linux/x86_64 done) |
 | 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads |
 
 W^X is hardening, not a tier. Order: Linux/x86_64 first, so a failure is a JSC-tier problem and not a signal
-emulation or persona problem, then Linux/aarch64, macOS/arm64 and Windows/x64. **Only 1D-A gates Tranche 2**; the
-rest are raised when WebCore needs them.
+emulation or persona problem, then Linux/aarch64, macOS/arm64 and Windows/x64. **1D-A gates Tranche 2 at minimum.** The pinned WebKit
+enables FTL, WebAssembly and the sampling profiler by default on x86_64/arm64, so 1D-B..1D-D close JSC's default
+capabilities: finish them before the unchanged WPE baseline where practical (1D-B and 1D-C are done on Linux/x86_64), but none
+is a `PlatformCRT` architecture blocker.
 
 **1D-A result, Linux/x86_64 (2026-10-05).** `tools/build_webkit_jsc.py --mode baseline-jit` gained "step 3", run on
 the *same* binary as 1C with `JSC_useDFGJIT=true`, `JSC_useConcurrentJIT=true`, four compiler threads
@@ -278,7 +280,7 @@ the *same* binary as 1C with `JSC_useDFGJIT=true`, `JSC_useConcurrentJIT=true`, 
 * Stress: the DFG script 100/100, the watchdog 100/100, 4- and 8-thread context cycles 40/40 (no failures); the
   interpreter mode is unchanged and passes. The first run was green; nothing in CRT had to change for DFG.
 
-*Not covered by 1D-A:* FTL, WebAssembly, the sampling profiler, W^X, TSAN/ASAN builds, a long soak, and any host other
+*Not covered by 1D-A:* FTL and WebAssembly (1D-B/1D-C, below), the sampling profiler, W^X, TSAN/ASAN builds, a long soak, and any host other
 than Linux/x86_64 and macOS/arm64 (below).
 
 **1D-A replay, macOS/arm64 (2026-10-06): green on the first run, nothing in CRT or the carried patches changed.**
@@ -319,6 +321,56 @@ thresholds (103), with serial compilation (134), the 1B script (10) and the JIT 
 host-ABI audit is clean. Stress beyond the harness: the DFG script 100/100, the watchdog 100/100 and 4- and 8-thread
 context cycles 40/40 with no failure or hang. Concurrent compilation is real: the process peaks at 15 threads with it on
 and 12 with `JSC_useConcurrentJIT=false`.
+
+**1D-B and 1D-C result, Linux/x86_64 (2026-10-06).** Same binary again; the harness gained "step 4" (FTL) and "step 5"
+(WebAssembly) in `tools/build_webkit_jsc.py` (`run_ftl_acceptance`, `run_wasm_acceptance`), still requiring evidence of the
+tier each step claims.
+
+* *1D-B, FTL (B3/Air).* `jsc_ftl_acceptance.js` (the DFG groups sized to reach FTL at the default thresholds, plus a
+  40-block function that stresses B3 lowering and Air register allocation, float and BigInt cases) passes at
+  jitPolicyScale 0.01, at the default thresholds and with serial compilation: 108-252 FTL reports (`reportFTLCompileTimes`,
+  "using FTL ... with FTL", also `FTLForOSREntry`); the same script with FTL off yields none (negative control). The 1B, 1C and
+  1D-A scripts, the context cycle on 0/1/4/8 threads and the watchdog pass with FTL enabled (two FTL compiler threads).
+* *1D-C, WebAssembly.* `jsc_wasm_acceptance.js` assembles its modules from raw bytes (no wat2wasm): validate/compile/
+  instantiate, i32/i64/f32/f64 including wraparound and BigInt, loops and recursion (made hot), imports and exceptions
+  through Wasm frames, tables and `call_indirect` (signature and bounds traps), memory load/store/`memory.grow`, nine kinds
+  of trap that must surface as `WebAssembly.RuntimeError` (out of bounds, straddling the end, huge offset, divide by zero,
+  divide overflow, `unreachable`, ...), 400 instances of one module, async compile. The tiers are separated with
+  `JSC_useBBQJIT`/`JSC_useOMGJIT` and evidenced by `JSC_dumpBBQDisassembly`/`JSC_dumpOMGDisassembly` ("Generated BBQ/OMG"):
+  interpreter only (0 JIT code), BBQ only (20+ BBQ, 0 OMG), BBQ and OMG (7-9 OMG), and again with
+  `useWasmFastMemory=false`. *Fast memory is proven, not assumed:* `jsc_wasm_oob_probe.js` under `strace -f -c` handles 50
+  signals with fast memory (each out-of-bounds access is a SIGSEGV that JSC's fault handler turns into a RuntimeError)
+  and none with software bounds checks (Linux with `strace` only; recorded as unavailable elsewhere). The watchdog stops
+  an infinite loop running in Wasm code on the main and on worker threads (`jsc_watchdog_test wasm`).
+  *Upstream limit, not a CRT gap:* JSC delivers a VM trap to Wasm code at function entry only (the prologue stack
+  check), so the loop must contain a call; a Wasm loop with none is not interruptible by the execution time limit
+  (from the pinned source, `WasmIPIntSlowPaths.cpp`; not measured on a native build). SIMD and Wasm threads are not covered.
+* Stress: FTL script 100/100, Wasm script 100/100, watchdog 100/100 for the JS and the Wasm loop, 4- and 8-thread
+  context cycles 40/40, and the Wasm script as four concurrent processes x 200 (800 runs) without failure.
+
+*Two CRT bugs, found only by running Wasm while the compiler threads install code.* A native glibc build of the same JSCOnly
+source (ICU built from the same tarball) ran 1,200 such runs without a failure; the CRT runtime hung or crashed in
+roughly 1 run in 10 (hang) and 1 in 100 (crash) under 4-way CPU contention before the fixes, and 0 in 800 after.
+
+1. *Thread registry lock.* `libc/src/tls.c` found the current thread's context (errno, `pthread_self`, `pthread_getspecific`,
+   `pthread_kill`) by walking a list under one global spin lock. WTF suspends a thread with SIGUSR1 and parks it in the
+   handler; a thread parked while it held that lock left every other thread, including the one sent to resume it
+   (`pthread_kill` -> `pthread_self`), spinning in `sched_yield` for ever. The Wasm tier-up path
+   (`resetInstructionCacheOnAllThreads`) suspends all threads for each installed callee, which made it frequent. Fix: a fixed
+   open-addressed table keyed by tid with lock-free readers (slots are never reallocated; the context pointer is published
+   last and cleared first, a tombstone keeps probe chains intact); only thread start/end/fork take the lock, and nothing a
+   handler or a resumer does does. `signal_threads_test` now parks and resumes a thread that is hot in errno/`pthread_self`
+   3000 times (it fails on every run with the old registry, 0/40 with the new). *Not fixed:* `pthread_kill` to a thread before it
+   has started running (it registers itself) finds nothing; the runtimes that use the suspend protocol signal started threads only.
+2. *Small `memcpy` was a byte loop.* `libc/src/string/bcopy.c` is OpenBSD's Torek copy: a 4-byte `memcpy` is four byte stores,
+   and the CRT wrapper's `-fno-builtin` keeps the compiler from turning a constant-size copy into one `mov`, as it does against
+   glibc. WTF's `performJITMemcpy` patches call displacements and immediates with `memcpy`, and another thread may be executing
+   that code: BBQ-to-OMG call-site patching showed a thread half of a new displacement and it crashed in JIT code (SIGSEGV or
+   SIGILL). Fix: copies of up to 16 bytes are single, overlapping 2/4/8-byte loads then stores (what Bionic's and glibc's
+   optimised versions do), shared by `memmove` and `bcopy`. `memcpy_atomicity_test` reads the destination while another thread
+   alternates two patterns: over a million torn 4-byte values before, none after, plus a correctness sweep of sizes 0-40 and of
+   forward/backward overlap. This also applies to the macOS/arm64 and Windows replays, which patch 4-byte instruction words
+   the same way and passed without it (by timing, not by design); they need this commit and a rerun of their JIT steps.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the

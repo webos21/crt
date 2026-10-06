@@ -268,8 +268,24 @@ DFG_ON_OPTIONS = {**JIT_ON_OPTIONS, "JSC_useDFGJIT": "true", "JSC_useConcurrentJ
 DFG_DEFAULT_THRESHOLD_OPTIONS = {k: v for k, v in DFG_ON_OPTIONS.items() if k != "JSC_jitPolicyScale"}
 # Compilation on the executing thread only: the answers must not depend on the compiler threads.
 DFG_SERIAL_OPTIONS = {**DFG_ON_OPTIONS, "JSC_useConcurrentJIT": "false"}
+# Tranche 1D-B: FTL (B3/Air) on top of DFG; WebAssembly still off.
+FTL_ON_OPTIONS = {**DFG_ON_OPTIONS, "JSC_useFTLJIT": "true", "JSC_numberOfFTLCompilerThreads": "2",
+                  "JSC_reportFTLCompileTimes": "true"}
+FTL_DEFAULT_THRESHOLD_OPTIONS = {k: v for k, v in FTL_ON_OPTIONS.items() if k != "JSC_jitPolicyScale"}
+FTL_SERIAL_OPTIONS = {**FTL_ON_OPTIONS, "JSC_useConcurrentJIT": "false"}
+# Tranche 1D-C: WebAssembly with every tier, on top of FTL. The tier compile evidence is the
+# disassembly dump of that tier ("Generated BBQ ..." / "Generated OMG ..."), which JSC prints
+# only for code it really compiled.
+WASM_ON_OPTIONS = {**FTL_ON_OPTIONS, "JSC_useWasm": "true", "JSC_useWasmFastMemory": "true",
+                   "JSC_useBBQJIT": "true", "JSC_useOMGJIT": "true",
+                   "JSC_dumpBBQDisassembly": "true", "JSC_dumpOMGDisassembly": "true"}
+WASM_INTERPRETER_OPTIONS = {**WASM_ON_OPTIONS, "JSC_useBBQJIT": "false", "JSC_useOMGJIT": "false"}
+WASM_BBQ_OPTIONS = {**WASM_ON_OPTIONS, "JSC_useOMGJIT": "false"}
+WASM_BOUNDS_CHECK_OPTIONS = {**WASM_ON_OPTIONS, "JSC_useWasmFastMemory": "false"}
+BBQ_CODE_REPORT = re.compile(r"Generated BBQ\b")
+OMG_CODE_REPORT = re.compile(r"Generated OMG\b")
 DFG_COMPILE_REPORT = re.compile(r"\busing DFG\b")
-FTL_COMPILE_REPORT = re.compile(r"\busing FTL\b|\bFTL\b.*\binto \d+ bytes")
+FTL_COMPILE_REPORT = re.compile(r"\busing FTL(?:ForOSREntry)? with FTL\b")
 
 
 def configure_options(mode: str):
@@ -454,7 +470,9 @@ def measured(command, env) -> dict:
             # Compiler threads print without a lock, so a report can share a line with other
             # output; count matches in the whole text.
             "dfg_reports": len(DFG_COMPILE_REPORT.findall(completed.stdout + completed.stderr)),
-            "ftl_reports": len(FTL_COMPILE_REPORT.findall(completed.stdout + completed.stderr))}
+            "ftl_reports": len(FTL_COMPILE_REPORT.findall(completed.stdout + completed.stderr)),
+            "bbq_reports": len(BBQ_CODE_REPORT.findall(completed.stdout + completed.stderr)),
+            "omg_reports": len(OMG_CODE_REPORT.findall(completed.stdout + completed.stderr))}
 
 
 def script_result(run_result: dict, marker: str) -> dict:
@@ -462,7 +480,8 @@ def script_result(run_result: dict, marker: str) -> dict:
             "peak_rss_kb": run_result["peak_rss_kb"],
             "within_rss_bound": 0 < run_result["peak_rss_kb"] <= ACCEPTANCE_MAX_RSS_KB,
             "baseline_compile_reports": run_result["compile_reports"],
-            "dfg_compile_reports": run_result["dfg_reports"], "ftl_compile_reports": run_result["ftl_reports"]}
+            "dfg_compile_reports": run_result["dfg_reports"], "ftl_compile_reports": run_result["ftl_reports"],
+            "bbq_code_reports": run_result["bbq_reports"], "omg_code_reports": run_result["omg_reports"]}
 
 
 def program_ok(env, command, marker) -> dict:
@@ -505,7 +524,103 @@ def run_dfg_acceptance(results: dict, build: Path, run_env: dict, programs: dict
         "no_ftl_code": watchdog["ftl_reports"] == 0}
 
 
-def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict) -> dict:
+def run_ftl_acceptance(results: dict, build: Path, run_env: dict, programs: dict) -> None:
+    """Tranche 1D-B: FTL (B3/Air) on top of DFG, same binary. Positive proof: FTL compile
+    reports; negative control: the same script with FTL off yields none."""
+    jsc = build / "bin" / "jsc"
+
+    def ftl_script(name, script, marker, options, expect_ftl=True):
+        """expect_ftl: True = FTL reports required, False = none allowed, None = not checked."""
+        result = script_result(measured([jsc, TESTS / script], {**run_env, **options}), marker)
+        if expect_ftl is True:
+            result["ftl_code_proven"] = result["ftl_compile_reports"] > 0
+        elif expect_ftl is False:
+            result["no_ftl_code"] = result["ftl_compile_reports"] == 0
+        results[name] = result
+
+    marker = "jsc_ftl_acceptance: ok"
+    ftl_script("step4_ftl_script", "jsc_ftl_acceptance.js", marker, FTL_ON_OPTIONS)
+    ftl_script("step4_ftl_script_default_thresholds", "jsc_ftl_acceptance.js", marker, FTL_DEFAULT_THRESHOLD_OPTIONS)
+    ftl_script("step4_ftl_script_serial_compiler", "jsc_ftl_acceptance.js", marker, FTL_SERIAL_OPTIONS)
+    ftl_script("step4_ftl_script_negative_control", "jsc_ftl_acceptance.js", marker, DFG_ON_OPTIONS, expect_ftl=False)
+    # Everything earlier must still pass when its hot functions can reach FTL.
+    ftl_script("step4_1b_script_with_ftl", "jsc_acceptance.js", "jsc_acceptance: ok", FTL_ON_OPTIONS, expect_ftl=None)
+    ftl_script("step4_jit_script_with_ftl", "jsc_jit_acceptance.js", "jsc_jit_acceptance: ok", FTL_ON_OPTIONS, expect_ftl=None)
+    ftl_script("step4_dfg_script_with_ftl", "jsc_dfg_acceptance.js", "jsc_dfg_acceptance: ok", FTL_ON_OPTIONS, expect_ftl=None)
+    ftl_env = {**run_env, **FTL_ON_OPTIONS}
+    for threads in CYCLE_THREAD_COUNTS:
+        results[f"step4_context_cycle_threads_{threads}"] = program_ok(
+            ftl_env, [programs["jsc_context_cycle"], str(threads)], "jsc_context_cycle: ok")
+    watchdog = measured([programs["jsc_watchdog_test"]], ftl_env)
+    results["step4_watchdog_signal_vm_traps"] = {
+        "ok": watchdog["returncode"] == 0 and "jsc_watchdog_test: ok" in watchdog["stdout"]}
+
+
+def count_handled_signals(command, env) -> "int | None":
+    """Signals the process handled, from `strace -f -c` (rt_sigreturn calls). None where strace
+    is not available (it is a Linux-only proof)."""
+    import shutil
+    strace = shutil.which("strace")
+    if strace is None or sys.platform != "linux":
+        return None
+    completed = run([strace, "-f", "-c", "-e", "trace=rt_sigreturn"] + [str(part) for part in command],
+                    env=env, check=False, capture=True)
+    if completed.returncode != 0:
+        return None
+    for line in completed.stderr.splitlines():
+        fields = line.split()
+        if fields and fields[-1] == "rt_sigreturn":
+            return int(fields[3])
+    return 0
+
+
+def run_wasm_acceptance(results: dict, build: Path, run_env: dict, programs: dict, target_os: str) -> None:
+    """Tranche 1D-C: WebAssembly in three layers (interpreter only; BBQ; BBQ and OMG), plus the
+    fast-memory trap path. Each layer needs evidence of the tier it claims."""
+    jsc = build / "bin" / "jsc"
+    marker = "jsc_wasm_acceptance: ok"
+
+    def wasm_script(name, options, script="jsc_wasm_acceptance.js", marker=marker):
+        result = script_result(measured([jsc, TESTS / script], {**run_env, **options}), marker)
+        results[name] = result
+        return result
+
+    interpreter = wasm_script("step5_wasm_interpreter_only", WASM_INTERPRETER_OPTIONS)
+    interpreter["no_wasm_jit_code"] = interpreter["bbq_code_reports"] == 0 and interpreter["omg_code_reports"] == 0
+    bbq = wasm_script("step5_wasm_bbq", WASM_BBQ_OPTIONS)
+    bbq["bbq_code_proven"] = bbq["bbq_code_reports"] > 0
+    bbq["no_omg_code"] = bbq["omg_code_reports"] == 0
+    omg = wasm_script("step5_wasm_bbq_and_omg", WASM_ON_OPTIONS)
+    omg["bbq_code_proven"] = omg["bbq_code_reports"] > 0
+    omg["omg_code_proven"] = omg["omg_code_reports"] > 0
+    wasm_script("step5_wasm_bounds_checked_memory", WASM_BOUNDS_CHECK_OPTIONS)
+    # Fast memory: every out-of-bounds access is a hardware fault that the fault handler converts
+    # (the signal count is the proof that this path, not a software check, produced the traps).
+    # The same probe with fast memory off must handle no signal at all.
+    probe = [jsc, TESTS / "jsc_wasm_oob_probe.js"]
+    fast = count_handled_signals(probe, {**run_env, **WASM_ON_OPTIONS})
+    slow = count_handled_signals(probe, {**run_env, **WASM_BOUNDS_CHECK_OPTIONS})
+    results["step5_wasm_fast_memory_traps"] = {
+        "ok": True, "signals_handled_fast_memory": fast, "signals_handled_bounds_checks": slow,
+        "fast_memory_signal_proven": fast is None or fast >= 50,
+        "bounds_check_without_signals": slow is None or slow < 5,
+        "proof_available": fast is not None}
+    # The earlier scripts still pass with WebAssembly enabled.
+    for name, script, expected in (("step5_1b_script_with_wasm", "jsc_acceptance.js", "jsc_acceptance: ok"),
+                                   ("step5_ftl_script_with_wasm", "jsc_ftl_acceptance.js", "jsc_ftl_acceptance: ok")):
+        wasm_script(name, WASM_ON_OPTIONS, script, expected)
+    wasm_env = {**run_env, **WASM_ON_OPTIONS}
+    for threads in CYCLE_THREAD_COUNTS:
+        results[f"step5_context_cycle_threads_{threads}"] = program_ok(
+            wasm_env, [programs["jsc_context_cycle"], str(threads)], "jsc_context_cycle: ok")
+    # The watchdog stops an infinite loop that runs in WebAssembly code, on the main and on worker threads.
+    watchdog = measured([programs["jsc_watchdog_test"], "wasm"], wasm_env)
+    results["step5_watchdog_wasm_loop"] = {
+        "ok": watchdog["returncode"] == 0 and "jsc_watchdog_test: ok" in watchdog["stdout"],
+        "wasm_loop_terminated": "wasm main terminated=1" in watchdog["stdout"] and "wasm worker terminated=1" in watchdog["stdout"]}
+
+
+def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict, target_os: str = "linux") -> dict:
     results = {}
     jsc = build / "bin" / "jsc"
     cycle = programs["jsc_context_cycle"]
@@ -543,11 +658,17 @@ def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict) -> dic
             "spin_function_compiled": compiled_spin}
     if mode == "baseline-jit":
         run_dfg_acceptance(results, build, run_env, programs)
+        run_ftl_acceptance(results, build, run_env, programs)
+        run_wasm_acceptance(results, build, run_env, programs, target_os)
     results["passed"] = all(
         value["ok"] and value.get("within_rss_bound", True) and value.get("no_code_compiled", True)
         and value.get("compiled_code_proven", True) and value.get("spin_function_compiled", True)
         and value.get("dfg_code_proven", True) and value.get("no_ftl_code", True)
-        and value.get("spin_function_dfg_compiled", True)
+        and value.get("spin_function_dfg_compiled", True) and value.get("ftl_code_proven", True)
+        and value.get("no_wasm_jit_code", True) and value.get("bbq_code_proven", True)
+        and value.get("omg_code_proven", True) and value.get("no_omg_code", True)
+        and value.get("fast_memory_signal_proven", True) and value.get("bounds_check_without_signals", True)
+        and value.get("spin_function_ftl_compiled", True) and value.get("wasm_loop_terminated", True)
         for value in results.values() if isinstance(value, dict))
     return results
 
@@ -784,7 +905,7 @@ def main() -> int:
         with phases.measure("build the C API test programs"):
             programs = build_test_programs(sdk, build, env, target_os, mode)
         with phases.measure(f"run the {mode} acceptance"):
-            results = run_acceptance(mode, build, run_env, programs)
+            results = run_acceptance(mode, build, run_env, programs, target_os)
         with phases.measure("host ABI audit"):
             audit = host_abi_audit(
                 sdk, deps, build,

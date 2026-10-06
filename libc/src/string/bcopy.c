@@ -44,6 +44,45 @@ typedef uintptr_t word;
 #define wsize sizeof(word)
 #define wmask (wsize - 1)
 
+/*
+ * Local adaptation: copies of up to 16 bytes are done with single, possibly overlapping
+ * 2/4/8-byte loads followed by the stores, never byte by byte. This is what Bionic's (and
+ * glibc's) optimised memcpy/memmove do for small sizes and some callers depend on it: a runtime
+ * that patches generated code with memcpy(code, &value, 4) (JavaScriptCore's and WTF's
+ * performJITMemcpy, for call/jump displacements and immediates) needs the store to be one
+ * instruction, because another thread may be executing that code; a byte loop shows it a
+ * half-written displacement. Loads before stores also make the small path overlap-safe, so it
+ * serves memmove and bcopy too.
+ */
+typedef struct { uint16_t value; } __attribute__((packed, may_alias)) crt_copy16;
+typedef struct { uint32_t value; } __attribute__((packed, may_alias)) crt_copy32;
+typedef struct { uint64_t value; } __attribute__((packed, may_alias)) crt_copy64;
+
+static inline int crt_copy_small(char* dst, const char* src, size_t length) {
+  if (length > 16) {
+    return 0;
+  }
+  if (length >= 8) {
+    uint64_t head = ((const crt_copy64*)src)->value;
+    uint64_t tail = ((const crt_copy64*)(src + length - 8))->value;
+    ((crt_copy64*)dst)->value = head;
+    ((crt_copy64*)(dst + length - 8))->value = tail;
+  } else if (length >= 4) {
+    uint32_t head = ((const crt_copy32*)src)->value;
+    uint32_t tail = ((const crt_copy32*)(src + length - 4))->value;
+    ((crt_copy32*)dst)->value = head;
+    ((crt_copy32*)(dst + length - 4))->value = tail;
+  } else if (length >= 2) {
+    uint16_t head = ((const crt_copy16*)src)->value;
+    uint16_t tail = ((const crt_copy16*)(src + length - 2))->value;
+    ((crt_copy16*)dst)->value = head;
+    ((crt_copy16*)(dst + length - 2))->value = tail;
+  } else if (length == 1) {
+    *dst = *src;
+  }
+  return 1;
+}
+
 #ifdef MEMCOPY
 void* memcpy(void* dst0, const void* src0, size_t length)
 #elif defined(MEMMOVE)
@@ -57,6 +96,9 @@ void bcopy(const void* src0, void* dst0, size_t length)
   size_t t;
 
   if (length == 0 || dst == src) {
+    goto done;
+  }
+  if (crt_copy_small(dst, src, length)) {
     goto done;
   }
 

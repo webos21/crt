@@ -412,3 +412,14 @@ longer special-cases Windows at all.
   `poll()` need the same "was it already pending" generation check, or
   whether real `EINTR` propagation from the underlying syscalls already
   covers them.
+
+## The thread registry and WTF's suspend/resume (Linux)
+
+`libc/src/tls.c` finds the calling thread's `crt_thread_context` (errno, `pthread_self`, `pthread_getspecific`) and
+`pthread_kill` validates a `pthread_t` against it. A signal handler can run at any instruction of any thread, and WTF
+parks a thread in its SIGUSR1 handler (`sigsuspend`) until a second SIGUSR1, sent with `pthread_kill`, releases it. So
+nothing on those paths may wait for a lock that an interrupted thread could hold. The registry is therefore a fixed
+open-addressed table keyed by tid: readers take no lock, a slot's tid stays after its thread ends (the context pointer is
+cleared, a tombstone), and the context pointer is published last. Only thread start, thread end and `fork` take the
+writer lock. `signal_threads_test` reproduces the old deadlock deterministically. Known gap: `pthread_kill` to a thread
+that has not started running yet (it registers itself) finds nothing; that was already true.
