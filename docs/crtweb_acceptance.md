@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on Linux/x86_64, Linux/aarch64 and macOS/arm64 and awaits the Windows/x64 replay, and FTL/WebAssembly/profiler/W^X (1D-B..D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on all four hosts (Linux/x86_64, Linux/aarch64, macOS/arm64, Windows/x64), and FTL/WebAssembly/profiler/W^X (1D-B..D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -309,6 +309,16 @@ harness: the DFG script 100/100 (118-125 reports per run), the watchdog 100/100 
 reports. Compiler threads: with concurrent JIT on, `JITWorker` threads appear in `/proc/<pid>/task` (up to 5 threads in
 the process); with it off there are none (3). `--mode interpreter` is unchanged and passes (build 285 s). Not covered:
 the same list as the other replays (FTL, WebAssembly, the sampling profiler, W^X, TSAN/ASAN, a long soak).
+
+**1D-A replay, Windows/x64 (2026-10-06): green on the first run; nothing in CRT, the carried patches or the harness
+changed.** Rebuilt `crt-ui-dist` from the tree, then `tools/build_webkit_jsc.py --mode baseline-jit --skip-build`
+on the same Windows Baseline-JIT binary (polling traps off, the signal VM-trap gate's first consumer for DFG). Every
+1B/1C step passes again and all of step 3: the DFG script at jitPolicyScale 0.01 (119 `using DFG` reports), at default
+thresholds (103), with serial compilation (134), the 1B script (10) and the JIT script under DFG, context cycles on
+0/1/4/8 threads, and the watchdog killing a DFG-compiled `spin`; FTL compile reports are zero everywhere and the
+host-ABI audit is clean. Stress beyond the harness: the DFG script 100/100, the watchdog 100/100 and 4- and 8-thread
+context cycles 40/40 with no failure or hang. Concurrent compilation is real: the process peaks at 15 threads with it on
+and 12 with `JSC_useConcurrentJIT=false`.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the
