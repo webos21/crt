@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on Linux/x86_64 and macOS/arm64 and awaits the other replays, and FTL/WebAssembly/profiler/W^X (1D-B..D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on Linux/x86_64, Linux/aarch64 and macOS/arm64 and awaits the Windows/x64 replay, and FTL/WebAssembly/profiler/W^X (1D-B..D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -293,6 +293,22 @@ sampling a running process (`sample`): with concurrent JIT on, `JITPlan::compile
 `JITWorklistThread::work` on worker threads; with it off it runs inside the main thread. DFG code is written under the
 same `MAP_JIT` plus per-thread write-protect toggle as Baseline, which the compiler threads' finalization and the
 concurrent invalidation exercised without a fault.
+
+**1D-A replay, Linux/aarch64 (2026-10-06): green on the first run, nothing in CRT or the carried patches changed.**
+Ubuntu 26.04 aarch64 (QEMU guest, 4 CPUs, Clang 21.1.8), HEAD `8e30763`, 24 commits after the aarch64 TLS work. The old
+`out/` was reconfigured with `cmake --fresh` (the commits changed shared libc, `crt-c++` and the dist prerequisites):
+clean build with 0 warnings, `crt-ui-dist` and `verify_dist` pass for 03/04/05, tooling unittests 102/102, full `ctest`
+140/140. `signal_vmtrap_test` reports "skipped: x86_64 Linux and Windows only" on aarch64 and is **not** evidence here;
+the aarch64 evidence for signal VM traps is the JSC watchdog. `tools/build_webkit_jsc.py --mode baseline-jit` from an
+empty work root (build 356 s, acceptance 20 s) passes every 1B/1C step and all of step 3: the DFG script at
+jitPolicyScale 0.01 (123 `using DFG` reports), at default thresholds (108) and with serial compilation (137, the same
+count as Linux/x86_64 and macOS/arm64), the 1B script (9) and the JIT script (45) under DFG, context cycles on 0/1/4/8
+threads, and the watchdog killing a DFG-compiled `spin`; no FTL report anywhere; host-ABI audit clean. Beyond the
+harness: the DFG script 100/100 (118-125 reports per run), the watchdog 100/100 (every run's `spin` compiled by DFG) and
+4/8-thread context cycles 40/40, all with no failure; with `useDFGJIT=false` the same script passes with zero DFG
+reports. Compiler threads: with concurrent JIT on, `JITWorker` threads appear in `/proc/<pid>/task` (up to 5 threads in
+the process); with it off there are none (3). `--mode interpreter` is unchanged and passes (build 285 s). Not covered:
+the same list as the other replays (FTL, WebAssembly, the sampling profiler, W^X, TSAN/ASAN, a long soak).
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the

@@ -10,6 +10,16 @@ substantive update.
 
 ## 2026-10-06
 
+- **Web Tranche 1D-A replayed on Linux/aarch64: DFG with concurrent compiler threads is green on the first run.**
+  Ubuntu 26.04 aarch64 QEMU guest at `8e30763`: `cmake --fresh` of the old tree (24 commits had changed shared libc,
+  `crt-c++` and the dist prerequisites), clean build with 0 warnings, `crt-ui-dist`/`verify_dist` for 03/04/05, tooling
+  102/102, `ctest` 140/140 (the new `signal_vmtrap_test` skips on aarch64 and is not counted). `--mode baseline-jit` from an
+  empty work root passes every 1B/1C step and all of step 3 (DFG at 0.01/default thresholds/serial with 123/108/137
+  `using DFG` reports, 1B and JIT scripts under DFG, cycles on 0/1/4/8 threads, watchdog on a DFG-compiled `spin`, no FTL
+  report, host-ABI audit clean); stress: DFG script 100/100, watchdog 100/100, 4/8-thread cycles 40/40; `useDFGJIT=false`
+  gives zero reports; `JITWorker` threads exist in `/proc/<pid>/task` only with concurrent JIT on; interpreter mode
+  unchanged and passing. No CRT or patch change was needed. Windows/x64 is the remaining 1D-A replay.
+
 - **Web Tranche 1D-A replayed on macOS/arm64: DFG with concurrent compiler threads is green on the first run.**
   Fresh `crt-ui-dist` and an empty-tree `--mode baseline-jit` build; all 1B/1C steps and step 3 (DFG at 0.01/default
   thresholds/serial, 1B and JIT scripts under DFG, context cycles on 0/1/4/8 threads, watchdog on DFG code) pass,
