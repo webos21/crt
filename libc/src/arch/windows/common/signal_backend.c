@@ -153,7 +153,8 @@ __declspec(dllimport) BOOL CRT_WINAPI SetEvent(HANDLE event);
 __declspec(dllimport) DWORD CRT_WINAPI WaitForSingleObject(HANDLE handle, DWORD milliseconds);
 __declspec(dllimport) DWORD CRT_WINAPI WaitForMultipleObjects(DWORD count, const HANDLE* handles, BOOL wait_all,
                                                               DWORD milliseconds);
-__declspec(dllimport) unsigned long long CRT_WINAPI GetTickCount64(void);
+__declspec(dllimport) int CRT_WINAPI QueryPerformanceCounter(long long* count);
+__declspec(dllimport) int CRT_WINAPI QueryPerformanceFrequency(long long* frequency);
 __declspec(dllimport) void CRT_WINAPI WakeByAddressAll(void* address);
 __declspec(dllimport) void* CRT_WINAPI AddVectoredExceptionHandler(unsigned long first,
                                                                    long(CRT_WINAPI* handler)(struct crt_exception_pointers*));
@@ -542,6 +543,29 @@ static int inject(crt_signal_state* target, int sig) {
 
 /* ---- interruptible waits (see private/crt_signal_wait.h) ---- */
 
+/* A monotonic clock in microseconds: the tick counter's 15.6 ms steps would end a short sleep early. */
+static unsigned long long clock_microseconds(void) {
+  static long long frequency;
+  long long count = 0;
+
+  if (frequency == 0) {
+    long long value = 0;
+
+    QueryPerformanceFrequency(&value);
+    frequency = value > 0 ? value : 1;
+  }
+  QueryPerformanceCounter(&count);
+  return (unsigned long long)(count / frequency) * 1000000ULL +
+         (unsigned long long)(count % frequency) * 1000000ULL / (unsigned long long)frequency;
+}
+
+/* Whole milliseconds still to wait until `deadline` (microseconds), rounded up; 0 when it has passed. */
+static DWORD milliseconds_until(unsigned long long deadline) {
+  unsigned long long now = clock_microseconds();
+
+  return now >= deadline ? 0 : (DWORD)((deadline - now + 999ULL) / 1000ULL);
+}
+
 int __crt_windows_signal_wait_begin(volatile void* address) {
   crt_signal_state* state = current_state();
 
@@ -574,7 +598,7 @@ void* __crt_windows_signal_wake_event(void) {
 }
 
 unsigned long __crt_windows_signal_wait_handle(void* handle, unsigned long milliseconds) {
-  unsigned long long deadline = milliseconds == 0xffffffffUL ? 0 : GetTickCount64() + milliseconds;
+  unsigned long long deadline = milliseconds == 0xffffffffUL ? 0 : clock_microseconds() + milliseconds * 1000ULL + 1;
 
   for (;;) {
     HANDLE handles[2];
@@ -584,9 +608,7 @@ unsigned long __crt_windows_signal_wait_handle(void* handle, unsigned long milli
     int blocked;
 
     if (deadline != 0) {
-      unsigned long long now = GetTickCount64();
-
-      remaining = now >= deadline ? 0 : (DWORD)(deadline - now);
+      remaining = milliseconds_until(deadline);
     }
     blocked = __crt_windows_signal_wait_begin(0);
     handles[0] = handle;
@@ -606,26 +628,26 @@ unsigned long __crt_windows_signal_wait_handle(void* handle, unsigned long milli
       return result; /* a failure */
     }
     /* Woken for a signal (its handler has run): wait again for what is left of the time. */
-    if (deadline != 0 && GetTickCount64() >= deadline) {
+    if (deadline != 0 && milliseconds_until(deadline) == 0) {
       return WAIT_TIMEOUT_CODE;
     }
   }
 }
 
 int __crt_windows_signal_sleep(unsigned long milliseconds) {
-  unsigned long long deadline = GetTickCount64() + milliseconds;
+  unsigned long long deadline = clock_microseconds() + milliseconds * 1000ULL;
 
   for (;;) {
-    unsigned long long now = GetTickCount64();
+    DWORD remaining = milliseconds_until(deadline);
     int blocked;
     int ran;
 
-    if (now >= deadline) {
+    if (remaining == 0) {
       return 0;
     }
     blocked = __crt_windows_signal_wait_begin(0);
     if (!blocked) {
-      WaitForSingleObject(__crt_windows_signal_wake_event(), (DWORD)(deadline - now));
+      WaitForSingleObject(__crt_windows_signal_wake_event(), remaining);
     }
     ran = __crt_windows_signal_wait_end();
     if (ran) {
