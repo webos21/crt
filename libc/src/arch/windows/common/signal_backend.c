@@ -57,6 +57,25 @@ typedef void* HANDLE;
 #define EXCEPTION_CONTINUE_EXECUTION_VALUE (-1L)
 #define EXCEPTION_CONTINUE_SEARCH_VALUE 0L
 
+/* Thread injection and hardware-fault mapping work on the thread's CONTEXT (x64 or ARM64, declared
+ * below) and hand a handler the Linux register layout of the same architecture: Linux x86_64's
+ * ucontext_t on x64, Bionic's aarch64 ucontext (private/crt_linux_ucontext_aarch64.h, as the macOS
+ * backend does) on arm64. Another architecture would keep the per-thread masks, pending sets,
+ * interruptible waits and sigsuspend(), with a directed signal staying pending until the thread next
+ * unblocks or waits in the CRT. */
+#if defined(__x86_64__) || defined(__aarch64__)
+#define CRT_SIGNAL_INJECT 1
+#endif
+
+#if defined(__aarch64__)
+#include <private/crt_linux_ucontext_aarch64.h>
+typedef struct crt_linux_aarch64_ucontext crt_signal_ucontext;
+#else
+typedef ucontext_t crt_signal_ucontext;
+#endif
+
+#if defined(CRT_SIGNAL_INJECT)
+#if defined(__x86_64__)
 /* The x64 CONTEXT (winnt.h), declared here because the CRT never includes the Windows headers. */
 struct crt_m128a {
   unsigned long long low;
@@ -112,6 +131,42 @@ typedef char crt_win_context_flt_check[offsetof(struct crt_win_context, flt_save
 #define CONTEXT_FLOATING_POINT_FLAG (CONTEXT_AMD64 | 0x8UL)
 #define CONTEXT_CAPTURE (CONTEXT_CONTROL_FLAG | CONTEXT_INTEGER_FLAG | CONTEXT_SEGMENTS_FLAG | CONTEXT_FLOATING_POINT_FLAG)
 #define CONTEXT_REDIRECT (CONTEXT_CONTROL_FLAG | CONTEXT_INTEGER_FLAG)
+#define CTX_PC(c) ((c)->rip)
+#define CTX_SP(c) ((c)->rsp)
+#else
+/* The ARM64 CONTEXT (winnt.h ARM64_NT_CONTEXT): x[0..28], fp (x29), lr (x30), then sp, pc, v0-v31. */
+struct crt_m128a {
+  unsigned long long low;
+  long long high;
+} __attribute__((aligned(16)));
+
+struct crt_win_context {
+  unsigned long context_flags;
+  unsigned long cpsr;
+  unsigned long long x[31];
+  unsigned long long sp;
+  unsigned long long pc;
+  struct crt_m128a v[32];
+  unsigned long fpcr;
+  unsigned long fpsr;
+  unsigned long bcr[8];
+  unsigned long long bvr[8];
+  unsigned long wcr[2];
+  unsigned long long wvr[2];
+} __attribute__((aligned(16)));
+
+typedef char crt_win_context_size_check[sizeof(struct crt_win_context) == 912 ? 1 : -1];
+typedef char crt_win_context_v_check[offsetof(struct crt_win_context, v) == 272 ? 1 : -1];
+
+#define CONTEXT_ARM64 0x00400000UL
+#define CONTEXT_CONTROL_FLAG (CONTEXT_ARM64 | 0x1UL)
+#define CONTEXT_INTEGER_FLAG (CONTEXT_ARM64 | 0x2UL)
+#define CONTEXT_FLOATING_POINT_FLAG (CONTEXT_ARM64 | 0x4UL)
+#define CONTEXT_CAPTURE (CONTEXT_CONTROL_FLAG | CONTEXT_INTEGER_FLAG | CONTEXT_FLOATING_POINT_FLAG)
+#define CONTEXT_REDIRECT (CONTEXT_CONTROL_FLAG | CONTEXT_INTEGER_FLAG)
+#define CTX_PC(c) ((c)->pc)
+#define CTX_SP(c) ((c)->sp)
+#endif
 
 struct crt_exception_record {
   DWORD exception_code;
@@ -138,10 +193,14 @@ struct crt_memory_info {
   DWORD type;
 };
 
+#endif
+
+#if defined(CRT_SIGNAL_INJECT)
 __declspec(dllimport) DWORD CRT_WINAPI SuspendThread(HANDLE thread);
 __declspec(dllimport) DWORD CRT_WINAPI ResumeThread(HANDLE thread);
 __declspec(dllimport) BOOL CRT_WINAPI GetThreadContext(HANDLE thread, struct crt_win_context* context);
 __declspec(dllimport) BOOL CRT_WINAPI SetThreadContext(HANDLE thread, const struct crt_win_context* context);
+#endif
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentProcess(void);
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentThread(void);
 __declspec(dllimport) DWORD CRT_WINAPI GetCurrentThreadId(void);
@@ -156,11 +215,16 @@ __declspec(dllimport) DWORD CRT_WINAPI WaitForMultipleObjects(DWORD count, const
 __declspec(dllimport) int CRT_WINAPI QueryPerformanceCounter(long long* count);
 __declspec(dllimport) int CRT_WINAPI QueryPerformanceFrequency(long long* frequency);
 __declspec(dllimport) void CRT_WINAPI WakeByAddressAll(void* address);
+#if defined(CRT_SIGNAL_INJECT)
 __declspec(dllimport) void* CRT_WINAPI AddVectoredExceptionHandler(unsigned long first,
                                                                    long(CRT_WINAPI* handler)(struct crt_exception_pointers*));
+#endif
 __declspec(dllimport) HANDLE CRT_WINAPI GetModuleHandleA(const char* name);
 __declspec(dllimport) void* CRT_WINAPI GetProcAddress(HANDLE module, const char* name);
+#if defined(CRT_SIGNAL_INJECT)
 __declspec(dllimport) size_t CRT_WINAPI VirtualQuery(const void* address, struct crt_memory_info* buffer, size_t length);
+
+#endif
 
 #define THREAD_RIGHTS 0x001FFFFFUL /* THREAD_ALL_ACCESS */
 #define DUPLICATE_SAME_ACCESS_FLAG 0x2UL
@@ -178,7 +242,9 @@ int __crt_windows_check_sigchld_pending(void);
 static volatile int action_installed[SIGNAL_MAX];
 static volatile unsigned long action_mask[SIGNAL_MAX];
 static volatile int action_flags[SIGNAL_MAX];
+#if defined(CRT_SIGNAL_INJECT)
 static volatile long exception_handler_added;
+#endif
 
 static int signal_in_range(int sig) {
   return sig > 0 && sig < SIGNAL_MAX;
@@ -198,6 +264,7 @@ static crt_signal_state* current_state(void) {
 static crt_signal_state* initial_state;
 static unsigned long initial_thread_id;
 
+#if defined(CRT_SIGNAL_INJECT)
 typedef long(CRT_WINAPI* restore_context_fn)(struct crt_win_context*, void*);
 static restore_context_fn restore_context_pointer;
 
@@ -211,6 +278,8 @@ static restore_context_fn restore_context_function(void) {
   }
   return restore_context_pointer;
 }
+
+#endif
 
 /* Makes the calling thread known to the signal machinery: a handle other threads can suspend it
  * through, and the event its sigsuspend() waits on. Idempotent. */
@@ -231,7 +300,9 @@ void __crt_windows_signal_attach_current(void) {
   }
   state->pending = 0;
   __atomic_store_n(&state->alive, 1, __ATOMIC_RELEASE);
+#if defined(CRT_SIGNAL_INJECT)
   restore_context_function();
+#endif
 }
 
 unsigned long __crt_windows_signal_current_mask(void) {
@@ -292,7 +363,7 @@ static void fill_siginfo(siginfo_t* info, int sig, int code) {
 static void run_handler_now(int sig, const siginfo_t* info, void* context) {
   crt_signal_state* state = current_state();
   unsigned long old_mask = state->mask;
-  ucontext_t blank;
+  crt_signal_ucontext blank;
 
   if (context == 0) {
     /* No interrupted context to show (the signal is delivered from a call, not by interruption): an
@@ -333,18 +404,20 @@ static void deliver_pending_now(void) {
   deliver_pending_with(0);
 }
 
+#if defined(CRT_SIGNAL_INJECT)
 /* ---- the interrupted thread's frame ---- */
 
 struct inject_frame {
   struct crt_win_context saved;
-  ucontext_t uc;
+  crt_signal_ucontext uc;
   siginfo_t info;
   int sig;
   unsigned long saved_mask;
   crt_signal_state* state;
 };
 
-static void context_to_ucontext(const struct crt_win_context* from, ucontext_t* uc, unsigned long mask) {
+#if defined(__x86_64__)
+static void context_to_ucontext(const struct crt_win_context* from, crt_signal_ucontext* uc, unsigned long mask) {
   greg_t* g = uc->uc_mcontext.gregs;
 
   memset(uc, 0, sizeof(*uc));
@@ -379,7 +452,7 @@ static void context_to_ucontext(const struct crt_win_context* from, ucontext_t* 
 
 /* What a handler may have changed: the general registers, the stack pointer, the instruction
  * pointer and the flags. */
-static void ucontext_to_context(const ucontext_t* uc, struct crt_win_context* to) {
+static void ucontext_to_context(const crt_signal_ucontext* uc, struct crt_win_context* to) {
   const greg_t* g = uc->uc_mcontext.gregs;
 
   to->r8 = (unsigned long long)g[REG_R8];
@@ -402,6 +475,46 @@ static void ucontext_to_context(const ucontext_t* uc, struct crt_win_context* to
   to->eflags = (unsigned long)g[REG_EFL];
 }
 
+#else
+#define CTX_UC_FPSIMD_MAGIC 0x46508001U
+
+static void context_to_ucontext(const struct crt_win_context* from, crt_signal_ucontext* uc, unsigned long mask) {
+  struct crt_linux_aarch64_sigcontext* m = &uc->uc_mcontext;
+  unsigned int* fpsimd = (unsigned int*)m->reserved;
+  int i;
+
+  memset(uc, 0, sizeof(*uc));
+  for (i = 0; i < 31; ++i) {
+    m->regs[i] = from->x[i];
+  }
+  m->sp = from->sp;
+  m->pc = from->pc;
+  m->pstate = from->cpsr;
+  /* The FP/SIMD state, as the kernel's fpsimd_context record: head{magic,size}, fpsr, fpcr, v0-v31. */
+  fpsimd[0] = CTX_UC_FPSIMD_MAGIC;
+  fpsimd[1] = 8 + 8 + 32 * 16;
+  fpsimd[2] = from->fpsr;
+  fpsimd[3] = from->fpcr;
+  memcpy(m->reserved + 16, from->v, 32 * 16);
+  uc->uc_sigmask = (sigset_t)mask;
+}
+
+/* What a handler may have changed: the general registers, the stack pointer, the program counter
+ * and the flags. */
+static void ucontext_to_context(const crt_signal_ucontext* uc, struct crt_win_context* to) {
+  const struct crt_linux_aarch64_sigcontext* m = &uc->uc_mcontext;
+  int i;
+
+  for (i = 0; i < 31; ++i) {
+    to->x[i] = m->regs[i];
+  }
+  to->sp = m->sp;
+  to->pc = m->pc;
+  to->cpsr = (unsigned long)m->pstate;
+}
+
+#endif
+
 /* Runs on the interrupted thread, on the frame the sender built, called by the entry stub below.
  * Never returns: it restores the (possibly rewritten) context. */
 void __crt_windows_signal_run(struct inject_frame* frame) {
@@ -422,6 +535,7 @@ void __crt_windows_signal_run(struct inject_frame* frame) {
   _exit(128 + SIGABRT); /* the context could not be restored: no way back */
 }
 
+#if defined(__x86_64__)
 /* The stub a suspended thread is redirected to: %rcx is the frame, %rsp is 8 mod 16 as after a call. */
 __asm__(".text\n"
         ".globl __crt_windows_signal_entry\n"
@@ -431,6 +545,16 @@ __asm__(".text\n"
         "  subq $40, %rsp\n"
         "  call __crt_windows_signal_run\n"
         "  ud2\n");
+#else
+/* The stub a suspended thread is redirected to: x0 is the frame, sp is 16-byte aligned. */
+__asm__(".text\n"
+        ".globl __crt_windows_signal_entry\n"
+        ".def __crt_windows_signal_entry; .scl 2; .type 32; .endef\n"
+        ".p2align 2\n"
+        "__crt_windows_signal_entry:\n"
+        "  bl __crt_windows_signal_run\n"
+        "  brk #0\n");
+#endif
 extern char __crt_windows_signal_entry[];
 
 /* Whether `address` lies inside one of the operating system's own wait / system-call modules. */
@@ -504,12 +628,12 @@ static int inject(crt_signal_state* target, int sig) {
     ResumeThread(handle);
     return -1;
   }
-  if (in_operating_system_code(context.rip) || (target->mask & bit_of(sig)) != 0) {
+  if (in_operating_system_code(CTX_PC(&context)) || (target->mask & bit_of(sig)) != 0) {
     ResumeThread(handle);
     return 0;
   }
   /* No red zone on Windows, but a margin below the stack pointer costs nothing. */
-  frame_address = (context.rsp - 128 - sizeof(struct inject_frame)) & ~15ULL;
+  frame_address = (CTX_SP(&context) - 128 - sizeof(struct inject_frame)) & ~15ULL;
   if (!writable_range((const void*)(uintptr_t)frame_address, sizeof(struct inject_frame) + 128)) {
     ResumeThread(handle);
     return 0;
@@ -528,9 +652,16 @@ static int inject(crt_signal_state* target, int sig) {
   __atomic_fetch_and(&target->pending, ~bit_of(sig), __ATOMIC_SEQ_CST);
 
   context.context_flags = CONTEXT_REDIRECT;
+#if defined(__x86_64__)
   context.rsp = frame_address - 8;
   context.rip = (unsigned long long)(uintptr_t)__crt_windows_signal_entry;
   context.rcx = (unsigned long long)(uintptr_t)frame;
+#else
+  context.sp = frame_address;
+  context.pc = (unsigned long long)(uintptr_t)__crt_windows_signal_entry;
+  context.x[0] = (unsigned long long)(uintptr_t)frame;
+  context.x[30] = 0; /* nothing returns into the interrupted code; the stub never falls out */
+#endif
   if (SetThreadContext(handle, &context)) {
     result = 1;
   } else {
@@ -540,6 +671,15 @@ static int inject(crt_signal_state* target, int sig) {
   ResumeThread(handle);
   return result;
 }
+
+#else
+/* No thread injection on this architecture: the signal stays pending (see the note at the top). */
+static int inject(crt_signal_state* target, int sig) {
+  (void)target;
+  (void)sig;
+  return 0;
+}
+#endif
 
 /* ---- interruptible waits (see private/crt_signal_wait.h) ---- */
 
@@ -577,15 +717,41 @@ int __crt_windows_signal_wait_begin(volatile void* address) {
   return (__atomic_load_n(&state->pending, __ATOMIC_SEQ_CST) & ~state->mask) != 0;
 }
 
+/* A ucontext_t describing the waiting call: its stack pointer and callee-saved registers. */
+#if defined(__aarch64__)
+static __attribute__((noinline)) void describe_waiting_call(crt_signal_ucontext* context) {
+  unsigned long long saved[12];
+
+  __asm__ volatile(
+      "stp x19, x20, [%0, #0]\n\t"
+      "stp x21, x22, [%0, #16]\n\t"
+      "stp x23, x24, [%0, #32]\n\t"
+      "stp x25, x26, [%0, #48]\n\t"
+      "stp x27, x28, [%0, #64]\n\t"
+      "stp x29, x30, [%0, #80]\n\t"
+      :
+      : "r"(saved)
+      : "memory");
+  memset(context, 0, sizeof(*context));
+  memcpy(&context->uc_mcontext.regs[19], saved, sizeof(saved));
+  context->uc_mcontext.sp = (unsigned long long)(uintptr_t)__builtin_frame_address(0);
+  context->uc_mcontext.pc = saved[11];
+}
+#else
+static void describe_waiting_call(crt_signal_ucontext* context) {
+  getcontext(context);
+}
+#endif
+
 int __crt_windows_signal_wait_end(void) {
   crt_signal_state* state = current_state();
   int ran = 0;
 
   __atomic_store_n(&state->in_wait, 0, __ATOMIC_SEQ_CST);
   if ((state->pending & ~state->mask) != 0) {
-    ucontext_t context;
+    crt_signal_ucontext context;
 
-    getcontext(&context);
+    describe_waiting_call(&context);
     context.uc_sigmask = (sigset_t)state->mask;
     deliver_pending_with(&context);
     ran = 1;
@@ -666,7 +832,9 @@ int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_acti
   return 0;
 }
 
+#if defined(CRT_SIGNAL_INJECT)
 static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers);
+#endif
 
 int __crt_signal_backend_set_action_ex(int bionic_sig, enum crt_signal_backend_action action,
                                        int flags, const sigset_t* mask) {
@@ -674,11 +842,13 @@ int __crt_signal_backend_set_action_ex(int bionic_sig, enum crt_signal_backend_a
     action_flags[bionic_sig] = flags;
     action_mask[bionic_sig] = mask != 0 ? (unsigned long)*mask : 0UL;
     action_installed[bionic_sig] = action == CRT_SIGNAL_BACKEND_DISPATCH;
+#if defined(CRT_SIGNAL_INJECT)
     if (action == CRT_SIGNAL_BACKEND_DISPATCH &&
         (bionic_sig == SIGTRAP || bionic_sig == SIGSEGV || bionic_sig == SIGILL || bionic_sig == SIGFPE) &&
         __atomic_exchange_n(&exception_handler_added, 1, __ATOMIC_SEQ_CST) == 0) {
       AddVectoredExceptionHandler(1, exception_handler);
     }
+#endif
   }
   __crt_windows_signal_attach_current();
   return 0;
@@ -801,6 +971,7 @@ crt_signal_state* __crt_windows_signal_state_of_initial_thread(void) {
   return initial_state;
 }
 
+#if defined(CRT_SIGNAL_INJECT)
 /* ---- hardware exceptions as signals ---- */
 
 static int signal_for_exception(const struct crt_exception_record* record, int* code) {
@@ -829,7 +1000,7 @@ static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers
   int code = 0;
   int sig = signal_for_exception(pointers->exception_record, &code);
   crt_signal_state* state;
-  ucontext_t uc;
+  crt_signal_ucontext uc;
   siginfo_t info;
   unsigned long old_mask;
 
@@ -845,6 +1016,7 @@ static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers
     info.si_addr = pointers->exception_record->exception_address;
   }
   context_to_ucontext(pointers->context_record, &uc, old_mask);
+#if defined(__x86_64__)
   if (pointers->exception_record->exception_code == STATUS_BREAKPOINT_CODE) {
     /* Windows reports the address of the int3 itself; Linux's SIGTRAP reports the instruction after
      * it (the trap has already executed), which is what a handler -- JavaScriptCore's -- expects, and
@@ -852,6 +1024,10 @@ static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers
     uc.uc_mcontext.gregs[REG_RIP] += 1;
   }
   uc.uc_mcontext.gregs[REG_CR2] = (greg_t)(uintptr_t)info.si_addr;
+#else
+  /* arm64's brk leaves the pc on the instruction, as Linux reports it: the handler advances it. */
+  uc.uc_mcontext.fault_address = (unsigned long long)(uintptr_t)info.si_addr;
+#endif
   /* A synchronous fault is delivered even if the signal is blocked (the kernel would kill the
    * process; here the handler is the best outcome), under the handler's mask. */
   state->mask = mask_for_handler(sig, old_mask);
@@ -860,3 +1036,4 @@ static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers
   ucontext_to_context(&uc, pointers->context_record);
   return EXCEPTION_CONTINUE_EXECUTION_VALUE;
 }
+#endif

@@ -16,7 +16,7 @@
 /* Real kernel signals reach CRT handlers on Linux and, since the Web Tranche 1 macOS replay, on
  * Apple Silicon (libc/src/arch/macos/common/signal_backend.c). macOS x86_64 still keeps the software
  * mask and a stub sigsuspend. */
-#if defined(__linux__) || (defined(__APPLE__) && defined(__aarch64__)) ||     (defined(CRT_TARGET_OS_WINDOWS) && defined(__x86_64__))
+#if defined(__linux__) || (defined(__APPLE__) && defined(__aarch64__)) ||     defined(CRT_TARGET_OS_WINDOWS)
 #define HAVE_REAL_SIGNALS 1
 #endif
 

@@ -1,5 +1,5 @@
 /* The signal semantics a JIT's VM traps depend on (WTF/JavaScriptCore with JSC_usePollingTraps off),
- * x86_64 Linux and Windows. JavaScriptCore interrupts compiled code that makes no calls and waits
+ * x86_64 Linux, Windows/x64 and Windows/arm64. JavaScriptCore interrupts compiled code that makes no calls and waits
  * for no one: another thread signals it, the handler reads the interrupted ucontext_t, may rewrite
  * the instruction pointer, and the thread resumes there; a patched-in `int3` raises SIGTRAP in the
  * thread itself with the same context. Windows has no kernel signal delivery, so the CRT builds it
@@ -26,7 +26,20 @@
 #include <ucontext.h>
 #include <unistd.h>
 
-#if defined(__x86_64__) && (defined(__linux__) || defined(CRT_TARGET_OS_WINDOWS))
+#if (defined(__x86_64__) && (defined(__linux__) || defined(CRT_TARGET_OS_WINDOWS))) || \
+    (defined(__aarch64__) && defined(CRT_TARGET_OS_WINDOWS))
+
+#if defined(__aarch64__)
+/* A handler on Windows/arm64 gets the Linux aarch64 ucontext (the header's own ucontext_t is private there). */
+#include <private/crt_linux_ucontext_aarch64.h>
+typedef struct crt_linux_aarch64_ucontext handler_context;
+#define UC_PC(uc) ((uc)->uc_mcontext.pc)
+#define UC_SP(uc) ((uc)->uc_mcontext.sp)
+#else
+typedef ucontext_t handler_context;
+#define UC_PC(uc) ((uc)->uc_mcontext.gregs[REG_RIP])
+#define UC_SP(uc) ((uc)->uc_mcontext.gregs[REG_RSP])
+#endif
 
 static int failures;
 
@@ -59,6 +72,20 @@ static pthread_key_t self_key;
 /* Spins in a loop that never calls anything and never blocks; leaves it only when the handler
  * moves RIP from the loop to `after`. */
 static void spin(struct spinner* me) {
+#if defined(__aarch64__)
+  __asm__ volatile(
+      "adr x9, 1f\n\t"
+      "str x9, %0\n\t"
+      "adr x9, 2f\n\t"
+      "str x9, %1\n\t"
+      "mov w9, #1\n\t"
+      "str w9, %2\n\t"
+      "1: b 1b\n\t"
+      "2:\n\t"
+      : "=m"(me->loop_address), "=m"(me->after_address), "=m"(me->ready)
+      :
+      : "x9", "memory");
+#else
   __asm__ volatile(
       "lea 1f(%%rip), %%rax\n\t"
       "movq %%rax, %0\n\t"
@@ -70,13 +97,14 @@ static void spin(struct spinner* me) {
       : "=m"(me->loop_address), "=m"(me->after_address), "=m"(me->ready)
       :
       : "rax", "memory");
+#endif
 }
 
 static void on_usr1(int sig, siginfo_t* info, void* context) {
-  ucontext_t* uc = (ucontext_t*)context;
+  handler_context* uc = (handler_context*)context;
   struct spinner* me = (struct spinner*)pthread_getspecific(self_key);
-  uintptr_t rip = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
-  uintptr_t rsp = (uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
+  uintptr_t rip = (uintptr_t)UC_PC(uc);
+  uintptr_t rsp = (uintptr_t)UC_SP(uc);
   uintptr_t here = (uintptr_t)&rsp;
 
   if (me == 0) {
@@ -89,7 +117,7 @@ static void on_usr1(int sig, siginfo_t* info, void* context) {
     me->context_ok = 1;
   }
   if (rip == (uintptr_t)me->loop_address) {
-    uc->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)me->after_address;
+    UC_PC(uc) = (uintptr_t)me->after_address;
   }
 }
 
@@ -216,13 +244,13 @@ static pthread_t initial_thread;
 static volatile int initial_context_ok;
 
 static void on_usr2(int sig, siginfo_t* info, void* context) {
-  ucontext_t* uc = (ucontext_t*)context;
+  handler_context* uc = (handler_context*)context;
 
   (void)info;
   (void)sig;
-  if ((void*)uc->uc_mcontext.gregs[REG_RIP] == initial_loop) {
+  if ((void*)(uintptr_t)UC_PC(uc) == initial_loop) {
     initial_context_ok = 1;
-    uc->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)initial_after;
+    UC_PC(uc) = (uintptr_t)initial_after;
   }
 }
 
@@ -254,6 +282,20 @@ static void test_interrupt_initial_thread(void) {
   pthread_create(&poker, 0, poke_initial, 0);
   for (i = 0; i < 20; ++i) {
     initial_context_ok = 0;
+#if defined(__aarch64__)
+    __asm__ volatile(
+        "adr x9, 1f\n\t"
+        "str x9, %0\n\t"
+        "adr x9, 2f\n\t"
+        "str x9, %1\n\t"
+        "mov w9, #1\n\t"
+        "str w9, %2\n\t"
+        "1: b 1b\n\t"
+        "2:\n\t"
+        : "=m"(initial_loop), "=m"(initial_after), "=m"(initial_ready)
+        :
+        : "x9", "memory");
+#else
     __asm__ volatile(
         "lea 1f(%%rip), %%rax\n\t"
         "movq %%rax, %0\n\t"
@@ -265,6 +307,7 @@ static void test_interrupt_initial_thread(void) {
         : "=m"(initial_loop), "=m"(initial_after), "=m"(initial_ready)
         :
         : "rax", "memory");
+#endif
     if (!initial_context_ok) ok = 0;
     initial_escaped = 1;
     if (!wait_for(&initial_ready, 0, 30.0)) {
@@ -276,21 +319,32 @@ static void test_interrupt_initial_thread(void) {
   CHECK(ok, "the initial thread's loop is interrupted by another thread, 20 times");
 }
 
-/* A patched-in `int3` raises SIGTRAP in the executing thread; the handler may move RIP. */
+#if defined(__aarch64__)
+#define TRAP_INSTRUCTION "brk #0xf000"
+#else
+#define TRAP_INSTRUCTION "int3"
+#endif
+
+/* A patched-in `int3` (arm64: `brk #0xf000`) raises SIGTRAP in the executing thread; the handler may move RIP. */
 static volatile int trap_seen;
 static volatile int trap_redirect_seen;
 static void* volatile trap_after;
 
 static void on_trap(int sig, siginfo_t* info, void* context) {
-  ucontext_t* uc = (ucontext_t*)context;
+  handler_context* uc = (handler_context*)context;
 
   (void)info;
   if (sig == SIGTRAP) {
     ++trap_seen;
     if (trap_after != 0) {
-      uc->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)trap_after;
+      UC_PC(uc) = (uintptr_t)trap_after;
       trap_redirect_seen = 1;
     }
+#if defined(__aarch64__)
+    else {
+      UC_PC(uc) += 4; /* arm64 reports the brk itself (as Linux does): step over it */
+    }
+#endif
   }
 }
 
@@ -305,10 +359,22 @@ static void test_int3_raises_sigtrap(void) {
   CHECK(sigaction(SIGTRAP, &action, 0) == 0, "sigaction(SIGTRAP)");
 
   trap_after = 0;
-  __asm__ volatile("int3" ::: "memory");
+  __asm__ volatile(TRAP_INSTRUCTION ::: "memory");
   CHECK(trap_seen == 1, "an int3 ran the SIGTRAP handler once and execution continued after it");
 
   trap_after = (void*)1; /* set below to the label after the trap */
+#if defined(__aarch64__)
+  __asm__ volatile(
+      "adr x9, 2f\n\t"
+      "str x9, %0\n\t"
+      TRAP_INSTRUCTION "\n\t"
+      "mov w9, #0\n\t"
+      "str w9, %1\n\t"
+      "2:\n\t"
+      : "=m"(trap_after), "=m"(skipped)
+      :
+      : "x9", "memory");
+#else
   __asm__ volatile(
       "lea 2f(%%rip), %%rax\n\t"
       "movq %%rax, %0\n\t"
@@ -318,6 +384,7 @@ static void test_int3_raises_sigtrap(void) {
       : "=m"(trap_after), "=m"(skipped)
       :
       : "rax", "memory");
+#endif
   CHECK(trap_redirect_seen == 1 && skipped == 1, "the SIGTRAP handler rewrote REG_RIP and the thread resumed there");
   trap_after = 0;
   signal(SIGTRAP, SIG_DFL);
@@ -328,7 +395,7 @@ static volatile long total_handled;
 static volatile long total_sent;
 
 static void on_usr1_many(int sig, siginfo_t* info, void* context) {
-  ucontext_t* uc = (ucontext_t*)context;
+  handler_context* uc = (handler_context*)context;
   struct spinner* me = (struct spinner*)pthread_getspecific(self_key);
 
   (void)sig;
@@ -336,8 +403,8 @@ static void on_usr1_many(int sig, siginfo_t* info, void* context) {
   if (me == 0) return;
   __atomic_fetch_add(&me->handled, 1, __ATOMIC_SEQ_CST);
   __atomic_fetch_add(&total_handled, 1, __ATOMIC_SEQ_CST);
-  if ((void*)uc->uc_mcontext.gregs[REG_RIP] == me->loop_address) {
-    uc->uc_mcontext.gregs[REG_RIP] = (greg_t)(uintptr_t)me->after_address;
+  if ((void*)(uintptr_t)UC_PC(uc) == me->loop_address) {
+    UC_PC(uc) = (uintptr_t)me->after_address;
   }
 }
 
@@ -507,7 +574,7 @@ int main(void) {
 #else
 
 int main(void) {
-  printf("signal_vmtrap_test: ok (skipped: x86_64 Linux and Windows only)\n");
+  printf("signal_vmtrap_test: ok (skipped: x86_64 Linux, Windows x64 and arm64 only)\n");
   return 0;
 }
 
