@@ -160,6 +160,9 @@ Linux/Windows portions of `docs/dynamic_loading.md`.
 
 ### Windows: thread-directed signals (2026-10-05)
 
+Windows/arm64 (2026-10-06) uses the same machinery with the ARM64 `CONTEXT` and a Linux-aarch64 `ucontext_t` handler frame
+(`private/crt_linux_ucontext_aarch64.h`) instead of the x86_64 layout; `brk` raises SIGTRAP with the pc on the instruction.
+
 The Windows signal VM-trap gate for JavaScriptCore (`JSC_usePollingTraps=false`) needs what Linux's kernel gives for free,
 so `libc/src/arch/windows/common/signal_backend.c` builds it, same-process and thread-directed only:
 

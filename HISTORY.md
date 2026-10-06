@@ -10,6 +10,17 @@ substantive update.
 
 ## 2026-10-06
 
+- **Windows/arm64: thread-directed signals, per-thread masks and fault-to-signal mapping (same gate as Windows/x64).**
+  180e43c had written `libc/src/arch/windows/common/signal_backend.c` against the x64 `CONTEXT` and the Linux x86_64
+  `ucontext_t`, which broke the windows-arm64 CI build (`greg_t`/`REG_R8` undeclared); first guarded to keep masks, waits and
+  `sigsuspend` only, then completed. The file now carries both layouts: the ARM64 `CONTEXT` (912 bytes, x0-x30/sp/pc/v0-v31),
+  an arm64 entry stub (`bl __crt_windows_signal_run`), and a Linux-aarch64 `ucontext_t` frame for the handler
+  (`private/crt_linux_ucontext_aarch64.h`, with the FP/SIMD record), as the macOS backend does; the header's own
+  `ucontext_t` stays private on Windows/arm64. `brk` -> SIGTRAP leaves the pc on the instruction (Linux behaviour, the handler
+  steps over it); a thread parked in a CRT wait gets x19-x30/sp in its context. `signal_vmtrap_test` gained an arm64 path
+  (`b .` loop, `brk #0xf000`) and `signal_threads_test` now runs on all Windows. Evidence: windows-arm64 CI at `41326fd`,
+  135/135 tests, `signal_vmtrap_test` 4.88 s and `signal_threads_test` 1.80 s (really executed, not skipped). The JavaScriptCore
+  replay on Windows/arm64 is not done.
 - **Web Tranche 1D-A replayed on Windows/x64: DFG with concurrent compiler threads is green on the first run.** Same
   Windows Baseline-JIT binary as 1C with `JSC_useDFGJIT`/`JSC_useConcurrentJIT` and four compiler threads, polling traps
   off, so the Windows signal VM-trap gate now has its DFG consumer. The harness's step 3 passes in full (DFG script at

@@ -88,7 +88,8 @@ then macOS/arm64.
     (signal VM-trap gate: real per-thread signals, polling traps off, watchdog 100/100); macOS/x86_64 has no signal
     conversion or JIT permissions. Windows signal gaps that are *not* gates (backlog until a consumer needs them):
     `poll`/`select`/file-I/O waits running handlers, threads not made by `pthread_create`, process-directed
-    `kill(pid)`/process groups (the Toybox `timeout` item), console Ctrl-C.
+    `kill(pid)`/process groups (the Toybox `timeout` item), console Ctrl-C. Windows/arm64 has the same signal backend
+    (CTest green 2026-10-06); no JavaScriptCore run exists there yet.
   * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided
     `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed `05-ui` SDK
     and from the isolated stage chain (Tranche 10); the Windows/macOS replays must include the host-ABI audit
