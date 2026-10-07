@@ -205,6 +205,7 @@ static void test_interrupt_worker(void) {
   int context_all = 1;
   long sent = 0;
 
+  memset(s, 0, sizeof(*s)); /* the test can be run more than once in a process (SIGNAL_VMTRAP_ONLY) */
   memset(&action, 0, sizeof(action));
   action.sa_sigaction = on_usr1;
   action.sa_flags = SA_SIGINFO;
@@ -662,6 +663,7 @@ static void test_fault_while_signalled(void) {
   double deadline = now() + 3.0;
   int faults = 0;
 
+  fault_handled = fault_wrong_pc = fault_usr1_ran = fault_done = 0;
   memset(&action, 0, sizeof(action));
   action.sa_sigaction = on_fault_segv;
   action.sa_flags = SA_SIGINFO;
@@ -687,6 +689,14 @@ static void test_fault_while_signalled(void) {
   CHECK(fault_handled == faults, "every fault ran the handler exactly once and execution continued");
   CHECK(fault_wrong_pc == 0, "the fault handler always saw the faulting instruction as the interrupted pc");
   CHECK(fault_usr1_ran > 0, "signals were delivered to the faulting thread meanwhile");
+  {
+    sigset_t current;
+
+    sigemptyset(&current);
+    pthread_sigmask(SIG_BLOCK, 0, &current);
+    CHECK(sigismember(&current, SIGUSR1) == 0 && sigismember(&current, SIGSEGV) == 0,
+          "the faulting thread's signal mask is what it was before the storm");
+  }
   signal(SIGSEGV, SIG_DFL);
   signal(SIGUSR1, SIG_DFL);
 }
@@ -698,25 +708,52 @@ static void progress(const char* step) {
   }
 }
 
-int main(void) {
-  pthread_key_create(&self_key, 0);
-  progress("int3 raises SIGTRAP");
-  test_int3_raises_sigtrap();
-  progress("hlt raises SIGSEGV, pending signals follow the fault handler");
-  test_hlt_raises_sigsegv();
-  progress("a worker's loop is interrupted");
-  test_interrupt_worker();
-  progress("the initial thread's loop is interrupted");
-  test_interrupt_initial_thread();
-  memset(spinners, 0, sizeof(spinners));
-  progress("8 threads interrupted concurrently");
-  test_concurrent_delivery();
-  progress("threads blocked in waits run the handler");
-  test_blocked_waits();
+/* SIGNAL_VMTRAP_ONLY="fault,worker" runs just those tests, in that order (diagnosing order dependence). */
+
+static void run_one(const char* name) {
+  if (strcmp(name, "int3") == 0) {
+    progress("int3 raises SIGTRAP");
+    test_int3_raises_sigtrap();
+  } else if (strcmp(name, "hlt") == 0) {
+    progress("hlt raises SIGSEGV, pending signals follow the fault handler");
+    test_hlt_raises_sigsegv();
+  } else if (strcmp(name, "worker") == 0) {
+    progress("a worker's loop is interrupted");
+    test_interrupt_worker();
+  } else if (strcmp(name, "initial") == 0) {
+    progress("the initial thread's loop is interrupted");
+    test_interrupt_initial_thread();
+  } else if (strcmp(name, "concurrent") == 0) {
+    memset(spinners, 0, sizeof(spinners));
+    progress("8 threads interrupted concurrently");
+    test_concurrent_delivery();
+  } else if (strcmp(name, "blocked") == 0) {
+    progress("threads blocked in waits run the handler");
+    test_blocked_waits();
 #if defined(__x86_64__)
-  progress("faults taken while signals are being delivered");
-  test_fault_while_signalled();
+  } else if (strcmp(name, "fault") == 0) {
+    progress("faults taken while signals are being delivered");
+    test_fault_while_signalled();
 #endif
+  }
+}
+
+int main(void) {
+  static const char* const names[] = {"fault", "int3", "hlt", "worker", "initial", "concurrent", "blocked"};
+  const char* only = getenv("SIGNAL_VMTRAP_ONLY");
+  size_t i;
+
+  pthread_key_create(&self_key, 0);
+  if (only != 0 && only[0] != 0) {
+    char list[128];
+    char* token;
+
+    strncpy(list, only, sizeof(list) - 1);
+    list[sizeof(list) - 1] = 0;
+    for (token = strtok(list, ","); token != 0; token = strtok(0, ",")) run_one(token);
+  } else {
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) run_one(names[i]);
+  }
   if (failures != 0) {
     fprintf(stderr, "signal_vmtrap_test: %d check(s) failed\n", failures);
     return 1;

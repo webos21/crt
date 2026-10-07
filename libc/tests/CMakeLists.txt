@@ -499,7 +499,21 @@ add_crt_test(signal_vmtrap_test signal_vmtrap_test.c)
 set_tests_properties(signal_vmtrap_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_vmtrap_test: ok"
   TIMEOUT 120
+  LABELS "signal"
 )
+# The same binary with its tests in a chosen order: one process must keep working after another test's
+# leftovers (a leaked signal mask once made everything after the fault test fail half of the time).
+foreach(order IN ITEMS fault,worker worker,fault worker,worker fault,fault)
+  string(REPLACE "," "_" order_name "${order}")
+  add_test(NAME signal_vmtrap_order_${order_name}_runs COMMAND signal_vmtrap_test)
+  set_tests_properties(signal_vmtrap_order_${order_name}_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    ENVIRONMENT "SIGNAL_VMTRAP_ONLY=${order}"
+    PASS_REGULAR_EXPRESSION "signal_vmtrap_test: ok"
+    TIMEOUT 120
+    LABELS "signal"
+  )
+endforeach()
 
 add_crt_test(memcpy_atomicity_test memcpy_atomicity_test.c)
 set_tests_properties(memcpy_atomicity_test_runs PROPERTIES
@@ -508,6 +522,7 @@ set_tests_properties(memcpy_atomicity_test_runs PROPERTIES
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"
+  LABELS "signal"
 )
 
 add_crt_test(bionic_surface_test bionic_surface_test.c)

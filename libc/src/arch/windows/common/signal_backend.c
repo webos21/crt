@@ -547,26 +547,31 @@ static void ucontext_to_context(const crt_signal_ucontext* uc, struct crt_win_co
 #endif
 
 /* Runs the handler of an injected signal and leaves the (possibly rewritten) interrupted context in
- * frame->saved. The sender already put the handler's mask in place (so no second signal could slip in
- * between the interruption and this point); the handler runs under it and the mask goes back afterwards. */
+ * frame->saved. The handler runs under the mask for it and the mask goes back afterwards. */
 static void run_injected_handler(struct inject_frame* frame) {
   crt_signal_state* state = frame->state;
   long unclaimed = 0;
 
   /* A sender that waited too long for this to start took the interruption back: do nothing, the
    * interrupted context is simply resumed. */
+  unsigned long old_mask;
+
   if (!__atomic_compare_exchange_n(&frame->claim, &unclaimed, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
     return;
   }
-  __atomic_store_n(frame->acknowledged, 1, __ATOMIC_SEQ_CST);
-
-  /* Keep senders from nesting another injected handler after the mask is restored but before this
-   * handler has finished converting and restoring the interrupted context. A signal arriving in that
-   * interval stays pending and is consumed by deliver_pending_with() below. */
+  /* The mask is the thread's own to change, and only from here: a sender that wrote it while the thread
+   * was stopped could lose it (the thread may take a fault, and save the changed mask as "its" mask, before
+   * it ever reaches this point). Keep senders from nesting another injected handler after the mask is
+   * restored but before this handler has finished converting and restoring the interrupted context: a signal
+   * arriving in that interval stays pending and is consumed by deliver_pending_with() below. Both are in
+   * place before the acknowledgement releases the sender. */
+  old_mask = state->mask;
   __atomic_fetch_add(&state->delivering, 1, __ATOMIC_SEQ_CST);
+  state->mask = mask_for_handler(frame->sig, old_mask);
+  __atomic_store_n(frame->acknowledged, 1, __ATOMIC_SEQ_CST);
   __crt_signal_dispatch_info(frame->sig, &frame->info, &frame->uc);
   __atomic_fetch_add(&state->handler_runs, 1, __ATOMIC_SEQ_CST);
-  state->mask = frame->saved_mask;
+  state->mask = old_mask;
   /* A signal that arrived (and was held back by the mask) while the handler ran sees the same
    * interrupted context, which the handler may rewrite too. */
   deliver_pending_with(&frame->uc);
@@ -675,14 +680,11 @@ static int interruption_took_effect(crt_signal_state* target, struct inject_fram
   unsigned long long spin_until = clock_microseconds() + 2000;
   unsigned long long deadline = clock_microseconds() + 250000; /* a redirected thread may wait for a CPU */
   long unclaimed = 0;
-  unsigned long handler_mask = mask_for_handler(sig, old_mask);
 
+  (void)old_mask;
   while (__atomic_load_n(acknowledged, __ATOMIC_SEQ_CST) == 0) {
     if (clock_microseconds() >= deadline) {
       if (__atomic_compare_exchange_n(&frame->claim, &unclaimed, 2, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
-        unsigned long expected = handler_mask;
-
-        __atomic_compare_exchange_n(&target->mask, &expected, old_mask, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
         __atomic_fetch_or(&target->pending, bit_of(sig), __ATOMIC_SEQ_CST);
         return 0;
       }
@@ -765,9 +767,6 @@ static int inject_locked(crt_signal_state* target, int sig, unsigned long long* 
   frame->acknowledged = &acknowledged;
   frame->claim = 0;
   context_to_ucontext(&context, &frame->uc, old_mask);
-  /* The handler's mask goes in now, while the thread cannot run: nothing can be delivered to it
-   * between the interruption and the handler's first instruction. */
-  target->mask = mask_for_handler(sig, old_mask);
   __atomic_fetch_and(&target->pending, ~bit_of(sig), __ATOMIC_SEQ_CST);
 
   context.context_flags = CONTEXT_REDIRECT;
@@ -784,7 +783,6 @@ static int inject_locked(crt_signal_state* target, int sig, unsigned long long* 
   if (SetThreadContext(handle, &context)) {
     result = 1;
   } else {
-    target->mask = old_mask;
     __atomic_fetch_or(&target->pending, bit_of(sig), __ATOMIC_SEQ_CST);
   }
   ResumeThread(handle);
