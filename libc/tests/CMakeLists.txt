@@ -519,6 +519,14 @@ add_crt_test(memcpy_atomicity_test memcpy_atomicity_test.c)
 set_tests_properties(memcpy_atomicity_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "memcpy_atomicity_test: ok"
   TIMEOUT 120)
+# Mutex/condition-variable mutual exclusion and wake-ups, and the flags register, while signals interrupt the
+# threads using them (WTF's Lock/ParkingLot sit on these). Longer than the "signal" tests: run with
+# `ctest -L signal-stress --repeat until-fail:N` on main/nightly.
+add_crt_test(signal_sync_stress_test signal_sync_stress_test.c)
+set_tests_properties(signal_sync_stress_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "signal_sync_stress_test: ok"
+  TIMEOUT 120
+  LABELS "signal-stress")
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"
