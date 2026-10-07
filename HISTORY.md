@@ -8,6 +8,32 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-07
+
+- **Web Tranche 1D-B (FTL) accepted on Windows/x64 and the signal/runtime part of the still-open 1D-C (WebAssembly)
+  replay hardened.** The installed/verified `05-ui` SDK's JSCOnly binary passes FTL at
+  reduced/default thresholds and with serial compilation plus the FTL-off negative control. A near-final full run also
+  passed the Wasm interpreter/BBQ/OMG and software-bounds matrix, watchdog termination of JS and Wasm loops, context cycles
+  and the host-ABI audit, but the final stress below prevents accepting 1D-C. Because Windows
+  has no `strace`, new `jsc_wasm_signal_probe.cpp` runs the OOB probe through JavaScriptCore's C API and brackets it with
+  CRT's signal-delivery generation: fast memory handles 50 hardware faults, bounds checks handle zero.
+  The work mapped JSC's `hlt` VM trap (`STATUS_PRIVILEGED_INSTRUCTION`) to Linux-compatible `SIGSEGV`/`SI_KERNEL` with a
+  null address, delivers signals held by a fault handler after its mask is restored, adds a pump for pending delivery when
+  the target is repeatedly inside Windows code, and serializes injection/delivery per target. The final duplicate-delivery
+  race was subtler: the sender polled a claim stored below the target's original stack pointer; after context restoration
+  the target reused that memory, so the sender could see zero again, restore the pending bit and run one signal twice.
+  A stable acknowledgement now lives on the sender's stack, while the target-frame claim is only cancellation arbitration.
+  Restored strict upper bounds in `signal_vmtrap_test` caught the old bug in 19-20/20 runs; after the fix
+  `signal_vmtrap_test`, `signal_threads_test` and `memcpy_atomicity_test` each pass 20 consecutive runs, full Windows CTest
+  passes 157/157, and `crt-ui-dist`/`verify_dist` complete. One near-final aggregate JSC run had all FTL/Wasm steps green but a
+  single earlier DFG 4-thread context-cycle process hit JSC's `Invalid value for lock: 0`; the same focused configuration
+  then passed 10/10 and a second full official harness passed every step plus the aggregate/host-ABI gates (131 s).
+  Final review additionally kept the sender stack alive until a just-claimed handler's acknowledgement store. The SDK
+  rebuilt from that exact source exposed the remaining non-signal-closure result: its dump-based BBQ run hung, while
+  bounded no-dump repetitions were BBQ-only 9/10 (one controlled JIT-address SIGSEGV, exit 139) and BBQ+OMG 10/10.
+  Therefore Windows 1D-C remains in `TODO.md`; 1D-B and the resolved PAL work belong here. Temporary mask/ring tracing was
+  removed. Open: isolate the Windows BBQ failure; replay 1D-B/C on macOS/arm64 and Linux/aarch64; then profiler 1D-D.
+
 ## 2026-10-06
 
 - **Web Tranche 1D-B (FTL) and 1D-C (WebAssembly) on Linux/x86_64; two CRT bugs fixed that only concurrent Wasm tier-up

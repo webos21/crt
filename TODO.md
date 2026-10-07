@@ -81,11 +81,14 @@ then macOS/arm64.
     compile proof, watchdog termination of compiled code, threads, host-ABI audit.
   * [ ] **1D. Higher JIT tiers, split by risk** (all compiled in, off at run time unless named). **1D-A DFG +
     concurrent compiler threads: done on all four hosts** (Linux/x86_64 2026-10-05; macOS/arm64, Linux/aarch64, Windows/x64
-    replays 2026-10-06). **1D-B FTL/B3 and 1D-C WebAssembly (BBQ/OMG, fast-memory traps): done on Linux/x86_64 2026-10-06**
-    and found two CRT bugs (lock-held-in-handler thread registry, byte-wise small `memcpy`), see `HISTORY.md` and
-    `docs/crtweb_acceptance.md`. **Next:** the 1D-B/C replays, Windows/x64 first for Wasm (fault-to-signal path), then macOS/arm64
-    and Linux/aarch64, **after pulling the libc fixes** (the macOS/Windows JIT steps patch 4-byte words with `memcpy` too); then
-    1D-D sampling profiler (a separate build: `ENABLE_SAMPLING_PROFILER=ON`). 1D-B..D close JSC's default capabilities and should
+    replays 2026-10-06). **1D-B FTL/B3 and 1D-C WebAssembly are done on Linux/x86_64 (2026-10-06); 1D-B is also done on
+    Windows/x64 (2026-10-07), but Windows 1D-C remains open.** Its functional matrix and fast-memory proof each have a
+    near-final green run, and the
+    replay fixed exact-once asynchronous delivery, privileged-instruction (`hlt`) mapping and pending delivery after a
+    fault handler; however the final SDK reproduced one BBQ-only JIT-address SIGSEGV in 10 no-dump runs and a separate
+    BBQ disassembly-dump hang (`docs/crtweb_acceptance.md`, `docs/signal_delivery.md`). **Next:** retain these libc fixes,
+    isolate that Windows BBQ failure; macOS/arm64 and Linux/aarch64 1D-B/C replays can proceed independently after pulling
+    them. Then run 1D-D sampling profiler (a separate build: `ENABLE_SAMPLING_PROFILER=ON`). 1D-B..D close JSC's default capabilities and should
     precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate hardening. Thread-stack sizing (1 MiB
     default) is still open: DFG, FTL and Wasm compiler threads ran fine at it.
   * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64

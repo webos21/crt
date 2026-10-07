@@ -52,6 +52,7 @@ typedef void* HANDLE;
 #define STATUS_BREAKPOINT_CODE 0x80000003UL
 #define STATUS_ACCESS_VIOLATION_CODE 0xC0000005UL
 #define STATUS_ILLEGAL_INSTRUCTION_CODE 0xC000001DUL
+#define STATUS_PRIVILEGED_INSTRUCTION_CODE 0xC0000096UL
 #define STATUS_INT_DIVIDE_BY_ZERO_CODE 0xC0000094UL
 #define STATUS_FLOAT_DIVIDE_BY_ZERO_CODE 0xC000008EUL
 #define EXCEPTION_CONTINUE_EXECUTION_VALUE (-1L)
@@ -215,6 +216,11 @@ __declspec(dllimport) DWORD CRT_WINAPI WaitForMultipleObjects(DWORD count, const
 __declspec(dllimport) int CRT_WINAPI QueryPerformanceCounter(long long* count);
 __declspec(dllimport) int CRT_WINAPI QueryPerformanceFrequency(long long* frequency);
 __declspec(dllimport) void CRT_WINAPI WakeByAddressAll(void* address);
+__declspec(dllimport) BOOL CRT_WINAPI SwitchToThread(void);
+__declspec(dllimport) void CRT_WINAPI Sleep(DWORD milliseconds);
+__declspec(dllimport) HANDLE CRT_WINAPI CreateThread(void* attributes, size_t stack_size,
+                                                     DWORD(CRT_WINAPI* start)(void*), void* parameter, DWORD flags,
+                                                     DWORD* thread_id);
 #if defined(CRT_SIGNAL_INJECT)
 __declspec(dllimport) void* CRT_WINAPI AddVectoredExceptionHandler(unsigned long first,
                                                                    long(CRT_WINAPI* handler)(struct crt_exception_pointers*));
@@ -283,6 +289,13 @@ static restore_context_fn restore_context_function(void) {
 
 /* Makes the calling thread known to the signal machinery: a handle other threads can suspend it
  * through, and the event its sigsuspend() waits on. Idempotent. */
+#if defined(CRT_SIGNAL_INJECT)
+static int in_operating_system_code(unsigned long long address);
+static void registry_add(crt_signal_state* state);
+static void registry_remove(crt_signal_state* state);
+static void registry_reset(void);
+#endif
+
 void __crt_windows_signal_attach_current(void) {
   crt_signal_state* state = current_state();
 
@@ -301,7 +314,11 @@ void __crt_windows_signal_attach_current(void) {
   state->pending = 0;
   __atomic_store_n(&state->alive, 1, __ATOMIC_RELEASE);
 #if defined(CRT_SIGNAL_INJECT)
+  registry_add(state);
+  /* Everything the sender needs while a target is stopped is resolved now: GetModuleHandleA() and
+   * GetProcAddress() take the loader lock, which the stopped thread may be holding. */
   restore_context_function();
+  (void)in_operating_system_code(0);
 #endif
 }
 
@@ -314,6 +331,9 @@ unsigned long __crt_windows_signal_current_mask(void) {
 void __crt_windows_signal_detach_current(void) {
   crt_signal_state* state = current_state();
 
+#if defined(CRT_SIGNAL_INJECT)
+  registry_remove(state);
+#endif
   __atomic_store_n(&state->alive, 0, __ATOMIC_RELEASE);
 }
 
@@ -327,6 +347,10 @@ void __crt_windows_signal_attach_initial(void) {
  * exist there. */
 void __crt_windows_signal_after_fork_child(void) {
   crt_signal_state* state = current_state();
+
+#if defined(CRT_SIGNAL_INJECT)
+  registry_reset();
+#endif
 
   state->alive = 0;
   state->thread_handle = 0;
@@ -373,6 +397,7 @@ static void run_handler_now(int sig, const siginfo_t* info, void* context) {
   }
   state->mask = mask_for_handler(sig, old_mask);
   __crt_signal_dispatch_info(sig, info, context);
+  __atomic_fetch_add(&state->handler_runs, 1, __ATOMIC_SEQ_CST);
   state->mask = old_mask;
 }
 
@@ -381,12 +406,16 @@ static void run_handler_now(int sig, const siginfo_t* info, void* context) {
 static void deliver_pending_with(void* context) {
   crt_signal_state* state = current_state();
 
+  /* While this runs the thread has made up its own mind about what to deliver: an interruption sent
+   * now would deliver the same signal a second time when the thread resumes here (inject() refuses). */
+  __atomic_fetch_add(&state->delivering, 1, __ATOMIC_SEQ_CST);
   for (;;) {
     unsigned long deliverable = state->pending & ~state->mask;
     int sig;
     siginfo_t info;
 
     if (deliverable == 0) {
+      __atomic_fetch_sub(&state->delivering, 1, __ATOMIC_SEQ_CST);
       return;
     }
     for (sig = 1; sig < SIGNAL_MAX; ++sig) {
@@ -414,6 +443,8 @@ struct inject_frame {
   int sig;
   unsigned long saved_mask;
   crt_signal_state* state;
+  volatile long* acknowledged; /* stable on the sender's stack until inject_locked() returns */
+  volatile long claim; /* 0 waiting, 1 the handler took it, 2 the sender gave it up (see inject()) */
 };
 
 #if defined(__x86_64__)
@@ -515,20 +546,38 @@ static void ucontext_to_context(const crt_signal_ucontext* uc, struct crt_win_co
 
 #endif
 
-/* Runs on the interrupted thread, on the frame the sender built, called by the entry stub below.
- * Never returns: it restores the (possibly rewritten) context. */
-void __crt_windows_signal_run(struct inject_frame* frame) {
+/* Runs the handler of an injected signal and leaves the (possibly rewritten) interrupted context in
+ * frame->saved. The sender already put the handler's mask in place (so no second signal could slip in
+ * between the interruption and this point); the handler runs under it and the mask goes back afterwards. */
+static void run_injected_handler(struct inject_frame* frame) {
   crt_signal_state* state = frame->state;
-  restore_context_fn restore = restore_context_function();
+  long unclaimed = 0;
 
-  /* The sender already put the handler's mask in place (so no second signal could slip in between
-   * the interruption and this point); the handler runs under it and the mask goes back afterwards. */
+  /* A sender that waited too long for this to start took the interruption back: do nothing, the
+   * interrupted context is simply resumed. */
+  if (!__atomic_compare_exchange_n(&frame->claim, &unclaimed, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+    return;
+  }
+  __atomic_store_n(frame->acknowledged, 1, __ATOMIC_SEQ_CST);
+
+  /* Keep senders from nesting another injected handler after the mask is restored but before this
+   * handler has finished converting and restoring the interrupted context. A signal arriving in that
+   * interval stays pending and is consumed by deliver_pending_with() below. */
+  __atomic_fetch_add(&state->delivering, 1, __ATOMIC_SEQ_CST);
   __crt_signal_dispatch_info(frame->sig, &frame->info, &frame->uc);
+  __atomic_fetch_add(&state->handler_runs, 1, __ATOMIC_SEQ_CST);
   state->mask = frame->saved_mask;
   /* A signal that arrived (and was held back by the mask) while the handler ran sees the same
    * interrupted context, which the handler may rewrite too. */
   deliver_pending_with(&frame->uc);
   ucontext_to_context(&frame->uc, &frame->saved);
+  __atomic_fetch_sub(&state->delivering, 1, __ATOMIC_SEQ_CST);
+}
+
+void __crt_windows_signal_run(struct inject_frame* frame) {
+  restore_context_fn restore = restore_context_function();
+
+  run_injected_handler(frame);
   if (restore != 0) {
     restore(&frame->saved, 0);
   }
@@ -606,14 +655,60 @@ static int writable_range(const void* low, size_t length) {
   return 1;
 }
 
+static unsigned long long clock_microseconds(void);
+
+/* A thread that was inside a hardware exception when it was redirected can carry on with the context it
+ * had already been given and never run the stub: the signal would be lost, with the handler's mask left
+ * in place (and a thread-suspend request waiting for ever for its answer). The context the system reports
+ * for such a thread already shows the redirection, so the only evidence is that the handler does not
+ * start. After the thread is let go, wait for an acknowledgement stored on the sender's stack (a thread
+ * that was redirected but must wait for a CPU takes up to a few scheduler quanta). The claim inside the
+ * target-stack frame cannot be the acknowledgement: once the handler restores the original stack pointer,
+ * the target may reuse and overwrite that memory before the sender observes it. If no acknowledgement
+ * arrives within a quarter of a second, cancel the frame (the handler, should it run after all, sees that and
+ * only resumes the interrupted context) and take the interruption back: the mask and pending bit return to
+ * what they were. Returns 1 when the handler has started, 0 when the interruption was taken back. */
+static int interruption_took_effect(crt_signal_state* target, struct inject_frame* frame,
+                                    volatile long* acknowledged, int sig, unsigned long old_mask) {
+  unsigned long long spin_until = clock_microseconds() + 2000;
+  unsigned long long deadline = clock_microseconds() + 250000; /* a redirected thread may wait for a CPU */
+  long unclaimed = 0;
+  unsigned long handler_mask = mask_for_handler(sig, old_mask);
+
+  while (__atomic_load_n(acknowledged, __ATOMIC_SEQ_CST) == 0) {
+    if (clock_microseconds() >= deadline) {
+      if (__atomic_compare_exchange_n(&frame->claim, &unclaimed, 2, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+        unsigned long expected = handler_mask;
+
+        __atomic_compare_exchange_n(&target->mask, &expected, old_mask, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+        __atomic_fetch_or(&target->pending, bit_of(sig), __ATOMIC_SEQ_CST);
+        return 0;
+      }
+      /* The handler claimed it but may have been preempted before its next instruction stores the
+       * acknowledgement. This stack slot must remain alive until that store really happened. */
+      while (__atomic_load_n(acknowledged, __ATOMIC_SEQ_CST) == 0) {
+        SwitchToThread();
+      }
+      break;
+    }
+    if (clock_microseconds() < spin_until) {
+      SwitchToThread();
+    } else {
+      Sleep(1);
+    }
+  }
+  return 1;
+}
+
 /* Interrupts `target` (not the caller) with `sig`. Returns 1 when the handler was set up on the thread,
  * 0 when it could not be done safely now (the signal is left pending), -1 when the thread is gone. */
-static int inject(crt_signal_state* target, int sig) {
+static int inject_locked(crt_signal_state* target, int sig, unsigned long long* where) {
   struct crt_win_context context;
   struct inject_frame* frame;
   unsigned long long frame_address;
   unsigned long old_mask;
   HANDLE handle = target->thread_handle;
+  volatile long acknowledged = 0;
   int result = 0;
 
   if (handle == 0 || restore_context_function() == 0) {
@@ -628,7 +723,20 @@ static int inject(crt_signal_state* target, int sig) {
     ResumeThread(handle);
     return -1;
   }
-  if (in_operating_system_code(CTX_PC(&context)) || (target->mask & bit_of(sig)) != 0) {
+  if (in_operating_system_code(CTX_PC(&context))) {
+    *where = CTX_PC(&context) ^ (CTX_SP(&context) * 31ULL);
+    ResumeThread(handle);
+    return 2; /* not now: the caller may try again a moment later */
+  }
+  if (__atomic_load_n(&target->delivering, __ATOMIC_SEQ_CST) != 0) {
+    *where = 0;
+    ResumeThread(handle);
+    return 2; /* it is delivering for itself: look again in a moment (and the pending bit may be gone) */
+  }
+  if ((target->mask & bit_of(sig)) != 0 || (__atomic_load_n(&target->pending, __ATOMIC_SEQ_CST) & bit_of(sig)) == 0) {
+    /* Blocked, or already taken by the thread itself (sigsuspend() or a wait consumed it between the
+     * sender's mark and now): the target is stopped, so this is final, and a second delivery would run
+     * the handler twice for one signal. */
     ResumeThread(handle);
     return 0;
   }
@@ -645,6 +753,8 @@ static int inject(crt_signal_state* target, int sig) {
   frame->sig = sig;
   frame->saved_mask = old_mask;
   frame->state = target;
+  frame->acknowledged = &acknowledged;
+  frame->claim = 0;
   context_to_ucontext(&context, &frame->uc, old_mask);
   /* The handler's mask goes in now, while the thread cannot run: nothing can be delivered to it
    * between the interruption and the handler's first instruction. */
@@ -669,15 +779,193 @@ static int inject(crt_signal_state* target, int sig) {
     __atomic_fetch_or(&target->pending, bit_of(sig), __ATOMIC_SEQ_CST);
   }
   ResumeThread(handle);
+  if (result == 1 && !interruption_took_effect(target, frame, &acknowledged, sig, old_mask)) {
+    return 2; /* the thread went on in its own code: nothing was delivered, the caller may try again */
+  }
+  return result;
+}
+
+/* One interruption of a thread at a time, from the first stop to the handler having started: a second
+ * sender (the pump and the caller of pthread_kill race each other) would capture the mask the first one had
+ * just put in place and the handler would give the thread back that mask for good. */
+static int inject(crt_signal_state* target, int sig, unsigned long long* where) {
+  int result;
+
+  if (__atomic_exchange_n(&target->injecting, 1, __ATOMIC_SEQ_CST) != 0) {
+    *where = 0;
+    return 2; /* someone else is at it: look again in a moment */
+  }
+  result = inject_locked(target, sig, where);
+  __atomic_store_n(&target->injecting, 0, __ATOMIC_SEQ_CST);
   return result;
 }
 
 #else
 /* No thread injection on this architecture: the signal stays pending (see the note at the top). */
-static int inject(crt_signal_state* target, int sig) {
+static int inject(crt_signal_state* target, int sig, unsigned long long* where) {
   (void)target;
   (void)sig;
+  *where = 0;
   return 0;
+}
+#endif
+
+#if defined(CRT_SIGNAL_INJECT)
+/* ---- the signal pump ----
+ *
+ * The kernel delivers a signal to a thread the moment it is back in user mode, however long that takes.
+ * Here delivery is an interruption done by another thread, and a thread that is almost always inside an
+ * operating-system leaf (a spin loop through TlsGetValue behind errno, say) can be missed by a bounded
+ * number of tries; the signal would then stay pending until the thread happens to wait, which a
+ * thread-suspend request (JavaScriptCore's) never lets it do. So a sender that gives up hands the signal
+ * to this thread, which keeps trying every millisecond for as long as a deliverable signal is pending. */
+#define REGISTRY_SLOTS 4096
+
+static crt_signal_state* registry_slots[REGISTRY_SLOTS];
+static volatile long registry_lock;
+static HANDLE pump_event;
+static volatile long pump_started;
+
+static void registry_acquire(void) {
+  while (__atomic_exchange_n(&registry_lock, 1, __ATOMIC_ACQUIRE) != 0) {
+    SwitchToThread();
+  }
+}
+
+static void registry_release(void) {
+  __atomic_store_n(&registry_lock, 0, __ATOMIC_RELEASE);
+}
+
+static void registry_add(crt_signal_state* state) {
+  int i;
+
+  registry_acquire();
+  for (i = 0; i < REGISTRY_SLOTS; ++i) {
+    if (registry_slots[i] == state) {
+      break;
+    }
+    if (registry_slots[i] == 0) {
+      registry_slots[i] = state;
+      break;
+    }
+  }
+  registry_release();
+}
+
+/* Waits for a pump pass that is looking at the state to finish: the caller frees the state next. */
+static void registry_remove(crt_signal_state* state) {
+  int i;
+
+  registry_acquire();
+  for (i = 0; i < REGISTRY_SLOTS; ++i) {
+    if (registry_slots[i] == state) {
+      registry_slots[i] = 0;
+      break;
+    }
+  }
+  registry_release();
+}
+
+static void registry_reset(void) {
+  memset(registry_slots, 0, sizeof(registry_slots));
+  registry_lock = 0;
+  pump_event = 0;
+  pump_started = 0;
+}
+
+typedef long(CRT_WINAPI* set_timer_resolution_fn)(unsigned long, unsigned char, unsigned long*);
+
+static DWORD CRT_WINAPI pump_main(void* argument) {
+  HANDLE ntdll = GetModuleHandleA("ntdll.dll");
+  set_timer_resolution_fn set_resolution =
+      ntdll != 0 ? (set_timer_resolution_fn)GetProcAddress(ntdll, "NtSetTimerResolution") : 0;
+
+  (void)argument;
+  if (set_resolution != 0) {
+    unsigned long actual = 0;
+
+    set_resolution(10000, 1, &actual); /* 1 ms: Sleep(1) below should not take 15.6 ms */
+  }
+  for (;;) {
+    int outstanding;
+    unsigned long passes = 0;
+
+    WaitForSingleObject(pump_event, 0xffffffffUL);
+    do {
+      int i;
+
+      outstanding = 0;
+      registry_acquire();
+      for (i = 0; i < REGISTRY_SLOTS; ++i) {
+        crt_signal_state* target = registry_slots[i];
+        unsigned long deliverable;
+        int sig;
+        unsigned long long where = 0;
+
+        if (target == 0 || __atomic_load_n(&target->alive, __ATOMIC_ACQUIRE) == 0) {
+          continue;
+        }
+        deliverable = __atomic_load_n(&target->pending, __ATOMIC_SEQ_CST) & ~target->mask;
+        if (deliverable == 0) {
+          continue;
+        }
+        if (__atomic_load_n(&target->waiting, __ATOMIC_SEQ_CST) != 0) {
+          if (target->wake_event != 0) {
+            SetEvent(target->wake_event); /* sigsuspend() delivers it itself */
+          }
+          continue;
+        }
+        if (__atomic_load_n(&target->in_wait, __ATOMIC_SEQ_CST) != 0) {
+          void* address = target->wait_address;
+
+          if (address != 0) {
+            WakeByAddressAll(address); /* the wait delivers it itself */
+          }
+          if (target->wake_event != 0) {
+            SetEvent(target->wake_event);
+          }
+          outstanding = 1;
+          continue;
+        }
+        for (sig = 1; sig < SIGNAL_MAX; ++sig) {
+          if ((deliverable & bit_of(sig)) != 0) {
+            break;
+          }
+        }
+        if (inject(target, sig, &where) == 2) {
+          outstanding = 1;
+        } else if (((__atomic_load_n(&target->pending, __ATOMIC_SEQ_CST) & ~target->mask) != 0)) {
+          outstanding = 1; /* more of them, or one that could not be set up just now */
+        }
+      }
+      registry_release();
+      if (outstanding) {
+        /* A thread inside a short system call is back in user code within microseconds: look again at
+         * once for a while, then settle to a millisecond. */
+        if (++passes < 5000) {
+          SwitchToThread();
+        } else {
+          Sleep(1);
+        }
+      }
+    } while (outstanding);
+  }
+  return 0;
+}
+
+/* Hands the signals nobody could deliver yet to the pump (started on first use). */
+static void wake_pump(void) {
+  if (__atomic_exchange_n(&pump_started, 1, __ATOMIC_SEQ_CST) == 0) {
+    pump_event = CreateEventA(0, 0, 0, 0);
+    if (pump_event == 0 || CreateThread(0, 0x20000, pump_main, 0, 0, 0) == 0) {
+      __atomic_store_n(&pump_started, 0, __ATOMIC_SEQ_CST);
+      return;
+    }
+  }
+  while (__atomic_load_n(&pump_event, __ATOMIC_ACQUIRE) == 0) {
+    SwitchToThread(); /* another thread is still creating it */
+  }
+  SetEvent(pump_event);
 }
 #endif
 
@@ -900,10 +1188,15 @@ int __crt_signal_backend_sigprocmask(int how, const sigset_t* set, sigset_t* old
 int __crt_signal_backend_sigsuspend(const sigset_t* mask) {
   crt_signal_state* state = current_state();
   unsigned long old = state->mask;
+  unsigned long runs = state->handler_runs;
 
   __crt_windows_signal_attach_current();
   state->mask = (unsigned long)*mask & ~(bit_of(SIGKILL) | bit_of(SIGSTOP));
   for (;;) {
+    /* A handler that an interruption ran on this thread while it waited ends the wait too. */
+    if (state->handler_runs != runs) {
+      break;
+    }
     if ((state->pending & ~state->mask) != 0) {
       deliver_pending_now();
       break;
@@ -929,6 +1222,9 @@ int __crt_signal_backend_sigsuspend(const sigset_t* mask) {
 /* pthread_kill(): send `sig` to the thread whose state is `target`. Returns 0 or an errno value. */
 int __crt_windows_signal_send(crt_signal_state* target, int sig) {
   int result;
+  int attempt;
+  int stuck = 0;
+  unsigned long long where = 0;
 
   if (target == 0 || __atomic_load_n(&target->alive, __ATOMIC_ACQUIRE) == 0) {
     return ESRCH;
@@ -963,7 +1259,45 @@ int __crt_windows_signal_send(crt_signal_state* target, int sig) {
     deliver_pending_now();
     return 0;
   }
-  result = inject(target, sig);
+  result = inject(target, sig, &where);
+  /* A thread that spends its time in a leaf of the operating system (TlsGetValue behind errno and
+   * pthread_self, say) is caught there most of the time: try again, a few hundred times at most, the
+   * way a kernel retries until the thread is back in user code. Past that the signal stays pending. */
+  for (attempt = 0; result == 2 && attempt < 4000; ++attempt) {
+    unsigned long long previous = where;
+
+    SwitchToThread();
+    if ((__atomic_load_n(&target->pending, __ATOMIC_SEQ_CST) & bit_of(sig)) == 0 ||
+        (target->mask & bit_of(sig)) != 0 || __atomic_load_n(&target->alive, __ATOMIC_ACQUIRE) == 0) {
+      return 0; /* delivered meanwhile, blocked, or the thread ended */
+    }
+    if (__atomic_load_n(&target->in_wait, __ATOMIC_SEQ_CST) != 0) {
+      void* address = target->wait_address;
+
+      if (address != 0) {
+        WakeByAddressAll(address);
+      }
+      return 0;
+    }
+    if (__atomic_load_n(&target->waiting, __ATOMIC_SEQ_CST) != 0) {
+      return 0;
+    }
+    result = inject(target, sig, &where);
+    /* The very same pc and sp again and again is a thread inside a system call (a write, a wait), not one
+     * passing through a leaf: stop holding the caller up, the pump delivers the signal when the thread
+     * is back in user code. */
+    if (result == 2 && where == previous && ++stuck >= 24) {
+      break;
+    }
+    if (where != previous) {
+      stuck = 0;
+    }
+  }
+#if defined(CRT_SIGNAL_INJECT)
+  if (result == 2) {
+    wake_pump(); /* still not deliverable: the pump keeps trying */
+  }
+#endif
   return result < 0 ? ESRCH : 0;
 }
 
@@ -985,6 +1319,12 @@ static int signal_for_exception(const struct crt_exception_record* record, int* 
     case STATUS_ILLEGAL_INSTRUCTION_CODE:
       *code = 1; /* ILL_ILLOPC */
       return SIGILL;
+    case STATUS_PRIVILEGED_INSTRUCTION_CODE:
+      /* `hlt` and the other privileged instructions: a general-protection fault, which Linux delivers as
+       * SIGSEGV with si_code SI_KERNEL and no address. JavaScriptCore patches `hlt` into compiled code
+       * as its VM-trap instruction and expects exactly that (Signal::AccessFault). */
+      *code = 128;
+      return SIGSEGV;
     case STATUS_INT_DIVIDE_BY_ZERO_CODE:
       *code = 1; /* FPE_INTDIV */
       return SIGFPE;
@@ -996,9 +1336,33 @@ static int signal_for_exception(const struct crt_exception_record* record, int* 
   }
 }
 
+#if defined(CRT_SIGNAL_INJECT)
+#if defined(__x86_64__)
+#define CTX_FIRST_ARGUMENT(c) ((c)->rcx)
+#else
+#define CTX_FIRST_ARGUMENT(c) ((c)->x[0])
+#endif
+#endif
+
 static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers) {
   int code = 0;
-  int sig = signal_for_exception(pointers->exception_record, &code);
+  int sig;
+
+#if defined(CRT_SIGNAL_INJECT)
+  if (pointers->exception_record->exception_address == (void*)__crt_windows_signal_entry) {
+    /* A hardware fault the target had already taken when the sender redirected it: the kernel was still
+     * building the exception, so it was dispatched with the stub's address as the fault site (and the
+     * original fault's record), which no handler could recognise. Nothing was executed at the stub. Run
+     * the injected handler here, as the stub would have, and resume the interrupted context: the thread
+     * re-executes the faulting instruction and takes the fault again, this time as itself. */
+    struct inject_frame* frame = (struct inject_frame*)(uintptr_t)CTX_FIRST_ARGUMENT(pointers->context_record);
+
+    run_injected_handler(frame);
+    *pointers->context_record = frame->saved;
+    return EXCEPTION_CONTINUE_EXECUTION_VALUE;
+  }
+#endif
+  sig = signal_for_exception(pointers->exception_record, &code);
   crt_signal_state* state;
   crt_signal_ucontext uc;
   siginfo_t info;
@@ -1010,7 +1374,9 @@ static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers
   state = current_state();
   old_mask = state->mask;
   fill_siginfo(&info, sig, code);
-  if (sig == SIGSEGV && pointers->exception_record->number_parameters >= 2) {
+  if (pointers->exception_record->exception_code == STATUS_PRIVILEGED_INSTRUCTION_CODE) {
+    info.si_addr = 0;
+  } else if (sig == SIGSEGV && pointers->exception_record->number_parameters >= 2) {
     info.si_addr = (void*)(uintptr_t)pointers->exception_record->exception_information[1];
   } else {
     info.si_addr = pointers->exception_record->exception_address;
@@ -1033,6 +1399,11 @@ static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers
   state->mask = mask_for_handler(sig, old_mask);
   __crt_signal_dispatch_info(sig, &info, &uc);
   state->mask = old_mask;
+  /* What arrived while the fault handler held its mask (JavaScriptCore's blocks every signal there) is
+   * delivered now, as the kernel does on the way out of a signal handler: a thread-suspend request
+   * sent to a thread that was inside the handler would otherwise wait for ever. It sees the context
+   * the fault handler left (the thread resumes there). */
+  deliver_pending_with(&uc);
   ucontext_to_context(&uc, pointers->context_record);
   return EXCEPTION_CONTINUE_EXECUTION_VALUE;
 }

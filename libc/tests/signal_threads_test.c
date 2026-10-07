@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -183,7 +184,7 @@ static void* hot_thread(void* argument) {
     errno = (int)(spins & 7);
     spins += (unsigned long)(errno + (pthread_self() != 0) + (pthread_getspecific(0) == 0));
   }
-  return (void*)spins;
+  return (void*)(uintptr_t)spins;
 }
 
 static int wait_for(volatile int* flag, double seconds) {

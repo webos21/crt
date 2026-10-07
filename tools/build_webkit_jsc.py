@@ -390,7 +390,8 @@ def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str, mode:
         compile_env["CRT_TARGET_OS"] = "linux"
     # The watchdog test interrupts compiled code with a signal and reads the forwarded machine
     # context, so it belongs to the JIT step only.
-    for name in (("jsc_context_cycle", "jsc_watchdog_test") if mode == "baseline-jit" else ("jsc_context_cycle",)):
+    for name in (("jsc_context_cycle", "jsc_watchdog_test", "jsc_wasm_signal_probe") if mode == "baseline-jit"
+                 else ("jsc_context_cycle",)):
         output = build / "bin" / (name + (".exe" if target_os == "windows" else ""))
         command = [sdk / "tools" / ("crt-c++.cmd" if target_os == "windows" else "crt-c++"),
                    f"-I{build / 'JavaScriptCore' / 'Headers'}",
@@ -556,13 +557,19 @@ def run_ftl_acceptance(results: dict, build: Path, run_env: dict, programs: dict
         "ok": watchdog["returncode"] == 0 and "jsc_watchdog_test: ok" in watchdog["stdout"]}
 
 
-def count_handled_signals(command, env) -> "int | None":
-    """Signals the process handled, from `strace -f -c` (rt_sigreturn calls). None where strace
-    is not available (it is a Linux-only proof)."""
+def count_handled_signals(command, env, probe: "Path | None" = None) -> "int | None":
+    """Signals the process handled, from `strace -f -c` (rt_sigreturn calls) on Linux, else from the
+    CRT's own delivery counter, read around the script by `jsc_wasm_signal_probe` (one increment per
+    handler invocation on every host). None only when neither is available."""
     import shutil
     strace = shutil.which("strace")
     if strace is None or sys.platform != "linux":
-        return None
+        if probe is None:
+            return None
+        script = [str(part) for part in command if str(part).endswith(".js")]
+        completed = run([probe] + script, env=env, check=False, capture=True)
+        match = re.search(r"jsc_wasm_signal_probe: handled=(\d+) ok=1", completed.stdout or "")
+        return int(match.group(1)) if completed.returncode == 0 and match else None
     completed = run([strace, "-f", "-c", "-e", "trace=rt_sigreturn"] + [str(part) for part in command],
                     env=env, check=False, capture=True)
     if completed.returncode != 0:
@@ -598,8 +605,9 @@ def run_wasm_acceptance(results: dict, build: Path, run_env: dict, programs: dic
     # (the signal count is the proof that this path, not a software check, produced the traps).
     # The same probe with fast memory off must handle no signal at all.
     probe = [jsc, TESTS / "jsc_wasm_oob_probe.js"]
-    fast = count_handled_signals(probe, {**run_env, **WASM_ON_OPTIONS})
-    slow = count_handled_signals(probe, {**run_env, **WASM_BOUNDS_CHECK_OPTIONS})
+    counter = programs.get("jsc_wasm_signal_probe")
+    fast = count_handled_signals(probe, {**run_env, **WASM_ON_OPTIONS}, counter)
+    slow = count_handled_signals(probe, {**run_env, **WASM_BOUNDS_CHECK_OPTIONS}, counter)
     results["step5_wasm_fast_memory_traps"] = {
         "ok": True, "signals_handled_fast_memory": fast, "signals_handled_bounds_checks": slow,
         "fast_memory_signal_proven": fast is None or fast >= 50,

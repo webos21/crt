@@ -167,32 +167,43 @@ The Windows signal VM-trap gate for JavaScriptCore (`JSC_usePollingTraps=false`)
 so `libc/src/arch/windows/common/signal_backend.c` builds it, same-process and thread-directed only:
 
 - **State.** `crt_signal_state` in each thread's `crt_thread_context`: mask, pending set, wake event, a duplicated thread
-  handle, `alive`/`waiting`/`in_wait` flags. The initial thread is attached in `__crt_env_set_initial`, others in
+  handle, `alive`/`waiting`/`in_wait` flags plus `injecting` (one sender transaction at a time), `delivering` and a handler
+  generation. The initial thread is attached in `__crt_env_set_initial`, others in
   `pthread_start`; a new thread starts with its creator's mask; after `fork()` the child re-attaches.
 - **Asynchronous delivery** (`pthread_kill` to another CRT thread): `SuspendThread` -> `GetThreadContext` -> frame
   `{CONTEXT, ucontext_t (Linux x86_64 layout), siginfo_t}` on the target's stack below `rsp - 128` -> the handler's mask
   (old mask | `sa_mask` | the signal unless `SA_NODEFER`) is stored while the target cannot run -> `SetThreadContext` to
   `__crt_windows_signal_entry` -> `ResumeThread`. After the handler the stub copies the (possibly modified) `ucontext_t`
-  back and restores it with `RtlRestoreContext` (resolved from ntdll at attach time). Signals that arrived while the mask
-  held them are delivered with the same interrupted context before the restore.
+  back and restores it with `RtlRestoreContext` (resolved from ntdll at attach time). The sender waits for an acknowledgement
+  stored on its own stack, not the claim stored in the target-stack frame: after restoration the target can immediately reuse
+  that frame memory. This makes cancellation/retry exact-once. Signals that arrived while the mask held them are delivered
+  with the same interrupted context before the restore, and concurrent senders are serialized per target so one cannot save
+  and later restore another handler's temporary mask.
 - **Not interrupted:** a thread whose RIP is in ntdll/kernelbase/kernel32/win32u, whose mask blocks the signal, or whose
   stack cannot be written; the signal stays pending. The CRT's own blocking waits are therefore interruptible instead:
   `__crt_wait32` (mutex/cond/sem/once), `pthread_join` and `nanosleep` bracket the blocking call with
   `__crt_windows_signal_wait_begin/end` (`private/crt_signal_wait.h`); the sender wakes the thread
   (`WakeByAddressAll`/its event) and the handler runs on the waiting thread with a `getcontext` snapshot. `sigsuspend`
   waits on the wake event, atomically with its temporary mask, and returns `EINTR` after the handler. `poll`/`select`/file
-  I/O waits are not interruptible yet (a signal sent during them is delivered when they return).
+  I/O waits are not interruptible yet (a signal sent during them is delivered when they return). A small signal-pump thread
+  retains responsibility when bounded direct retries repeatedly catch the target inside Windows system code, and retries
+  once the target is back in CRT/user code.
 - **Hardware exceptions** reach handlers through a vectored exception handler installed when a handler is set for
   SIGTRAP/SIGSEGV/SIGILL/SIGFPE: `int3` (RIP + 1, as Linux reports it), access violation, illegal instruction, divide by
-  zero. A handler may rewrite `REG_RIP`; unhandled exceptions keep the existing controlled-exit path.
+  zero. The privileged `hlt` instruction JSC uses for VM traps maps to `SIGSEGV`/`SI_KERNEL` with a null `si_addr`, matching
+  Linux; pending signals are delivered after the fault handler restores its mask. A handler may rewrite `REG_RIP`; unhandled
+  exceptions keep the existing controlled-exit path.
 - **Windows-only context state** lives in slots a signal frame does not use: rdi/rsi in `gregs`, xmm6-xmm15 in
   `__fpregs_mem._xmm[6..15]`, the TEB stack bounds in `__reserved1[0..2]` (offsets in `private/crt_ucontext_offsets.h`,
   checked against `offsetof()` in `libc/src/ucontext.c`).
 - **Out of scope:** `kill(pid)`, process groups, SIGCHLD from other processes (unchanged), threads not made by
   `pthread_create`, async-signal-safety beyond what the handler itself guarantees.
 
-Evidence: `signal_vmtrap_test` (100/100 runs), `signal_threads_test`, and JavaScriptCore with polling traps off
-(`jsc_watchdog_test` 100/100); see `HISTORY.md` and `docs/crtweb_acceptance.md`.
+Evidence through 2026-10-07: `signal_vmtrap_test`, `signal_threads_test` and `memcpy_atomicity_test` each passed 20
+consecutive runs after the exact-once fix; the full Windows CTest passed 157/157. JavaScriptCore runs with polling traps
+off, FTL passes, and the cross-platform Wasm probe observes 50 handled signals with fast memory versus zero with software
+bounds checks. Windows Wasm acceptance is nevertheless still open because the final SDK reproduced an intermittent
+BBQ-only JIT-address SIGSEGV; see `HISTORY.md` and `docs/crtweb_acceptance.md`.
 
 ### Windows (SIGCHLD)
 

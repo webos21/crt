@@ -229,7 +229,8 @@ static void test_interrupt_worker(void) {
   CHECK(context_all, "the handler saw siginfo_t, REG_RIP at the loop and a REG_RSP on the thread's stack");
   /* Standard signals are not queued: one sent while another is still pending merges into it, so the
    * handler can run fewer times than signals were sent -- but at least once per round (each round's
-   * loop was left through the handler) and never more often than a signal was sent. */
+   * loop was left through the handler) and never more often than a signal was sent. A handler may run
+   * in a later round than its send, but both counters cover the whole test. */
   CHECK(s->handled >= 40 && s->handled <= sent,
         "the handler ran at least once per round and never more often than signals were sent");
   stop_spinner(s);
@@ -438,6 +439,10 @@ static void test_concurrent_delivery(void) {
     for (i = 0; i < threads; ++i) spinners[i].escaped = 0;
   }
   CHECK(ok, "8 threads interrupted concurrently, 30 rounds, no hang");
+  if (total_handled < (long)threads * rounds || total_handled > total_sent) {
+    fprintf(stderr, "signal_vmtrap_test: concurrent handled=%ld sent=%ld minimum=%d\n",
+            total_handled, total_sent, threads * rounds);
+  }
   CHECK(total_handled >= (long)threads * rounds && total_handled <= total_sent,
         "each thread's handler ran at least once per round and never more often than signals were sent");
   for (i = 0; i < threads; ++i) stop_spinner(&spinners[i]);
@@ -544,6 +549,72 @@ static void test_blocked_waits(void) {
   sem_destroy(&block_sem);
 }
 
+/* `hlt` -- the instruction JavaScriptCore patches into compiled code as its VM trap -- is a general-protection
+ * fault: Linux delivers SIGSEGV (si_code SI_KERNEL, no address), Windows reports a privileged-instruction
+ * exception, which the CRT must turn into the same SIGSEGV. A signal sent to a thread while it is inside
+ * that handler (JavaScriptCore blocks every signal there) must be delivered when the handler returns,
+ * not be lost: its thread-suspend request would wait for ever. */
+static volatile int hlt_seen;
+static volatile int hlt_code;
+static volatile void* hlt_addr;
+static volatile int hlt_in_handler;
+static volatile int hlt_usr1_sent;
+static volatile int hlt_usr1_ran;
+static pthread_t hlt_target;
+
+static void on_hlt_segv(int sig, siginfo_t* info, void* context) {
+  ucontext_t* uc = (ucontext_t*)context;
+  double deadline = now() + 10.0;
+
+  (void)sig;
+  hlt_code = info->si_code;
+  hlt_addr = info->si_addr;
+  hlt_seen = 1;
+  uc->uc_mcontext.gregs[REG_RIP] += 1; /* step over the one-byte hlt */
+  hlt_in_handler = 1;
+  while (!hlt_usr1_sent && now() < deadline) sched_yield();
+  CHECK(!hlt_usr1_ran, "SIGUSR1 stayed blocked while the SIGSEGV handler ran");
+}
+
+static void on_hlt_usr1(int sig) {
+  (void)sig;
+  hlt_usr1_ran = 1;
+}
+
+static void* hlt_sender(void* argument) {
+  (void)argument;
+  wait_for(&hlt_in_handler, 1, 10.0);
+  pthread_kill(hlt_target, SIGUSR1);
+  hlt_usr1_sent = 1;
+  return 0;
+}
+
+static void test_hlt_raises_sigsegv(void) {
+  struct sigaction action;
+  pthread_t sender;
+
+  memset(&action, 0, sizeof(action));
+  action.sa_sigaction = on_hlt_segv;
+  action.sa_flags = SA_SIGINFO;
+  sigfillset(&action.sa_mask);
+  CHECK(sigaction(SIGSEGV, &action, 0) == 0, "sigaction(SIGSEGV)");
+  memset(&action, 0, sizeof(action));
+  action.sa_handler = on_hlt_usr1;
+  sigemptyset(&action.sa_mask);
+  CHECK(sigaction(SIGUSR1, &action, 0) == 0, "sigaction(SIGUSR1)");
+
+  hlt_target = pthread_self();
+  pthread_create(&sender, 0, hlt_sender, 0);
+  __asm__ volatile("hlt" ::: "memory");
+  pthread_join(sender, 0);
+  CHECK(hlt_seen == 1, "hlt ran the SIGSEGV handler and execution continued after it");
+  CHECK(hlt_code == 0x80, "the hlt fault carries si_code SI_KERNEL");
+  CHECK(hlt_addr == 0, "the hlt fault carries no address");
+  CHECK(hlt_usr1_ran == 1, "a SIGUSR1 sent during the SIGSEGV handler was delivered when it returned");
+  signal(SIGSEGV, SIG_DFL);
+  signal(SIGUSR1, SIG_DFL);
+}
+
 static void progress(const char* step) {
   if (getenv("SIGNAL_VMTRAP_VERBOSE") != 0) {
     fprintf(stderr, "signal_vmtrap_test: %s\n", step);
@@ -554,6 +625,8 @@ int main(void) {
   pthread_key_create(&self_key, 0);
   progress("int3 raises SIGTRAP");
   test_int3_raises_sigtrap();
+  progress("hlt raises SIGSEGV, pending signals follow the fault handler");
+  test_hlt_raises_sigsegv();
   progress("a worker's loop is interrupted");
   test_interrupt_worker();
   progress("the initial thread's loop is interrupted");

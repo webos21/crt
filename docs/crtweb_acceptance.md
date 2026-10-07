@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on all four hosts (Linux/x86_64, Linux/aarch64, macOS/arm64, Windows/x64), and FTL/WebAssembly/profiler/W^X (1D-B..D) remain. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on all four hosts; 1D-B (FTL) is green on Linux/x86_64 and Windows/x64, while 1D-C (WebAssembly) is green on Linux/x86_64 and remains open on Windows/x64. macOS/arm64 and Linux/aarch64 1D-B/C replays plus 1D-D (profiler) remain. W^X is separate hardening. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -238,8 +238,8 @@ predecessor of `06-web`; 1B was run from `02-cxx`); gperf removed from the JSCOn
 *1C is complete when:* the Baseline-JIT acceptance, the `JSC_useJIT=false` rerun of 1B and the
 watchdog test pass on Linux/x86_64; the compile proof is present; resident memory stays
 bounded; and the host-ABI audit is clean. That is the *reference acceptance* (done). The *host
-replays* are recorded separately and are not part of that definition: Linux/aarch64 and
-macOS/arm64 done, Windows/x64 open. "1C done" therefore does not mean three-host closure.
+replays* are recorded separately and are not part of that definition: Linux/aarch64,
+macOS/arm64 and Windows/x64 are all done.
 
 *Deliberately unchanged.* The default thread stack stays 1 MiB (1B already showed correct
 stack-overflow detection and 1/4/8-thread VMs; JSC's own defaults are 5 MB per-thread usage,
@@ -254,14 +254,14 @@ one on and isolates it with JSC run-time options):
 | Step | Turns on | New assumption under test |
 |---|---|---|
 | 1D-A | DFG + concurrent compiler threads | compiler threads, DFG code, cross-thread VM/code lifecycle |
-| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs (Linux/x86_64 done) |
-| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (Linux/x86_64 done) |
+| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs (Linux/x86_64, Windows/x64 done) |
+| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (Linux/x86_64 done; Windows/x64 open) |
 | 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads |
 
 W^X is hardening, not a tier. Order: Linux/x86_64 first, so a failure is a JSC-tier problem and not a signal
 emulation or persona problem, then Linux/aarch64, macOS/arm64 and Windows/x64. **1D-A gates Tranche 2 at minimum.** The pinned WebKit
 enables FTL, WebAssembly and the sampling profiler by default on x86_64/arm64, so 1D-B..1D-D close JSC's default
-capabilities: finish them before the unchanged WPE baseline where practical (1D-B and 1D-C are done on Linux/x86_64), but none
+capabilities: finish them before the unchanged WPE baseline where practical (1D-B and 1D-C are done on Linux/x86_64; 1D-B is also done on Windows/x64), but none
 is a `PlatformCRT` architecture blocker.
 
 **1D-A result, Linux/x86_64 (2026-10-05).** `tools/build_webkit_jsc.py --mode baseline-jit` gained "step 3", run on
@@ -371,6 +371,46 @@ roughly 1 run in 10 (hang) and 1 in 100 (crash) under 4-way CPU contention befor
    alternates two patterns: over a million torn 4-byte values before, none after, plus a correctness sweep of sizes 0-40 and of
    forward/backward overlap. This also applies to the macOS/arm64 and Windows replays, which patch 4-byte instruction words
    the same way and passed without it (by timing, not by design); they need this commit and a rerun of their JIT steps.
+
+**1D-B accepted and 1D-C progressed but still open, Windows/x64 (2026-10-07).** The replay
+used the installed and verified `out/windows-host-ninja-debug/dist/05-ui` SDK and the existing pinned JSCOnly build, with
+polling traps off. Step 4 passed the FTL script at reduced/default thresholds and with serial compilation (108-252 FTL
+reports), its FTL-off negative control, the earlier scripts, 0/1/4/8-thread context cycles and the watchdog. One near-final
+full run's Step 5 passed Wasm interpreter-only, BBQ-only (22 BBQ, zero OMG), BBQ+OMG (22 BBQ, 6 OMG), software-bounds mode, earlier-tier scripts,
+0/1/4/8-thread cycles and termination of main- and worker-thread Wasm loops. The host-ABI audit is clean.
+
+Linux proves the fast-memory path with `strace`, which Windows does not have. The new
+`libcrtweb/tests/jsc/jsc_wasm_signal_probe.cpp` instead evaluates the same OOB script through JavaScriptCore's public C API
+and reads CRT's process-wide signal-delivery generation before and after it. The result is the same proof on Windows:
+**50** fault-handler invocations with Wasm fast memory and **0** with software bounds checks.
+
+The first Windows replay exposed races in the emulated thread-directed signal backend, not WebAssembly code:
+
+1. JSC's x86_64 VM-trap instruction is `hlt`. Windows reports it as `STATUS_PRIVILEGED_INSTRUCTION`; CRT now maps that to
+   Linux-compatible `SIGSEGV`/`SI_KERNEL` with null `si_addr`, and delivers a thread signal that became pending under the
+   fault handler's full mask before returning to the faulting context.
+2. A bounded injection attempt may repeatedly catch a target in ntdll/kernelbase. A per-process signal pump retains the
+   pending work and retries when the target returns to user code; per-target `injecting` and `delivering` state prevents a
+   caller, pump and target-side delivery from duplicating one signal or leaking a handler mask.
+3. The decisive exact-once bug was the sender polling `claim` in a frame below the target's old stack pointer. As soon as
+   the handler restored that pointer, ordinary target execution could overwrite the frame before the sender observed the
+   claim; the sender then resurrected the pending bit and delivered the same signal twice. The handler now acknowledges on
+   the sender's still-live stack while the target-frame claim remains only the cancellation arbitration. Strict handler
+   counts made the old bug fail 19-20 of 20 runs; after the fix `signal_vmtrap_test`, `signal_threads_test` and
+   `memcpy_atomicity_test` each pass 20 consecutive runs and full Windows CTest passes 157/157.
+
+One near-final aggregate harness run made every 1D-B/1D-C item pass, but one earlier 1D-A 4-thread context-cycle process
+exited at a JSC lock assertion (`Invalid value for lock: 0`), making only the aggregate `passed` bit false. The exact same
+DFG/4-thread process then passed 10/10 focused runs; the FTL and Wasm 4-thread processes in that aggregate run also passed.
+A second run passed every step and the aggregate/host-ABI gates cleanly (131 s acceptance). During final code review the
+sender-acknowledgement lifetime was tightened once more (if the target claims immediately before the timeout, the sender
+now waits for the acknowledgement store before its stack can disappear). On the SDK rebuilt from that exact final source,
+all 157 CTests pass and the three focused regressions pass 20 consecutive runs each, but 1D-C is **not accepted**: the
+official dump-based run hung in BBQ, and bounded no-dump repetitions produced BBQ-only 9/10 (one controlled SIGSEGV at a
+JIT address, exit 139) and BBQ+OMG 10/10. Thus large output is an amplifier, not the whole cause. FTL step 4 passed before
+the hang, so Windows 1D-B is closed; Windows 1D-C stays open with these exact reproduction results. No temporary signal
+tracing instrumentation is part of the result. macOS/arm64 and Linux/aarch64 replays can proceed independently; sampling
+profiler 1D-D, W^X, SIMD and Wasm threads remain separate work.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the
