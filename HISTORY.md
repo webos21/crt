@@ -10,6 +10,26 @@ substantive update.
 
 ## 2026-10-07
 
+### Windows/x64: BBQ-only SIGSEGV at a JIT address root-caused and fixed
+
+Reproduced with `jsc_wasm_acceptance.js` under the BBQ-only options (about 10% of runs, always in `memory-and-traps`, 0.5 s in).
+A temporary log in JSC's Wasm `trapHandler` showed it returning `NotHandled` because the ucontext it received had its pc at
+`__crt_windows_signal_entry`, not at the faulting load. A thread suspend request had redirected the thread (SetThreadContext)
+after the kernel had built the exception record (pc = JIT address) but before it captured the context, so the VEH saw a
+record with the JIT pc and a context already pointing at the stub. `exception_handler` only recognised the record carrying
+the stub address; it now also checks the context pc, runs the injected handler, restores the saved context and lets the
+faulting instruction fault again (`libc/src/arch/windows/common/signal_backend.c`). A new regression test (`test_fault_while_signalled` in `signal_vmtrap_test`: 200000
+`hlt` faults on one thread while another floods it with SIGUSR1) showed a second defect of the same class: the injected frame sat
+128 bytes below the target's stack pointer, where the kernel builds the exception CONTEXT/record of a fault in flight, so the frame
+(its claim word) could be overwritten and the sender waited for ever or the handler saw a wrong pc. The frame now sits 16 KiB
+below the stack pointer (falling back to the old margin on a shallow stack). Before: the test hung or crashed every run; after: it
+passes. After both fixes: 0 SIGSEGV in 70 BBQ-only runs (about 10% before), the signal tests pass 20 consecutive runs, full CTest
+157/157, `jsc_watchdog_test` 5/5. The test runs last in `main` because, run first, a later worker-interruption round of
+the same test intermittently never gets its handler to start with the 16 KiB placement; that order dependence is not understood
+yet and is tracked in `TODO.md`. The temporary JSC logging was removed.
+Not fixed here: JSC `Invalid value for lock: 0` aborts (about 5% of runs) and a rare `instance-lifecycle` hang under the dump options.
+
+
 - **Web Tranche 1D-B (FTL) accepted on Windows/x64 and the signal/runtime part of the still-open 1D-C (WebAssembly)
   replay hardened.** The installed/verified `05-ui` SDK's JSCOnly binary passes FTL at
   reduced/default thresholds and with serial compilation plus the FTL-off negative control. A near-final full run also

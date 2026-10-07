@@ -657,6 +657,8 @@ static int writable_range(const void* low, size_t length) {
 
 static unsigned long long clock_microseconds(void);
 
+#define INJECT_FRAME_CLEARANCE 16384ULL
+
 /* A thread that was inside a hardware exception when it was redirected can carry on with the context it
  * had already been given and never run the stub: the signal would be lost, with the handler's mask left
  * in place (and a thread-suspend request waiting for ever for its answer). The context the system reports
@@ -740,11 +742,18 @@ static int inject_locked(crt_signal_state* target, int sig, unsigned long long* 
     ResumeThread(handle);
     return 0;
   }
-  /* No red zone on Windows, but a margin below the stack pointer costs nothing. */
-  frame_address = (CTX_SP(&context) - 128 - sizeof(struct inject_frame)) & ~15ULL;
+  /* No red zone on Windows. A thread that is in the middle of taking a hardware fault is about to have the
+   * kernel build the exception's CONTEXT (with the extended state, several KiB) and record on its stack just
+   * below the stack pointer: a frame placed right under it would be overwritten (the claim word then looks
+   * taken for ever and the sender never sees the acknowledgement). Keep well clear of that area when the
+   * stack is committed that far, and fall back to a small margin on a shallow stack. */
+  frame_address = (CTX_SP(&context) - INJECT_FRAME_CLEARANCE - sizeof(struct inject_frame)) & ~15ULL;
   if (!writable_range((const void*)(uintptr_t)frame_address, sizeof(struct inject_frame) + 128)) {
-    ResumeThread(handle);
-    return 0;
+    frame_address = (CTX_SP(&context) - 128 - sizeof(struct inject_frame)) & ~15ULL;
+    if (!writable_range((const void*)(uintptr_t)frame_address, sizeof(struct inject_frame) + 128)) {
+      ResumeThread(handle);
+      return 0;
+    }
   }
   frame = (struct inject_frame*)(uintptr_t)frame_address;
   old_mask = target->mask;
@@ -1349,10 +1358,18 @@ static long CRT_WINAPI exception_handler(struct crt_exception_pointers* pointers
   int sig;
 
 #if defined(CRT_SIGNAL_INJECT)
-  if (pointers->exception_record->exception_address == (void*)__crt_windows_signal_entry) {
+#if defined(__x86_64__)
+#define CTX_PC(c) ((c)->rip)
+#else
+#define CTX_PC(c) ((c)->pc)
+#endif
+  if (pointers->exception_record->exception_address == (void*)__crt_windows_signal_entry ||
+      CTX_PC(pointers->context_record) == (unsigned long long)(uintptr_t)__crt_windows_signal_entry) {
     /* A hardware fault the target had already taken when the sender redirected it: the kernel was still
      * building the exception, so it was dispatched with the stub's address as the fault site (and the
-     * original fault's record), which no handler could recognise. Nothing was executed at the stub. Run
+     * original fault's record), or with the original fault site in the record but the redirected context
+     * (the pc at the stub, the frame in the first argument register), which no handler could recognise.
+     * Either way nothing was executed at the stub. Run
      * the injected handler here, as the stub would have, and resume the interrupted context: the thread
      * re-executes the faulting instruction and takes the fault again, this time as itself. */
     struct inject_frame* frame = (struct inject_frame*)(uintptr_t)CTX_FIRST_ARGUMENT(pointers->context_record);

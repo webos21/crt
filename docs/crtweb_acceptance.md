@@ -407,7 +407,7 @@ sender-acknowledgement lifetime was tightened once more (if the target claims im
 now waits for the acknowledgement store before its stack can disappear). On the SDK rebuilt from that exact final source,
 all 157 CTests pass and the three focused regressions pass 20 consecutive runs each, but 1D-C is **not accepted**: the
 official dump-based run hung in BBQ, and bounded no-dump repetitions produced BBQ-only 9/10 (one controlled SIGSEGV at a
-JIT address, exit 139) and BBQ+OMG 10/10. Thus large output is an amplifier, not the whole cause. FTL step 4 passed before
+JIT address, exit 139) and BBQ+OMG 10/10. Thus large output is an amplifier, not the whole cause. (Update 2026-10-07: the SIGSEGV was root-caused to a fault handler that was handed a context already redirected to the signal stub, plus a redirect frame that could be overwritten by the kernel's exception CONTEXT; both are fixed, 0 SIGSEGV in 70 BBQ-only runs. The `Invalid value for lock: 0` abort and the rare `instance-lifecycle` hang remain open; see `HISTORY.md`.) FTL step 4 passed before
 the hang, so Windows 1D-B is closed; Windows 1D-C stays open with these exact reproduction results. No temporary signal
 tracing instrumentation is part of the result. macOS/arm64 and Linux/aarch64 replays can proceed independently; sampling
 profiler 1D-D, W^X, SIMD and Wasm threads remain separate work.

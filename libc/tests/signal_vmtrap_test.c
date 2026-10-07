@@ -615,6 +615,83 @@ static void test_hlt_raises_sigsegv(void) {
   signal(SIGUSR1, SIG_DFL);
 }
 
+#if defined(__x86_64__)
+/* A fault taken while another thread is delivering a signal to the faulting thread. On Windows the sender
+ * redirects the target (SetThreadContext) at an arbitrary instruction; when that lands after the kernel built
+ * a fault's exception record but before it captured the context, the fault handler used to see the signal stub
+ * as the interrupted pc (JavaScriptCore's Wasm fault handler then refused the fault and the process died with
+ * SIGSEGV). The handler must always see the faulting instruction itself, and a pc it rewrites must take effect. */
+static void* volatile fault_site;
+static volatile int fault_handled;
+static volatile int fault_wrong_pc;
+static volatile int fault_usr1_ran;
+static volatile int fault_done;
+
+static void on_fault_segv(int sig, siginfo_t* info, void* context) {
+  ucontext_t* uc = (ucontext_t*)context;
+
+  (void)sig;
+  (void)info;
+  if ((void*)UC_PC(uc) != fault_site) {
+    ++fault_wrong_pc;
+    UC_PC(uc) = (greg_t)(uintptr_t)fault_site;
+  }
+  UC_PC(uc) += 1; /* step over the one-byte hlt */
+  ++fault_handled;
+}
+
+static void on_fault_usr1(int sig) {
+  (void)sig;
+  ++fault_usr1_ran;
+}
+
+static pthread_t fault_target;
+
+static void* fault_sender(void* argument) {
+  (void)argument;
+  while (!fault_done) {
+    pthread_kill(fault_target, SIGUSR1);
+    sched_yield();
+  }
+  return 0;
+}
+
+static void test_fault_while_signalled(void) {
+  struct sigaction action;
+  pthread_t sender;
+  double deadline = now() + 3.0;
+  int faults = 0;
+
+  memset(&action, 0, sizeof(action));
+  action.sa_sigaction = on_fault_segv;
+  action.sa_flags = SA_SIGINFO;
+  sigemptyset(&action.sa_mask);
+  CHECK(sigaction(SIGSEGV, &action, 0) == 0, "sigaction(SIGSEGV)");
+  memset(&action, 0, sizeof(action));
+  action.sa_handler = on_fault_usr1;
+  sigemptyset(&action.sa_mask);
+  CHECK(sigaction(SIGUSR1, &action, 0) == 0, "sigaction(SIGUSR1)");
+
+  fault_target = pthread_self();
+  pthread_create(&sender, 0, fault_sender, 0);
+  while (now() < deadline && faults < 200000) {
+    void* site;
+    __asm__ volatile("leaq 1f(%%rip), %0\n\t"
+                     "movq %0, %1\n\t"
+                     "1: hlt"
+                     : "=&r"(site), "=m"(fault_site)::"memory");
+    ++faults;
+  }
+  fault_done = 1;
+  pthread_join(sender, 0);
+  CHECK(fault_handled == faults, "every fault ran the handler exactly once and execution continued");
+  CHECK(fault_wrong_pc == 0, "the fault handler always saw the faulting instruction as the interrupted pc");
+  CHECK(fault_usr1_ran > 0, "signals were delivered to the faulting thread meanwhile");
+  signal(SIGSEGV, SIG_DFL);
+  signal(SIGUSR1, SIG_DFL);
+}
+#endif
+
 static void progress(const char* step) {
   if (getenv("SIGNAL_VMTRAP_VERBOSE") != 0) {
     fprintf(stderr, "signal_vmtrap_test: %s\n", step);
@@ -636,6 +713,10 @@ int main(void) {
   test_concurrent_delivery();
   progress("threads blocked in waits run the handler");
   test_blocked_waits();
+#if defined(__x86_64__)
+  progress("faults taken while signals are being delivered");
+  test_fault_while_signalled();
+#endif
   if (failures != 0) {
     fprintf(stderr, "signal_vmtrap_test: %d check(s) failed\n", failures);
     return 1;

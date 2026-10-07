@@ -202,8 +202,10 @@ so `libc/src/arch/windows/common/signal_backend.c` builds it, same-process and t
 Evidence through 2026-10-07: `signal_vmtrap_test`, `signal_threads_test` and `memcpy_atomicity_test` each passed 20
 consecutive runs after the exact-once fix; the full Windows CTest passed 157/157. JavaScriptCore runs with polling traps
 off, FTL passes, and the cross-platform Wasm probe observes 50 handled signals with fast memory versus zero with software
-bounds checks. Windows Wasm acceptance is nevertheless still open because the final SDK reproduced an intermittent
-BBQ-only JIT-address SIGSEGV; see `HISTORY.md` and `docs/crtweb_acceptance.md`.
+bounds checks. A fault taken while another thread redirects the faulting thread is also handled: the fault handler recognises a
+context already redirected to the signal stub (not only a record carrying the stub's address) and the redirect frame is kept 16 KiB
+below the target's stack pointer, clear of the CONTEXT the kernel builds for a fault in flight (`test_fault_while_signalled`).
+Windows Wasm acceptance still has open JSC-side `instance-lifecycle` aborts/hangs; see `HISTORY.md` and `docs/crtweb_acceptance.md`.
 
 ### Windows (SIGCHLD)
 

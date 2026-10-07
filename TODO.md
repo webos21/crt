@@ -85,9 +85,10 @@ then macOS/arm64.
     Windows/x64 (2026-10-07), but Windows 1D-C remains open.** Its functional matrix and fast-memory proof each have a
     near-final green run, and the
     replay fixed exact-once asynchronous delivery, privileged-instruction (`hlt`) mapping and pending delivery after a
-    fault handler; however the final SDK reproduced one BBQ-only JIT-address SIGSEGV in 10 no-dump runs and a separate
-    BBQ disassembly-dump hang (`docs/crtweb_acceptance.md`, `docs/signal_delivery.md`). **Next:** retain these libc fixes,
-    isolate that Windows BBQ failure; macOS/arm64 and Linux/aarch64 1D-B/C replays can proceed independently after pulling
+    fault handler; the BBQ-only JIT-address SIGSEGV is root-caused and fixed (a fault whose exception record was the JIT pc but whose
+    context had been redirected to the signal stub; 0/40 runs after, ~10% before). Still open on Windows: an intermittent JSC
+    `Invalid value for lock: 0` abort and a rare hang in `instance-lifecycle` under the BBQ dump options (`docs/crtweb_acceptance.md`).
+    **Next:** isolate those two, and explain why `signal_vmtrap_test`'s worker-interruption round can fail to start its handler when the new fault-storm test runs before it; macOS/arm64 and Linux/aarch64 1D-B/C replays can proceed independently after pulling
     them. Then run 1D-D sampling profiler (a separate build: `ENABLE_SAMPLING_PROFILER=ON`). 1D-B..D close JSC's default capabilities and should
     precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate hardening. Thread-stack sizing (1 MiB
     default) is still open: DFG, FTL and Wasm compiler threads ran fine at it.
