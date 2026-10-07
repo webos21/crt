@@ -443,9 +443,17 @@ struct inject_frame {
   int sig;
   unsigned long saved_mask;
   crt_signal_state* state;
-  volatile long* acknowledged; /* stable on the sender's stack until inject_locked() returns */
-  volatile long claim; /* 0 waiting, 1 the handler took it, 2 the sender gave it up (see inject()) */
+  long long serial; /* this interruption's number: the handshake word lives in the thread's state */
 };
+
+/* The handshake between the sender and the redirected thread is the word state->inject_word, which holds
+ * serial * 4 + phase: 0 waiting for the stub, 1 the stub took it, 2 the sender gave it up, 3 the handler is
+ * running (the mask and the delivering count are in place). It cannot live in the frame on the target's
+ * stack: a thread that never ran the stub goes on using that stack and overwrites the frame. */
+#define INJECT_WAITING 0
+#define INJECT_CLAIMED 1
+#define INJECT_CANCELLED 2
+#define INJECT_RUNNING 3
 
 #if defined(__x86_64__)
 static void context_to_ucontext(const struct crt_win_context* from, crt_signal_ucontext* uc, unsigned long mask) {
@@ -550,13 +558,14 @@ static void ucontext_to_context(const crt_signal_ucontext* uc, struct crt_win_co
  * frame->saved. The handler runs under the mask for it and the mask goes back afterwards. */
 static void run_injected_handler(struct inject_frame* frame) {
   crt_signal_state* state = frame->state;
-  long unclaimed = 0;
+  long long base = frame->serial * 4;
+  long long expected = base + INJECT_WAITING;
+  unsigned long old_mask;
 
   /* A sender that waited too long for this to start took the interruption back: do nothing, the
    * interrupted context is simply resumed. */
-  unsigned long old_mask;
-
-  if (!__atomic_compare_exchange_n(&frame->claim, &unclaimed, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+  if (!__atomic_compare_exchange_n(&state->inject_word, &expected, base + INJECT_CLAIMED, 0, __ATOMIC_SEQ_CST,
+                                   __ATOMIC_SEQ_CST)) {
     return;
   }
   /* The mask is the thread's own to change, and only from here: a sender that wrote it while the thread
@@ -568,7 +577,7 @@ static void run_injected_handler(struct inject_frame* frame) {
   old_mask = state->mask;
   __atomic_fetch_add(&state->delivering, 1, __ATOMIC_SEQ_CST);
   state->mask = mask_for_handler(frame->sig, old_mask);
-  __atomic_store_n(frame->acknowledged, 1, __ATOMIC_SEQ_CST);
+  __atomic_store_n(&state->inject_word, base + INJECT_RUNNING, __ATOMIC_SEQ_CST);
   __crt_signal_dispatch_info(frame->sig, &frame->info, &frame->uc);
   __atomic_fetch_add(&state->handler_runs, 1, __ATOMIC_SEQ_CST);
   state->mask = old_mask;
@@ -675,31 +684,32 @@ static unsigned long long clock_microseconds(void);
  * arrives within a quarter of a second, cancel the frame (the handler, should it run after all, sees that and
  * only resumes the interrupted context) and take the interruption back: the mask and pending bit return to
  * what they were. Returns 1 when the handler has started, 0 when the interruption was taken back. */
-static int interruption_took_effect(crt_signal_state* target, struct inject_frame* frame,
-                                    volatile long* acknowledged, int sig, unsigned long old_mask) {
+static int interruption_took_effect(crt_signal_state* target, long long serial, int sig) {
   unsigned long long spin_until = clock_microseconds() + 2000;
   unsigned long long deadline = clock_microseconds() + 250000; /* a redirected thread may wait for a CPU */
-  long unclaimed = 0;
+  long long base = serial * 4;
 
-  (void)old_mask;
-  while (__atomic_load_n(acknowledged, __ATOMIC_SEQ_CST) == 0) {
+  while (__atomic_load_n(&target->inject_word, __ATOMIC_SEQ_CST) == base + INJECT_WAITING) {
     if (clock_microseconds() >= deadline) {
-      if (__atomic_compare_exchange_n(&frame->claim, &unclaimed, 2, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+      long long expected = base + INJECT_WAITING;
+
+      if (__atomic_compare_exchange_n(&target->inject_word, &expected, base + INJECT_CANCELLED, 0, __ATOMIC_SEQ_CST,
+                                      __ATOMIC_SEQ_CST)) {
         __atomic_fetch_or(&target->pending, bit_of(sig), __ATOMIC_SEQ_CST);
         return 0;
       }
-      /* The handler claimed it but may have been preempted before its next instruction stores the
-       * acknowledgement. This stack slot must remain alive until that store really happened. */
-      while (__atomic_load_n(acknowledged, __ATOMIC_SEQ_CST) == 0) {
-        SwitchToThread();
-      }
-      break;
+      break; /* the stub took it at the last moment */
     }
     if (clock_microseconds() < spin_until) {
       SwitchToThread();
     } else {
       Sleep(1);
     }
+  }
+  /* The stub took it: it is running, so it gets to the handler's first instruction in a moment. The sender may
+   * not release the thread to other senders before the mask and the delivering count are in place. */
+  while (__atomic_load_n(&target->inject_word, __ATOMIC_SEQ_CST) == base + INJECT_CLAIMED) {
+    SwitchToThread();
   }
   return 1;
 }
@@ -712,7 +722,7 @@ static int inject_locked(crt_signal_state* target, int sig, unsigned long long* 
   unsigned long long frame_address;
   unsigned long old_mask;
   HANDLE handle = target->thread_handle;
-  volatile long acknowledged = 0;
+  long long serial;
   int result = 0;
 
   if (handle == 0 || restore_context_function() == 0) {
@@ -764,8 +774,10 @@ static int inject_locked(crt_signal_state* target, int sig, unsigned long long* 
   frame->sig = sig;
   frame->saved_mask = old_mask;
   frame->state = target;
-  frame->acknowledged = &acknowledged;
-  frame->claim = 0;
+  serial = target->inject_serial + 1; /* senders are serialised by the injecting lock */
+  target->inject_serial = serial;
+  frame->serial = serial;
+  __atomic_store_n(&target->inject_word, serial * 4 + INJECT_WAITING, __ATOMIC_SEQ_CST);
   context_to_ucontext(&context, &frame->uc, old_mask);
   __atomic_fetch_and(&target->pending, ~bit_of(sig), __ATOMIC_SEQ_CST);
 
@@ -783,10 +795,11 @@ static int inject_locked(crt_signal_state* target, int sig, unsigned long long* 
   if (SetThreadContext(handle, &context)) {
     result = 1;
   } else {
+    __atomic_store_n(&target->inject_word, serial * 4 + INJECT_CANCELLED, __ATOMIC_SEQ_CST);
     __atomic_fetch_or(&target->pending, bit_of(sig), __ATOMIC_SEQ_CST);
   }
   ResumeThread(handle);
-  if (result == 1 && !interruption_took_effect(target, frame, &acknowledged, sig, old_mask)) {
+  if (result == 1 && !interruption_took_effect(target, serial, sig)) {
     return 2; /* the thread went on in its own code: nothing was delivered, the caller may try again */
   }
   return result;

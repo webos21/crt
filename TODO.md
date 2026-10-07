@@ -88,7 +88,7 @@ then macOS/arm64.
     fault handler; the BBQ-only JIT-address SIGSEGV is root-caused and fixed (a fault whose exception record was the JIT pc but whose
     context had been redirected to the signal stub; 0/40 runs after, ~10% before). Still open on Windows: an intermittent JSC
     `Invalid value for lock: 0` abort and a rare hang in `instance-lifecycle` under the BBQ dump options (`docs/crtweb_acceptance.md`).
-    **Next:** isolate those two, and explain why `signal_vmtrap_test`'s worker-interruption round can fail to start its handler when the new fault-storm test runs before it; macOS/arm64 and Linux/aarch64 1D-B/C replays can proceed independently after pulling
+    **Next:** the 120 s `instance-lifecycle` hang is fixed (signal handshake, see `HISTORY.md`); still open is a `WTF::Lock` `Invalid value for lock: 0` abort on `JITThunks::m_lock` in about 4% of dump-option BBQ runs. macOS/arm64 and Linux/aarch64 1D-B/C replays can proceed independently after pulling
     them. Then run 1D-D sampling profiler (a separate build: `ENABLE_SAMPLING_PROFILER=ON`). 1D-B..D close JSC's default capabilities and should
     precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate hardening. Thread-stack sizing (1 MiB
     default) is still open: DFG, FTL and Wasm compiler threads ran fine at it.

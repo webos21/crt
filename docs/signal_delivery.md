@@ -205,7 +205,7 @@ off, FTL passes, and the cross-platform Wasm probe observes 50 handled signals w
 bounds checks. A fault taken while another thread redirects the faulting thread is also handled: the fault handler recognises a
 context already redirected to the signal stub (not only a record carrying the stub's address) and the redirect frame is kept 16 KiB
 below the target's stack pointer, clear of the CONTEXT the kernel builds for a fault in flight (`test_fault_while_signalled`).
-Windows Wasm acceptance still has open JSC-side `instance-lifecycle` aborts/hangs; see `HISTORY.md` and `docs/crtweb_acceptance.md`.
+The sender/target handshake is one word in the thread's `crt_signal_state` (`inject_word`: serial, phase), not memory on the target's stack, and the handler's mask is set and restored by the target itself. Windows Wasm acceptance still has a rare JSC `Invalid value for lock: 0` abort; see `HISTORY.md` and `docs/crtweb_acceptance.md`.
 
 ### Windows (SIGCHLD)
 

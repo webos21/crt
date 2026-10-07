@@ -16,6 +16,8 @@ typedef struct crt_signal_state {
   volatile long alive;        /* 0 once the thread has ended */
   volatile long injecting;    /* 1 while a sender is interrupting this thread (one at a time) */
   volatile long delivering;   /* >0 while the CRT is itself delivering a signal on this thread */
+  volatile long long inject_serial; /* number of the last interruption (Windows; see signal_backend.c) */
+  volatile long long inject_word;   /* its handshake with the redirected thread (serial * 4 + phase) */
   volatile unsigned long handler_runs; /* handlers run on this thread so far (sigsuspend() waits for a change) */
   volatile long in_wait;      /* 1 while the thread is parked in an interruptible CRT wait */
   void* volatile wait_address; /* the address that wait is parked on (0: a handle wait) */

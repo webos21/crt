@@ -10,6 +10,28 @@ substantive update.
 
 ## 2026-10-07
 
+### Windows/x64: signal-state leaks behind the `instance-lifecycle` hang (2026-10-07)
+
+Two more defects of the redirect protocol, found by chasing the test-order dependence and the 120 s hang under the BBQ
+dump options (about 7% of runs).
+1. **Signal mask leak.** The sender wrote the handler's mask into the stopped target before redirecting it. A target that
+   was taking a fault at that moment ran the fault handler with the changed mask, saved it as its own and restored it, so
+   the mask (SIGUSR1) stayed blocked for good. Showed up as `fault,hlt`/`fault,worker` failing 40-60% when the fault-storm test ran
+   first (and as the "leaked main-thread mask 512" seen earlier). The target now sets and restores its own mask after it has
+   claimed the interruption; the sender no longer touches it.
+2. **Lost acknowledgement.** The claim word lived in the frame on the target's stack. A thread whose redirect did not take
+   effect carried on using that stack and overwrote the frame (the pump's captured claim was `746351308`), so the sender's
+   cancel CAS failed and it waited for an acknowledgement for ever while holding the registry lock: exiting threads piled up
+   in `registry_remove` and `WTF::Thread::suspend` waited for its answer (all-thread stack captured with lldb). The handshake is
+   now one word in `crt_signal_state` (`inject_word` = serial * 4 + phase: waiting, claimed, cancelled, running) that
+   survives the stack being reused; a stale stub finds a different serial and only resumes the interrupted context.
+`signal_vmtrap_test` can now run tests in a chosen order (`SIGNAL_VMTRAP_ONLY=fault,worker`) and re-run them; the fault storm
+runs first by default, with a mask postcondition. After the fix: all order pairs pass 12/12, 0 hangs in 150 runs
+(BBQ-only 110, BBQ+OMG 40; 3-4 of 40 before), full CTest 158/158. Still open: a JSC `Invalid value for lock: 0` abort
+(`WTF::LockAlgorithm::unlockSlow` on `JITThunks::m_lock`, in a Baseline-JIT compiler thread, first group of the script) in
+about 4% of runs with the dump options and none without them. `signal_sync_stress_test` (mutex/cond under signals) and a flags-survival
+check (`lock cmpxchg` + `jne` interrupted) both pass, so the CRT's own synchronisation is not the evident cause.
+
 ### Windows/x64: BBQ-only SIGSEGV at a JIT address root-caused and fixed
 
 Reproduced with `jsc_wasm_acceptance.js` under the BBQ-only options (about 10% of runs, always in `memory-and-traps`, 0.5 s in).
