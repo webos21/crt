@@ -81,17 +81,15 @@ then macOS/arm64.
     compile proof, watchdog termination of compiled code, threads, host-ABI audit.
   * [ ] **1D. Higher JIT tiers, split by risk** (all compiled in, off at run time unless named). **1D-A DFG +
     concurrent compiler threads: done on all four hosts** (Linux/x86_64 2026-10-05; macOS/arm64, Linux/aarch64, Windows/x64
-    replays 2026-10-06). **1D-B FTL/B3 and 1D-C WebAssembly are done on Linux/x86_64 (2026-10-06); 1D-B is also done on
-    Windows/x64 (2026-10-07), but Windows 1D-C remains open.** Its functional matrix and fast-memory proof each have a
-    near-final green run, and the
-    replay fixed exact-once asynchronous delivery, privileged-instruction (`hlt`) mapping and pending delivery after a
-    fault handler; the BBQ-only JIT-address SIGSEGV is root-caused and fixed (a fault whose exception record was the JIT pc but whose
-    context had been redirected to the signal stub; 0/40 runs after, ~10% before). Still open on Windows: an intermittent JSC
-    `Invalid value for lock: 0` abort and a rare hang in `instance-lifecycle` under the BBQ dump options (`docs/crtweb_acceptance.md`).
-    **Next:** the 120 s `instance-lifecycle` hang is fixed (signal handshake, see `HISTORY.md`); still open is a `WTF::Lock` `Invalid value for lock: 0` abort on `JITThunks::m_lock` in about 4% of dump-option BBQ runs. macOS/arm64 and Linux/aarch64 1D-B/C replays can proceed independently after pulling
+    replays 2026-10-06). **1D-B FTL/B3 and 1D-C WebAssembly are done on Linux/x86_64 (2026-10-06) and on Windows/x64
+    (2026-10-07/08).** The Windows replay fixed exact-once asynchronous delivery, `hlt` mapping, a fault taken while a thread is redirected
+    (JIT-address SIGSEGV), the signal-mask ownership, the lost handshake acknowledgement (120 s hang) and the exit-time
+    emulated-TLS teardown (silent exit 134, which also explains `Invalid value for lock: 0`); the official baseline-jit acceptance passes
+    and 0 failures in about 800 Wasm runs (`HISTORY.md`, `docs/crtweb_acceptance.md`). **Next:** macOS/arm64 and Linux/aarch64 1D-B/C replays can proceed independently after pulling
     them. Then run 1D-D sampling profiler (a separate build: `ENABLE_SAMPLING_PROFILER=ON`). 1D-B..D close JSC's default capabilities and should
     precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate hardening. Thread-stack sizing (1 MiB
     default) is still open: DFG, FTL and Wasm compiler threads ran fine at it.
+    Windows emulated TLS follow-up: the project-owned `__emutls_get_address` is compiled into each consumer (JavaScriptCore, graphics); put one in libc so every module shares one TLS state and a thread_local object shared by two modules is numbered once.
   * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64
     (signal VM-trap gate: real per-thread signals, polling traps off, watchdog 100/100); macOS/x86_64 has no signal
     conversion or JIT permissions. Windows signal gaps that are *not* gates (backlog until a consumer needs them):

@@ -10,6 +10,26 @@ substantive update.
 
 ## 2026-10-07
 
+### Windows/x64: silent exit 134 at process exit was compiler-rt's emulated-TLS teardown (2026-10-08)
+
+The last Windows 1D-C symptom: 4-8% of runs of even a 0.3 s Wasm script (the first group of the acceptance script, dump options on or
+off, only with concurrent JIT) ended with exit status 134, output cut in mid-line, or the `Invalid value for lock: 0` message. Found by
+bisecting options (concurrent JIT off: 0/80; Wasm off: still failing; Baseline-only: 0/80; DFG on: 9/80), a 0.3 s reproducer, and
+instrumenting `abort()`/`_exit()` (their callers): 14 of 15 failures happened after the script had printed its last line, and
+`abort()` was called from `__emutls_get_address` -- compiler-rt's win_abort() after `TlsGetValue` failed with
+ERROR_INVALID_PARAMETER ("The parameter is incorrect"; the CRT's link stubs for `__acrt_iob_func`/`__stdio_common_vfprintf` abort silently
+before emutls can print that). compiler-rt's emutls registers an `atexit()` handler that frees its TLS index and mutex. `exit()` runs
+atexit handlers while other threads still run (only the final `ExitProcess` stops them), so a compiler thread touching a thread_local in
+that window used a freed index. The project now owns `__emutls_get_address` (`libc/src/arch/windows/common/emutls_link_stubs.c`, compiled into
+JavaScriptCore and the graphics consumers): same control-object layout and per-thread array, state initialised on first use whatever
+control object comes first (compiler-rt's fast path skipped that for an already numbered one) and no teardown at exit. New test
+`emutls_exit_race_test` (spawns itself 100 times; threads spin on a thread_local while the main thread calls `exit(0)`; plus per-thread
+semantics and a pre-numbered control object). After the change: 300/300 and 100/100 runs of the reproducer (about 7% before), the
+60-run BBQ acceptance script with the dump options, 40 BBQ+OMG, 40 more BBQ, the official `baseline-jit` acceptance (131 s,
+passed) and full CTest 163/163. Not changed: libc/libc++ and other modules that link compiler-rt's own emutls still have its atexit
+teardown, and a control object shared between two modules is numbered by each module's own counter (per-module arrays); moving
+`__emutls_get_address` into libc so there is one state per process is the follow-up in `TODO.md`.
+
 ### Windows/x64: signal-state leaks behind the `instance-lifecycle` hang (2026-10-07)
 
 Two more defects of the redirect protocol, found by chasing the test-order dependence and the 120 s hang under the BBQ
