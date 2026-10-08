@@ -10,6 +10,40 @@ substantive update.
 
 ## 2026-10-08
 
+### Web Tranche 1D-D: JavaScriptCore sampling profiler accepted on Windows/x64
+
+Rebuilt the pinned JSCOnly source against the installed Windows/x64 `05-ui` SDK with
+`ENABLE_SAMPLING_PROFILER=ON`. The separate profiler build passed every 1B..1D-C gate
+before its profiler-specific gate, including DFG/FTL, Wasm fast-memory faults and
+watchdog VM traps. Its official profiler step sampled the main VM and all four
+`$262.agent` worker VMs: **5/5 profiles, 153 traces and 153 named hot-function frames**.
+The aggregate acceptance and PE host-ABI audit were clean. Twenty further isolated
+profiler runs passed 20/20, always sampled all five VMs, and produced at least 152
+traces and 152 named hot frames.
+
+The first worker-profiler run exposed a real libc/PAL prerequisite rather than a JSC
+profiler defect. On Windows, `pthread_create()` could return before its target wrapper
+had called `GetCurrentThreadStackLimits()` and recorded the stack in the pthread control
+block. WebKit immediately calls `pthread_getattr_np()` from the creator; it could
+therefore observe `{ base = NULL, size = 1 MiB }`, manufacture `0x100000` as the stack
+origin, and crash the worker in `sanitizeStackForVMImpl`. The Windows start wrapper now
+release-publishes the real bounds and wakes the creator, while `pthread_create()` waits
+for that publication before returning the `pthread_t`. A second creator-publication
+handshake keeps a detached thread's control block alive until the creator has finished
+publishing its id. `pthread_stack_bounds_test`
+locks in the contract by querying a live worker immediately after creation and requiring
+a non-null, plausible stack range. The final source passes the full Windows CTest 164/164,
+the focused pthread/signal/TLS subset 7/7, the stack-bound regression 100/100 and the JSC
+harness unit tests 2/2; the detached-thread regression also passes 100/100. The cumulative
+`05-ui` distribution was regenerated from that source and every stage passed `verify_dist`;
+its direct profiler replay passed again with 5/5 VMs, 138 traces and 138 named hot frames.
+
+One redundant post-package full-suite replay was stopped after its second Wasm acceptance
+process exceeded the normal duration before reaching the profiler. The official complete
+1B..1D-D run, the 20/20 profiler repetitions and the final packaged-SDK direct profiler run
+remain green; treat this as a 1D-C observation and reopen that gate only if it reproduces.
+This closes 1D-D on Windows/x64; Linux/aarch64 and macOS/arm64 native replays remain.
+
 ### Web Tranche 1D-D: JavaScriptCore sampling profiler accepted on Linux/x86_64
 
 Added a distinct `sampling-profiler` mode to `tools/build_webkit_jsc.py`. It builds

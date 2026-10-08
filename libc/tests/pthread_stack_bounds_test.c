@@ -37,9 +37,26 @@ static void check_current_stack(const char* who) {
 }
 
 static void* worker(void* argument) {
-  (void)argument;
+  int* release = (int*)argument;
+
   check_current_stack("worker thread");
+  while (__atomic_load_n(release, __ATOMIC_ACQUIRE) == 0) {
+  }
   return 0;
+}
+
+static void check_new_thread_stack(pthread_t thread) {
+  pthread_attr_t attr;
+  void* base = 0;
+  size_t size = 0;
+
+  CHECK(pthread_getattr_np(thread, &attr) == 0,
+        "creator can query a new worker immediately after pthread_create");
+  CHECK(pthread_attr_getstack(&attr, &base, &size) == 0,
+        "creator can read a new worker's stack attributes");
+  CHECK(base != 0 && size >= 16 * 1024,
+        "a newly-created worker already has real stack bounds when pthread_create returns");
+  pthread_attr_destroy(&attr);
 }
 
 #if defined(_WIN32) || defined(__MINGW32__) || defined(CRT_TARGET_OS_WINDOWS)
@@ -63,12 +80,15 @@ static void check_stack_limit_matches_the_main_stack(void) {
 
 int main(void) {
   pthread_t thread;
+  int release = 0;
 
   check_current_stack("initial thread");
 #if defined(_WIN32) || defined(__MINGW32__) || defined(CRT_TARGET_OS_WINDOWS)
   check_stack_limit_matches_the_main_stack();
 #endif
-  CHECK(pthread_create(&thread, 0, worker, 0) == 0, "pthread_create");
+  CHECK(pthread_create(&thread, 0, worker, (void*)&release) == 0, "pthread_create");
+  check_new_thread_stack(thread);
+  __atomic_store_n(&release, 1, __ATOMIC_RELEASE);
   CHECK(pthread_join(thread, 0) == 0, "pthread_join");
   if (failures != 0) {
     return 1;

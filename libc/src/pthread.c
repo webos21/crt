@@ -210,6 +210,8 @@ typedef struct crt_pthread_control {
 #if defined(CRT_TARGET_OS_WINDOWS)
   HANDLE handle;
   DWORD thread_id;
+  int stack_bounds_ready;
+  int creation_published;
 #elif defined(CRT_TARGET_OS_LINUX)
   long tid;
   int tid_word;
@@ -598,6 +600,14 @@ static int pthread_start(void* arg) {
   __crt_thread_clear_current(&control->context);
   detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   if (detached) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+    /* A detached routine can finish immediately after publishing its stack bounds. Keep the
+     * control block alive until pthread_create() has finished reading it and returned the id.
+     * This wait is deliberately a bounded atomic spin: after publication the worker may free
+     * the control immediately, so the creator must not issue a wake against that address. */
+    while (__atomic_load_n(&control->creation_published, __ATOMIC_ACQUIRE) == 0) {
+    }
+#endif
     pthread_control_destroy_from_worker(control);
   }
   return 0;
@@ -646,6 +656,8 @@ static DWORD CRT_WINAPI pthread_windows_start(void* arg) {
     control->attr.stack_base = base;
     control->attr.stack_size = size;
   }
+  __atomic_store_n(&control->stack_bounds_ready, 1, __ATOMIC_RELEASE);
+  __crt_wake32_all(&control->stack_bounds_ready);
   return (DWORD)pthread_start(arg);
 }
 #endif
@@ -1862,11 +1874,20 @@ int pthread_create(
     free(control);
     return EAGAIN;
   }
+  /* pthread_getattr_np() is allowed immediately after pthread_create() returns.  Windows only
+   * exposes stack limits to the target thread, so do not publish its pthread_t until the wrapper
+   * has recorded those limits.  Without this handshake a fast creator (WTF::Thread::create) can
+   * observe the initialized default { base = 0, size = 1 MiB } and manufacture 0x100000 as the
+   * worker's stack origin before the worker has entered pthread_windows_start(). */
+  while (__atomic_load_n(&control->stack_bounds_ready, __ATOMIC_ACQUIRE) == 0) {
+    (void)__crt_wait32(&control->stack_bounds_ready, 0);
+  }
   if (control->detached) {
     CloseHandle(control->handle);
     control->handle = 0;
   }
   *thread = (pthread_t)(uintptr_t)control;
+  __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
   return 0;
 #elif defined(CRT_TARGET_OS_LINUX)
   if (control->detached) {

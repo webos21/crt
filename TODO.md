@@ -87,8 +87,15 @@ then macOS/arm64.
     emulated-TLS teardown (silent exit 134, which also explains `Invalid value for lock: 0`); the official baseline-jit acceptance passes
     and 0 failures in about 800 Wasm runs (`HISTORY.md`, `docs/crtweb_acceptance.md`). **1D-D sampling profiler is done on
     Linux/x86_64 (2026-10-08)** in its separate `ENABLE_SAMPLING_PROFILER=ON` build: the main VM and four worker VMs all
-    produced named hot-function samples, with 20/20 repeat runs. **Next:** replay 1D-B/C on macOS/arm64 and Linux/aarch64,
-    then replay 1D-D on those hosts and Windows/x64. 1D-B..D close JSC's default capabilities and should
+    produced named hot-function samples, with 20/20 repeat runs. **Windows/x64 1D-D is done (2026-10-08):** the separate
+    profiler build passed all 1B..1D-C gates, sampled 5/5 main/worker VMs with 153 named hot frames, retained a clean PE
+    host-ABI audit, and passed 20/20 focused repeats (minimum 152 named frames). This replay fixed a Windows
+    `pthread_create()` publication race that let an immediate `pthread_getattr_np()` see a null worker stack base. The
+    final freshly regenerated/verified SDK also passed the direct gate (5/5, 138 traces/hot frames); the stack-bound and
+    detached-thread lifetime regressions each pass 100/100. One redundant full-suite replay was stopped when its second
+    Wasm script exceeded the expected duration before reaching the profiler; reopen 1D-C only if that isolated
+    observation reproduces.
+    **Next:** replay 1D-B/C on macOS/arm64 and Linux/aarch64, then replay 1D-D there. 1D-B..D close JSC's default capabilities and should
     precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate hardening. Thread-stack sizing (1 MiB
     default) is still open: DFG, FTL and Wasm compiler threads ran fine at it.
   * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64
