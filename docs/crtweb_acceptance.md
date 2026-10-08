@@ -404,13 +404,15 @@ exited at a JSC lock assertion (`Invalid value for lock: 0`), making only the ag
 DFG/4-thread process then passed 10/10 focused runs; the FTL and Wasm 4-thread processes in that aggregate run also passed.
 A second run passed every step and the aggregate/host-ABI gates cleanly (131 s acceptance). During final code review the
 sender-acknowledgement lifetime was tightened once more (if the target claims immediately before the timeout, the sender
-now waits for the acknowledgement store before its stack can disappear). On the SDK rebuilt from that exact final source,
-all 157 CTests pass and the three focused regressions pass 20 consecutive runs each, but 1D-C is **not accepted**: the
-official dump-based run hung in BBQ, and bounded no-dump repetitions produced BBQ-only 9/10 (one controlled SIGSEGV at a
-JIT address, exit 139) and BBQ+OMG 10/10. Thus large output is an amplifier, not the whole cause. (Update 2026-10-07: the SIGSEGV was root-caused to a fault handler that was handed a context already redirected to the signal stub, plus a redirect frame that could be overwritten by the kernel's exception CONTEXT; both are fixed, 0 SIGSEGV in 70 BBQ-only runs. The `instance-lifecycle` hang was a lost acknowledgement in the signal handshake and is fixed (0 hangs in 150 runs); the `Invalid value for lock: 0` abort and the silent exit 134 were one defect, compiler-rt's emulated-TLS teardown at process exit, replaced by a project-owned `__emutls_get_address`; Windows 1D-C now passes the official acceptance and 0 failures in about 800 runs; see `HISTORY.md`.) FTL step 4 passed before
-the hang, so Windows 1D-B is closed; Windows 1D-C stays open with these exact reproduction results. No temporary signal
-tracing instrumentation is part of the result. macOS/arm64 and Linux/aarch64 replays can proceed independently; sampling
-profiler 1D-D, W^X, SIMD and Wasm threads remain separate work.
+now waits for the acknowledgement store before its stack can disappear). The first SDK rebuilt from that source still exposed
+three independent defects: a BBQ SIGSEGV when a fault context had already been redirected to the signal stub, an
+`instance-lifecycle` lost-acknowledgement hang, and compiler-rt emulated-TLS teardown racing a concurrent compiler thread at
+process exit (`Invalid value for lock: 0` or silent exit 134). All three are fixed in the CRT/PAL: 0 SIGSEGV in 70 BBQ-only
+runs, 0 hangs in 150 runs, the official acceptance passes, and about 800 bounded Wasm runs have no failures. The emulated-TLS
+runtime was subsequently centralized in `libc.dll` (2026-10-08) with a two-DLL ownership regression, so JSC and graphics no
+longer carry consumer-local copies. Windows 1D-B and 1D-C are closed. No temporary signal tracing instrumentation is part of
+the result. macOS/arm64 and Linux/aarch64 replays can proceed independently; sampling profiler 1D-D, W^X, SIMD and Wasm
+threads remain separate work.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the

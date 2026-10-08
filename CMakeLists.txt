@@ -490,6 +490,16 @@ function(crt_configure_shared_runtime target_name)
       -Wl,/entry:crtDllMainCRTStartup
       -Wl,/OPT:REF
     )
+    if(NOT target_name STREQUAL "c_shared")
+      # MinGW auto-export can otherwise re-export libc.dll's imported
+      # __emutls_get_address thunk from every consumer DLL. A later DLL
+      # then sees both that accidental export and libc's canonical import,
+      # defeating the one-runtime boundary (and often producing a duplicate
+      # definition). Only libc.dll owns/exports these names.
+      target_link_options(${target_name} PRIVATE
+        -Wl,--exclude-symbols=__emutls_get_address
+        -Wl,--exclude-symbols=__imp___emutls_get_address)
+    endif()
     target_link_libraries(${target_name} PRIVATE ${CRT_WINDOWS_SYSTEM_LIBS})
     if(TARGET crt1_pseudo_reloc)
       # dllcrt.c's crtDllMainCRTStartup() now calls _pei386_runtime_
@@ -674,7 +684,49 @@ if(CRT_USE_COMPILER_RT)
     )
   endif()
   if(CRT_COMPILER_RT_BUILTINS AND EXISTS "${CRT_COMPILER_RT_BUILTINS}")
-    message(STATUS "compiler-rt builtins: ${CRT_COMPILER_RT_BUILTINS}")
+    if(CRT_TARGET_OS STREQUAL "windows")
+      # libc owns the one process-wide emulated-TLS runtime.  Leaving
+      # compiler-rt's emutls.c.obj in the general builtins archive lets a
+      # consumer DLL acquire a private copy whenever archive ordering puts
+      # the builtins before libc.dll's import library.  COFF weak coalescing
+      # cannot merge their state.  Publish/use a project-owned filtered copy
+      # while retaining every other compiler helper from the vendor archive.
+      set(CRT_COMPILER_RT_BUILTINS_SOURCE "${CRT_COMPILER_RT_BUILTINS}")
+      set(CRT_COMPILER_RT_FILTER_DIR "${CMAKE_BINARY_DIR}/compiler-rt")
+      set(CRT_COMPILER_RT_FILTERED "${CRT_COMPILER_RT_FILTER_DIR}/libclang_rt.builtins.a")
+      file(MAKE_DIRECTORY "${CRT_COMPILER_RT_FILTER_DIR}")
+      file(COPY_FILE "${CRT_COMPILER_RT_BUILTINS_SOURCE}"
+        "${CRT_COMPILER_RT_FILTERED}" ONLY_IF_DIFFERENT)
+      execute_process(
+        COMMAND "${CMAKE_AR}" t "${CRT_COMPILER_RT_FILTERED}"
+        OUTPUT_VARIABLE CRT_COMPILER_RT_MEMBERS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE CRT_COMPILER_RT_LIST_RESULT)
+      if(NOT CRT_COMPILER_RT_LIST_RESULT EQUAL 0)
+        message(FATAL_ERROR "cannot inspect compiler-rt builtins with ${CMAKE_AR}")
+      endif()
+      string(REPLACE "\r\n" ";" CRT_COMPILER_RT_MEMBER_LIST "${CRT_COMPILER_RT_MEMBERS}")
+      string(REPLACE "\n" ";" CRT_COMPILER_RT_MEMBER_LIST "${CRT_COMPILER_RT_MEMBER_LIST}")
+      set(CRT_COMPILER_RT_EMUTLS_MEMBER "")
+      foreach(CRT_COMPILER_RT_MEMBER IN LISTS CRT_COMPILER_RT_MEMBER_LIST)
+        if(CRT_COMPILER_RT_MEMBER MATCHES "(^|[\\\\/])emutls\\.c\\.(obj|o)$")
+          set(CRT_COMPILER_RT_EMUTLS_MEMBER "${CRT_COMPILER_RT_MEMBER}")
+        endif()
+      endforeach()
+      if(CRT_COMPILER_RT_EMUTLS_MEMBER)
+        execute_process(
+          COMMAND "${CMAKE_AR}" d "${CRT_COMPILER_RT_FILTERED}"
+                  "${CRT_COMPILER_RT_EMUTLS_MEMBER}"
+          RESULT_VARIABLE CRT_COMPILER_RT_FILTER_RESULT)
+        if(NOT CRT_COMPILER_RT_FILTER_RESULT EQUAL 0)
+          message(FATAL_ERROR "cannot remove ${CRT_COMPILER_RT_EMUTLS_MEMBER} from compiler-rt builtins")
+        endif()
+      endif()
+      set(CRT_COMPILER_RT_BUILTINS "${CRT_COMPILER_RT_FILTERED}")
+      message(STATUS "compiler-rt builtins (without emutls): ${CRT_COMPILER_RT_BUILTINS}")
+    else()
+      message(STATUS "compiler-rt builtins: ${CRT_COMPILER_RT_BUILTINS}")
+    endif()
     add_library(crt_compiler_rt_builtins INTERFACE)
     target_link_libraries(crt_compiler_rt_builtins INTERFACE "${CRT_COMPILER_RT_BUILTINS}")
     install(FILES "${CRT_COMPILER_RT_BUILTINS}" DESTINATION lib RENAME libclang_rt.builtins.a COMPONENT crt-c)

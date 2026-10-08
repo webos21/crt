@@ -4,8 +4,8 @@
  * handlers while other threads still run (only the final ExitProcess stops them), so a thread that touched a
  * thread_local in that window got TlsGetValue() == NULL with ERROR_INVALID_PARAMETER, and emutls aborted the
  * process with exit status 134 -- a silent failure in about 5% of JavaScriptCore runs, always right after
- * the script had finished. The project's own __emutls_get_address() (libc/src/arch/windows/common/
- * emutls_link_stubs.c, compiled into this test) tears nothing down.
+ * the script had finished. The project's own __emutls_get_address() in libc
+ * tears nothing down.
  *
  * The test runs itself as a child many times: the child starts threads that spin on a thread_local, the main
  * thread calls exit(0) while they do, and every child must end with status 0. It also checks that
@@ -21,9 +21,6 @@
 #include <unistd.h>
 
 #if defined(CRT_TARGET_OS_WINDOWS)
-
-#include "../src/arch/windows/common/emutls_link_stubs.c"
-
 #include <spawn.h>
 
 extern char** environ;
@@ -69,6 +66,8 @@ typedef struct {
   void* templ;
 } control_object;
 
+extern void* __emutls_get_address(control_object* control);
+
 static int check_semantics(void) {
   pthread_t thread;
   long seen = -1;
@@ -88,8 +87,8 @@ static int check_semantics(void) {
     fprintf(stderr, "emutls_exit_race_test: the main thread's thread_local was overwritten by another thread\n");
     return 1;
   }
-  object = (long*)__emutls_get_address((crt_emutls_control*)&numbered);
-  if (object == 0 || *object != 99 || object != (long*)__emutls_get_address((crt_emutls_control*)&numbered)) {
+  object = (long*)__emutls_get_address(&numbered);
+  if (object == 0 || *object != 99 || object != (long*)__emutls_get_address(&numbered)) {
     fprintf(stderr, "emutls_exit_race_test: a pre-numbered control object did not work\n");
     return 1;
   }

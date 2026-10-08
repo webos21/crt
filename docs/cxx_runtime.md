@@ -177,6 +177,22 @@ On Linux a stray `-lm`/`-ldl` from an upstream makefile is dropped in a static-r
 and a `-shared` link gets `crtbegin_so.o` for the per-object `__dso_handle` that C++ static
 destructors register against.
 
+### Windows emulated TLS ownership
+
+Windows CRT-targeted code is compiled with `-femulated-tls` because this
+freestanding runtime does not provide the native PE TLS-directory startup used
+by UCRT/mingw-w64. Clang lowers `__thread` and `thread_local` to
+`__emutls_get_address`. That function is owned once by `libc.dll` for every DLL
+and shared-runtime executable; static executables get the same source from
+`libc.a`. It must not be copied from compiler-rt into each DLL: COFF does not
+coalesce the runtime's counter, Win32 TLS key and per-thread slot array, so two
+modules sharing one control object would address different objects. The staged
+Windows builtins archive therefore excludes compiler-rt's `emutls.c.obj`, and
+consumer DLLs may not re-export libc's import thunk. The runtime intentionally
+does not tear down its key at process exit because other threads still run while
+`atexit` handlers execute; thread-exit reclamation is a separate lifecycle
+question.
+
 ## Exceptions, RTTI, And Unwind
 
 The bootstrap `cxx` library still defaults to `-fno-exceptions` and

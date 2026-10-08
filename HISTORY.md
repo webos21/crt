@@ -8,6 +8,42 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-08
+
+### Windows emulated TLS is owned once by libc across DLL boundaries
+
+Closed the follow-up exposed by the Windows JSC 1D-C exit-race fix. The first
+project-owned `__emutls_get_address` stopped compiler-rt's unsafe process-exit
+teardown, but JSC, graphics and tests still compiled that source into each
+consumer. PE/COFF does not coalesce the runtime's counter, Win32 TLS key or
+per-thread slot array, so a control object shared by two DLLs could have one
+index but two different values.
+
+`libc/src/arch/windows/common/emutls.c` is now a normal source of both `libc.a`
+and `libc.dll`; it retains the no-process-exit-teardown rule and advances the
+global high-water mark when it observes an already-numbered control. Windows
+shared-library links through `crt-cc` now import libc/libm/libdl instead of
+embedding their static archives, and both wrappers plus the common CMake DLL
+policy prevent a consumer from auto-exporting libc's emutls import thunk. The
+Windows compiler-rt archive staged by the project is a copied archive with only
+`emutls.c.obj` removed, so archive ordering cannot silently restore a private
+runtime while all other builtins remain available. JSC, in-tree/isolated Skia,
+the 05-ui predecessor contract and the standalone gfx-skia example no longer
+carry an emutls source/object/archive or the old duplicate-definition bypass.
+
+The new `emutls_multi_module_test` builds DLL A and DLL B against `libc.dll`.
+A exports a control object; writes through either DLL are visible through the
+other on the same thread, a new pthread starts from the template and cannot
+overwrite the main thread, two compiler-lowered `__thread` values are isolated,
+and the shared plus four private controls receive five distinct nonzero indexes.
+PE inspection confirms `libc.dll` exports `__emutls_get_address`, both fixture
+DLLs import it from `libc.dll` without re-exporting it, and the staged filtered
+builtins archive no longer defines it. `pthread_native_tls_test`, the 100-child
+`emutls_exit_race_test` and the new test pass; the stage closure/dependency unit
+tests pass 14/14; the full Windows build and CTest pass 143/143. Per-thread
+allocation reclamation under high thread churn remains a separately measured
+follow-up; process-exit teardown must not return.
+
 ## 2026-10-07
 
 ### Windows/x64: silent exit 134 at process exit was compiler-rt's emulated-TLS teardown (2026-10-08)

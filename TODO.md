@@ -89,7 +89,6 @@ then macOS/arm64.
     them. Then run 1D-D sampling profiler (a separate build: `ENABLE_SAMPLING_PROFILER=ON`). 1D-B..D close JSC's default capabilities and should
     precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate hardening. Thread-stack sizing (1 MiB
     default) is still open: DFG, FTL and Wasm compiler threads ran fine at it.
-    Windows emulated TLS follow-up: the project-owned `__emutls_get_address` is compiled into each consumer (JavaScriptCore, graphics); put one in libc so every module shares one TLS state and a thread_local object shared by two modules is numbered once.
   * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64
     (signal VM-trap gate: real per-thread signals, polling traps off, watchdog 100/100); macOS/x86_64 has no signal
     conversion or JIT permissions. Windows signal gaps that are *not* gates (backlog until a consumer needs them):
@@ -99,7 +98,9 @@ then macOS/arm64.
   * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided
     `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed `05-ui` SDK
     and from the isolated stage chain (Tranche 10); the Windows/macOS replays must include the host-ABI audit
-    (`llvm-readobj`/`dumpbin`, `otool -L`).
+    (`llvm-readobj`/`dumpbin`, `otool -L`). Windows emulated TLS is now centralized in libc; measure
+    per-thread allocation growth under a bounded thread-churn test before deciding whether pthread-exit cleanup
+    is needed (not a 1D-C gate and never reintroduce process-exit teardown).
   * [ ] **Build-tool/target split.** Before `06-web` is the embedded product stage, separate
     build-host tools (gperf, ICU's data generators, Perl/Python/Ruby) from target libraries so
     a cross build (x86_64 host, Linux/aarch64 target) works; native three-host builds are

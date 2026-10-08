@@ -57,8 +57,7 @@ endforeach()
 if(CRT_TARGET_OS STREQUAL "windows")
   foreach(required_file
       "${CMAKE_SYSROOT}/include/crt-win32-shim/mingw_w64_compat.h"
-      "${CMAKE_SYSROOT}/include/crt-mingw-w64-headers/_mingw.h"
-      "${CMAKE_SYSROOT}/lib/libcrt_stage_emutls_stub.a")
+      "${CMAKE_SYSROOT}/include/crt-mingw-w64-headers/_mingw.h")
     if(NOT EXISTS "${required_file}")
       message(FATAL_ERROR "required 05-ui predecessor artifact is missing: ${required_file}")
     endif()
@@ -104,10 +103,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
     -Wl,dxgi.lib -Wl,d3d12.lib)
   set_property(TARGET crtgfx_skia PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_SYSROOT}/lib/libcrtgfx_skia.a" crtgfx_gpu
-    ${CRTGFX_SKIA_ARCHIVES} -Wl,d3dcompiler.lib -Wl,uuid.lib
-    "${CMAKE_SYSROOT}/lib/libcrt_stage_emutls_stub.a")
-  set_property(TARGET crtgfx_skia PROPERTY INTERFACE_LINK_OPTIONS
-    -Wl,--allow-multiple-definition)
+    ${CRTGFX_SKIA_ARCHIVES} -Wl,d3dcompiler.lib -Wl,uuid.lib)
   set_property(TARGET crtmedia PROPERTY INTERFACE_LINK_LIBRARIES
     "${CMAKE_SYSROOT}/lib/libcrtmedia.a"
     ${CRTMEDIA_FFMPEG_ARCHIVES} ${CRTMEDIA_CURL_ARCHIVES}

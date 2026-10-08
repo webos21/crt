@@ -33,7 +33,6 @@ set(CRTMEDIA_SRC_DIR "${CMAKE_SOURCE_DIR}/libcrtmedia/src")
 set(CRTGFX_WIN32_SHIM_ROOT "${CMAKE_SOURCE_DIR}/libstdc++/third_party/win32_shim")
 set(CRTGFX_LIBC_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/libc/include")
 set(CRTGFX_LIBCXX_UNEXPORTED "${CMAKE_SOURCE_DIR}/libstdc++/third_party/libcxx/libc++.unexported.exp")
-set(CRTGFX_EMUTLS_STUB_SOURCE "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
 set(CRTGFX_WINDOW_SOURCES ${CRTGFX_WINDOW_COMMON_SOURCES})
 set(CRTGFX_GPU_SOURCES ${CRTGFX_GPU_COMMON_SOURCES})
 option(CRTGFX_ENABLE_GPU_BACKEND "Compile the host GPU backend into crtgfx_gpu" ON)
@@ -1708,26 +1707,6 @@ function(crt_wire_skia_executable target_name)
     # above (same reasoning; this target also #includes Skia headers
     # directly via crtgfx/skia.h).
     target_compile_definitions(${target_name} PRIVATE SK_BUILD_FOR_UNIX)
-    # emutls_link_stubs.c (__acrt_iob_func/__stdio_common_vfprintf link
-    # stubs -- see that file's own top comment: needed once -femulated-
-    # tls's own compiler-rt implementation, emutls.c, actually gets linked
-    # in, which any real Windows+Skia *executable* does once it fully
-    # resolves symbols at its own link time -- matches crtgfx_shared's own
-    # identical, separately-added copy just above for the DLL case).
-    # target_sources(), not a source added at this target's own original
-    # add_executable() call: this function is applied to more than one
-    # caller's target (crtgfx_skia_raster_smoke, crtgfx_keyboard_
-    # interactive, ...), and CMake supports adding sources to an already-
-    # defined target exactly this way. Found missing for real (2026-08-25):
-    # crtgfx_keyboard_interactive linked against Skia/FreeType fine but
-    # failed with `undefined symbol: __acrt_iob_func`/`__stdio_common_
-    # vfprintf` -- this function's own extraction from crtgfx_skia_raster_
-    # smoke's original inline block (which added this file directly to
-    # its own add_executable() sources) had carried over every compile/
-    # link *flag* but not this one *source file*, since the file list
-    # itself was never part of what got refactored into this function.
-    target_sources(${target_name} PRIVATE
-      "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
   endif()
   if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
     # See crtgfx_skia_objects's own, fuller comment on SK_USE_INTERNAL_
@@ -1951,36 +1930,12 @@ function(crt_wire_skia_executable target_name)
       set(CRTGFX_WINDOWS_UUID_LIB uuid.lib CACHE FILEPATH "Windows uuid import library")
     endif()
     target_link_libraries(${target_name} PRIVATE "${CRTGFX_WINDOWS_UUID_LIB}")
-    # --allow-multiple-definition: clang_rt.builtins-x86_64.lib (this
-    # target's own crt_compiler_rt_builtins, needed for __emutls_get_
-    # address -- see tools/crt-cc's own -femulated-tls comment) is a real,
-    # vendor-shipped MSVC-layout LLVM archive that bundles more than pure
-    # arithmetic builtins: at least two of its own object members (emutls.
-    # c.obj, enable_execute_stack.c.obj) each carry their own internal
-    # fallback `fprintf` (itself calling the real UCRT's __stdio_common_
-    # vfprintf, so clearly meant for a real-CRT host environment, not this
-    # freestanding one) -- confirmed for real via llvm-nm. Once anything
-    # pulls either member in, COFF/lld-link's own archive semantics treat
-    # every symbol *that member exports* as now part of the final image, so
-    # its own fprintf collides outright with this project's real, correct
-    # `fprintf` in libc.a: `ld.lld: error: duplicate symbol: fprintf`. This
-    # project's own libc.a is linked well before clang_rt.builtins-x86_64.
-    # lib on this target's own link line, and lld's own documented --allow-
-    # multiple-definition behavior (matching GNU ld) is "keep the first
-    # definition encountered" -- so this reliably keeps our real fprintf,
-    # not the vendor archive's unused internal fallback.
-    target_link_options(${target_name} PRIVATE
-      -Wl,--allow-multiple-definition
-    )
   endif()
 endfunction()
 
 if(CRTGFX_ENABLE_SKIA)
   # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
   # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
-  # emutls_link_stubs.c (Windows-only) is added by crt_wire_skia_
-  # executable() itself now, via target_sources() -- not this add_
-  # executable() call's own source list -- since that function is shared
   # with crtgfx_keyboard_interactive too (see that function's own comment
   # for the real bug this consolidation fixed).
   add_executable(crtgfx_skia_raster_smoke

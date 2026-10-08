@@ -451,9 +451,10 @@ case "$target_os" in
     # no equivalent of). Lowers __declspec(thread)/thread_local to
     # __emutls_get_address() runtime calls instead -- Bionic/Android's own
     # historical strategy for the identical reason, matching this whole
-    # project's "Bionic-compatible" identity -- backed by compiler-rt's
-    # emutls.c, already present in the builtins archive this wrapper always
-    # links (confirmed via llvm-nm). Found chasing crtgfx_skia_raster_
+    # project's "Bionic-compatible" identity -- backed by the single
+    # project-owned implementation in libc (libc.dll for every DLL and
+    # shared-runtime executable, libc.a for a static executable). Found
+    # chasing crtgfx_skia_raster_
     # smoke's own link failure once mingw32 unification got everything else
     # working: Skia's SkStrikeCache::GlobalStrikeCache() uses a plain C++11
     # thread_local, which without this flag lowers to a direct,
@@ -987,6 +988,8 @@ if [ "$target_os" = windows ]; then
     set -- -nostdlib -nostartfiles -nodefaultlibs \
       -Wl,--exclude-symbols=_pei386_runtime_relocator \
       -Wl,--exclude-symbols=_crt_install_dwarf_unwind_safety_net \
+      -Wl,--exclude-symbols=__emutls_get_address \
+      -Wl,--exclude-symbols=__imp___emutls_get_address \
       -Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld \
       "${CRT_SYSROOT}/lib/dllcrt.o" \
       "${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o" \

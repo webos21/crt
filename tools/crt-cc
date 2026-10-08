@@ -526,22 +526,13 @@ case "$target_os" in
     # strategy Bionic/Android itself has historically used for the identical
     # reason (no ELF/COFF loader-level TLS directory cooperation needed),
     # matching this whole project's own "Bionic-compatible" identity.
-    # __emutls_get_address's own implementation (compiler-rt's emutls.c,
-    # itself built on TlsAlloc/TlsGetValue/TlsSetValue under the hood) is
-    # already present in libclang_rt.builtins.a/clang_rt.builtins-*.lib,
-    # already unconditionally linked into every executable this wrapper
-    # builds (see $compiler_rt_builtins below) -- confirmed for real
-    # (2026-08-23): `llvm-nm` on that exact archive lists a defined
-    # __emutls_get_address alongside emutls_init/emutls_exit/etc. Found
-    # chasing crtgfx_skia_raster_smoke's own link failure once mingw32
-    # unification got everything else working: Skia's SkStrikeCache::
-    # GlobalStrikeCache() uses a plain C++11 thread_local, which without
-    # this flag lowers to a direct, unresolvable `_tls_index` reference
-    # (`ld.lld: error: undefined symbol: _tls_index`). Applied here (not
-    # just on Skia's own build) so every port this wrapper ever compiles
-    # gets the same thread_local lowering strategy, rather than a
-    # per-consumer flag that would silently stop matching the moment a
-    # different port needs it too.
+    # __emutls_get_address is owned by this project's libc.  Windows DLLs
+    # import the one libc.dll definition so every image shares its control
+    # numbering and Win32 TLS key; static executables get the same source
+    # from libc.a.  It must not be taken independently from compiler-rt in
+    # each DLL because COFF cannot coalesce those process-global states.
+    # Found originally through Skia's thread_local use; applied here so every
+    # port gets the same lowering strategy.
     common_flags="$common_flags -femulated-tls"
     ;;
 esac
@@ -680,11 +671,9 @@ prelibs=""
 # project's own CMake c_shared/m_shared/dl_shared/cxx_shared targets)
 # instead of the static archives, exactly like a real shared library is
 # normally expected to link against a shared libc rather than statically
-# embedding one. libclang_rt.builtins.a is deliberately left static in
-# both modes: it's leaf compiler-intrinsic code with no global-data
-# relocations of this kind, and statically linking compiler-rt/libgcc
-# into every shared object (not just executables) is itself completely
-# normal, standard practice.
+# embedding one. Other compiler-rt arithmetic helpers may remain static;
+# __emutls_get_address specifically is resolved from libc before that
+# archive is considered, because its state must be process-wide.
 # A C driver must not inject libc++.  This is the load-bearing boundary
 # between the 01-c and 02-cxx distributions: tools/crt-c++ owns selection of
 # libc++/libc++abi/libunwind, while tools/crt-cc remains usable with 01-c alone.
@@ -881,13 +870,15 @@ if [ "$target_os" = windows ]; then
     run_cc -nostdlib -nostartfiles -nodefaultlibs \
       -Wl,--exclude-symbols=_pei386_runtime_relocator \
       -Wl,--exclude-symbols=_crt_install_dwarf_unwind_safety_net \
+      -Wl,--exclude-symbols=__emutls_get_address \
+      -Wl,--exclude-symbols=__imp___emutls_get_address \
       -Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld \
       "${CRT_SYSROOT}/lib/dllcrt.o" \
       "${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o" \
       "${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o" \
       "$@" "-L${CRT_SYSROOT}/lib" \
-      "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
-      "${CRT_SYSROOT}/lib/libdl.a" $windows_system_libs \
+      "${CRT_SYSROOT}/lib/libc_dll.dll.a" "${CRT_SYSROOT}/lib/libm_dll.dll.a" \
+      "${CRT_SYSROOT}/lib/libdl_dll.dll.a" $windows_system_libs \
       ${CRT_WINDOWS_SDK_LIBPATH:+"-L${CRT_WINDOWS_SDK_LIBPATH}"}
   fi
   # shellcheck disable=SC2086

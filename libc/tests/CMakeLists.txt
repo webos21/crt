@@ -458,20 +458,6 @@ set_tests_properties(long_argv_test_runs PROPERTIES
 )
 
 add_crt_test(pthread_native_tls_test pthread_native_tls_test.c)
-if(CRT_TARGET_OS STREQUAL "windows")
-  # thread_local lowers to compiler-rt's emutls.c (-femulated-tls, crt_build_flags). Pulling
-  # that archive member needs the same three link accommodations libcrtgfx documents for
-  # Skia's thread_local: UCRT-entry stubs for its fatal-error path, uuid.lib (lld looks for
-  # libuuid.a otherwise), and keeping libc's own fprintf over the member's internal one.
-  target_sources(pthread_native_tls_test PRIVATE
-    "${CMAKE_SOURCE_DIR}/libc/src/arch/windows/common/emutls_link_stubs.c")
-  find_file(CRT_TLS_TEST_UUID_LIB NAMES Uuid.Lib uuid.lib
-    PATHS ${CRT_WINDOWS_SDK_LIB_CANDIDATES} NO_DEFAULT_PATH)
-  if(CRT_TLS_TEST_UUID_LIB)
-    target_link_libraries(pthread_native_tls_test PRIVATE "${CRT_TLS_TEST_UUID_LIB}")
-  endif()
-  target_link_options(pthread_native_tls_test PRIVATE -Wl,--allow-multiple-definition)
-endif()
 set_tests_properties(pthread_native_tls_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pthread_native_tls_test: ok"
 )
@@ -533,6 +519,45 @@ add_crt_test(emutls_exit_race_test emutls_exit_race_test.c)
 set_tests_properties(emutls_exit_race_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "emutls_exit_race_test: ok"
   TIMEOUT 180)
+if(CRT_TARGET_OS STREQUAL "windows")
+  foreach(module IN ITEMS a b)
+    add_library(emutls_module_${module} SHARED
+      emutls_multi_module_${module}.c
+      $<TARGET_OBJECTS:crt_windows_dllcrt>)
+    target_link_libraries(emutls_module_${module} PRIVATE
+      crt_build_flags c_shared crt_compiler_rt_builtins)
+    target_include_directories(emutls_module_${module} PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/libc/include")
+    crt_configure_shared_runtime(emutls_module_${module})
+    set_target_properties(emutls_module_${module} PROPERTIES
+      PREFIX ""
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+      ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+  endforeach()
+  target_link_libraries(emutls_module_b PRIVATE emutls_module_a)
+
+  add_executable(emutls_multi_module_test
+    ${CRT_STARTUP_OBJECTS}
+    emutls_multi_module_test.c)
+  target_link_libraries(emutls_multi_module_test PRIVATE
+    crt_build_flags c_shared emutls_module_a emutls_module_b
+    crt_compiler_rt_builtins ${CRT_WINDOWS_SYSTEM_LIBS})
+  target_include_directories(emutls_multi_module_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/libc/include")
+  target_link_options(emutls_multi_module_test PRIVATE
+    -nostdlib -nostartfiles -nodefaultlibs
+    -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF)
+  crt_link_startup_end_objects(emutls_multi_module_test)
+  set_target_properties(emutls_multi_module_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  add_dependencies(emutls_multi_module_test c_shared emutls_module_a emutls_module_b)
+  add_test(NAME emutls_multi_module_test_runs COMMAND emutls_multi_module_test)
+  set_tests_properties(emutls_multi_module_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "emutls_multi_module_test: ok"
+    TIMEOUT 60)
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
+    emutls_multi_module_test_runs)
+endif()
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"
@@ -1136,6 +1161,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
   )
   set_tests_properties(windows_dll_symbol_priority_test_runs PROPERTIES
     PASS_REGULAR_EXPRESSION "windows_dll_symbol_priority_test: ok"
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR}/bin"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_dll_symbol_priority_test_runs)
 

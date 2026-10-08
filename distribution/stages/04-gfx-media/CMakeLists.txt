@@ -421,9 +421,6 @@ endif()
 list(TRANSFORM CRTGFX_GPU_SOURCES PREPEND "${CRTGFX_ROOT}/")
 list(TRANSFORM CRTGFX_GPU_BACKEND_SOURCES PREPEND "${CRTGFX_ROOT}/")
 set(CRTGFX_LIBC_INCLUDE_DIR "${CMAKE_SYSROOT}/include")
-set(CRTGFX_EMUTLS_STUB_SOURCE
-  "${CRT_STAGE_SOURCE_ROOT}/libc/src/arch/windows/common/emutls_link_stubs.c")
-
 crt_add_crtgfx_gpu_common_targets()
 target_compile_options(crtgfx_gpu_common_objects PRIVATE ${stage_c_options})
 if(CRT_TARGET_OS STREQUAL "linux")
@@ -939,50 +936,15 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # in-tree raw-CMake-flags path crt_wire_skia_executable() targets), so
   # only the genuinely Skia/D3D12-specific pieces are needed here, not
   # that whole function ported wholesale.
-  # A separate OBJECT library, not target_sources(<exe> PRIVATE
-  # CRTGFX_EMUTLS_STUB_SOURCE) directly on each C++ executable below: this
-  # stage's own ${stage_cxx_options} (target_compile_options(<exe> PRIVATE
-  # ${stage_cxx_options}), already applied to each of these two
-  # executables above) includes -std=c++17, and target_compile_options()
-  # applies to every source of a target uniformly regardless of that
-  # source's own language -- CMake does not exempt a .c file added later
-  # via target_sources() from options already collected for the target.
-  # Found for real 2026-09-11: `error: invalid argument '-std=c++17' not
-  # allowed with 'C'` compiling emutls_link_stubs.c this exact way. A
-  # small dedicated OBJECT library, compiled with only stage_c_options
-  # (never touched by -std=c++17 at all), sidesteps the ambiguity
-  # entirely -- matching this project's own established pattern of using
-  # OBJECT libraries wherever a source needs independent compile flags
-  # from its consumer (crtgfx_gpu_common_objects, crtgfx_skia_objects,
-  # ...), rather than trying to make one target serve two languages'
-  # worth of flags at once.
-  add_library(crtgfx_stage_emutls_stub OBJECT "${CRTGFX_EMUTLS_STUB_SOURCE}")
-  target_compile_options(crtgfx_stage_emutls_stub PRIVATE ${stage_c_options})
   foreach(skia_direct_consumer
       crtgfx_skia_raster_smoke crtgfx_skia_gpu_window_demo
       crtgfx_skia_media_lifecycle_test crtgfx_skia_media_window_demo)
     target_compile_definitions(${skia_direct_consumer} PRIVATE SK_BUILD_FOR_UNIX)
-    target_sources(${skia_direct_consumer} PRIVATE
-      $<TARGET_OBJECTS:crtgfx_stage_emutls_stub>)
     target_compile_options(${skia_direct_consumer} PRIVATE
       "-I${CRTGFX_WIN32_SHIM_ROOT}"
       "-I${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}"
       "-include" "${CRTGFX_WIN32_SHIM_ROOT}/mingw_w64_compat.h"
       -Wno-pragma-pack -Wno-unused-value -Wno-ignored-attributes)
-  endforeach()
-
-  # The two bridge consumers link the static crtgfx_skia/crtmedia archives
-  # (matching the bridge's per-consumer link rule) and therefore pull in
-  # libc.a next to compiler-rt's emutls.c, which defines the same fprintf
-  # stub -- the identical duplicate the in-tree build resolves for every
-  # static Skia consumer via crt_wire_skia_executable()'s
-  # --allow-multiple-definition (libcrtgfx/CMakeLists.txt). Found for real
-  # by the first Windows bridge-inclusive isolated stage build (2026-09-27):
-  # `ld.lld: error: duplicate symbol: fprintf` on the lifecycle test.
-  foreach(bridge_consumer
-      crtgfx_skia_media_lifecycle_test crtgfx_skia_media_window_demo)
-    target_link_options(${bridge_consumer} PRIVATE
-      -Wl,--allow-multiple-definition)
   endforeach()
 
   # examples/gfx-skia needs this exact same "direct Skia consumer"
@@ -996,21 +958,12 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # crtgfx_skia_raster_smoke/skia_gpu_window_demo already hit and fixed
   # above -- the fix just never reached the one consumer living outside
   # this CMakeLists.txt entirely. Bundle the two header sets under a
-  # clearly CRT-prefixed, won't-collide destination, and wrap the emutls
-  # stub object in a real installable static archive (examples/gfx-skia
-  # has no access to CRTGFX_EMUTLS_STUB_SOURCE's own .c file either, and
-  # even if it did, compiling it directly risks the exact -std=c++17
-  # conflict this OBJECT-library split already exists to avoid).
+  # clearly CRT-prefixed, won't-collide destination. Emulated TLS is part
+  # of the predecessor SDK's libc and needs no consumer-local archive.
   install(DIRECTORY "${CRTGFX_WIN32_SHIM_ROOT}/"
     DESTINATION include/crt-win32-shim)
   install(DIRECTORY "${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}/"
     DESTINATION include/crt-mingw-w64-headers)
-  add_library(crtgfx_stage_emutls_stub_lib STATIC
-    $<TARGET_OBJECTS:crtgfx_stage_emutls_stub>)
-  set_target_properties(crtgfx_stage_emutls_stub_lib PROPERTIES
-    OUTPUT_NAME crt_stage_emutls_stub
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-  install(TARGETS crtgfx_stage_emutls_stub_lib ARCHIVE DESTINATION lib)
 endif()
 
 install(TARGETS crtgfx_gpu crtgfx_gpu_shared crtgfx_skia crtgfx_skia_shared

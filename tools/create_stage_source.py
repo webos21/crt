@@ -299,7 +299,6 @@ STAGES = {
                 # file's own first commit, never caught because no isolated
                 # stage build had been run since.
                 "libcrtmedia/src/arch/windows/capture_mf.c",
-                "libc/src/arch/windows/common/emutls_link_stubs.c",
                 # The whole shim is required: Skia's D3D include chain uses
                 # its forwarding windows.h plus exclusive excpt/malloc/etc.
                 "libstdc++/third_party/win32_shim",

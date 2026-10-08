@@ -149,6 +149,13 @@ set_source_files_properties(${CRT_REGEX_SOURCES} PROPERTIES
   COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/src/regex/netbsd-compat.h;-Wno-sign-compare;-Wno-unused-parameter;-Wno-unused-function;-Wno-missing-field-initializers"
 )
 
+# One process-wide -femulated-tls runtime.  This source belongs to both the
+# static libc and libc.dll; Windows DLL consumers link libc.dll's import
+# library and therefore cannot acquire independent compiler-rt copies.
+if(CRT_TARGET_OS STREQUAL "windows")
+  list(APPEND CRT_LIBC_SOURCES src/arch/windows/common/emutls.c)
+endif()
+
 add_library(c STATIC ${CRT_LIBC_SOURCES})
 target_link_libraries(c PRIVATE crt_build_flags)
 target_include_directories(c PRIVATE

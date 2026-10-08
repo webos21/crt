@@ -3,7 +3,7 @@
 # for both the in-tree build and isolated 04-gfx-media stage.
 #
 # The caller supplies CRTGFX_ROOT plus the Skia, CRT runtime, platform-library,
-# imported-libc++, Win32 shim, emutls, and SDK-header variables referenced by
+# imported-libc++, Win32 shim, and SDK-header variables referenced by
 # the original in-tree logic below. CRTMEDIA_INCLUDE_DIR/CRTMEDIA_SRC_DIR
 # (2026-09-23..24, "Zero-copy decoded textures" Tranches 1-3) are the new
 # ones: libcrtmedia's own public include/ root (all three hosts) and private
@@ -423,23 +423,8 @@ endfunction()
 function(crt_add_crtgfx_skia_shared_target)
   # --- crtgfx_skia_shared (SHARED): the Skia bridge DLL/.so/.dylib.
   if(CRTGFX_ENABLE_SKIA)
-    set(CRTGFX_SHARED_EXTRA_SOURCES "")
-    # Windows + Skia only: crtgfx_skia_shared -- unlike the plain `crtgfx_
-    # skia` static archive, which only records crtgfx_skia_objects's own
-    # unresolved real-libc++/emutls references for whatever later links it
-    # in (crtgfx_skia_raster_smoke, already fixed) -- is itself a real DLL,
-    # so it must fully resolve those same references at its own link time.
-    # See crtgfx_skia_raster_smoke's own matching comments (imported
-    # libc++, uuid.lib, --allow-multiple-definition, emutls_link_stubs.c)
-    # for the full story of each piece; this mirrors all of them for the
-    # shared/DLL case.
-    if(CRT_TARGET_OS STREQUAL "windows")
-      list(APPEND CRTGFX_SHARED_EXTRA_SOURCES
-        "${CRTGFX_EMUTLS_STUB_SOURCE}")
-    endif()
     add_library(crtgfx_skia_shared SHARED
       $<TARGET_OBJECTS:crtgfx_skia_objects>
-      ${CRTGFX_SHARED_EXTRA_SOURCES}
     )
     target_link_libraries(crtgfx_skia_shared PUBLIC crtgfx_gpu_shared)
     target_include_directories(crtgfx_skia_shared PUBLIC
@@ -627,7 +612,6 @@ function(crt_add_crtgfx_skia_shared_target)
         set(CRTGFX_WINDOWS_UUID_LIB uuid.lib CACHE FILEPATH "Windows uuid import library")
       endif()
       target_link_libraries(crtgfx_skia_shared PRIVATE "${CRTGFX_WINDOWS_UUID_LIB}")
-      target_link_options(crtgfx_skia_shared PRIVATE -Wl,--allow-multiple-definition)
     elseif(CRT_TARGET_OS STREQUAL "linux")
       # -fuse-ld=lld: see crtgfx_skia_raster_smoke's own, fuller comment
       # (same file, its Linux branch) for the full ld.bfd-vs-lld story.

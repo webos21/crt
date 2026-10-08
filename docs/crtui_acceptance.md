@@ -951,8 +951,8 @@ and the per-OS dependency/RPATH checks.
    (`manifest.built_from.stage == "03-gfx-simple"`): the entrypoint refuses the
    ordinary cumulative 04 package up front, because that one has no Skia, FFmpeg
    or curl. crtgfx/crtmedia headers, `libskia.a`, FreeType, FFmpeg, the curl chain,
-   the mingw/win32-shim headers and the emutls stub archive all come from the
-   installed SDK. The asset (`distribution/stages/05-ui/CMakeLists.txt`,
+   the mingw/win32-shim headers and the libc-owned emulated-TLS runtime all come
+   from the installed SDK. The asset (`distribution/stages/05-ui/CMakeLists.txt`,
    `tools/build_stage_05_ui.py`, `libcrtui/{cmake,include,src,tests,tools}`, the
    LVGL recipe and fetcher, the test clip, the sample project) is ~118 KB.
 2. *LVGL.* Fetched live and pinned by `libcrtui/third_party/lvgl/recipe.json`

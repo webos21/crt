@@ -333,15 +333,9 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
                                                                          # the Microsoft layout MinGW targets default to does not.
                                                                          "-mno-ms-bitfields"]
         macos_options = [f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
-        # thread_local is lowered to compiler-rt's emulated TLS (the wrapper's -femulated-tls), whose
-        # emutls.c names two UCRT entry points that only its fatal-error path reaches; the stubs and
-        # --allow-multiple-definition are the accommodation libcrtgfx documents for Skia's thread_local.
         # Data exported by one CRT DLL and read by another (environ, libc++'s vtables) is auto-imported.
-        stubs = build.parent / "emutls_link_stubs.o"
-        stubs.parent.mkdir(parents=True, exist_ok=True)
-        run([sdk / "tools" / "crt-cc.cmd", "-c", ROOT / "libc" / "src" / "arch" / "windows" / "common" /
-             "emutls_link_stubs.c", "-o", stubs], env=env)
-        link_flags += [str(stubs).replace("\\", "/"), "-Wl,--allow-multiple-definition", "-Wl,--enable-auto-import"]
+        # -femulated-tls calls resolve through libc.dll; no consumer-local emutls object is linked.
+        link_flags.append("-Wl,--enable-auto-import")
     if target_os == "linux":
         # Native TLS in a shared library: the initial-exec model avoids __tls_get_addr, which
         # only the (host) dynamic loader defines.
