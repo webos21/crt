@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on all four hosts; 1D-B (FTL) is green on Linux/x86_64 and Windows/x64, while 1D-C (WebAssembly) is green on Linux/x86_64 and remains open on Windows/x64. macOS/arm64 and Linux/aarch64 1D-B/C replays plus 1D-D (profiler) remain. W^X is separate hardening. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on all four hosts; 1D-B (FTL) and 1D-C (WebAssembly) are green on Linux/x86_64 and Windows/x64; 1D-D (sampling profiler) is green on Linux/x86_64. macOS/arm64 and Linux/aarch64 1D-B/C replays plus 1D-D replays on the other three hosts remain. W^X is separate hardening. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -241,10 +241,10 @@ bounded; and the host-ABI audit is clean. That is the *reference acceptance* (do
 replays* are recorded separately and are not part of that definition: Linux/aarch64,
 macOS/arm64 and Windows/x64 are all done.
 
-*Deliberately unchanged.* The default thread stack stays 1 MiB (1B already showed correct
-stack-overflow detection and 1/4/8-thread VMs; JSC's own defaults are 5 MB per-thread usage,
-64 KB reserved zone, 128 KB soft zone); revisit it when concurrent DFG/FTL compiler threads
-arrive. `__tls_get_addr`: JSC itself avoids it with `-ftls-model=initial-exec`; ICU and
+*Deliberately unchanged.* The default thread stack stays 1 MiB. Correct stack-overflow detection,
+1/4/8-thread VMs, concurrent DFG/FTL compiler threads and the profiler's four worker VMs all
+pass, but an embedder that runs arbitrary script still owns its thread-size policy (JSC's defaults
+are 5 MB per-thread usage, 64 KB reserved zone and 128 KB soft zone). `__tls_get_addr`: JSC itself avoids it with `-ftls-model=initial-exec`; ICU and
 `libc++abi` still reference it. On Linux the host's dynamic loader is CRT's loader today, so
 this is the *accepted current loader boundary*, and becomes a gap only when CRT owns a loader.
 
@@ -255,13 +255,13 @@ one on and isolates it with JSC run-time options):
 |---|---|---|
 | 1D-A | DFG + concurrent compiler threads | compiler threads, DFG code, cross-thread VM/code lifecycle |
 | 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs (Linux/x86_64, Windows/x64 done) |
-| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (Linux/x86_64 done; Windows/x64 open) |
-| 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads |
+| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (Linux/x86_64 and Windows/x64 done) |
+| 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads (Linux/x86_64 done) |
 
 W^X is hardening, not a tier. Order: Linux/x86_64 first, so a failure is a JSC-tier problem and not a signal
 emulation or persona problem, then Linux/aarch64, macOS/arm64 and Windows/x64. **1D-A gates Tranche 2 at minimum.** The pinned WebKit
 enables FTL, WebAssembly and the sampling profiler by default on x86_64/arm64, so 1D-B..1D-D close JSC's default
-capabilities: finish them before the unchanged WPE baseline where practical (1D-B and 1D-C are done on Linux/x86_64; 1D-B is also done on Windows/x64), but none
+capabilities: finish them before the unchanged WPE baseline where practical (1D-B and 1D-C are done on Linux/x86_64 and Windows/x64; 1D-D is done on Linux/x86_64), but none
 is a `PlatformCRT` architecture blocker.
 
 **1D-A result, Linux/x86_64 (2026-10-05).** `tools/build_webkit_jsc.py --mode baseline-jit` gained "step 3", run on
@@ -411,8 +411,28 @@ process exit (`Invalid value for lock: 0` or silent exit 134). All three are fix
 runs, 0 hangs in 150 runs, the official acceptance passes, and about 800 bounded Wasm runs have no failures. The emulated-TLS
 runtime was subsequently centralized in `libc.dll` (2026-10-08) with a two-DLL ownership regression, so JSC and graphics no
 longer carry consumer-local copies. Windows 1D-B and 1D-C are closed. No temporary signal tracing instrumentation is part of
-the result. macOS/arm64 and Linux/aarch64 replays can proceed independently; sampling profiler 1D-D, W^X, SIMD and Wasm
+the result. macOS/arm64 and Linux/aarch64 replays can proceed independently; sampling-profiler replays, W^X, SIMD and Wasm
 threads remain separate work.
+
+**1D-D result, Linux/x86_64 (2026-10-08).** The harness has a third, separate
+`--mode sampling-profiler` build tree. It configures the pinned JSCOnly source with
+`ENABLE_SAMPLING_PROFILER=ON`, keeps Baseline/DFG/FTL/WebAssembly enabled, and reruns every
+1B..1D-C gate before the profiler-specific gate. This avoids treating a profiler-only build as
+evidence for an ordinary tier build and proves that profiler suspension coexists with concurrent
+JIT compilation, Wasm fast-memory faults and watchdog VM traps.
+
+`libcrtweb/tests/jsc/jsc_sampling_profiler_acceptance.js` first checks JSC's
+`platformSupportsSamplingProfiler()`, starts profiling, and executes a named non-inlined hot loop.
+It validates the returned profile interval, non-empty traces and that the expected JavaScript
+function occurs in sampled frames. Four `$262.agent` workers then create independent VMs and run
+the same test concurrently; each worker must return its own valid profile. The official installed-
+`05-ui` SDK run passed with **5/5 profiles, 1,320 traces and 1,320 named hot frames**, and the host-
+ABI audit reported no host-library violation. Twenty additional isolated repeats passed 20/20;
+every run sampled all five VMs, with at least 1,288 traces and 1,288 named hot frames. The rebuilt
+CRT signal/TLS regression subset passes 9/9 and the tools suite passes 104/104. This closes 1D-D on
+Linux/x86_64 only. The full in-tree CTest result is 169/170; its sole failure is the documented,
+pre-existing no-sound-card `crtmedia_playback_pipeline_test_runs` wall-time pacing check, unrelated
+to Web/JSC. Linux/aarch64, macOS/arm64 and Windows/x64 remain native replay gates.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the

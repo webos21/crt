@@ -85,8 +85,10 @@ then macOS/arm64.
     (2026-10-07/08).** The Windows replay fixed exact-once asynchronous delivery, `hlt` mapping, a fault taken while a thread is redirected
     (JIT-address SIGSEGV), the signal-mask ownership, the lost handshake acknowledgement (120 s hang) and the exit-time
     emulated-TLS teardown (silent exit 134, which also explains `Invalid value for lock: 0`); the official baseline-jit acceptance passes
-    and 0 failures in about 800 Wasm runs (`HISTORY.md`, `docs/crtweb_acceptance.md`). **Next:** macOS/arm64 and Linux/aarch64 1D-B/C replays can proceed independently after pulling
-    them. Then run 1D-D sampling profiler (a separate build: `ENABLE_SAMPLING_PROFILER=ON`). 1D-B..D close JSC's default capabilities and should
+    and 0 failures in about 800 Wasm runs (`HISTORY.md`, `docs/crtweb_acceptance.md`). **1D-D sampling profiler is done on
+    Linux/x86_64 (2026-10-08)** in its separate `ENABLE_SAMPLING_PROFILER=ON` build: the main VM and four worker VMs all
+    produced named hot-function samples, with 20/20 repeat runs. **Next:** replay 1D-B/C on macOS/arm64 and Linux/aarch64,
+    then replay 1D-D on those hosts and Windows/x64. 1D-B..D close JSC's default capabilities and should
     precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate hardening. Thread-stack sizing (1 MiB
     default) is still open: DFG, FTL and Wasm compiler threads ran fine at it.
   * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64
@@ -95,9 +97,9 @@ then macOS/arm64.
     `poll`/`select`/file-I/O waits running handlers, threads not made by `pthread_create`, process-directed
     `kill(pid)`/process groups (the Toybox `timeout` item), console Ctrl-C. Windows/arm64 has the same signal backend
     (CTest green 2026-10-06); no JavaScriptCore run exists there yet.
-  * [ ] **Follow-ups found.** ICU and libc++abi use global-dynamic TLS (loader-provided
-    `__tls_get_addr`); the default thread stack is 1 MiB; run the harness from the installed `05-ui` SDK
-    and from the isolated stage chain (Tranche 10); the Windows/macOS replays must include the host-ABI audit
+  * [ ] **Follow-ups found.** The 1 MiB default thread stack remains an embedder-policy question even though
+    compiler threads and the 1/4/8-thread VM gates pass. The installed-`05-ui` harness run is done; the isolated
+    stage-chain run remains Tranche 10. The Windows/macOS replays must include the host-ABI audit
     (`llvm-readobj`/`dumpbin`, `otool -L`). Windows emulated TLS is now centralized in libc; measure
     per-thread allocation growth under a bounded thread-churn test before deciding whether pthread-exit cleanup
     is needed (not a 1D-C gate and never reintroduce process-exit teardown).

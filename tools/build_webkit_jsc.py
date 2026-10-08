@@ -18,12 +18,15 @@ the lifecycle test program -> run the acceptance (a JavaScript script through th
 shell, and a C API program that creates, uses and releases JS contexts 150 times and on
 several threads while watching resident memory).
 
-Two build modes, one new runtime assumption each (Web Tranche 1B and 1C):
+Three build modes, one new runtime assumption each (Web Tranche 1B, 1C and 1D-D):
 
   interpreter   the C_LOOP interpreter; JIT, DFG, FTL, WebAssembly and the sampling profiler off
   baseline-jit  the assembly interpreter plus the JIT tiers compiled in (a smaller JIT build does
                 not compile, see MODE_OPTIONS); the DFG, FTL and WebAssembly tiers are disabled at
                 run time, so only the Baseline JIT generates code. The sampling profiler is off
+  sampling-profiler
+                a separate full-tier JIT build with ENABLE_SAMPLING_PROFILER=ON. It reruns every
+                Baseline/DFG/FTL/Wasm gate, then samples the main VM and concurrent worker VMs
 
 both with the Generic event loop (no GLib). In baseline-jit mode the same binary is run twice:
 with JSC_useJIT=false (the assembly interpreter alone: the whole 1B acceptance must still pass and
@@ -226,11 +229,11 @@ COMMON_OPTIONS = [
                               "header maps need; an upstream option, no source change"),
     ("-DENABLE_API_TESTS=OFF", "upstream disables them on Windows; CRT has its own acceptance"),
     ("-DDEVELOPER_MODE=OFF", ""),
-    ("-DENABLE_SAMPLING_PROFILER=OFF", "needs signal-based thread suspension (and conflicts with C_LOOP)"),
 ]
 
 MODE_OPTIONS = {
     "interpreter": [
+        ("-DENABLE_SAMPLING_PROFILER=OFF", "conflicts with C_LOOP"),
         ("-DENABLE_JIT=OFF", "Tranche 1B interpreter first-green"),
         ("-DENABLE_C_LOOP=ON", "the portable C++ interpreter (no assembly LLInt, no JIT)"),
         ("-DENABLE_DFG_JIT=OFF", ""),
@@ -238,6 +241,7 @@ MODE_OPTIONS = {
         ("-DENABLE_WEBASSEMBLY=OFF", "conflicts with C_LOOP"),
     ],
     "baseline-jit": [
+        ("-DENABLE_SAMPLING_PROFILER=OFF", "enabled only in the separate Tranche 1D-D build"),
         ("-DENABLE_JIT=ON", "Tranche 1C: generated code"),
         ("-DENABLE_C_LOOP=OFF", "the JIT conflicts with C_LOOP; this is the offlineasm assembly LLInt"),
         ("-DENABLE_DFG_JIT=ON", "the tiers are compiled in and the Baseline JIT is isolated at run time "
@@ -248,6 +252,14 @@ MODE_OPTIONS = {
                                 "sources need B3, which exists only with FTL"),
         ("-DENABLE_FTL_JIT=ON", "see above"),
         ("-DENABLE_WEBASSEMBLY=ON", "see above"),
+    ],
+    "sampling-profiler": [
+        ("-DENABLE_SAMPLING_PROFILER=ON", "Tranche 1D-D: signal-based sampling of VM threads"),
+        ("-DENABLE_JIT=ON", "same full-tier JIT configuration already accepted in 1C/1D-A..C"),
+        ("-DENABLE_C_LOOP=OFF", "the sampling profiler and JIT conflict with C_LOOP"),
+        ("-DENABLE_DFG_JIT=ON", "rerun the accepted higher-tier gates in the profiler build"),
+        ("-DENABLE_FTL_JIT=ON", "rerun the accepted higher-tier gates in the profiler build"),
+        ("-DENABLE_WEBASSEMBLY=ON", "rerun the accepted Wasm gate in the profiler build"),
     ],
 }
 
@@ -344,7 +356,7 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         # libc++abi); the executable link must not insist on resolving them at link time.
         link_flags.append("-Wl,--allow-shlib-undefined")
     cxx_flags = list(c_flags)
-    if target_os == "macos" and mode == "baseline-jit":
+    if target_os == "macos" and mode != "interpreter":
         # Apple Silicon W^X through JavaScriptCore's own extension point (no patch): the CRT toggle
         # behind OS_THREAD_SELF_RESTRICT. JavaScriptCore only uses these macros from C++.
         cxx_flags += ["-include", str(ROOT / "libcrtweb" / "cmake" / "crt_webkit_jit_permissions.h")]
@@ -384,7 +396,7 @@ def build_test_programs(sdk: Path, build: Path, env: dict, target_os: str, mode:
         compile_env["CRT_TARGET_OS"] = "linux"
     # The watchdog test interrupts compiled code with a signal and reads the forwarded machine
     # context, so it belongs to the JIT step only.
-    for name in (("jsc_context_cycle", "jsc_watchdog_test", "jsc_wasm_signal_probe") if mode == "baseline-jit"
+    for name in (("jsc_context_cycle", "jsc_watchdog_test", "jsc_wasm_signal_probe") if mode != "interpreter"
                  else ("jsc_context_cycle",)):
         output = build / "bin" / (name + (".exe" if target_os == "windows" else ""))
         command = [sdk / "tools" / ("crt-c++.cmd" if target_os == "windows" else "crt-c++"),
@@ -622,6 +634,30 @@ def run_wasm_acceptance(results: dict, build: Path, run_env: dict, programs: dic
         "wasm_loop_terminated": "wasm main terminated=1" in watchdog["stdout"] and "wasm worker terminated=1" in watchdog["stdout"]}
 
 
+def run_sampling_profiler_acceptance(results: dict, build: Path, run_env: dict) -> None:
+    """Tranche 1D-D: prove the separately compiled sampling profiler can suspend and sample
+    the main VM thread and four concurrent worker VMs. The script validates the JSON profiles
+    and named JavaScript frames itself; the structured line keeps the evidence machine-readable."""
+    completed = measured(
+        [build / "bin" / "jsc", TESTS / "jsc_sampling_profiler_acceptance.js"],
+        {**run_env, **FTL_ON_OPTIONS})
+    match = re.search(
+        r"jsc_sampling_profiler_acceptance: ok profiles=(\d+) traces=(\d+) hot_frames=(\d+)",
+        completed["stdout"])
+    profiles = int(match.group(1)) if match else 0
+    traces = int(match.group(2)) if match else 0
+    hot_frames = int(match.group(3)) if match else 0
+    results["step6_sampling_profiler_main_and_workers"] = {
+        "ok": completed["returncode"] == 0 and match is not None,
+        "platform_support": "platform_support=true" in completed["stdout"],
+        "profiles": profiles,
+        "traces": traces,
+        "hot_frames": hot_frames,
+        "all_vm_threads_sampled": profiles == 5,
+        "samples_collected": traces > 0 and hot_frames > 0,
+    }
+
+
 def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict, target_os: str = "linux") -> dict:
     results = {}
     jsc = build / "bin" / "jsc"
@@ -658,10 +694,12 @@ def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict, target
         results["step2_watchdog_signal_vm_traps"] = {
             "ok": watchdog["returncode"] == 0 and "jsc_watchdog_test: ok" in watchdog["stdout"],
             "spin_function_compiled": compiled_spin}
-    if mode == "baseline-jit":
+    if mode != "interpreter":
         run_dfg_acceptance(results, build, run_env, programs)
         run_ftl_acceptance(results, build, run_env, programs)
         run_wasm_acceptance(results, build, run_env, programs, target_os)
+    if mode == "sampling-profiler":
+        run_sampling_profiler_acceptance(results, build, run_env)
     results["passed"] = all(
         value["ok"] and value.get("within_rss_bound", True) and value.get("no_code_compiled", True)
         and value.get("compiled_code_proven", True) and value.get("spin_function_compiled", True)
@@ -671,6 +709,8 @@ def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict, target
         and value.get("omg_code_proven", True) and value.get("no_omg_code", True)
         and value.get("fast_memory_signal_proven", True) and value.get("bounds_check_without_signals", True)
         and value.get("spin_function_ftl_compiled", True) and value.get("wasm_loop_terminated", True)
+        and value.get("platform_support", True) and value.get("all_vm_threads_sampled", True)
+        and value.get("samples_collected", True)
         for value in results.values() if isinstance(value, dict))
     return results
 
@@ -844,10 +884,10 @@ def write_fingerprint(work: Path, recipe: Path, sdk: Path, deps: Path, tools: di
         "icu_prefix": str(deps),
         "icu_recipe_sha256": hashlib.sha256((ROOT / "porting/recipes/icu.json").read_bytes()).hexdigest(),
         "host_tools": tools,
-        "configuration": {"port": "JSCOnly", "mode": mode, "jit": mode == "baseline-jit",
+        "configuration": {"port": "JSCOnly", "mode": mode, "jit": mode != "interpreter",
                           "c_loop": mode == "interpreter", "event_loop": "Generic",
                           "options": [option for option, _ in configure_options(mode)],
-                          "jit_run_options": JIT_ON_OPTIONS if mode == "baseline-jit" else {}},
+                          "jit_run_options": JIT_ON_OPTIONS if mode != "interpreter" else {}},
     }
     (work / f"webkit-jsc-config-{mode}.json").write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
 
@@ -862,7 +902,8 @@ def main() -> int:
     parser.add_argument("--work-root", type=Path, required=True)
     parser.add_argument("--cache", type=Path, help="download cache (default: <work-root>/cache)")
     parser.add_argument("--mode", choices=sorted(MODE_OPTIONS), default="interpreter",
-                        help="interpreter (1B, default) or baseline-jit (1C); each mode has its own build tree")
+                        help="interpreter (1B, default), baseline-jit (1C/1D-A..C), or "
+                             "sampling-profiler (1D-D); each mode has its own build tree")
     parser.add_argument("--skip-build", action="store_true",
                         help="reuse an existing build tree and only run the acceptance")
     args = parser.parse_args()

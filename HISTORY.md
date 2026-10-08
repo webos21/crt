@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-10-08
 
+### Web Tranche 1D-D: JavaScriptCore sampling profiler accepted on Linux/x86_64
+
+Added a distinct `sampling-profiler` mode to `tools/build_webkit_jsc.py`. It builds
+the pinned JSCOnly source from the installed and verified `05-ui` SDK with
+`ENABLE_SAMPLING_PROFILER=ON`, while retaining Baseline JIT, DFG, FTL and WebAssembly,
+and reruns the complete 1B..1D-C acceptance before its profiler gate. Interpreter and
+ordinary Baseline-JIT modes continue to compile the profiler out, so their existing
+configuration and evidence remain isolated.
+
+The new `jsc_sampling_profiler_acceptance.js` validates JSC's platform-support result,
+profile interval, non-empty traces and named hot-function frames. It exercises the main
+VM plus four concurrent `$262.agent` worker VMs, each with an independently started
+profiler. The official run produced 5/5 valid profiles, 1,320 traces and 1,320 named hot
+frames; its host-ABI audit was clean. Twenty further runs passed 20/20 with all five VMs
+sampled every time and minima of 1,288 traces and 1,288 hot frames. The relevant rebuilt
+signal/TLS CTest subset passes 9/9 and the tool suite passes 104/104. Tranche 1D-D is
+closed on Linux/x86_64. Full in-tree CTest is 169/170; the sole failure is the known,
+pre-existing no-sound-card `crtmedia_playback_pipeline_test_runs` pacing check, unrelated
+to Web/JSC. This run also closes the installed-`05-ui` SDK half of the packaging follow-up.
+ICU/libc++abi's loader-provided global-dynamic TLS is recorded as the accepted current loader
+boundary rather than an active Tranche 1 gap; it becomes work when CRT owns the loader. Native
+Linux/aarch64, macOS/arm64 and Windows/x64 replays remain.
+
 ### Windows CI: architecture-correct VM-trap coverage and scheduler-safe sleep assertion
 
 Repaired the two Windows failures in GitHub Actions run 37707937441. The
