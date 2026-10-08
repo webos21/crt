@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-10-08
 
+### Windows CI: architecture-correct VM-trap coverage and scheduler-safe sleep assertion
+
+Repaired the two Windows failures in GitHub Actions run 37707937441. The
+`signal_vmtrap_test` source included the x86_64-only `hlt` scenario in its
+Windows/arm64 build: its handler advanced `uc_mcontext.gregs[REG_RIP]` and its
+inline assembly emitted the one-byte x86 instruction. The complete `hlt`
+scenario and its default test-list entry are now x86_64-only. Windows/arm64
+continues to exercise its actual JSC trap shape through the existing AArch64
+`brk #0xf000` test, including Linux-layout `pc` rewriting, as well as the common
+worker, initial-thread, concurrent and blocked-wait signal tests. The source
+compiles cleanly with the CI target and flags (`aarch64-w64-mingw32`,
+`-femulated-tls`, `-ffixed-x18`, `-Werror`).
+
+The Windows/x64 job's lone `bionic_surface_test` failure was not reproducible
+in 200 isolated runs. Its sleep check nevertheless imposed a false two-second
+upper bound on `usleep(20000)`: POSIX guarantees that the call does not return
+before the requested interval, but an oversubscribed CI runner may resume it
+arbitrarily later. The regression now checks the real contract (at least 19
+ms, retaining the existing one-millisecond timer tolerance) instead of treating
+scheduler delay as a libc failure. The rebuilt focused Windows/x64 signal and
+Bionic-surface tests pass, the latter passes 200/200 isolated repetitions, and
+a fresh configure/build/test workflow passes all 143 Windows/x64 CI tests.
+
 ### Windows emulated TLS is owned once by libc across DLL boundaries
 
 Closed the follow-up exposed by the Windows JSC 1D-C exit-race fix. The first

@@ -550,6 +550,10 @@ static void test_blocked_waits(void) {
   sem_destroy(&block_sem);
 }
 
+/* `hlt` is JavaScriptCore's x86_64 VM-trap instruction. arm64 uses `brk`, whose context and
+ * resume behavior are covered by test_int3_raises_sigtrap() above; it has no x86-style
+ * one-byte privileged instruction or REG_RIP to advance here. */
+#if defined(__x86_64__)
 /* `hlt` -- the instruction JavaScriptCore patches into compiled code as its VM trap -- is a general-protection
  * fault: Linux delivers SIGSEGV (si_code SI_KERNEL, no address), Windows reports a privileged-instruction
  * exception, which the CRT must turn into the same SIGSEGV. A signal sent to a thread while it is inside
@@ -615,6 +619,7 @@ static void test_hlt_raises_sigsegv(void) {
   signal(SIGSEGV, SIG_DFL);
   signal(SIGUSR1, SIG_DFL);
 }
+#endif
 
 #if defined(__x86_64__)
 /* A fault taken while another thread is delivering a signal to the faulting thread. On Windows the sender
@@ -714,9 +719,11 @@ static void run_one(const char* name) {
   if (strcmp(name, "int3") == 0) {
     progress("int3 raises SIGTRAP");
     test_int3_raises_sigtrap();
+#if defined(__x86_64__)
   } else if (strcmp(name, "hlt") == 0) {
     progress("hlt raises SIGSEGV, pending signals follow the fault handler");
     test_hlt_raises_sigsegv();
+#endif
   } else if (strcmp(name, "worker") == 0) {
     progress("a worker's loop is interrupted");
     test_interrupt_worker();
@@ -739,7 +746,11 @@ static void run_one(const char* name) {
 }
 
 int main(void) {
+#if defined(__x86_64__)
   static const char* const names[] = {"fault", "int3", "hlt", "worker", "initial", "concurrent", "blocked"};
+#else
+  static const char* const names[] = {"int3", "worker", "initial", "concurrent", "blocked"};
+#endif
   const char* only = getenv("SIGNAL_VMTRAP_ONLY");
   size_t i;
 

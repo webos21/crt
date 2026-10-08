@@ -124,7 +124,11 @@ static void test_usleep(void) {
   CHECK(usleep(20000) == 0, "usleep returns 0");
   clock_gettime(CLOCK_MONOTONIC, &after);
   elapsed_ns = (after.tv_sec - before.tv_sec) * 1000000000L + (after.tv_nsec - before.tv_nsec);
-  CHECK(elapsed_ns >= 19000000L && elapsed_ns < 2000000000L, "usleep(20000) took about 20 ms");
+  /* usleep() promises not to return before the requested interval. It does not promise an upper
+   * bound: a loaded CI runner may deschedule this process for arbitrarily longer. Testing a 2 s
+   * ceiling made the otherwise-correct Windows/x64 surface test intermittently fail in the full
+   * workflow even though 200 isolated repetitions passed. */
+  CHECK(elapsed_ns >= 19000000L, "usleep(20000) did not return early");
 }
 
 static void test_mkostemp(void) {
