@@ -11,8 +11,9 @@
  * exit() runs atexit handlers while other threads can still execute, so freeing
  * the TLS key there caused JavaScriptCore compiler threads to abort after the
  * script had completed.  This runtime deliberately has no process-exit
- * teardown; Windows reclaims the key and allocations when the process ends.
- * Per-thread reclamation is tracked separately from this correctness boundary.
+ * teardown; Windows reclaims the key and the initial thread's allocations when
+ * the process ends. CRT-created pthreads explicitly reclaim only their own
+ * arrays and objects at thread exit, without invalidating the process-wide key.
  *
  * The control and array layouts follow compiler-rt's public emutls ABI.  An
  * already-numbered control can arrive through another module, so observing one
@@ -70,6 +71,24 @@ static void crt_emutls_reserve_index(uintptr_t index) {
          !__atomic_compare_exchange_n(&crt_emutls_count, &count, index, 0,
                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
   }
+}
+
+void __crt_windows_emutls_thread_cleanup(void) {
+  crt_emutls_array* array;
+  uintptr_t index;
+
+  if (__atomic_load_n(&crt_emutls_state, __ATOMIC_ACQUIRE) != 2) return;
+  array = (crt_emutls_array*)TlsGetValue(crt_emutls_key);
+  if (array == 0) return;
+
+  /* Clear the OS slot before releasing its value: no later runtime helper on
+   * this exiting thread may observe a dangling array.  The process-wide key
+   * remains valid for live and future threads. */
+  if (!TlsSetValue(crt_emutls_key, 0)) abort();
+  for (index = 0; index < array->size; ++index) {
+    if (array->data[index] != 0) _aligned_free(array->data[index]);
+  }
+  free(array);
 }
 
 void* __emutls_get_address(crt_emutls_control* control) {

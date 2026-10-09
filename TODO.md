@@ -103,23 +103,14 @@ then macOS/arm64.
     macOS `pthread_create()` stack-bound publication race analogous to the Windows finding.
     **Next:** replay 1D-B/C/D on Linux/aarch64. 1D-B..D close JSC's default capabilities and
     should precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate
-    hardening. Thread-stack sizing (1 MiB default) remains an embedder-policy question.
+    hardening. The tested 1 MiB pthread default is accepted as a runtime default; embedders own
+    larger per-workload stack choices (`docs/pthread_policy.md`).
   * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64
     (signal VM-trap gate: real per-thread signals, polling traps off, watchdog 100/100); macOS/x86_64 has no signal
     conversion or JIT permissions. Windows signal gaps that are *not* gates (backlog until a consumer needs them):
     `poll`/`select`/file-I/O waits running handlers, threads not made by `pthread_create`, process-directed
     `kill(pid)`/process groups (the Toybox `timeout` item), console Ctrl-C. Windows/arm64 has the same signal backend
     (CTest green 2026-10-06); no JavaScriptCore run exists there yet.
-  * [ ] **Follow-ups found.** The 1 MiB default thread stack remains an embedder-policy question even though
-    compiler threads and the 1/4/8-thread VM gates pass. The installed-`05-ui` harness run is done; the isolated
-    stage-chain run remains Tranche 10. The Windows/macOS replays must include the host-ABI audit
-    (`llvm-readobj`/`dumpbin`, `otool -L`). Windows emulated TLS is now centralized in libc; measure
-    per-thread allocation growth under a bounded thread-churn test before deciding whether pthread-exit cleanup
-    is needed (not a 1D-C gate and never reintroduce process-exit teardown).
-  * [ ] **Build-tool/target split.** Before `06-web` is the embedded product stage, separate
-    build-host tools (gperf, ICU's data generators, Perl/Python/Ruby) from target libraries so
-    a cross build (x86_64 host, Linux/aarch64 target) works; native three-host builds are
-    unaffected.
 * [ ] **2. Linux WPE reference baseline.** Upstream WPE unchanged rendering
   local HTML; the known-good baseline to diff `PlatformCRT` against.
 * [ ] **3. `PlatformCRT` graphics and input prototype.** (Gates before 3B: pin the full
@@ -141,7 +132,10 @@ then macOS/arm64.
 * [ ] **10. Distribution and security closure.** Isolated `06-web` build from
   the installed `05-ui` SDK; update `tools/create_stage_source.py` and
   `tools/crt_dist_prerequisites.py` in the same change; provenance/SBOM/CVE
-  artifacts.
+  artifacts. The isolated stage chain also closes the complete build-host/target
+  split: gperf, Perl, Python, Ruby and ICU generators run as host tools and never
+  enter the SDK or target ABI audit; ICU, JSC, libc++ and WebKit remain target
+  artifacts. Prove it with an x86_64-host -> Linux/aarch64-target build.
 
 Web follow-up (not a gate): `tools/check_webkit_security.py` -- compare the pinned
 version with the upstream WPE advisory feed; becomes a package gate before the

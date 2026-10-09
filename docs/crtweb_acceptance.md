@@ -127,20 +127,22 @@ kept apart from the start.
   `Source/cmake/WebKitCommon.cmake` for every port; JavaScriptCore generates its
   interpreter with Ruby and Perl scripts). `gperf` joins them only when WebCore is
   enabled (`if (ENABLE_WEBCORE) find_package(Gperf ...)`), so it is a WebCore
-  prerequisite, not a JSCOnly one: its Linux port is done and kept, and its
-  Windows/macOS replay does not block 1B.
+  prerequisite, not a JSCOnly one. ICU's data-generator executables also belong
+  on this side even though the libraries they generate data for are target
+  dependencies. None of these executables belongs in the SDK or target ABI audit.
 - *Target dependencies* are built against the CRT target sysroot and shipped: CRT
-  pthread/libc/libc++, and ICU (`data`, `uc`, `i18n`, >= 70.1) from the CRT port
-  `porting/recipes/icu.json`, never the host ICU (fast on Linux, wrong on
-  Windows/macOS).
+  pthread/libc/libc++, ICU (`data`, `uc`, `i18n`, >= 70.1), JavaScriptCore and
+  later WebCore/WebKit. ICU comes from the CRT port `porting/recipes/icu.json`,
+  never the host ICU (fast on Linux, wrong on Windows/macOS).
 
 Today host and target are the same machine and architecture, so the ports are
 ordinary CRT executables that run during the build. That does not survive a cross
 build (an x86_64 build host producing a Linux/aarch64 SDK cannot run an aarch64
 `gperf` or ICU's data generators), so before `06-web` becomes the embedded product
 stage the build must separate the two: build tools built for, and run on, the build
-machine; target libraries built for the target. Not a blocker for the native
-three-host acceptance; recorded in `TODO.md`.
+machine; target libraries built for the target. This design boundary is fixed
+here, but the complete x86_64-host -> Linux/aarch64-target proof belongs to the
+isolated stage chain in Tranche 10, not to Tranche 1.
 
 **1A -- dependency inventory and ports.** The build-host tool inventory above
 (checked, with versions, by `tools/build_webkit_jsc.py`) and the ICU target port,
@@ -1024,7 +1026,11 @@ context between WebKit and CRT is explicitly not an initial acceptance item.
 Isolated `06-web` build from the installed `05-ui` SDK: JSC/WebCore/WebKit ->
 `libcrtweb` -> a browser sample, `verify_dist.py`, dependency/RPATH audit, and
 publication only after all three hosts pass. Include the provenance/SBOM/CVE
-policy artifacts named in Tranche 0.
+policy artifacts named in Tranche 0. This tranche also owns the complete
+build-host/target split: gperf, Perl, Python, Ruby and ICU data generators execute
+for the build host and never enter the SDK or target ABI audit; ICU, libc++, JSC,
+WebCore and WebKit are built for the target. Acceptance includes an
+x86_64-host -> Linux/aarch64-target isolated build.
 
 ## Host order
 

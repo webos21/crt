@@ -29,6 +29,7 @@ extern unsigned long __crt_initial_stack_top;
 extern long __crt_initial_thread_id;
 #endif
 #if defined(CRT_TARGET_OS_WINDOWS)
+void __crt_windows_emutls_thread_cleanup(void);
 void __crt_windows_signal_attach_current(void);
 unsigned long __crt_windows_signal_current_mask(void);
 unsigned long __crt_windows_signal_wait_handle(void* handle, unsigned long milliseconds);
@@ -598,6 +599,7 @@ static int pthread_start(void* arg) {
   pthread_run_key_destructors();
 #if defined(CRT_TARGET_OS_WINDOWS)
   __crt_windows_signal_detach_current();
+  __crt_windows_emutls_thread_cleanup();
 #endif
   __crt_thread_clear_current(&control->context);
   detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
@@ -2388,6 +2390,9 @@ void pthread_exit(void* retval) {
     detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   }
   pthread_run_key_destructors();
+#if defined(CRT_TARGET_OS_WINDOWS)
+  __crt_windows_emutls_thread_cleanup();
+#endif
   if (control != 0) {
     __crt_thread_clear_current(&control->context);
   }

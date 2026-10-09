@@ -519,6 +519,12 @@ add_crt_test(emutls_exit_race_test emutls_exit_race_test.c)
 set_tests_properties(emutls_exit_race_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "emutls_exit_race_test: ok"
   TIMEOUT 180)
+# Bounded sequential pthread churn must not retain a fresh emulated-TLS array
+# and object set for every terminated Windows thread.
+add_crt_test(emutls_thread_churn_test emutls_thread_churn_test.c)
+set_tests_properties(emutls_thread_churn_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "emutls_thread_churn_test: ok"
+  TIMEOUT 120)
 if(CRT_TARGET_OS STREQUAL "windows")
   foreach(module IN ITEMS a b)
     add_library(emutls_module_${module} SHARED

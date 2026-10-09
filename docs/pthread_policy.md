@@ -74,6 +74,40 @@ to Linux, macOS, and Windows.
   because Kernel32 does not accept an arbitrary caller-owned stack for
   `CreateThread`.
 
+### Default stack-size ownership
+
+The CRT pthread default remains 1 MiB on all three hosts. It is a runtime
+default, not a promise that every application workload fits in 1 MiB. The
+JavaScriptCore bring-up exercised the assembly interpreter, Baseline/DFG/FTL
+compiler threads, WebAssembly, stack-overflow detection, 1/4/8-thread VM cycles
+and sampling-profiler workers successfully with that default. Those results
+reject a general CRT stack defect and keep a larger stack out of Tranche 1's
+acceptance gates.
+
+An embedder that runs arbitrary script, recursive code or another workload with
+a documented larger requirement must set `pthread_attr_setstacksize()` for the
+threads it owns. Raising the global CRT default to accommodate one consumer
+would multiply reserved address space across every thread and is not the policy.
+
+## Windows emulated-TLS lifetime
+
+Clang `-femulated-tls` storage is process-wide in `libc.dll`, so every DLL sees
+one control-index namespace and one Win32 TLS key. The key is never destroyed by
+an `atexit()` handler: process-exit callbacks run while other threads may still
+use TLS, which caused JavaScriptCore's former exit-status-134 race. Instead, a
+CRT-created pthread frees only its own emulated-TLS objects and slot array after
+pthread-key destructors have run. Normal routine return and explicit
+`pthread_exit()` use the same cleanup; live threads and future threads retain the
+process-wide key. The initial thread and any non-CRT-created host thread remain
+OS/process-lifetime storage.
+
+`emutls_thread_churn_test` enforces this boundary with two sequential batches of
+128 short-lived threads, each touching a 256 KiB emulated-TLS object. Before the
+pthread-exit cleanup, the second batch added 42,024,960 private bytes and the two
+batches added 84,049,920 bytes. With cleanup, both measured growth values are
+zero on the Windows/x64 acceptance host. `emutls_exit_race_test` separately
+keeps the no-process-exit-teardown rule covered.
+
 ## Bionic extension policy
 
 - `pthread_getattr_np` returns the stored project pthread attributes. For the

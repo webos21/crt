@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-10-09
 
+### Windows emulated-TLS churn is bounded and Tranche 1 follow-ups are classified
+
+Added `emutls_thread_churn_test`, a bounded Windows/x64 regression that runs a
+warm-up and two sequential batches of 128 short-lived pthreads, each touching a
+256 KiB compiler-lowered `__thread` object, while recording process private
+bytes. The pre-fix implementation retained every terminated thread's emutls
+array and objects: the second batch added 42,024,960 bytes and total post-warm-up
+growth was 84,049,920 bytes. `libc.dll` now keeps its process-wide emutls key but
+frees only the exiting CRT pthread's object slots and array, after pthread-key
+destructors, on both normal return and explicit `pthread_exit()`. This does not
+restore the unsafe process-exit teardown. After the fix, both batch and total
+growth are zero; the churn regression passes 20/20 repetitions, the churn,
+process-exit-race and multi-DLL emutls tests pass 3/3, and the full Windows/x64
+CTest passes 165/165.
+
+Closed the non-implementation Tranche 1 follow-ups at the same boundary. Host-ABI
+audits are complete on Linux/x86_64, macOS/arm64 and Windows/x64. The tested 1 MiB
+pthread default is now explicit policy: CRT keeps the default and an embedder
+selects a larger stack for workloads that require it. The isolated `06-web`
+stage chain and the full build-host/target split are Tranche 10 work. The fixed
+roles are host gperf/Perl/Python/Ruby/ICU generators versus target ICU/libc++/JSC/
+WebKit, with an x86_64-host -> Linux/aarch64-target proof deferred to that stage.
+
 ### Web Tranche 1D-B/C/D accepted on macOS/arm64
 
 Completed the missing native macOS replay with fresh Baseline-JIT and sampling-profiler
