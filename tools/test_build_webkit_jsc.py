@@ -24,6 +24,14 @@ class BuildWebKitJSCModeTests(unittest.TestCase):
             self.assertIn("-DENABLE_SAMPLING_PROFILER=OFF", options)
             self.assertNotIn("-DENABLE_SAMPLING_PROFILER=ON", options)
 
+    def test_macos_arm64_reserves_the_darwin_platform_register(self):
+        arm64 = build_webkit_jsc.target_c_flags("macos", "arm64")
+        self.assertIn("-DWTF_CRT_DARWIN_ARM64_ABI=1", arm64)
+        self.assertNotIn("-DWTF_CRT_DARWIN_ARM64_ABI=1",
+                         build_webkit_jsc.target_c_flags("macos", "x86_64"))
+        self.assertNotIn("-DWTF_CRT_DARWIN_ARM64_ABI=1",
+                         build_webkit_jsc.target_c_flags("linux", "aarch64"))
+
 
 if __name__ == "__main__":
     unittest.main()

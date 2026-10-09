@@ -210,8 +210,6 @@ typedef struct crt_pthread_control {
 #if defined(CRT_TARGET_OS_WINDOWS)
   HANDLE handle;
   DWORD thread_id;
-  int stack_bounds_ready;
-  int creation_published;
 #elif defined(CRT_TARGET_OS_LINUX)
   long tid;
   int tid_word;
@@ -224,6 +222,10 @@ typedef struct crt_pthread_control {
   struct crt_pthread_control* reap_next;
 #elif defined(CRT_TARGET_OS_MACOS)
   crt_macos_pthread_t native_thread;
+#endif
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
+  int stack_bounds_ready;
+  int creation_published;
 #endif
   crt_thread_context context;
   pthread_attr_t attr;
@@ -600,7 +602,7 @@ static int pthread_start(void* arg) {
   __crt_thread_clear_current(&control->context);
   detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   if (detached) {
-#if defined(CRT_TARGET_OS_WINDOWS)
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
     /* A detached routine can finish immediately after publishing its stack bounds. Keep the
      * control block alive until pthread_create() has finished reading it and returned the id.
      * This wait is deliberately a bounded atomic spin: after publication the worker may free
@@ -637,6 +639,8 @@ static void* pthread_macos_start(void* arg) {
       control->attr.stack_size = size;
     }
   }
+  __atomic_store_n(&control->stack_bounds_ready, 1, __ATOMIC_RELEASE);
+  __crt_wake32_all(&control->stack_bounds_ready);
   pthread_start(arg);
   return 0;
 }
@@ -2036,19 +2040,28 @@ int pthread_create(
       free(control);
       return result;
     }
+    /* The native pthread API exposes a kernel-allocated stack's address only to the target
+     * thread. Publish the Bionic-shaped pthread_t after its wrapper records those bounds, so an
+     * immediate pthread_getattr_np() cannot observe { base = NULL, size = requested size }. */
+    while (__atomic_load_n(&control->stack_bounds_ready, __ATOMIC_ACQUIRE) == 0) {
+      (void)__crt_wait32(&control->stack_bounds_ready, 0);
+    }
     if (control->detached) {
       crt_macos_pthread_detach_fn detach_fn =
           (crt_macos_pthread_detach_fn)crt_macos_pthread_symbol("pthread_detach");
       if (detach_fn == 0) {
+        __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
         return ENOSYS;
       }
       result = detach_fn(control->native_thread);
       if (result != 0) {
+        __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
         return result;
       }
     }
   }
   *thread = (pthread_t)(uintptr_t)control;
+  __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
   return 0;
 #else
   free(control);

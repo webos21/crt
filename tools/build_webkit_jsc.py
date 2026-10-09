@@ -304,15 +304,35 @@ def configure_options(mode: str):
     return COMMON_OPTIONS + MODE_OPTIONS[mode]
 
 
+def target_c_flags(target_os: str, arch: str):
+    flags = []
+    if arch in ("x86_64", "amd64"):
+        # libpas/bmalloc use 16-byte atomics; without cmpxchg16b the compiler emits calls to
+        # __atomic_*_16 (libatomic), which the CRT toolchain does not provide.
+        flags.append("-mcx16")
+    if target_os == "macos":
+        flags += ["-D__linux__=1", "-DWTF_CRT_INT64_IS_LONG_LONG=1", "-DWTF_CRT_MACHO_ASM=1",
+                  "-DENABLE_OFFLINE_ASM_ALT_ENTRY=1"]
+        if arch in ("aarch64", "arm64"):
+            # OS(LINUX) selects WebKit's portable source surface, but the generated code still
+            # follows Darwin arm64's ABI, where x18 is reserved for the platform. Patch 0004 uses
+            # this object-ABI trait without enabling WebKit's Apple SDK branches.
+            flags.append("-DWTF_CRT_DARWIN_ARM64_ABI=1")
+    if target_os == "windows":
+        flags += [f"-U{name}" for name in (
+            "WIN32", "WIN64", "WINNT", "_WIN32", "_WIN64", "__WIN32", "__WIN32__", "__WIN64", "__WIN64__",
+            "__WINNT", "__WINNT__", "__MINGW32__", "__MINGW64__")]
+        flags += ["-D__linux__=1", "-DWTF_CRT_COFF_ASM=1", "-mno-ms-bitfields"]
+    if target_os == "linux":
+        flags.append("-ftls-model=initial-exec")
+    return flags
+
+
 def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_os: str, arch: str, mode: str):
     toolchain = sdk / "crt-toolchain.cmake"
     if not toolchain.is_file():
         raise SystemExit(f"{toolchain} not found: --sdk-root must be an installed CRT SDK")
-    c_flags = []
-    if arch in ("x86_64", "amd64"):
-        # libpas/bmalloc use 16-byte atomics; without cmpxchg16b the compiler emits calls to
-        # __atomic_*_16 (libatomic), which the CRT toolchain does not provide.
-        c_flags.append("-mcx16")
+    c_flags = target_c_flags(target_os, arch)
     link_flags = []
     macos_options = []
     if target_os == "macos":
@@ -322,12 +342,6 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         # define selects the RawHex overloads for Darwin's `long long` int64_t (patch 0001).
         # The compilers are given explicitly: on a macOS host WebKitXcodeSDK.cmake otherwise
         # pins Xcode's own clang before the toolchain file is read.
-        c_flags += ["-D__linux__=1", "-DWTF_CRT_INT64_IS_LONG_LONG=1", "-DWTF_CRT_MACHO_ASM=1",
-                    # Mach-O: a global label inside a function is a new linker atom unless marked
-                    # .alt_entry, and the linker may then move the continuation elsewhere (the
-                    # LLInt's vmEntryToJavaScript lost the rest of its body). WTF turns this on only
-                    # for PLATFORM(COCOA); the header does not guard it, so a -D is enough.
-                    "-DENABLE_OFFLINE_ASM_ALT_ENTRY=1"]
         macos_options = [f"-DCMAKE_C_COMPILER={sdk / 'tools' / 'crt-cc'}",
                          f"-DCMAKE_CXX_COMPILER={sdk / 'tools' / 'crt-c++'}",
                          f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
@@ -337,13 +351,6 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
         # runtime, which the CRT sysroot does not have. __linux__ makes WTF/bmalloc take OS(LINUX).
         # Every Windows/MinGW macro clang predefines for *-w64-mingw32 (WebKit tests WIN32, _WIN32,
         # WINNT and __MINGW32__ in different places), then the Linux one.
-        c_flags += [f"-U{name}" for name in (
-            "WIN32", "WIN64", "WINNT", "_WIN32", "_WIN64", "__WIN32", "__WIN32__", "__WIN64", "__WIN64__",
-            "__WINNT", "__WINNT__", "__MINGW32__", "__MINGW64__")] + ["-D__linux__=1", "-DWTF_CRT_COFF_ASM=1",
-                                                                         # GNU bit-field layout, as on Linux: WebKit packs bit-fields of different
-                                                                         # underlying types (RegisterAtOffset: unsigned and ptrdiff_t, 8 bytes), which
-                                                                         # the Microsoft layout MinGW targets default to does not.
-                                                                         "-mno-ms-bitfields"]
         macos_options = [f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
         # Data exported by one CRT DLL and read by another (environ, libc++'s vtables) is auto-imported.
         # -femulated-tls calls resolve through libc.dll; no consumer-local emutls object is linked.
@@ -351,7 +358,6 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
     if target_os == "linux":
         # Native TLS in a shared library: the initial-exec model avoids __tls_get_addr, which
         # only the (host) dynamic loader defines.
-        c_flags.append("-ftls-model=initial-exec")
         # The shared libraries reference loader-provided symbols (__tls_get_addr from ICU and
         # libc++abi); the executable link must not insist on resolving them at link time.
         link_flags.append("-Wl,--allow-shlib-undefined")

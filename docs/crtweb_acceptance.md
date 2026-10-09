@@ -1,7 +1,7 @@
 # crtweb Acceptance (Stage `06-web`)
 
 **Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on all four hosts; 1D-B (FTL) and 1D-C (WebAssembly) are green on Linux/x86_64 and Windows/x64; 1D-D (sampling profiler) is green on Linux/x86_64 and Windows/x64. macOS/arm64 and Linux/aarch64 1D-B/C replays plus their 1D-D replays remain. W^X is separate hardening. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on all four hosts; 1D-B (FTL), 1D-C (WebAssembly) and 1D-D (sampling profiler) are green on Linux/x86_64, macOS/arm64 and Windows/x64. Linux/aarch64 1D-B/C/D remains. W^X is separate hardening. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -254,14 +254,14 @@ one on and isolates it with JSC run-time options):
 | Step | Turns on | New assumption under test |
 |---|---|---|
 | 1D-A | DFG + concurrent compiler threads | compiler threads, DFG code, cross-thread VM/code lifecycle |
-| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs (Linux/x86_64, Windows/x64 done) |
-| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (Linux/x86_64 and Windows/x64 done) |
-| 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads (Linux/x86_64 and Windows/x64 done) |
+| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs (Linux/x86_64, macOS/arm64, Windows/x64 done) |
+| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (Linux/x86_64, macOS/arm64, Windows/x64 done) |
+| 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads (Linux/x86_64, macOS/arm64, Windows/x64 done) |
 
 W^X is hardening, not a tier. Order: Linux/x86_64 first, so a failure is a JSC-tier problem and not a signal
 emulation or persona problem, then Linux/aarch64, macOS/arm64 and Windows/x64. **1D-A gates Tranche 2 at minimum.** The pinned WebKit
 enables FTL, WebAssembly and the sampling profiler by default on x86_64/arm64, so 1D-B..1D-D close JSC's default
-capabilities: finish them before the unchanged WPE baseline where practical (1D-B through 1D-D are done on Linux/x86_64 and Windows/x64), but none
+capabilities: finish them before the unchanged WPE baseline where practical (1D-B through 1D-D are done on Linux/x86_64, macOS/arm64 and Windows/x64), but none
 is a `PlatformCRT` architecture blocker.
 
 **1D-A result, Linux/x86_64 (2026-10-05).** `tools/build_webkit_jsc.py --mode baseline-jit` gained "step 3", run on
@@ -411,8 +411,8 @@ process exit (`Invalid value for lock: 0` or silent exit 134). All three are fix
 runs, 0 hangs in 150 runs, the official acceptance passes, and about 800 bounded Wasm runs have no failures. The emulated-TLS
 runtime was subsequently centralized in `libc.dll` (2026-10-08) with a two-DLL ownership regression, so JSC and graphics no
 longer carry consumer-local copies. Windows 1D-B and 1D-C are closed. No temporary signal tracing instrumentation is part of
-the result. macOS/arm64 and Linux/aarch64 replays can proceed independently; sampling-profiler replays, W^X, SIMD and Wasm
-threads remain separate work.
+the result. At that point macOS/arm64 and Linux/aarch64 replays could proceed independently;
+sampling-profiler replays, W^X, SIMD and Wasm threads remained separate work.
 
 **1D-D result, Linux/x86_64 (2026-10-08).** The harness has a third, separate
 `--mode sampling-profiler` build tree. It configures the pinned JSCOnly source with
@@ -432,7 +432,7 @@ every run sampled all five VMs, with at least 1,288 traces and 1,288 named hot f
 CRT signal/TLS regression subset passes 9/9 and the tools suite passes 104/104. This closes 1D-D on
 Linux/x86_64 only. The full in-tree CTest result is 169/170; its sole failure is the documented,
 pre-existing no-sound-card `crtmedia_playback_pipeline_test_runs` wall-time pacing check, unrelated
-to Web/JSC. Linux/aarch64 and macOS/arm64 remain native replay gates.
+to Web/JSC. At that point Linux/aarch64 and macOS/arm64 remained native replay gates.
 
 **1D-D replay, Windows/x64 (2026-10-08).** The separate `sampling-profiler` build
 passed the complete 1B..1D-C sequence before the profiler step, including concurrent DFG/FTL,
@@ -460,7 +460,41 @@ change was needed. The final source passes Windows CTest
 A redundant post-package full-suite replay was stopped after its second Wasm script exceeded
 the expected duration, before it reached the profiler. The official complete run, the 20/20
 profiler repetitions and the final direct profiler gate remain green; this observation reopens
-1D-C only if it reproduces. Linux/aarch64 and macOS/arm64 remain the native 1D-D replay gates.
+1D-C only if it reproduces. Linux/aarch64 remains after the macOS/arm64 replay below.
+
+**1D-B, 1D-C and 1D-D replay, macOS/arm64 (2026-10-09).** Fresh
+`baseline-jit` and `sampling-profiler` trees were built from the verified WPE WebKit 2.54.0
+archive against the regenerated and verified installed `05-ui` SDK. The baseline tree closed
+FTL/B3 and WebAssembly. The profiler tree then reran the complete 1B..1D-C sequence before its
+own gate. FTL produced 153 reports at the reduced threshold, 107 at default thresholds and 252
+with serial compilation; its negative control produced zero. Wasm produced 21 BBQ and 5 OMG
+code reports, passed interpreter-only and software-bounds modes, and the C API signal probe
+proved 50 fast-memory fault deliveries versus zero in bounds-check mode. The 0/1/4/8-thread
+context cycles, JS and Wasm watchdogs, earlier-tier scripts and Mach-O host-ABI audit all passed.
+
+The first FTL run found an object-ABI mismatch in the Linux-shaped WebKit persona. Its Linux
+ARM64 register table makes x18 allocatable, but Darwin arm64 reserves x18 as the platform
+register. Under B3/Air pressure generated code preserved a value there across a runtime call
+and later faulted near `operationStringFromCharCode`. Carried patch
+`0004-darwin-arm64-reserved-x18` is selected only by
+`WTF_CRT_DARWIN_ARM64_ABI` on macOS/arm64; it chooses WebKit's existing reserved-x18 table
+without enabling Apple SDK source branches. Linux/aarch64 is unchanged. The manifest records
+the exact before/after hashes and removal condition.
+
+The first profiler worker run then exposed the same contract gap previously found on Windows:
+macOS learns a kernel-allocated worker stack only in the target wrapper, but `pthread_create()`
+could return before that wrapper had stored the bounds. WebKit immediately queried
+`pthread_getattr_np()`, observed a null base and derived `0x100000` as the stack origin, then
+faulted in `sanitizeStackForVM`. The wrapper now release-publishes the Apple-reported bounds and
+wakes the creator; the creator publishes the Bionic-shaped `pthread_t` only after that point.
+The detached-thread lifetime handshake covers macOS as well as Windows.
+
+The official profiler gate sampled the main VM and four `$262.agent` worker VMs: **5/5 profiles,
+1,167 traces and 1,167 named hot frames**. Twenty focused repeats passed 20/20 with all five VMs
+and minima of 1,156 traces and hot frames. `pthread_stack_bounds_test`,
+`pthread_thread_test` and `pthread_detach_test` each passed 100 consecutive repetitions; the
+full macOS CTest passed 125/125. This closes 1D-B/C/D on macOS/arm64. Linux/aarch64 is the sole
+remaining native 1D-B/C/D replay; W^X, SIMD and Wasm threads remain separate work.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the
@@ -686,8 +720,9 @@ keys these on the object format instead of `OS(DARWIN)`, or CRT presents macOS a
    signal cases), `pthread_native_tls_test`, `bionic_surface_test`, and `jsc_watchdog_test`/`jsc_context_cycle`
    run on macOS.
 
-*Open on macOS.* x86_64 macOS has neither the signal conversion nor JIT permissions; the DFG/FTL/WebAssembly tiers and
-concurrent compiler threads are 1D; the harness is run from the in-tree `05-ui` SDK, not yet from the isolated stage chain.
+*Open on macOS at the time 1C closed.* x86_64 macOS has neither the signal conversion nor JIT
+permissions. The arm64 DFG/concurrent-JIT replay closed in 1D-A and its FTL/WebAssembly/profiler
+replays closed on 2026-10-09 above. The isolated stage-chain replay remains Tranche 10.
 
 **Linux verification of the macOS replay (done on Linux/x86_64 2026-10-04 at `cd954c9` and on Linux/aarch64 2026-10-05; Windows/x64 shared-code checks 2026-10-05, JSC harness not yet).** The macOS work changed shared
 libc, headers, wrappers, recipes and the harness. Nothing below has been built or run on Linux (or Windows) since

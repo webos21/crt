@@ -67,3 +67,18 @@ the tranche that touches it reads the source. Not yet decided means blank.
 - No WebKit/WPE/GLib type crosses the `libcrtweb` public API.
 - A pin bump (including security updates) changes `libcrtweb/third_party/webkit/recipe.json`
   and re-runs the stage gates; see Tranche 0 in `crtweb_acceptance.md`.
+
+## Current carried patches
+
+`libcrtweb/patches/manifest.json` is authoritative for target selection, exact source hashes,
+reasons and removal conditions. The current patches describe target ABI/object-format traits
+that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
+
+- `0001` keeps Darwin's real `int64_t` identity while the macOS target uses the Linux-shaped
+  source persona.
+- `0002` selects Mach-O assembler spelling for that macOS persona.
+- `0003` selects COFF assembler/calling-convention spelling for the Windows persona.
+- `0004` reserves x18 for the Darwin arm64 ABI even though WTF sees `OS(LINUX)`. It was required
+  by the macOS FTL/B3 replay: the Linux register table allocated x18 and generated code faulted
+  after a runtime call. `WTF_CRT_DARWIN_ARM64_ABI` is emitted only for macOS/arm64, so
+  Linux/aarch64 retains WebKit's Linux table.

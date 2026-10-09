@@ -95,9 +95,15 @@ then macOS/arm64.
     detached-thread lifetime regressions each pass 100/100. One redundant full-suite replay was stopped when its second
     Wasm script exceeded the expected duration before reaching the profiler; reopen 1D-C only if that isolated
     observation reproduces.
-    **Next:** replay 1D-B/C on macOS/arm64 and Linux/aarch64, then replay 1D-D there. 1D-B..D close JSC's default capabilities and should
-    precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate hardening. Thread-stack sizing (1 MiB
-    default) is still open: DFG, FTL and Wasm compiler threads ran fine at it.
+    **macOS/arm64 1D-B/C/D is done (2026-10-09):** FTL/B3, Wasm BBQ/OMG and fast-memory
+    faults, all context/watchdog gates, and the separate sampling-profiler build passed with a
+    clean Mach-O host-ABI audit. The profiler sampled 5/5 VMs with 1,167 named hot frames in the
+    official run and passed 20/20 focused repeats (minimum 1,156). The replay fixed WebKit's
+    Linux-persona register table incorrectly allocating Darwin arm64's reserved x18 and fixed a
+    macOS `pthread_create()` stack-bound publication race analogous to the Windows finding.
+    **Next:** replay 1D-B/C/D on Linux/aarch64. 1D-B..D close JSC's default capabilities and
+    should precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate
+    hardening. Thread-stack sizing (1 MiB default) remains an embedder-policy question.
   * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64
     (signal VM-trap gate: real per-thread signals, polling traps off, watchdog 100/100); macOS/x86_64 has no signal
     conversion or JIT permissions. Windows signal gaps that are *not* gates (backlog until a consumer needs them):

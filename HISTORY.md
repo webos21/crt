@@ -8,6 +8,38 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-09
+
+### Web Tranche 1D-B/C/D accepted on macOS/arm64
+
+Completed the missing native macOS replay with fresh Baseline-JIT and sampling-profiler
+JSCOnly builds against the regenerated, verified `05-ui` SDK. FTL/B3 passed at reduced,
+default and serial thresholds (153, 107 and 252 FTL reports; zero in the negative control).
+WebAssembly passed interpreter, BBQ, OMG and software-bounds modes (21 BBQ and 5 OMG reports),
+and its C API probe measured 50 fast-memory signal deliveries versus zero with explicit bounds
+checks. Context cycles on 0/1/4/8 threads, JS/Wasm watchdog termination and the Mach-O host-ABI
+audit were green. The separate profiler build reran all earlier gates, then sampled the main VM
+and four worker VMs with 5/5 profiles and 1,167 named traces/hot frames. Twenty focused profiler
+repetitions passed 20/20, with a minimum of 1,156 named frames.
+
+The FTL replay exposed a persona-versus-object-ABI mismatch: CRT intentionally presents macOS
+to WebKit as Linux-shaped source, but Darwin arm64 reserves x18 while WebKit's Linux register
+table allocates it. Under B3/Air pressure generated code reused x18 across a runtime call and
+faulted near `operationStringFromCharCode`. Carried patch
+`0004-darwin-arm64-reserved-x18`, with verified before/after hashes and a removal condition,
+selects WebKit's existing reserved-x18 table only for macOS/arm64; it does not enable Apple SDK
+source paths or change Linux/aarch64.
+
+The profiler replay exposed a macOS `pthread_create()` publication race analogous to the
+Windows/x64 finding. A target wrapper learns its kernel-allocated stack from Apple's pthread API,
+but the creator could return a Bionic-shaped `pthread_t` before those bounds were stored. An
+immediate WebKit `pthread_getattr_np()` then derived stack origin `0x100000` and crashed in
+`sanitizeStackForVM`. The target now release-publishes the bounds and wakes the creator before
+the thread id is returned; the detached lifetime handshake is shared by macOS and Windows.
+The three focused pthread regressions each pass 100/100, the JSC harness unit tests pass 3/3,
+and full macOS CTest passes 125/125. Linux/aarch64 is now the only remaining 1D-B/C/D native
+replay.
+
 ## 2026-10-08
 
 ### Web Tranche 1D-D: JavaScriptCore sampling profiler accepted on Windows/x64

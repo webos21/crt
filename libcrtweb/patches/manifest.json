@@ -115,6 +115,22 @@
       ],
       "reason": "CRT presents Windows to WebKit as a Linux-shaped platform (libcrtweb/cmake/crt_webkit_platform.cmake), so JavaScriptCore's offlineasm and inline assembly take their ELF branches, but the object format is COFF and the assembler rejects the ELF-only forms (found by the Windows baseline-jit build: `.hidden`, `.size` and `.type name, function` are `unknown directive`/`expected absolute expression`, `.previous` is an unknown directive, and a `name@plt` reference does not exist in COFF). Selected by -DWTF_CRT_COFF_ASM (compiler side) and the WTF_CRT_COFF_ASM environment variable (offlineasm side), both set by tools/build_webkit_jsc.py on Windows: HIDE_SYMBOL expands to nothing, GLOBAL_REFERENCE is the plain symbol, the ELF debug directives are not emitted, and the `.previous` after the probe trampolines and the unary-double thunks (an ELF section-stack directive; nothing follows them in the same asm block) is dropped. Mach-O has its own variant (0002).",
       "remove_when": "WebKit selects these directives by object format (COFF/ELF/Mach-O) instead of OS(), or CRT presents Windows to WTF as OS(WINDOWS) without pulling in windows.h and the Microsoft C runtime."
+    },
+    {
+      "id": "0004-darwin-arm64-reserved-x18",
+      "patch": "0004-darwin-arm64-reserved-x18.patch",
+      "targets": [
+        "macos"
+      ],
+      "files": [
+        {
+          "file": "Source/JavaScriptCore/assembler/ARM64Registers.h",
+          "sha256_before": "61029ae32c6c2cefa8f179317ab2e06b3a5f22086c562f940d6617b38b6726e8",
+          "sha256_after": "ea7324312ba2fdad1dfa4906709f0fc4cb08af6d002abaa68887d175c4788966"
+        }
+      ],
+      "reason": "CRT presents macOS to WebKit as OS(LINUX) to select the Bionic/Linux-shaped source surface, but generated code still follows the actual Darwin arm64 object and calling-convention ABI. ARM64Registers.h's Linux branch marks x18 allocatable, while Darwin reserves x18 as the platform register. Under FTL/B3 register pressure that mismatch let generated code use x18 across a runtime call and produced a null-address write near operationStringFromCharCode. The harness defines WTF_CRT_DARWIN_ARM64_ABI only for macOS arm64, selecting WebKit's existing non-Linux register table without enabling Apple SDK source branches; Linux/aarch64 is unchanged.",
+      "remove_when": "WebKit derives the x18 reservation from the target ABI/object format rather than OS(LINUX), or CRT can select WebKit's Darwin ABI traits independently of its Apple SDK source surface."
     }
   ]
 }

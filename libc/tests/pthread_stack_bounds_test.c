@@ -1,6 +1,7 @@
 /* pthread_getattr_np() must describe the calling thread's real stack. WTF::StackBounds and
  * JavaScriptCore's VM::setLastStackTop() derive the stack from it and abort when the address of a
- * local is not inside the reported range; the Windows implementation reported nothing (base 0). */
+ * local is not inside the reported range. Windows and macOS both learn a kernel-allocated stack's
+ * address in the target wrapper, so pthread_create() must wait for that publication. */
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
