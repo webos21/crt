@@ -10,6 +10,32 @@ substantive update.
 
 ## 2026-10-09
 
+### Web Tranche 1 closed with the Linux/aarch64 1D-B/C/D replay
+
+Regenerated and verified the cumulative `05-ui` SDK from `a8a20fa`, then built
+fresh Baseline-JIT and sampling-profiler JSCOnly trees from the verified WPE
+WebKit 2.54.0 pin on Ubuntu 26.04/aarch64 with Clang 21.1.8. The ordinary
+Baseline-JIT tree passed every 1B..1D-C gate. FTL/B3 produced 158 reports at the
+reduced threshold, 108 at default thresholds and 252 with serial compilation;
+the FTL-off negative control produced zero. WebAssembly passed interpreter-only,
+BBQ, BBQ+OMG and software-bounds configurations with 21 BBQ and 7 OMG reports,
+and its C API signal probe measured 50 fast-memory signal deliveries versus zero
+with explicit bounds checks. The 0/1/4/8-thread context cycles, JS and Wasm
+watchdogs, RSS bounds and ELF host-ABI audit all passed.
+
+The separate `ENABLE_SAMPLING_PROFILER=ON` build reran the complete 1B..1D-C
+sequence before its profiler gate. It again proved FTL (157/108/252 reports),
+Wasm BBQ/OMG (21/8 reports) and the 50/0 fast-memory signal distinction. The
+official profiler run sampled the main VM and all four worker VMs with 5/5
+profiles, 297 traces and 296 named hot frames. Twenty focused repetitions passed
+20/20 with every VM sampled; the minima were 274 traces and 271 named hot
+frames. The final host-ABI audit was clean, full Linux/aarch64 CTest passed
+148/148, the JSC harness tests passed 3/3, and distribution verification passed
+for the cumulative 03/04/05 stages. No runtime, WebKit patch or harness change
+was required. This was the last native 1D-B/C/D replay, so JavaScriptCore
+Tranche 1 is closed on all four acceptance hosts; W^X, SIMD, Wasm threads and
+Windows/arm64 JSC remain separate non-gating follow-ups.
+
 ### Windows emulated-TLS churn is bounded and Tranche 1 follow-ups are classified
 
 Added `emutls_thread_churn_test`, a bounded Windows/x64 regression that runs a

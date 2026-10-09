@@ -73,44 +73,14 @@ then macOS/arm64.
   2.54.0 pinned and verified (`libcrtweb/third_party/webkit/`: recomputed SHA-256, signed
   tag, license-file inventory), upstream mapping written, security/SBOM policy
   confirmed; evidence in `HISTORY.md` and `docs/crtweb_acceptance.md`.
-* [ ] **1. JavaScriptCore / JSCOnly bring-up.** Linux/x86_64 1A (dependency ports) and 1B
-  (interpreter first-green) are done 2026-10-04 (`HISTORY.md`, `docs/crtweb_acceptance.md`),
-  built by `tools/build_webkit_jsc.py` against an installed SDK.
-  * [x] **1C. Baseline JIT.** Done on Linux/x86_64 and macOS/arm64 2026-10-04 (`HISTORY.md`,
-    `docs/crtweb_acceptance.md`): pre-JIT gate, assembly-interpreter and Baseline-JIT runs with a
-    compile proof, watchdog termination of compiled code, threads, host-ABI audit.
-  * [ ] **1D. Higher JIT tiers, split by risk** (all compiled in, off at run time unless named). **1D-A DFG +
-    concurrent compiler threads: done on all four hosts** (Linux/x86_64 2026-10-05; macOS/arm64, Linux/aarch64, Windows/x64
-    replays 2026-10-06). **1D-B FTL/B3 and 1D-C WebAssembly are done on Linux/x86_64 (2026-10-06) and on Windows/x64
-    (2026-10-07/08).** The Windows replay fixed exact-once asynchronous delivery, `hlt` mapping, a fault taken while a thread is redirected
-    (JIT-address SIGSEGV), the signal-mask ownership, the lost handshake acknowledgement (120 s hang) and the exit-time
-    emulated-TLS teardown (silent exit 134, which also explains `Invalid value for lock: 0`); the official baseline-jit acceptance passes
-    and 0 failures in about 800 Wasm runs (`HISTORY.md`, `docs/crtweb_acceptance.md`). **1D-D sampling profiler is done on
-    Linux/x86_64 (2026-10-08)** in its separate `ENABLE_SAMPLING_PROFILER=ON` build: the main VM and four worker VMs all
-    produced named hot-function samples, with 20/20 repeat runs. **Windows/x64 1D-D is done (2026-10-08):** the separate
-    profiler build passed all 1B..1D-C gates, sampled 5/5 main/worker VMs with 153 named hot frames, retained a clean PE
-    host-ABI audit, and passed 20/20 focused repeats (minimum 152 named frames). This replay fixed a Windows
-    `pthread_create()` publication race that let an immediate `pthread_getattr_np()` see a null worker stack base. The
-    final freshly regenerated/verified SDK also passed the direct gate (5/5, 138 traces/hot frames); the stack-bound and
-    detached-thread lifetime regressions each pass 100/100. One redundant full-suite replay was stopped when its second
-    Wasm script exceeded the expected duration before reaching the profiler; reopen 1D-C only if that isolated
-    observation reproduces.
-    **macOS/arm64 1D-B/C/D is done (2026-10-09):** FTL/B3, Wasm BBQ/OMG and fast-memory
-    faults, all context/watchdog gates, and the separate sampling-profiler build passed with a
-    clean Mach-O host-ABI audit. The profiler sampled 5/5 VMs with 1,167 named hot frames in the
-    official run and passed 20/20 focused repeats (minimum 1,156). The replay fixed WebKit's
-    Linux-persona register table incorrectly allocating Darwin arm64's reserved x18 and fixed a
-    macOS `pthread_create()` stack-bound publication race analogous to the Windows finding.
-    **Next:** replay 1D-B/C/D on Linux/aarch64. 1D-B..D close JSC's default capabilities and
-    should precede Tranche 2 where practical; none blocks `PlatformCRT`. W^X stays separate
-    hardening. The tested 1 MiB pthread default is accepted as a runtime default; embedders own
-    larger per-workload stack choices (`docs/pthread_policy.md`).
-  * [x] **Replays of 1A/1B/1C.** Done 2026-10-04/05 on Linux/aarch64 (native thread TLS), macOS/arm64 and Windows/x64
-    (signal VM-trap gate: real per-thread signals, polling traps off, watchdog 100/100); macOS/x86_64 has no signal
-    conversion or JIT permissions. Windows signal gaps that are *not* gates (backlog until a consumer needs them):
-    `poll`/`select`/file-I/O waits running handlers, threads not made by `pthread_create`, process-directed
-    `kill(pid)`/process groups (the Toybox `timeout` item), console Ctrl-C. Windows/arm64 has the same signal backend
-    (CTest green 2026-10-06); no JavaScriptCore run exists there yet.
+* [x] **1. JavaScriptCore / JSCOnly bring-up.** Closed 2026-10-09 on
+  Linux/x86_64, Linux/aarch64, Windows/x64 and macOS/arm64. The interpreter,
+  Baseline JIT, concurrent DFG, FTL/B3, WebAssembly and separate sampling-
+  profiler builds pass their compile proofs, context/watchdog gates and host-
+  ABI audits; Linux/aarch64 was the final 1D-B/C/D replay. Detailed per-host
+  evidence and the remaining non-gating hardening limits are in `HISTORY.md`
+  and `docs/crtweb_acceptance.md`. The next active product tranche is the
+  unchanged Linux WPE reference baseline below.
 * [ ] **2. Linux WPE reference baseline.** Upstream WPE unchanged rendering
   local HTML; the known-good baseline to diff `PlatformCRT` against.
 * [ ] **3. `PlatformCRT` graphics and input prototype.** (Gates before 3B: pin the full

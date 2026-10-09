@@ -256,15 +256,15 @@ one on and isolates it with JSC run-time options):
 | Step | Turns on | New assumption under test |
 |---|---|---|
 | 1D-A | DFG + concurrent compiler threads | compiler threads, DFG code, cross-thread VM/code lifecycle |
-| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs (Linux/x86_64, macOS/arm64, Windows/x64 done) |
-| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (Linux/x86_64, macOS/arm64, Windows/x64 done) |
-| 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads (Linux/x86_64, macOS/arm64, Windows/x64 done) |
+| 1D-B | FTL/B3 | the B3/Air backend, larger compile jobs (all four acceptance hosts done) |
+| 1D-C | WebAssembly | wasm tiers, their memory/trap handling (all four acceptance hosts done) |
+| 1D-D | sampling profiler (`ENABLE_SAMPLING_PROFILER`, a build option) | signal-based suspension of arbitrary VM threads (all four acceptance hosts done) |
 
 W^X is hardening, not a tier. Order: Linux/x86_64 first, so a failure is a JSC-tier problem and not a signal
 emulation or persona problem, then Linux/aarch64, macOS/arm64 and Windows/x64. **1D-A gates Tranche 2 at minimum.** The pinned WebKit
 enables FTL, WebAssembly and the sampling profiler by default on x86_64/arm64, so 1D-B..1D-D close JSC's default
-capabilities: finish them before the unchanged WPE baseline where practical (1D-B through 1D-D are done on Linux/x86_64, macOS/arm64 and Windows/x64), but none
-is a `PlatformCRT` architecture blocker.
+capabilities. They are complete on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; W^X, SIMD and Wasm threads
+remain separate hardening rather than `PlatformCRT` architecture blockers.
 
 **1D-A result, Linux/x86_64 (2026-10-05).** `tools/build_webkit_jsc.py --mode baseline-jit` gained "step 3", run on
 the *same* binary as 1C with `JSC_useDFGJIT=true`, `JSC_useConcurrentJIT=true`, four compiler threads
@@ -462,7 +462,8 @@ change was needed. The final source passes Windows CTest
 A redundant post-package full-suite replay was stopped after its second Wasm script exceeded
 the expected duration, before it reached the profiler. The official complete run, the 20/20
 profiler repetitions and the final direct profiler gate remain green; this observation reopens
-1D-C only if it reproduces. Linux/aarch64 remains after the macOS/arm64 replay below.
+1D-C only if it reproduces. At that point Linux/aarch64 remained after the
+macOS/arm64 replay; its completed replay is recorded below.
 
 **1D-B, 1D-C and 1D-D replay, macOS/arm64 (2026-10-09).** Fresh
 `baseline-jit` and `sampling-profiler` trees were built from the verified WPE WebKit 2.54.0
@@ -495,8 +496,31 @@ The official profiler gate sampled the main VM and four `$262.agent` worker VMs:
 1,167 traces and 1,167 named hot frames**. Twenty focused repeats passed 20/20 with all five VMs
 and minima of 1,156 traces and hot frames. `pthread_stack_bounds_test`,
 `pthread_thread_test` and `pthread_detach_test` each passed 100 consecutive repetitions; the
-full macOS CTest passed 125/125. This closes 1D-B/C/D on macOS/arm64. Linux/aarch64 is the sole
-remaining native 1D-B/C/D replay; W^X, SIMD and Wasm threads remain separate work.
+full macOS CTest passed 125/125. This closes 1D-B/C/D on macOS/arm64. The final
+Linux/aarch64 replay follows below; W^X, SIMD and Wasm threads remain separate work.
+
+**1D-B, 1D-C and 1D-D replay, Linux/aarch64 (2026-10-09).** Regenerated and
+verified the cumulative `05-ui` SDK from `a8a20fa`, then built fresh
+`baseline-jit` and `sampling-profiler` trees from the verified WPE WebKit 2.54.0
+archive on Ubuntu 26.04/aarch64 with Clang 21.1.8. The baseline tree passed every
+1B..1D-C gate. FTL produced 158 reports at the reduced threshold, 108 at default
+thresholds and 252 with serial compilation; its negative control produced zero.
+Wasm passed interpreter-only, BBQ, BBQ+OMG and software-bounds modes with 21 BBQ
+and 7 OMG reports. The C API signal probe proved 50 fast-memory fault deliveries
+versus zero in bounds-check mode. Context cycles on 0/1/4/8 threads, JS and Wasm
+watchdogs, RSS bounds and the ELF host-ABI audit were green.
+
+The separate profiler build reran the complete 1B..1D-C sequence and again
+proved FTL (157/108/252), Wasm BBQ/OMG (21/8) and the 50/0 fast-memory signal
+distinction. Its official profiler gate sampled the main VM and all four worker
+VMs with **5/5 profiles, 297 traces and 296 named hot frames**. Twenty focused
+repetitions passed 20/20 with every VM sampled and minima of 274 traces and 271
+named hot frames. Full Linux/aarch64 CTest passed 148/148, the JSC harness tests
+passed 3/3, and distribution verification passed for the cumulative 03/04/05
+stages. No CRT, WebKit patch or harness change was needed. This closes
+1D-B/C/D on Linux/aarch64 and therefore closes JavaScriptCore Tranche 1 on all
+four acceptance hosts. W^X, SIMD, Wasm threads and Windows/arm64 JSC remain
+separate non-gating follow-ups.
 
 **Linux/x86_64 result (2026-10-04): 1A and 1B green; 1C (JIT) and the Windows and
 macOS replays remain.** `tools/build_webkit_jsc.py` builds JavaScriptCore from the
@@ -927,8 +951,11 @@ the watchdog terminates a compiled loop. Repeats: 150/150 watchdog runs, and 4- 
 both interpreter and JIT mode. The process has three shared-library TLS modules (`libJavaScriptCore`, `libc++abi`,
 `libicuuc`), so the multi-module dtv path is exercised, not only the executable's own block.
 
-*Not covered on aarch64.* DFG/FTL/WebAssembly and W^X (1D), the wrapper byte-for-byte comparison (it was an x86_64
-check), and a shared-library TLS case in `pthread_native_tls_test` itself (JSC is the only multi-module evidence).
+*Not covered in that 1A/1B/1C replay.* DFG/FTL/WebAssembly and W^X, the wrapper
+byte-for-byte comparison (it was an x86_64 check), and a shared-library TLS
+case in `pthread_native_tls_test` itself (JSC is the multi-module evidence).
+DFG/FTL/WebAssembly and the sampling profiler are now closed by the 1D replays
+above; W^X remains separate hardening.
 
 ### 2. Linux WPE reference baseline
 
