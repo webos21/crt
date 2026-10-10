@@ -3,7 +3,7 @@
 This file is the current, evidence-based project snapshot. It intentionally
 does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
-[`docs/porting_status.md`](docs/porting_status.md).
+[`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
 Last synchronized with the source tree and git history: **2026-10-10**.
 Updated only on explicit request from here on, not as part of routine
@@ -39,7 +39,7 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 - The core source-porting queue through curl, plus the upper-runtime FreeType
   and FFmpeg ports, has static and shared coverage on Linux, macOS, and
   Windows. The authoritative package-by-package state is
-  [`docs/porting_status.md`](docs/porting_status.md).
+  [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 - The current project-owned allocator remains the bootstrap/reference
   implementation. Windows/x86_64, macOS/arm64, and Linux/aarch64 have current-
   schema baseline/contention data; Linux also passed focused correctness,
@@ -109,7 +109,7 @@ The software/CPU graphics baseline is complete on all three hosts:
   acceptance run; the Linux/aarch64 VM (lavapipe) remains the recorded
   cross-host stage-build baseline.
 - The `crtgfx_gpu_device`/`crtgfx_gpu_surface` backend-object boundary is
-  hardened and closed (2026-09-17..18, `HISTORY.md`): both are now a fixed
+  hardened and closed (2026-09-17..18, [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)): both are now a fixed
   common representation (refcount/backend tag/ops table/opaque backend-state
   pointer) with no `CRTGFX_HAVE_*`-conditional layout, dispatched through a
   per-backend operations table; Vulkan/D3D12/Metal concrete device/surface
@@ -125,7 +125,7 @@ The software/CPU graphics baseline is complete on all three hosts:
   and Windows/x64.
 - Machine-checkable live-presentation pixel evidence is closed on every
   required host against one frozen, backend-neutral acceptance contract
-  (`docs/libcrtgfx_live_presentation_acceptance.md`, 2026-09-18): a real
+  (`docs/acceptance/libcrtgfx_live_presentation_acceptance.md`, 2026-09-18): a real
   `SkSurface::readPixels()` check against the shared reference scene on the
   live swapchain/layer-backed Ganesh surface, for both a plain 5-frame run
   and a 5-frame run with a scripted mid-stream `900x520` resize (the second
@@ -184,14 +184,14 @@ hosts:
   IFUNC-relink segfault, a `PKG_CONFIG_PATH` gap hiding the host's own
   `libva.pc`, a new `-fcrt-real-linux-sdk` `crt-cc` sentinel for `<va/va.h>`,
   and linking the real host `libva.so`/`libva-drm.so`); see
-  `docs/crtmedia_hardware_decode_acceptance.md` and `HISTORY.md`'s 2026-09-22
+  `docs/acceptance/crtmedia_hardware_decode_acceptance.md` and [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s 2026-09-22
   entry. No platform-native decoded surface is part of the public ABI.
 - Zero-copy decoded-texture interop is complete on all three hosts. macOS/
   VideoToolbox -> Metal and Linux/VA-API dma-buf -> Vulkan pass direct
   zero-copy. Windows/D3D11VA -> D3D12 passes the documented no-CPU-readback
   GPU-copy fallback. Common lifecycle stress, installed/package acceptance,
   pixel/resize checks, and exact per-host interop reporting are closed; see
-  `docs/crtmedia_zero_copy_decode_acceptance.md` and `HISTORY.md` 2026-09-27.
+  `docs/acceptance/crtmedia_zero_copy_decode_acceptance.md` and [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md) 2026-09-27.
 - Encode and capture is complete on Linux/x86_64, macOS/arm64, and
   Windows/x64. The common capture ABI feeds V4L2, AVFoundation, and Media
   Foundation backends; software MPEG-4 plus VA-API, VideoToolbox, and Media
@@ -201,7 +201,7 @@ hosts:
   real Linux UVC camera and all three hardware encoders. Each host also passed
   a fresh isolated `04-gfx-media` rebuild with installed consumers,
   dependency/RPATH audit, `verify_dist.py`, and atomic publication; see
-  `docs/crtmedia_encode_capture_acceptance.md` and `HISTORY.md` 2026-09-27..28.
+  `docs/acceptance/crtmedia_encode_capture_acceptance.md` and [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md) 2026-09-27..28.
 
 - Networking and streaming is complete on Linux/x86_64, macOS/arm64, and
   Windows/x64. `libcrtmedia` owns a bounded, cancellable transport queue with
@@ -220,7 +220,7 @@ hosts:
   consumer, `verify_dist.py`, and atomic publication. FFmpeg's own network
   stack stays disabled; libcurl sits under the CRT-owned contract. Loopback and
   IP-literal fixtures keep the minimal IPv4/UDP resolver out of the streaming
-  path. See `docs/crtmedia_networking_acceptance.md` and `HISTORY.md`
+  path. See `docs/acceptance/crtmedia_networking_acceptance.md` and [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)
   2026-09-28..29.
 
 This evidence does not yet prove production-complete seeking/track selection,
@@ -229,7 +229,7 @@ adaptive streaming (HLS/DASH), RTSP, or realtime/WebRTC behavior.
 ### libcrtui
 
 The application UI layer (`05-ui`) is accepted on Linux/x86_64, macOS/arm64,
-and Windows/x64 (Tranches 0-7, `docs/crtui_acceptance.md`):
+and Windows/x64 (Tranches 0-7, `docs/acceptance/crtui_acceptance.md`):
 
 - `libcrtui` is a CRT-owned API: no LVGL type appears in a public header, and the
   shared library exports exactly the declared `CRTUI_API` functions (68 at the
@@ -275,7 +275,7 @@ JavaScriptCore now exists only as an accepted `06-web` bring-up component.
 ### libcrtweb / 06-web
 
 The WebKit CRT Port is in progress. Tranches 0-2 are closed; detailed evidence
-and non-gating hardening follow-ups are in `docs/crtweb_acceptance.md`:
+and non-gating hardening follow-ups are in `docs/acceptance/crtweb_acceptance.md`:
 
 - WPE WebKit 2.54.0 is pinned with archive hash, signed-tag/commit provenance,
   license inventory, patch manifest, and a source-security policy.
@@ -322,12 +322,12 @@ and non-gating hardening follow-ups are in `docs/crtweb_acceptance.md`:
 - The `libcrtgfx` GPU backend-object boundary hardening and the live GPU
   presentation pixel-exact/resize evidence tranches are both closed
   (2026-09-17..18) on every required host. Hardware video decode built on
-  that foundation and is closed on all three hosts (`HISTORY.md`,
+  that foundation and is closed on all three hosts ([`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md),
   2026-09-22): macOS/arm64 (VideoToolbox, 2026-09-18), Windows/x64 (D3D11VA,
   2026-09-19), and Linux/x86_64 (VA-API, physical Intel GPU, 2026-09-22) all
   report a real hardware frame observed and downloaded, the normalized
   cross-host acceptance matrix is recorded in
-  `docs/crtmedia_hardware_decode_acceptance.md`, and the package-acceptance
+  `docs/acceptance/crtmedia_hardware_decode_acceptance.md`, and the package-acceptance
   re-audit (fresh isolated `04-gfx-media` rebuild, binary/import dependency
   audit) passed on all three hosts. A real, separate gap this closure found:
   the packaged `crtmedia_player_demo` never actually requested hardware
@@ -342,7 +342,7 @@ and non-gating hardening follow-ups are in `docs/crtweb_acceptance.md`:
   default above and still only decodes in software on every host; the
   release notes document that. A dedicated clean-machine run was explicitly
   removed from the project queue in favor of acting on real downloader
-  reports (`HISTORY.md`, 2026-09-23). Replaying the later hardware-decode-
+  reports ([`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md), 2026-09-23). Replaying the later hardware-decode-
   default demo on macOS/Linux belongs to a future release build, not the
   completed preview or the active runtime tranche.
 - Zero-copy decoded-texture interop, Encode and capture, and Networking and
@@ -356,7 +356,7 @@ and non-gating hardening follow-ups are in `docs/crtweb_acceptance.md`:
   QuickJS, WebGPU, EME/DRM, V8, and Chromium/Ozone are deferred, not gates.
 
 The sequencing and ownership boundaries are recorded in
-[`docs/runtime_roadmap.md`](docs/runtime_roadmap.md); the isolated-acceptance
+[`docs/design/runtime_roadmap.md`](docs/design/runtime_roadmap.md); the isolated-acceptance
 trail is in `HISTORY.md`, open work in `TODO.md`.
 
 ## Verification Model
@@ -426,9 +426,9 @@ A port is complete only when its recipe records static and shared attempts on
 each host, plus a link/run or round-trip test where meaningful. Recipes,
 statuses, and exceptions are maintained in:
 
-- [`porting/recipes/`](porting/recipes/)
-- [`docs/porting_status.md`](docs/porting_status.md)
-- [`docs/sysroot_ports.md`](docs/sysroot_ports.md)
+- [`porting/recipes/`](porting/recipes)
+- [`docs/porting/porting_status.md`](docs/porting/porting_status.md)
+- [`docs/porting/sysroot_ports.md`](docs/porting/sysroot_ports.md)
 
 ## Known Limitations
 
@@ -440,10 +440,10 @@ statuses, and exceptions are maintained in:
   meaningful `SIGCHLD` `siginfo_t` data are complete.
 - Interactive POSIX job control remains deferred. The project mksh build does
   not claim full foreground/background stop/resume semantics; see
-  [`docs/job_control.md`](docs/job_control.md).
+  [`docs/design/job_control.md`](docs/design/job_control.md).
 - Some console environments cannot provide a real screen buffer for
   `TIOCGWINSZ`; tty behavior and remaining applet restrictions are tracked in
-  [`docs/toybox_applet_status.md`](docs/toybox_applet_status.md).
+  [`docs/porting/toybox_applet_status.md`](docs/porting/toybox_applet_status.md).
 - Windows static archives containing constructor sections can still require a
   recipe-specific retention policy because PE/COFF archive extraction does
   not behave like a GNU ELF linker script.
@@ -535,10 +535,10 @@ statuses, and exceptions are maintained in:
 1. Continue `TODO.md`'s active Web Runtime (`06-web`) work, a WebKit CRT Port.
    Application UI (`05-ui`, Tranches 0-7) is closed on all three hosts, so its
    External Surface contract is the accepted prerequisite. The order is
-   `docs/crtweb_acceptance.md`: Tranches 0-2 (provenance, cross-host
+   `docs/acceptance/crtweb_acceptance.md`: Tranches 0-2 (provenance, cross-host
    JavaScriptCore, and the native Linux WPE reference baseline) are closed;
    next is the Tranche 3 `PlatformCRT` graphics/input prototype. See
-   `docs/crtweb_porting.md`.
+   `docs/porting/crtweb_porting.md`.
 2. Small follow-ups left by the UI work, not gates: teach
    `tools/prepare_release_assets.py` the `05-ui` SDK, and make a default-
    configuration `crt-ui-dist` fail with a clear message instead of a missing
@@ -549,7 +549,7 @@ CRT/PAL limitations above when an upstream consumer exposes a concrete
 requirement, following the Bionic-first porting discipline in `AGENTS.md`
 (`TODO.md`'s "Focused CRT/PAL follow-ups"), including non-blocking
 Windows/aarch64 allocator validation and comparison of real upper-runtime
-workloads against `docs/allocator_baseline.md`.
+workloads against `docs/acceptance/allocator_baseline.md`.
 
 Detailed actionable work belongs in [`TODO.md`](TODO.md); completed changes
 belong in [`HISTORY.md`](HISTORY.md).

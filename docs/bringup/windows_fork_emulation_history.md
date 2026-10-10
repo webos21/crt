@@ -4,7 +4,7 @@
 > every bug found and fixed along the way, benchmarks, prior-art research,
 > and attempts that were reverted. It is kept as a record, not as current
 > documentation. **For the current implementation and open issues, see
-> [`../windows_fork_emulation.md`](../windows_fork_emulation.md).**
+> [`../windows_fork_emulation.md`](../design/windows_fork_emulation.md).**
 
 ## Goal
 
@@ -694,7 +694,7 @@ The broker fixed zlib end to end and got libpng most of the way, but kept
 generating new structural failure modes of its own rather than converging:
 recurring orphaned `mksh.exe` processes, named-pipe instance-exhaustion and
 lost-response races (both fixed, see the 2026-08-05..2026-08-06 "Retired the
-spawn broker" entry in `HISTORY.md`), missing
+spawn broker" entry in [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)), missing
 I/O timeouts (also fixed), and finally the process-tree-reparenting attempt
 above, which regressed the previously-working state (`STATUS_DLL_INIT_FAILED`)
 and had to be reverted rather than shipped half-fixed. Each fix bought

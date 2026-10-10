@@ -1,4 +1,4 @@
-// Networking & Streaming Tranche 2 fixture B (docs/crtmedia_networking_
+// Networking & Streaming Tranche 2 fixture B (docs/acceptance/crtmedia_networking_
 // acceptance.md): a real fragmented MP4 (CRTMEDIA_MUXER_OUTPUT_MPEG_4_
 // FRAGMENTED -- moof/mdat pairs interleaved, no seeking needed to decode
 // it forward) served over a real repository-owned loopback HTTP/1.1
@@ -318,7 +318,7 @@ int main(void) {
         "decoded video frame count over chunked HTTP matches the fixture's real encoded frame count");
 
   // The real, honest capability check this fixture exists for: a non-
-  // seekable source must never claim otherwise (docs/crtmedia_networking_
+  // seekable source must never claim otherwise (docs/acceptance/crtmedia_networking_
   // acceptance.md's own capability contract -- "no public API may imply
   // that a non-seekable stream supports arbitrary seek"), verified above
   // via CRTMEDIA_SOURCE_SEEKABLE right after open(). A behavioral seek

@@ -108,7 +108,7 @@ function(crt_add_crtmedia_targets)
     "${CRTMEDIA_ROOT}/src/player.c"
     "${CRTMEDIA_ROOT}/src/gpu_frame.c"
     "${CRTMEDIA_ROOT}/src/capture.c"
-    # Networking & Streaming Tranche 1 (docs/crtmedia_networking_
+    # Networking & Streaming Tranche 1 (docs/acceptance/crtmedia_networking_
     # acceptance.md): no socket/curl/TLS/FFmpeg dependency at all, so this
     # is always built, not gated behind CRTMEDIA_ENABLE_FFMPEG like demux.c/
     # extractor.c/codec.c/muxer.c below.
@@ -245,7 +245,7 @@ function(crt_add_crtmedia_targets)
     target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_LINUX_VAAPI_LIBS})
 
     # libcurl-backed HTTP transport (Networking & Streaming Tranche 2,
-    # docs/crtmedia_networking_acceptance.md) -- additive, only makes sense
+    # docs/acceptance/crtmedia_networking_acceptance.md) -- additive, only makes sense
     # together with FFmpeg's extractor (the custom AVIOContext this feeds).
     if(CRTMEDIA_ENABLE_CURL)
       set(CRTMEDIA_HTTP_SOURCES

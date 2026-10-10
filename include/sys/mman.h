@@ -81,7 +81,7 @@ extern "C" {
  * consumers need (e.g. wl_shm-style shared buffers) -- but not real Linux
  * memfd's sealing support (F_ADD_SEALS/F_GET_SEALS aren't implemented;
  * MFD_ALLOW_SEALING is accepted but has no effect). See
- * docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. */
+ * docs/porting/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. */
 int memfd_create(const char* name, unsigned int flags);
 
 void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset);

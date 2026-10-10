@@ -7,7 +7,7 @@
 # txt for every recipe under CRT_PORT_RECIPE_ROOT, no per-recipe CMake
 # code needed) installs into the same shared port-tests/install prefix
 # every other porting recipe here uses (freetype, wayland's expat/
-# libffi, ...) -- see docs/porting_status.md.
+# libffi, ...) -- see docs/porting/porting_status.md.
 set(CRTMEDIA_FFMPEG_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH
   "Shared porting/recipes install prefix (ffmpeg) for libcrtmedia's demux/decode bridge")
 set(CRTMEDIA_FFMPEG_LIBRARIES "")
@@ -36,7 +36,7 @@ if(CRTMEDIA_ENABLE_FFMPEG AND NOT CRTMEDIA_FFMPEG_LIBRARIES)
 endif()
 
 # libcurl-backed HTTP transport (crtmedia/extractor.h's additive URL-based
-# open, Networking & Streaming Tranche 2, docs/crtmedia_networking_
+# open, Networking & Streaming Tranche 2, docs/acceptance/crtmedia_networking_
 # acceptance.md) -- opt-in, off by default, same CRTMEDIA_ENABLE_FFMPEG
 # pattern immediately above. porting/recipes/curl.json is `shared-pass` on
 # all three hosts (HISTORY.md) and installs into the same shared port-
@@ -539,7 +539,7 @@ set_tests_properties(crtmedia_gpu_frame_test_runs PROPERTIES
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_gpu_frame_test_runs)
 
 # crtmedia_transport_queue_test: Networking & Streaming Tranche 1
-# (docs/crtmedia_networking_acceptance.md) -- deterministic, fully
+# (docs/acceptance/crtmedia_networking_acceptance.md) -- deterministic, fully
 # resource-free coverage (real pthread producer/consumer threads, but no
 # socket/curl/TLS/FFmpeg dependency) for the private bounded transport
 # queue (libcrtmedia/src/transport_queue.h) that a later HTTP transport
@@ -593,7 +593,7 @@ set_tests_properties(crtmedia_transport_queue_test_runs PROPERTIES
 set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_transport_queue_test_runs)
 
 # crtmedia_format_test: deterministic, FFmpeg-free coverage for crtmedia/
-# format.h (docs/libcrtmedia_api_policy.md's decided core, TODO.md's
+# format.h (docs/design/libcrtmedia_api_policy.md's decided core, TODO.md's
 # "Separate extractor and codec" item) -- unconditional, not gated behind
 # CRTMEDIA_ENABLE_FFMPEG, since crtmedia_format itself has no FFmpeg
 # dependency at all (see src/format.c's own top comment). Same plain-C-
@@ -1501,7 +1501,7 @@ if(CRTMEDIA_ENABLE_FFMPEG)
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_extractor_codec_test_runs)
 
   # crtmedia_http_input_range_test / crtmedia_http_input_chunked_test:
-  # Networking & Streaming Tranche 2 (docs/crtmedia_networking_
+  # Networking & Streaming Tranche 2 (docs/acceptance/crtmedia_networking_
   # acceptance.md) -- fixtures A and B, a real repository-owned loopback
   # HTTP/1.1 server (tests/http_test_server.h) driving crtmedia_extractor_
   # create_from_url() end to end. Host-generic like crtmedia_extractor_
@@ -1887,7 +1887,7 @@ if(CRTMEDIA_ENABLE_FFMPEG)
   endforeach()
 
   # crtmedia_zero_copy_test: "Zero-copy decoded textures" Tranche 0/1
-  # (2026-09-23, docs/crtmedia_zero_copy_decode_acceptance.md) -- see that
+  # (2026-09-23, docs/acceptance/crtmedia_zero_copy_decode_acceptance.md) -- see that
   # test source's own top comment. Identical build/link shape to
   # crtmedia_hw_decode_test above (same core API, same real MP4 fixture,
   # same private codec_test_control.h access); kept as its own executable

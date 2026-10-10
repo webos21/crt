@@ -2,7 +2,7 @@
  * API, now a thin wrapper composing crtmedia_extractor (crtmedia/
  * extractor.h) + one crtmedia_codec (crtmedia/codec.h) per decodable
  * track, rather than its own independent FFmpeg integration (TODO.md's
- * "Rebuild crtmedia_demuxer_* over the new core" step, docs/libcrtmedia_
+ * "Rebuild crtmedia_demuxer_* over the new core" step, docs/design/libcrtmedia_
  * api_policy.md's own Decision). No FFmpeg type appears here directly
  * anymore -- not because this file suddenly avoids FFmpeg (it never did
  * so directly even before this rebuild's own predecessor), but because

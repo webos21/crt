@@ -10,7 +10,7 @@
  * knowledge of). This engine walks that trie directly instead, mirroring
  * dyld's own MachOLoaded::trieWalk()/findExportedSymbol()
  * (apple-oss-distributions/dyld, dyld3/MachOLoaded.cpp), reimplemented in C.
- * See docs/dynamic_loading.md for the full design writeup.
+ * See docs/design/dynamic_loading.md for the full design writeup.
  *
  * This lives in libc (not libdl) because more than one CRT component needs
  * it: libdl's macOS dlsym() backend (libdl/src/arch/macos/dl_macos.c) for

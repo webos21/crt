@@ -35,7 +35,7 @@ if(NOT WIN32 AND NOT APPLE)
 
   # Real host libwayland-client.so (2026-09-22, found rebuilding this exact
   # example from a genuinely extracted Linux 03-gfx-simple release archive
-  # for the first time -- docs/release_preview.md's own quick start had
+  # for the first time -- docs/guides/release_preview.md's own quick start had
   # never actually been run from a downloaded Linux archive before). The
   # comment this replaced claimed "native Wayland protocol glue first
   # appears in the later media/GPU stage", which does not match

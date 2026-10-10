@@ -2,7 +2,7 @@
  * primitive (__crt_wait32/__crt_wake32_*) that already backs
  * pthread_mutex/pthread_cond/pthread_rwlock (see libc/src/pthread.c) --
  * this was the most surprising gap found in the 2026-08-16 Bionic libc
- * audit (docs/bionic_libc_gaps.md) given how complete the rest of the
+ * audit (docs/porting/bionic_libc_gaps.md) given how complete the rest of the
  * pthread story already is: every primitive a semaphore needs was already
  * sitting right there. Named semaphores (sem_open/sem_close/sem_unlink)
  * match real Bionic's own policy of declaring but never supporting them

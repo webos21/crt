@@ -1,6 +1,6 @@
 /* Permanent regression test for libc/src/arch/windows/common/
  * dwarf_unwind_safety_net.c -- see that file's own top comment for the
- * full empirical background (TODO.md item 7 / docs/cxx_runtime.md's
+ * full empirical background (TODO.md item 7 / docs/design/cxx_runtime.md's
  * "Known cost: DWARF-compiled code has zero Windows-native unwind
  * info"). This exercises the REAL production toolchain end to end, not
  * a synthetic clang-direct repro: windows_dwarf_unwind_safety_net_
@@ -69,7 +69,7 @@ int main(void) {
    * back into WIFSIGNALED()/WTERMSIG() the way a POSIX host's own
    * waitpid() would is exactly the separate, larger, deliberately-not-
    * yet-decided "bridge SIGSEGV/SIGFPE/SIGILL through signal()/raise()"
-   * question docs/signal_delivery.md's own "Next Steps" already tracks
+   * question docs/design/signal_delivery.md's own "Next Steps" already tracks
    * (distinct from this file's own narrower "did the process reach a
    * controlled, correct-value exit at all" concern) -- this test checks
    * what this project's PAL genuinely produces today, not what a future,

@@ -809,7 +809,7 @@ def apply_source_patches(work, recipe, target_os=None):
     base list has always had to be) as plain, exact-text substring replacements
     against the freshly copy_source()'d work tree. Deliberately a simple
     find/replace, not a unified-diff engine: this project's stated policy
-    (docs/porting_status.md) is to keep upstream source unchanged wherever
+    (docs/porting/porting_status.md) is to keep upstream source unchanged wherever
     possible and treat any patch as a documented policy exception, so the
     expectation is a handful of small, one-line, easy-to-audit-in-the-
     recipe-JSON-itself edits, not a general patch-management system.
@@ -1949,7 +1949,7 @@ def main():
     # Windows only: an extracted SDK is self-hosting at the shell/tool
     # level there because Windows has no POSIX-compatible shell of its
     # own to run `configure` with (the whole reason mksh/toybox exist as
-    # real project artifacts at all -- see docs/android_shell_
+    # real project artifacts at all -- see docs/guides/android_shell_
     # environment.md's own "Goal" section). Linux/macOS already have a
     # real, fast, native POSIX shell -- this project's own rootfs mksh
     # is a from-scratch, freestanding-libc reimplementation there and

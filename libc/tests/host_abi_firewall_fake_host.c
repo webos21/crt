@@ -1,5 +1,5 @@
 /* Real implementation behind host_abi_firewall_fake_host.h -- see that
- * header's own top comment and docs/host_abi_firewall.md's "Mechanical
+ * header's own top comment and docs/design/host_abi_firewall.md's "Mechanical
  * detection" section for the full design.
  *
  * Allocates through crt_fault_instance_b_malloc()/_free() (tranche 6's

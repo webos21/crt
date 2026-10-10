@@ -4,7 +4,7 @@
 // implementation of the frozen, backend-neutral live-presentation
 // acceptance contract closed on every required host 2026-09-18 -- see
 // this file's own "Backend-neutral acceptance contract" comment below
-// and docs/libcrtgfx_live_presentation_acceptance.md. Draws the same shared
+// and docs/acceptance/libcrtgfx_live_presentation_acceptance.md. Draws the same shared
 // reference scene (tests/skia_reference_scene.h) crtgfx_skia_gpu_
 // offscreen_smoke already proves pixel-correct offscreen, but through a
 // real, live swapchain/layer image every frame instead of an offscreen
@@ -27,7 +27,7 @@
 //
 // Backend-neutral acceptance contract (2026-09-18, TODO.md's "Finish live
 // GPU presentation evidence before hardware decode" tranche, Step 1 --
-// docs/libcrtgfx_live_presentation_acceptance.md has the full frozen
+// docs/acceptance/libcrtgfx_live_presentation_acceptance.md has the full frozen
 // contract this implements). This one C++ source, unchanged per backend,
 // checks the deterministic reference scene's actual pixel content -- not
 // just that draw/present calls returned CRTGFX_OK -- via a plain
@@ -121,7 +121,7 @@ extern "C" int main(int argc, char** argv) {
   uint32_t requested_width = 0, requested_height = 0;
 
   // Backend-neutral acceptance-contract state (see this file's own top
-  // comment and docs/libcrtgfx_live_presentation_acceptance.md): a single
+  // comment and docs/acceptance/libcrtgfx_live_presentation_acceptance.md): a single
   // pixel_check runs on the deterministic "canonical" frame -- the first
   // post-resize frame when a scripted resize was requested (matching the
   // contract's own `resize_frame`), otherwise the first frame drawn at the
@@ -300,7 +300,7 @@ extern "C" int main(int argc, char** argv) {
     snprintf(resize_frame_str, sizeof(resize_frame_str), "n/a");
     snprintf(post_resize_str, sizeof(post_resize_str), "n/a");
   }
-  // The frozen, backend-neutral RESULT record (docs/libcrtgfx_live_
+  // The frozen, backend-neutral RESULT record (docs/acceptance/libcrtgfx_live_
   // presentation_acceptance.md) -- one line, space-separated key=value
   // pairs, printed on every exit path (success or failure) so an
   // automated acceptance run can grep it unconditionally.

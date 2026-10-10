@@ -147,7 +147,7 @@ static size_t http_header_callback(char* buffer, size_t size, size_t nitems, voi
           (status != 206 || transport->range_start != transport->requested_offset ||
            strcmp(transport->validator, transport->required_validator) != 0)) {
         /* Resume needs all three of 206, matching Content-Range start, and
-         * the same entity validator (docs/crtmedia_networking_acceptance.md,
+         * the same entity validator (docs/acceptance/crtmedia_networking_acceptance.md,
          * Reconnect). Anything less may splice two versions of the resource. */
         result = CRTMEDIA_ERROR_PROTOCOL;
       } else if (status == 206 && transport->range_start != transport->requested_offset) {
@@ -156,7 +156,7 @@ static size_t http_header_callback(char* buffer, size_t size, size_t nitems, voi
         result = CRTMEDIA_ERROR_PROTOCOL;
       } else if (status == 200 && transport->requested_offset != 0) {
         /* The server cannot give us the byte range we asked for -- never
-         * silently substitute the wrong bytes (docs/crtmedia_networking_
+         * silently substitute the wrong bytes (docs/acceptance/crtmedia_networking_
          * acceptance.md's own reconnect-safety rule). */
         result = CRTMEDIA_ERROR_PROTOCOL;
       } else if (status < 200 || (status >= 300 && status < 400) || status >= 400) {

@@ -211,7 +211,7 @@ static void test_suspend_resume_in_hot_thread(void) {
   sigaction(SIGUSR1, &action, 0);
   pthread_create(&thread, 0, hot_thread, 0);
   /* A new thread joins the registry as it starts; pthread_kill() before that cannot find it
-   * (a documented gap, docs/signal_delivery.md), and the runtimes that use this protocol only
+   * (a documented gap, docs/design/signal_delivery.md), and the runtimes that use this protocol only
    * signal threads that have finished starting. */
   wait_for(&hot_started, 10.0);
   for (round = 0; round < 3000 && !stuck; ++round) {

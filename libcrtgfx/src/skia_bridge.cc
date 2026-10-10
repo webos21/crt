@@ -401,7 +401,7 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
 #if CRTGFX_HAS_SKIA_HEADERS
 // Zero-copy decoded textures, Tranche 3 (Linux, 2026-09-24) -- the Vulkan
 // branch of crtgfx_skia_import_media_frame() (crtgfx/skia_media.h has the
-// frozen contract; docs/crtmedia_zero_copy_decode_acceptance.md records the
+// frozen contract; docs/acceptance/crtmedia_zero_copy_decode_acceptance.md records the
 // "direct DRM PRIME import, not FFmpeg's Vulkan hwcontext" decision).
 // `frame->native_handle` is a crtmedia_vaapi_gpu_frame_handle* (VA-API
 // surface already synchronised and exported as dma-bufs by libcrtmedia, so
@@ -701,7 +701,7 @@ sk_sp<SkImage> crtgfx_skia_import_media_frame(
 // here is forced by Skia's own public include/gpu/ganesh/d3d/GrD3DTypes.h
 // (unlike Vulkan, which Skia vendors its own copy of) -- a real, deliberate
 // exception to this project's own no-host-SDK-header policy, already
-// codified in docs/libcrtgfx_api_policy.md's own "third-party source being
+// codified in docs/design/libcrtgfx_api_policy.md's own "third-party source being
 // ported" Non-Goals clause; src/arch/windows/gpu_win32.c itself stays
 // real-host-header-free, hand-declaring only what it needs, exactly like
 // window_win32.c and src/arch/linux/gpu_vulkan.c already do.
@@ -949,7 +949,7 @@ crtgfx_result crtgfx_skia_gpu_surface_present(
 #if CRTGFX_HAS_SKIA_HEADERS && defined(CRTGFX_HAVE_D3D12)
 
 // Real <d3d11.h>/<d3d11_3.h> inclusion, the identical "third-party source
-// being ported" exception docs/libcrtgfx_api_policy.md's own Non-Goals
+// being ported" exception docs/design/libcrtgfx_api_policy.md's own Non-Goals
 // clause already accepts for this file's own <d3d12.h> above (Skia's own
 // GrD3DTypes.h forces that one) -- extended here to D3D11 rather than
 // hand-declaring a dozen-plus vtable slots for CreateTexture2D/
@@ -1289,7 +1289,7 @@ sk_sp<SkImage> crtgfx_skia_import_media_frame(
   ComPtr<ID3D11DeviceContext> d3d11_context;
   d3d11_device->GetImmediateContext(d3d11_context.ReceiveAddressOf());
 
-  // Real device-affinity check (docs/crtmedia_zero_copy_decode_
+  // Real device-affinity check (docs/acceptance/crtmedia_zero_copy_decode_
   // acceptance.md's own "Device-affinity pairing" scope item, resolved
   // here as this tranche's own frozen decision): FFmpeg's own D3D11VA
   // device and crtgfx_gpu_device's own D3D12 device are each created
@@ -1364,7 +1364,7 @@ sk_sp<SkImage> crtgfx_skia_import_media_frame(
   // driver-level hazard from unsynchronized cross-API shared-resource
   // access, not a logic bug in the LUID check itself. crtgfx_gpu_fence
   // (crtgfx/gpu.h) is explicitly documented as CPU-only and must not be
-  // reused for this (docs/crtmedia_zero_copy_decode_acceptance.md's own
+  // reused for this (docs/acceptance/crtmedia_zero_copy_decode_acceptance.md's own
   // Scope section) -- a real device-affine GPU fence, if ever needed, is
   // separate future work; a plain D3D11_QUERY_EVENT CPU-block is the
   // simple, correct, always-available substitute this tranche's own gate
@@ -1445,7 +1445,7 @@ sk_sp<SkImage> crtgfx_skia_import_media_frame(
 // GrMtlBackendContext.h #includes include/ports/SkCFObject.h, which
 // #imports <CoreFoundation/CoreFoundation.h>) -- a real, deliberate
 // exception to this project's own no-host-SDK-header policy, already
-// codified in docs/libcrtgfx_api_policy.md's own "third-party source
+// codified in docs/design/libcrtgfx_api_policy.md's own "third-party source
 // being ported" Non-Goals clause, exactly like the D3D12 branch's own
 // GrD3DTypes.h. This translation unit is compiled with tools/crt-c++'s
 // own -fcrt-real-apple-sdk sentinel specifically because of this
@@ -1704,7 +1704,7 @@ sk_sp<SkImage> crtgfx_skia_import_media_frame(
       {}, {}};
 
   // BT.709 limited range: crtmedia_gpu_frame carries no color metadata yet
-  // (docs/crtmedia_zero_copy_decode_acceptance.md's own Scope section --
+  // (docs/acceptance/crtmedia_zero_copy_decode_acceptance.md's own Scope section --
   // matches CRTMEDIA_COLOR_SPACE_UNSPECIFIED's own default for the CPU
   // path, src/frame_convert.c).
   SkYUVAInfo yuva_info(

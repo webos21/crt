@@ -91,7 +91,7 @@ see `shell/toybox/PATCHES.md` for the current example of that record.
 `porting/recipes/*.json` describe how to fetch and build third-party libraries
 (zlib, libpng, libffi, SQLite, GNU Make, ...) against the CRT sysroot for
 portability testing. None of that upstream source is committed to this
-repository -- see `docs/porting_status.md`'s Policy section. Each of those
+repository -- see `docs/porting/porting_status.md`'s Policy section. Each of those
 projects' own license applies to the source `tools/crt-port-build.py`
 downloads and to any binaries you build from it; consult the upstream project
 for its license before redistributing anything built from a recipe.

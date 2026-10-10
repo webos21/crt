@@ -1370,7 +1370,7 @@ def main() -> None:
             # hang risk on one specific, already-documented host/driver
             # combination this pipeline has actually run on before (Intel's
             # own WSL2 VA-API driver deadlocks on a real decode even outside
-            # CRT, docs/crtmedia_hardware_decode_acceptance.md) -- the 60 s
+            # CRT, docs/acceptance/crtmedia_hardware_decode_acceptance.md) -- the 60 s
             # timeout below turns that into a loud, diagnosable failure
             # instead of a silent hang, matching this project's own
             # established handling of the identical class of risk elsewhere

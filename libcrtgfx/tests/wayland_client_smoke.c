@@ -5,7 +5,7 @@
  *
  * Deliberately independent of libcrtgfx's own real Linux window backend
  * (src/arch/linux/window_wayland.c), which intentionally does NOT link
- * libwayland-client (see docs/libcrtgfx_wayland_plan.md's own "Linux Host
+ * libwayland-client (see docs/design/libcrtgfx_wayland_plan.md's own "Linux Host
  * Adapter" section) -- this program exists only to prove the external
  * Meson build genuinely produces a working, linkable libwayland-client
  * against this project's own CRT toolchain (libc, epoll, memfd_create,

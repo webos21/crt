@@ -14,7 +14,7 @@
 // cc): every frame here is a plain malloc'd buffer, never a real
 // crtgfx_window, so this runs identically on every CI runner. Normal
 // Skia headers are used throughout (public API), matching this project's
-// own "Skia owns drawing" policy (docs/libcrtgfx_api_policy.md).
+// own "Skia owns drawing" policy (docs/design/libcrtgfx_api_policy.md).
 //
 // Three cases, one per crtmedia_pixel_format this contract defines:
 //  - RGBA8888: wrapped directly as an SkImage (kRGBA_8888_SkColorType

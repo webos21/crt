@@ -155,7 +155,7 @@ void __crt_malloc_after_fork_child(void) {
   heap_lock.state.value = 0;
 }
 
-/* Windows memory-copy fork() support (docs/windows_fork_emulation.md,
+/* Windows memory-copy fork() support (docs/design/windows_fork_emulation.md,
  * "Chosen Direction" superseded by the Cygwin/MSYS-style replacement):
  * tracks the OS-level mmap()/VirtualAlloc() region boundaries separately
  * from the block_header split chain above. The two are NOT the same

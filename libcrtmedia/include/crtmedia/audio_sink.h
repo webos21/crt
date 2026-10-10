@@ -15,7 +15,7 @@ extern "C" {
  * ALSA"). Opaque, blocking-write-shaped -- no `IAudioClient`/
  * `AudioQueueRef`/`snd_pcm_t` (or any other host audio API type) ever
  * appears here, matching this project's established "no host/upstream
- * SDK type in a public header" policy (see docs/libcrtgfx_api_policy.md's
+ * SDK type in a public header" policy (see docs/design/libcrtgfx_api_policy.md's
  * own Non-Goals for the same rule applied to libcrtgfx's own Win32/
  * Direct3D/Cocoa/Metal boundary). Each real host backend (`src/arch/
  * windows/audio_sink_wasapi.c`, `src/arch/linux/audio_sink_alsa.c`,

@@ -18,7 +18,7 @@ void* dlsym(void* handle, const char* symbol);
 int dlclose(void* handle);
 char* dlerror(void);
 
-/* dladdr() -- see docs/dynamic_loading.md and docs/bionic_libc_gaps.md/
+/* dladdr() -- see docs/design/dynamic_loading.md and docs/porting/bionic_libc_gaps.md/
  * HISTORY.md's 2026-08-17 entry. Real per-host implementation (Windows:
  * VirtualQuery()+GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS);
  * macOS: dyld's own loaded-image list, the same infrastructure libdl's

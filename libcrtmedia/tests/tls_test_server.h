@@ -1,7 +1,7 @@
 #pragma once
 
 /* Test-only loopback TLS terminator for Networking & Streaming Tranche 5
- * (docs/crtmedia_networking_acceptance.md, "TLS trust policy").
+ * (docs/acceptance/crtmedia_networking_acceptance.md, "TLS trust policy").
  *
  * Generates a fresh PKI in memory on every start (never a checked-in
  * certificate with a hardcoded validity window): an ECDSA P-256 CA, a

@@ -2,7 +2,7 @@
 
 The CRT-owned application UI API (stage `05-ui`, accepted on Linux, Windows and
 macOS). Contract, tranche order and evidence:
-[`docs/crtui_acceptance.md`](../docs/crtui_acceptance.md).
+[`docs/acceptance/crtui_acceptance.md`](../docs/acceptance/crtui_acceptance.md).
 
 ## Layout
 

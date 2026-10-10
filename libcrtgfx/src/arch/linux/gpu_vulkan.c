@@ -691,7 +691,7 @@ static const char* crtgfx_gpu_vulkan_instance_extension_names[2];
 static uint32_t crtgfx_gpu_vulkan_instance_extension_count = 0;
 
 /* Device extensions for importing a VA-API-exported dma-buf as a VkImage
- * (docs/crtmedia_zero_copy_decode_acceptance.md, Linux row). Enabled
+ * (docs/acceptance/crtmedia_zero_copy_decode_acceptance.md, Linux row). Enabled
  * all-or-nothing, only when the physical device supports every one -- a
  * device without them creates exactly the device it always did and
  * borrow_device() reports dmabuf_import = 0 (the bridge then declines and the
@@ -1435,7 +1435,7 @@ static crtgfx_result crtgfx_gpu_vulkan_surface_state_acquire(
      * longer matches this swapchain's, e.g. after a real resize) -- real,
      * later work: recreate the swapchain in place and retry, matching
      * what any production Vulkan presentation loop does. Not attempted in
-     * this first vertical slice (see docs/libcrtgfx_wayland_plan.md's own
+     * this first vertical slice (see docs/design/libcrtgfx_wayland_plan.md's own
      * notes on this) -- surfaces this as a real, honest CRTGFX_ERROR_HOST
      * rather than silently limping on with a stale swapchain. */
     return CRTGFX_ERROR_HOST;

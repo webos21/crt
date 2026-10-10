@@ -5,7 +5,7 @@
 /* Windows-only, project-private interop shape for `crtmedia_gpu_frame.
  * native_handle` (crtmedia/gpu_frame.h) when `memory_kind ==
  * CRTMEDIA_GPU_MEMORY_GPU` on this host ("Zero-copy decoded textures"
- * Tranche 2, 2026-09-23 -- docs/crtmedia_zero_copy_decode_acceptance.md has
+ * Tranche 2, 2026-09-23 -- docs/acceptance/crtmedia_zero_copy_decode_acceptance.md has
  * the full frozen contract). Not installed, not a public header -- same
  * precedent as this directory's own codec_test_control.h: a real,
  * project-owned agreement between crtmedia (the producer, src/codec.c) and
@@ -13,7 +13,7 @@
  * own CRTGFX_HAVE_D3D12 branch), which reaches this file the identical way
  * codec_test_control.h's own top comment already documents (an explicit
  * extra -I onto this directory on the consumer's own target, not a general
- * crtmedia->crtgfx or crtgfx->crtmedia build dependency -- docs/crtmedia_
+ * crtmedia->crtgfx or crtgfx->crtmedia build dependency -- docs/acceptance/crtmedia_
  * zero_copy_decode_acceptance.md's own "Library boundary" section). A
  * generic caller of crtmedia_codec_dequeue_gpu_frame() must still treat
  * native_handle as opaque; only these two project-owned files interpret it.

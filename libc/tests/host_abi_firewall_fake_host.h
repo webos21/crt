@@ -1,6 +1,6 @@
 /* A synthetic "host library" for TODO.md's "Allocator baseline validation
  * before Upper Runtime" tranche 7 ("freeze the Host ABI firewall before
- * hardware decode") -- see docs/host_abi_firewall.md's own "Mechanical
+ * hardware decode") -- see docs/design/host_abi_firewall.md's own "Mechanical
  * detection" section for the full design.
  *
  * fake_host_object is deliberately opaque here: this header is the only

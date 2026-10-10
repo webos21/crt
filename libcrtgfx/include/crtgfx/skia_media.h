@@ -6,7 +6,7 @@
 
 #if CRTGFX_HAS_SKIA_HEADERS && (defined(CRTGFX_HAVE_METAL) || defined(CRTGFX_HAVE_D3D12) || defined(CRTGFX_HAVE_VULKAN))
 // Zero-copy decoded-texture bridge (2026-09-23, "Zero-copy decoded
-// textures" Tranches 1-3 -- docs/crtmedia_zero_copy_decode_acceptance.md has
+// textures" Tranches 1-3 -- docs/acceptance/crtmedia_zero_copy_decode_acceptance.md has
 // the full frozen contract). The one real, deliberately small, optional
 // third component that document promises: depends on both libcrtmedia's
 // public headers (crtmedia_gpu_frame) and libcrtgfx/Skia, so neither of
@@ -35,7 +35,7 @@
 // and sampled as YUV -- declined (null) when the crtgfx_gpu_device did not
 // enable the dma-buf import extensions; on Windows, FFmpeg's own
 // shared D3D11VA decode-pool texture (`frame->native_handle`'s real
-// ID3D11Texture2D*/array-index pair, docs/crtmedia_zero_copy_decode_
+// ID3D11Texture2D*/array-index pair, docs/acceptance/crtmedia_zero_copy_decode_
 // acceptance.md's own native_handle table) is not itself shareable with
 // D3D12, and Skia's own GrD3DTextureResourceInfo has no multi-plane
 // concept at all (confirmed by reading include/gpu/ganesh/d3d/
@@ -50,7 +50,7 @@
 // texture, matching this tranche's own explicit "no RGBA intermediate"
 // decision.
 //
-// Ownership (frozen, docs/crtmedia_zero_copy_decode_acceptance.md's own
+// Ownership (frozen, docs/acceptance/crtmedia_zero_copy_decode_acceptance.md's own
 // "Library boundary" section): on success, this function takes ownership
 // of `*frame` -- it is moved into the returned SkImage's own release
 // context and crtmedia_gpu_frame_release()d only once that SkImage's real

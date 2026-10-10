@@ -1,4 +1,4 @@
-/* sendmsg()/recvmsg() + SCM_RIGHTS fd passing -- see docs/bionic_libc_gaps.md
+/* sendmsg()/recvmsg() + SCM_RIGHTS fd passing -- see docs/porting/bionic_libc_gaps.md
  * and HISTORY.md's 2026-08-16 entry.
  *
  * The plain-data gather/scatter path (part 1) runs identically on every

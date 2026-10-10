@@ -7,7 +7,7 @@
  * project's existing private libc/include/private/crt_atomic.h internal
  * layer, just exposed generically and publicly for real C11 consumers
  * (QuickJS/V8/Skia all commonly include <stdatomic.h> directly) instead of
- * that layer's narrow int-only subset. See docs/bionic_libc_gaps.md and
+ * that layer's narrow int-only subset. See docs/porting/bionic_libc_gaps.md and
  * HISTORY.md's 2026-08-16 entry.
  *
  * This project builds with -std=gnu99 (see shell/CMakeLists.txt and
@@ -72,7 +72,7 @@ typedef enum {
 
 /* Core scalar types. char16_t/char32_t are intentionally omitted -- they'd
  * need uchar.h, itself a documented, still-open gap (see
- * docs/bionic_libc_gaps.md's "Lower priority" list); add
+ * docs/porting/bionic_libc_gaps.md's "Lower priority" list); add
  * atomic_char16_t/atomic_char32_t alongside whenever that header lands. */
 typedef _Atomic(__crt_atomic_bool_t) atomic_bool;
 typedef _Atomic(char) atomic_char;

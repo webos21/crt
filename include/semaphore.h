@@ -10,7 +10,7 @@ extern "C" {
 /* Bionic-shaped opaque storage, matching the pthread_mutex_t/pthread_cond_t
  * convention already used throughout this project (a small __private[]
  * array manipulated internally rather than a directly-typed field) -- see
- * docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. Real Bionic's
+ * docs/porting/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. Real Bionic's
  * own sem_t is just a single atomic unsigned int; this keeps the same
  * one-word shape while following this project's established storage
  * convention. */

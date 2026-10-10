@@ -2,7 +2,7 @@
 #define CRT_PRIVATE_CRT_FORK_MEMCOPY_H
 
 /* Windows aarch64 Cygwin/MSYS-style fork() replacement
- * (docs/windows_fork_emulation.md, "Spawn Broker Retired"): spawns a
+ * (docs/design/windows_fork_emulation.md, "Spawn Broker Retired"): spawns a
  * CREATE_SUSPENDED clone of the current executable under the mitigation
  * policy verified to make heap/stack addresses deterministic, copies the
  * calling thread's live state (heap chunks, stack, image .data/.bss, TLS

@@ -10,7 +10,7 @@
  * memcopy.c instead walks malloc.c's own __crt_malloc_os_region_count()/
  * _base()/_size() accessors and manually copies each OS region's bytes
  * into the child's address space -- a mechanism this project wrote itself
- * (docs/windows_fork_emulation.md) and that has never been exercised here
+ * (docs/design/windows_fork_emulation.md) and that has never been exercised here
  * against a heap spanning more than a handful of regions. Linux/macOS
  * fork() is the real OS syscall (copy-on-write), needing no such
  * per-region bookkeeping -- but running the identical test there too

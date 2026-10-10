@@ -2,8 +2,8 @@
 
 The CRT-owned Web Runtime API (stage `06-web`): a WebKit CRT Port (`PlatformCRT`)
 plus the `crtweb` runtime/view API and the `crtui` WebView on top of it. Contract,
-tranche order and evidence: [`docs/crtweb_acceptance.md`](../docs/crtweb_acceptance.md);
-upstream mapping: [`docs/crtweb_porting.md`](../docs/crtweb_porting.md).
+tranche order and evidence: [`docs/acceptance/crtweb_acceptance.md`](../docs/acceptance/crtweb_acceptance.md);
+upstream mapping: [`docs/porting/crtweb_porting.md`](../docs/porting/crtweb_porting.md).
 
 **Status: bring-up.** Web Tranche 0 (scope, version and license freeze) is closed.
 Tranche 1 (JavaScriptCore) is closed on Linux/x86_64, Linux/aarch64, macOS/arm64
@@ -36,7 +36,7 @@ Current and planned layout, following the tranche order:
 - `platform/` -- `PlatformCRT`, the new WebKit CRT port (not a WPEPlatform backend),
   backed by `crtgfx`, `crtui` external surfaces, `crtmedia` and the CRT PAL. WPEPlatform
   appears only in the Linux first-green prototype (Tranche 3A) and is not the
-  cross-platform architecture; see `docs/crtweb_porting.md`.
+  cross-platform architecture; see `docs/porting/crtweb_porting.md`.
 - `tests/` and `tools/` -- per-tranche acceptance tests and demos, as in the other
   libraries.
 

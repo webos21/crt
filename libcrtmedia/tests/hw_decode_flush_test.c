@@ -1,5 +1,5 @@
 // "Hardware video decode" Tranche 2, item 6 (2026-09-18,
-// docs/crtmedia_hardware_decode_acceptance.md): flush()/reuse coverage on
+// docs/acceptance/crtmedia_hardware_decode_acceptance.md): flush()/reuse coverage on
 // real VideoToolbox hardware, the first real exercise of crtmedia_
 // extractor_seek_to() in this project's own test suite. Deliberately a
 // separate file from hw_decode_test.c (matching demux_decode_test.c's own

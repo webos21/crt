@@ -1,6 +1,6 @@
 #pragma once
 
-/* Networking & Streaming Tranche 2 (docs/crtmedia_networking_acceptance.md)
+/* Networking & Streaming Tranche 2 (docs/acceptance/crtmedia_networking_acceptance.md)
  * -- a libcurl-backed HTTP GET producer feeding a private crtmedia_
  * transport_queue (transport_queue.h). This is the only file in
  * libcrtmedia that #includes <curl/curl.h>; everything above this layer
@@ -9,7 +9,7 @@
  *
  * Always issues a byte-range request, `Range: bytes=<offset>-`, even for
  * offset 0 -- this is the one way to *validate* Range support rather than
- * assume it from an Accept-Ranges header claim (docs/crtmedia_networking_
+ * assume it from an Accept-Ranges header claim (docs/acceptance/crtmedia_networking_
  * acceptance.md's own source/sink capability section: "HTTP with
  * validated Range response -> seekable"), and it is exactly the same rule
  * Tranche 4's own reconnect contract needs later, exercised here in

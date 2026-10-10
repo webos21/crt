@@ -25,7 +25,7 @@
  * macOS/arm64 replay (2026-09-28) found one more real, honest skip case
  * run_capture_cycle() below did not yet classify correctly: a device that
  * enumerates and opens successfully but then never yields even its first
- * frame (confirmed for real: this is exactly docs/crtmedia_encode_capture_
+ * frame (confirmed for real: this is exactly docs/acceptance/crtmedia_encode_capture_
  * acceptance.md's own Tranche 4A finding -- a bare, un-launched process's
  * camera authorization on this host never actually completes) was
  * previously treated as a hard failure rather than a skip, since only
@@ -180,7 +180,7 @@ static int run_capture_cycle(
   /* Set only when the very first dequeue of this cycle fails -- an opened
    * device that never yields even one real frame is indistinguishable,
    * from this API alone, from a device held exclusively elsewhere, a
-   * hardware fault, or (confirmed for real on macOS, docs/crtmedia_encode_
+   * hardware fault, or (confirmed for real on macOS, docs/acceptance/crtmedia_encode_
    * capture_acceptance.md's own Tranche 4A finding) a bare, un-launched
    * process whose camera authorization never actually completes -- the
    * same real, honest skip this test's own device_count==0/capture==NULL

@@ -1,6 +1,6 @@
 /* Windows aarch64 Cygwin/MSYS-style fork() replacement. See
  * libc/include/private/crt_fork_memcopy.h and
- * docs/windows_fork_emulation.md ("Spawn Broker Retired: Moving To Full
+ * docs/design/windows_fork_emulation.md ("Spawn Broker Retired: Moving To Full
  * Cygwin/MSYS-Style fork()") for the design and the Phase B measurements
  * this depends on.
  *

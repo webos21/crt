@@ -1,7 +1,7 @@
 /* Windows x86_64 Cygwin/MSYS-style fork() replacement. See
  * libc/include/private/crt_fork_memcopy.h,
  * libc/src/arch/windows/aarch64/fork_memcopy.c (the original port this
- * mirrors), and docs/windows_fork_emulation.md ("Spawn Broker Retired") for
+ * mirrors), and docs/design/windows_fork_emulation.md ("Spawn Broker Retired") for
  * the design and the Phase B measurements this depends on.
  *
  * Deliberately self-contained (own Win32 declarations, no <windows.h>,

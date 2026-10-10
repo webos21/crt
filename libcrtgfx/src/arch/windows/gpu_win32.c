@@ -15,7 +15,7 @@
  * This file itself never includes the real <d3d12.h>/<dxgi1_4.h> -- unlike
  * skia_bridge.cc's own D3D12 branch, which is forced to (Skia's own public
  * include/gpu/ganesh/d3d/GrD3DTypes.h includes them directly; see that
- * file's own top comment and docs/libcrtgfx_api_policy.md's documented
+ * file's own top comment and docs/design/libcrtgfx_api_policy.md's documented
  * "third-party source being ported" exception).
  *
  * Every vtable slot index, struct field, GUID, and enum value below was

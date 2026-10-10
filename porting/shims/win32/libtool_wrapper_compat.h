@@ -217,7 +217,7 @@ static __inline int _setmode(int fd, int mode) {
  * be started). Deliberately posix_spawn()+waitpid(), NOT fork()+
  * execv()+waitpid() -- fork() on this project's Windows PAL is a real,
  * heavy memory-copy clone of the calling process (see
- * docs/windows_fork_emulation.md) that additionally requires the
+ * docs/design/windows_fork_emulation.md) that additionally requires the
  * calling *program itself* to have opted into the ASLR-mitigation
  * self-relaunch dance at startup (only crt_mksh and the ctest suite do
  * -- see fork_capable_relaunch.c); any other program calling a

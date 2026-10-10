@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-/* Demux-only container reader, the second piece of docs/libcrtmedia_
+/* Demux-only container reader, the second piece of docs/design/libcrtmedia_
  * api_policy.md's decided core (TODO.md's "Separate extractor and codec"
  * item). Shaped after AMediaExtractor's own design -- open a container,
  * list tracks, select which ones to read, pull raw (still encoded)
@@ -32,7 +32,7 @@ extern "C" {
 
 typedef struct crtmedia_extractor crtmedia_extractor;
 
-/* Source/sink capability bits (docs/crtmedia_networking_acceptance.md's
+/* Source/sink capability bits (docs/acceptance/crtmedia_networking_acceptance.md's
  * own Tranche 0 "source/sink capability" section) -- crtmedia_extractor_
  * create()'s own local-file path is always READABLE | SEEKABLE |
  * SIZE_KNOWN (unchanged, not queryable -- a real local file always has
@@ -85,7 +85,7 @@ void crtmedia_sample_release(crtmedia_sample* sample);
  * or demuxed at all. */
 crtmedia_result crtmedia_extractor_create(const char* path, crtmedia_extractor** out_extractor);
 
-/* Networking & Streaming Tranche 2 (docs/crtmedia_networking_acceptance.md)
+/* Networking & Streaming Tranche 2 (docs/acceptance/crtmedia_networking_acceptance.md)
  * -- opens `url` (http://, or https:// with the Tranche 5 trust policy of
  * crtmedia_extractor_create_from_url_with_tls() below) over a
  * private CRT-owned HTTP transport feeding FFmpeg through private custom

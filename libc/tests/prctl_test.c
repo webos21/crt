@@ -1,4 +1,4 @@
-/* prctl() -- Linux-only in real Bionic too, see docs/bionic_libc_gaps.md.
+/* prctl() -- Linux-only in real Bionic too, see docs/porting/bionic_libc_gaps.md.
  * The PR_* constants below are a fixed Linux UAPI, checked on every host;
  * the real prctl() syscall behavior (under CRT_TARGET_OS_LINUX) carries
  * the same unverified-pending-real-Linux-hardware caveat as this

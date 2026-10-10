@@ -34,12 +34,12 @@
  * delivered the next time that thread unblocks or suspends in the CRT. So a thread parked in a plain
  * Win32 wait does not take a signal until it wakes. Process-directed signals (kill(), SIGCHLD,
  * process groups, Ctrl-C) are separate work and not part of this file's thread machinery; SIGCHLD
- * keeps its polled implementation below. See docs/signal_delivery.md, "Windows".
+ * keeps its polled implementation below. See docs/design/signal_delivery.md, "Windows".
  *
  * SIGCHLD specifically: a process handle that becomes signaled on exit, already tracked per child in
  * syscall.c's child registry for waitpid(). __crt_windows_check_sigchld_pending() scans it; unblocking
  * SIGCHLD synchronously delivers an already-pending instance, matching real delivery on the way back
- * from the unblocking sigprocmask() on Linux/macOS (see docs/signal_delivery.md's "pselect() Atomicity",
+ * from the unblocking sigprocmask() on Linux/macOS (see docs/design/signal_delivery.md's "pselect() Atomicity",
  * which libc/src/poll.c's pselect() depends on). __crt_sys_poll()'s blocking loop makes the same check
  * on every iteration. Console control events (Ctrl-C) remain unbridged. */
 

@@ -26,7 +26,7 @@
  * deliberately hand-rolls the wire protocol and has never linked real
  * libwayland-client at all. See window_wayland_native.h's own top comment
  * for the full dual-backend design and why a window cannot move between
- * the two after creation, and docs/libcrtgfx_wayland_plan.md for the
+ * the two after creation, and docs/design/libcrtgfx_wayland_plan.md for the
  * user's own 4-phase roadmap this is Phase 2 of.
  *
  * Scope of this vertical slice (deliberately narrower than the legacy

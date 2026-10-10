@@ -5,7 +5,7 @@
 /* Linux-only, project-private interop shape for `crtmedia_gpu_frame.
  * native_handle` (crtmedia/gpu_frame.h) when `memory_kind ==
  * CRTMEDIA_GPU_MEMORY_GPU` on this host ("Zero-copy decoded textures"
- * Tranche 3 -- docs/crtmedia_zero_copy_decode_acceptance.md has the frozen
+ * Tranche 3 -- docs/acceptance/crtmedia_zero_copy_decode_acceptance.md has the frozen
  * contract and the FFmpeg-Vulkan-mapping vs direct-DRM-PRIME decision).
  * Not installed, not a public header -- same precedent as gpu_frame_d3d11.h
  * and codec_test_control.h: an agreement between crtmedia (producer,

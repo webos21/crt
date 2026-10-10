@@ -2,11 +2,11 @@
  * inside DWARF-CFI-compiled (-fdwarf-exceptions) CRT/libc++/libcxxabi/
  * libunwind code on Windows.
  *
- * Background (see docs/cxx_runtime.md's "Known cost: DWARF-compiled code
+ * Background (see docs/design/cxx_runtime.md's "Known cost: DWARF-compiled code
  * has zero Windows-native unwind info" and TODO.md's C++ runtime
  * prerequisite section, step 7): this project deliberately compiles its
  * own C++ runtime with -fdwarf-exceptions rather than native SEH (see
- * docs/cxx_runtime.md's own "why Windows C++ exceptions use DWARF CFI,
+ * docs/design/cxx_runtime.md's own "why Windows C++ exceptions use DWARF CFI,
  * not native SEH" section), which means every non-leaf function in that
  * code -- throwing or not -- carries no `.pdata`/`.xdata` at all, only a
  * `.eh_frame` section only this project's own libunwind understands. The
@@ -84,7 +84,7 @@
  * behavior from a corrupted second-chance search. This is exactly what
  * makes CRT/libc++-compiled code safe to register directly as a raw
  * native OS callback (window proc, `CreateThread` entry point, COM
- * vtable method, ...) per TODO.md item 7 and docs/cxx_runtime.md's third
+ * vtable method, ...) per TODO.md item 7 and docs/design/cxx_runtime.md's third
  * bullet -- and it needs no per-callsite boundary shim at all: this one
  * process-wide registration at CRT startup covers every thread and every
  * call path automatically, which turned out to be strictly simpler than
@@ -281,7 +281,7 @@ static crt_long CRT_WINAPI crt_dwarf_unwind_safety_net(crt_exception_pointers* i
        * DWARF-CFI-walking _Unwind_RaiseException (UnwindLevel1.c), which
        * never calls Windows' RaiseException()/SEH machinery in the first
        * place, confirmed by this project's own choice of libunwind
-       * backend -- see docs/cxx_runtime.md). Never touch anything else,
+       * backend -- see docs/design/cxx_runtime.md). Never touch anything else,
        * regardless of table state. */
       return CRT_VEH_CONTINUE_SEARCH;
   }
@@ -319,7 +319,7 @@ static crt_long CRT_WINAPI crt_dwarf_unwind_safety_net(crt_exception_pointers* i
         " -- no Windows-native unwind info at the fault site (a DWARF-only\n"
         "CRT/libc++/libunwind frame); the OS's own second-chance search\n"
         "cannot safely cross it, so this is a controlled, deterministic\n"
-        "exit instead of undefined behavior. See docs/cxx_runtime.md's\n"
+        "exit instead of undefined behavior. See docs/design/cxx_runtime.md's\n"
         "\"Known cost: DWARF-compiled code has zero Windows-native unwind\n"
         "info\" section.\n");
   }

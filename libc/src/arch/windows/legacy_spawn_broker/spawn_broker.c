@@ -11,7 +11,7 @@
 /*
  * See libc/include/private/crt_spawn_broker.h for the protocol and the
  * "why does this file exist" background, and
- * docs/windows_fork_emulation.md ("Chosen Direction: Spawn Broker") for
+ * docs/design/windows_fork_emulation.md ("Chosen Direction: Spawn Broker") for
  * the full design writeup.
  *
  * This file is deliberately self-contained (its own local Win32

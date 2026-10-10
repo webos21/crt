@@ -98,7 +98,7 @@ windows_host_arg() {
 # own Metal branch, which #includes Skia's public GrMtlBackendContext.h --
 # that header itself #imports <CoreFoundation/CoreFoundation.h> and
 # #includes <TargetConditionals.h>, the real, documented "third-party
-# source being ported" exception docs/libcrtgfx_api_policy.md's own Non-
+# source being ported" exception docs/design/libcrtgfx_api_policy.md's own Non-
 # Goals clause already codified for the D3D12 slice's GrD3DTypes.h).
 #
 # Two real, separately-confirmed problems solving this needs (2026-09-04,
@@ -421,7 +421,7 @@ case "$target_os" in
     # `configure` scripts (and this project's own --build=*-w64-mingw32
     # recipe workarounds) already expect.
     common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1 -fno-threadsafe-statics --target=${target_arch}-w64-mingw32"
-    # See docs/cxx_runtime.md's "Windows exception-table format: DWARF
+    # See docs/design/cxx_runtime.md's "Windows exception-table format: DWARF
     # CFI, not native SEH" for the full architectural reasoning (this
     # project's own from-source libunwind/libc++abi are built as portable
     # DWARF-CFI unwinders, not linked against native SEH). That decision

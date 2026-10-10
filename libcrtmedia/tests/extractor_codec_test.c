@@ -1,4 +1,4 @@
-// Real end-to-end coverage for docs/libcrtmedia_api_policy.md's decided
+// Real end-to-end coverage for docs/design/libcrtmedia_api_policy.md's decided
 // core -- crtmedia_extractor (crtmedia/extractor.h) + crtmedia_codec
 // (crtmedia/codec.h) driven together against the same real, tiny,
 // project-authored MP4 fixture demux_decode_video_test.c already

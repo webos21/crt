@@ -1,5 +1,5 @@
 // Real coverage for "Zero-copy decoded textures" Tranches 0-3
-// (2026-09-23, docs/crtmedia_zero_copy_decode_acceptance.md): exercises
+// (2026-09-23, docs/acceptance/crtmedia_zero_copy_decode_acceptance.md): exercises
 // crtmedia_codec_dequeue_gpu_frame() against the same real H.264 MP4
 // fixture tests/hw_decode_test.c already proves correct through
 // crtmedia_codec_dequeue_output() (libcrtmedia/assets/test_video.mp4 --
@@ -23,7 +23,7 @@
 //     instead produces
 //     memory_kind == GPU, native_handle != NULL, plane_count == 0, and
 //     crtmedia_codec_is_hardware_accelerated()/hw_gpu_frame_delivered
-//     transition exactly where docs/crtmedia_zero_copy_decode_
+//     transition exactly where docs/acceptance/crtmedia_zero_copy_decode_
 //     acceptance.md says they must;
 //   - a software-only decoder (PREFER_HARDWARE_DECODE unset) never
 //     reports memory_kind == GPU, on any host.
@@ -260,7 +260,7 @@ static void run_gpu_frame_decode(
   *out_cpu_convert_ok = cpu_convert_ok;
 }
 
-// Lower-layer half of docs/crtmedia_zero_copy_decode_acceptance.md's frozen
+// Lower-layer half of docs/acceptance/crtmedia_zero_copy_decode_acceptance.md's frozen
 // gate: a hardware-preferring decoder on a supported host must produce at
 // least one memory_kind == GPU frame. The Skia window demo separately
 // classifies the end-to-end bridge as zero-copy, GPU-copy, or CPU-copy.

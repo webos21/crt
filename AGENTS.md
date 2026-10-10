@@ -21,7 +21,7 @@ OS에서 더 쉽게 재빌드하고 이전할 수 있게 만드는 것이 핵심
 - 상위 계층이 graphics, window system, application lifecycle, packaging,
   host UX 같은 문제에 집중할 수 있도록 저수준 portability 기반 제공.
 - 대형 프로젝트 중 WebKit은 `06-web` 단계의 직접 목표이다. WPE WebKit을 reference로
-  삼은 **WebKit CRT Port**(`PlatformCRT`)를 만든다 (`docs/crtweb_acceptance.md`).
+  삼은 **WebKit CRT Port**(`PlatformCRT`)를 만든다 (`docs/acceptance/crtweb_acceptance.md`).
   Qt, GTK, Enlightenment, Chromium/Chrome 같은 나머지 대형 프로젝트는 직접 포팅
   대상이 아니라 portability gap을 드러내는 예시 또는 장기 benchmark로 취급.
 
@@ -80,7 +80,7 @@ toolchain으로 빌드해 보면서 부족한 Bionic-compatible libc/PAL 표면�
   `toolchain/llvm-project` revision, `libstdc++/third_party/`의 recipe). `02-cxx`
   이상의 SDK가 이를 제공하고 GNU libstdc++는 채택하지 않는다. in-tree bootstrap
   C++ ABI 런타임(`libstdc++/src/`)은 `CRT_USE_IMPORTED_LIBCXX=OFF`일 때의
-  기본이다 (`docs/cxx_runtime.md`).
+  기본이다 (`docs/design/cxx_runtime.md`).
 - Build system: CMake.
 - Default generator: Ninja.
 - Test integration: CTest.
@@ -120,7 +120,7 @@ host startup files, host default runtime libraries에 우발적으로 의존하�
   unwind 엔진/테이블 포맷을 쓰기로 결정했으므로 (host `libunwind-dev` 패키지
   사용을 명시적으로 거부한 것과 동일한 "toolchain을 직접 소유한다" 원칙),
   Windows에서만 native SEH(=OS 소유의 unwind 엔진)에 의존하면 이 일관성이
-  깨진다. 자세한 배경은 `docs/cxx_runtime.md`의 "Exceptions, RTTI, And
+  깨진다. 자세한 배경은 `docs/design/cxx_runtime.md`의 "Exceptions, RTTI, And
   Unwind" 절과 `tools/crt-libcxx-build.py`의 관련 주석을 참고한다.
 
 ## 아키텍처 원칙
@@ -147,10 +147,10 @@ runtime은 다음 계층으로 나누어 설계한다.
      header와 API-level shim(`libc/src/android_api.c`)뿐이며, 실제 consumer가
      요구할 때 정의한다.
 5. Graphics/application runtime
-   - libc/PAL 위의 누적(cumulative) SDK stage로 정의되어 있다 (`docs/runtime_roadmap.md`).
+   - libc/PAL 위의 누적(cumulative) SDK stage로 정의되어 있다 (`docs/design/runtime_roadmap.md`).
      `03-gfx-simple`(`libcrtgfx` window/input), `04-gfx-media`(Skia/GPU,
      `libcrtmedia`), `05-ui`(`libcrtui`), `06-web`(`libcrtweb`, WebKit CRT Port,
-     진행 중). 각 단계는 이전 단계 SDK만으로 빌드·검증된다 (`docs/distribution.md`).
+     진행 중). 각 단계는 이전 단계 SDK만으로 빌드·검증된다 (`docs/guides/distribution.md`).
 
 ## 프로젝트 구조
 
@@ -193,7 +193,7 @@ runtime은 다음 계층으로 나누어 설계한다.
     cos(3) in a separate library.
   - `src/freebsd/`: imported FreeBSD msun 계열 소스. 프로젝트 소유 코드
     (`basic.c`, `fenv.c`, `long_double.c`)와 분리되어 있다. 의존성/출처는
-    `docs/libm_dependency_map.md`.
+    `docs/reference/libm_dependency_map.md`.
 - `libdl/`
   - 결과 파일: `libdl.so`
   - The dynamic linker interface library. This is where stuff like dlopen(3)
@@ -202,11 +202,11 @@ runtime은 다음 계층으로 나누어 설계한다.
     validation), calling into a per-host backend under
     `src/arch/{linux,macos,windows}/dl_*.c` via `src/dl_internal.h`. Linux's
     backend is currently a documented stub (no CRT-owned ELF loader yet); see
-    `docs/dynamic_loading.md`.
+    `docs/design/dynamic_loading.md`.
 - `libstdc++/`
   - 결과 파일: `libc++.a`, `libc++.so` (in-tree bootstrap 런타임의 `OUTPUT_NAME`).
   - 디렉터리 이름은 Android Bionic의 작은 C++ ABI 지원 라이브러리 이름에서
-    왔다. GNU libstdc++는 채택하지 않는다 (`docs/cxx_runtime.md`).
+    왔다. GNU libstdc++는 채택하지 않는다 (`docs/design/cxx_runtime.md`).
   - `src/`: in-tree bootstrap C++ ABI/allocation runtime (`cxxabi.c`,
     `msvcabi.c`, `new_delete.cc`). `CRT_USE_IMPORTED_LIBCXX=OFF`일 때의 기본
     런타임이며, `__cxa_guard_acquire`, `__cxa_pure_virtual` 같은 symbol이 있다.
@@ -235,13 +235,13 @@ runtime은 다음 계층으로 나누어 설계한다.
   - **예약된 폴더이며 아직 빌드 타깃이 없다** (`README.md`만 있음). 결과 파일은
     `/system/bin/linker`로 계획되어 있다.
   - 장기적으로 ELF executable을 메모리에 올리고 symbol을 해석하는 project-owned
-    dynamic linker/loader가 들어갈 자리이다. 정책은 `docs/linker_loader.md`에
+    dynamic linker/loader가 들어갈 자리이다. 정책은 `docs/design/dynamic_loading.md`에
     있고, 구체적인 ELF loader milestone이 선택되기 전까지 공개 API는 `libdl/`이다.
 
 ### Upper runtime (`03-gfx-simple` ~ `06-web`)
 
 각 단계는 이전 단계 SDK를 포함하는 누적(cumulative) stage이다.
-단계 정의와 순서는 `docs/runtime_roadmap.md`, 배포 계약은 `docs/distribution.md`.
+단계 정의와 순서는 `docs/design/runtime_roadmap.md`, 배포 계약은 `docs/guides/distribution.md`.
 
 - `libcrtgfx/`
   - 결과 파일: `libcrtgfx` (window/input/software framebuffer, `03-gfx-simple`),
@@ -250,12 +250,12 @@ runtime은 다음 계층으로 나누어 설계한다.
   - `src/arch/{linux,macos,windows}/`: 호스트별 window/GPU 백엔드.
   - `third_party/{skia,wayland,xkbcommon}`: pin/recipe. `assets/fonts`: 번들 폰트.
   - `cmake/`: in-tree 빌드와 isolated stage 프로젝트가 공유하는 source/target 목록.
-  - `tools/`: window/GPU/Skia 데모. 정책은 `docs/libcrtgfx_api_policy.md`.
+  - `tools/`: window/GPU/Skia 데모. 정책은 `docs/design/libcrtgfx_api_policy.md`.
 - `libcrtmedia/`
   - 결과 파일: `libcrtmedia.a`, `libcrtmedia.so` (`04-gfx-media`).
   - FFmpeg 기반 media: frame/format/extractor/codec/muxer/player, host audio sink,
     capture, hardware decode와 GPU frame 전달, HTTP/HTTPS transport (libcurl은
-    CRT 소유 계약 아래에 있다). 정책은 `docs/libcrtmedia_api_policy.md`.
+    CRT 소유 계약 아래에 있다). 정책은 `docs/design/libcrtmedia_api_policy.md`.
   - `third_party/ffmpeg`, `assets/`(테스트용 오디오/비디오 클립), `cmake/`, `tools/`.
 - `libcrtui/`
   - 결과 파일: `libcrtui.a`, `libcrtui.so`, 선택적 `libcrtui_skia.a`,
@@ -263,13 +263,13 @@ runtime은 다음 계층으로 나누어 설계한다.
   - CRT 소유 application UI API. LVGL은 비공개 구현 의존성이며 빌드 시 fetch되고
     (`third_party/lvgl`에는 pin만 있다) public header나 SDK에 노출되지 않는다.
   - `cmake/crtui_sources.cmake`: in-tree 빌드와 isolated stage가 공유하는 source
-    목록. 상세는 `libcrtui/README.md`, `docs/crtui_acceptance.md`.
+    목록. 상세는 `libcrtui/README.md`, `docs/acceptance/crtui_acceptance.md`.
 - `libcrtweb/`
   - `06-web`(WebKit CRT Port)의 자리. **현재는 `third_party/webkit/`의 WPE WebKit
     2.54.0 pin과 provenance(`recipe.json`, `license-inventory.json`)뿐이며**
     `crtweb` API, `PlatformCRT`, 빌드 타깃은 아직 없고 루트 CMake에 연결되어 있지
-    않다. 계약은 `docs/crtweb_acceptance.md`, upstream 매핑은
-    `docs/crtweb_porting.md`.
+    않다. 계약은 `docs/acceptance/crtweb_acceptance.md`, upstream 매핑은
+    `docs/porting/crtweb_porting.md`.
 
 ### Provenance and porting
 
@@ -316,13 +316,16 @@ runtime은 다음 계층으로 나누어 설계한다.
   - allocator baseline/contention 결과(`.jsonl`). 호스트별 결과를 한곳에 모으기 위해
     일부러 git에 커밋하며, 손으로 편집하지 않고 driver script로 재생성한다.
 - `docs/`
-  - 프로젝트 문서 저장: 정책/설계, 단계별 acceptance 기록(`crtui_`/`crtweb_`/
-    `crtmedia_*`), roadmap, 배포 계약, porting 상태. `bringup/`, `study/`,
-    `refine/`, `marketing/`은 참고/작업 메모이다.
+  - 문서 색인은 `docs/README.md`이다. 목적별로 `design/`(정책/설계),
+    `acceptance/`(검증 계약/증거), `guides/`(빌드/배포/사용 절차),
+    `porting/`(upstream 이식 계획/상태), `reference/`(구현 참조),
+    `releases/`(발행된 릴리스 노트), `history/`(월별 완료 이력 요약)로 나눈다.
+    `bringup/`에는 원인 분석과 재현 가치가 있는 초기 조사 기록을 보존한다.
+    채택된 검토/홍보 초안은 해당 정책 문서에 통합하고 중복 초안은 남기지 않는다.
 - `.github/workflows/ci.yml`
   - CI matrix: macOS aarch64, Linux amd64/arm64, Windows x64/arm64.
 - 루트 문서: `README.md`(공개 개요), `STATUS.md`(근거 기반 현재 상태 스냅샷),
-  `TODO.md`(진행 중/예정 작업), `HISTORY.md`(완료 작업의 상세 기록), `LICENSE.md`.
+  `TODO.md`(진행 중/예정 작업), `HISTORY.md`(현재 월의 완료 작업 상세 기록), `LICENSE.md`.
   빌드 입구는 `CMakeLists.txt`와 `CMakePresets.json`이다.
 - `out/`
   - 빌드 산출물과 SDK(`out/<preset>/dist/`). 생성물이므로 git에 포함하지 않는다.
@@ -331,21 +334,30 @@ runtime은 다음 계층으로 나누어 설계한다.
 
 상세한 프로젝트 의미와 기술 스택 판단은 다음 문서를 우선 참고한다.
 
-- `docs/project_meanings.md`
-- `docs/project_stacks.md` (core runtime 스택. 상위 계층은 아래 roadmap/acceptance 문서)
+- `docs/design/project_meanings.md`
+- `docs/design/project_stacks.md` (core runtime 스택. 상위 계층은 아래 roadmap/acceptance 문서)
 
 단계 정의, 계약, 배포는 다음 문서를 참고한다.
 
-- `docs/runtime_roadmap.md`: 단계 순서와 경계.
-- `docs/distribution.md`: 누적 SDK stage와 isolated stage 계약.
-- `docs/crtui_acceptance.md`, `docs/crtweb_acceptance.md`,
-  `docs/crtmedia_*_acceptance.md`: 단계별 계약과 증거.
-- `docs/crtweb_porting.md`: WebKit upstream과 CRT의 매핑.
+- `docs/design/runtime_roadmap.md`: 단계 순서와 경계.
+- `docs/guides/distribution.md`: 누적 SDK stage와 isolated stage 계약.
+- `docs/acceptance/crtui_acceptance.md`, `docs/acceptance/crtweb_acceptance.md`,
+  `docs/acceptance/crtmedia_*_acceptance.md`: 단계별 계약과 증거.
+- `docs/porting/crtweb_porting.md`: WebKit upstream과 CRT의 매핑.
 
 ## 문서 관리
 
 - `HISTORY.md`는 완료된 작업의 상세 기록, `TODO.md`는 진행 상황을 한두 줄로
   적는 곳이며, 끝난 항목의 상세는 `HISTORY.md`로 옮기고 `TODO.md`에서 지운다.
+- 완료된 이전 월은 `docs/history/`에 원인/결정, 검증 및 재현 진입점, 한계와
+  원문 Git commit을 보존해 요약한 뒤 `HISTORY.md`에서 정리한다. 복원 방법은
+  `docs/history/README.md`에 기록한다. 문서 이동 시 저장소 참조도 함께 갱신한다.
 - `STATUS.md`는 명시적으로 요청받았을 때만 갱신한다. 상세 규칙은 `TODO.md`의
   Notice를 따른다.
 - 같은 상태를 `README.md`, `STATUS.md`, `TODO.md`에 반복해 적지 않는다.
+
+- 문서별 소유 범위를 지킨다: 프로젝트 목표는 `project_meanings`, 스택 근거는
+  `project_stacks`, 단계 순서는 `runtime_roadmap`, 절차는 guides, 검증 계약과
+  측정 증거는 acceptance가 소유한다. 완료 체크리스트와 상태를 복제하지 말고
+  원문을 링크한다. 검토 초안의 유효한 내용은 소유 문서에 통합하고 폐기된 제안은
+  현재 계약처럼 남기지 않는다.

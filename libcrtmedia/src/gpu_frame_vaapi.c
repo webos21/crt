@@ -1,5 +1,5 @@
 /* Linux VA-API surface export for the zero-copy decode branch (Tranche 3,
- * docs/crtmedia_zero_copy_decode_acceptance.md). Kept in its own source so
+ * docs/acceptance/crtmedia_zero_copy_decode_acceptance.md). Kept in its own source so
  * only this file needs the host libva headers (-fcrt-real-linux-sdk);
  * codec.c stays free of them. */
 

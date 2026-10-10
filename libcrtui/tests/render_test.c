@@ -1,4 +1,4 @@
-/* crtui Tranche 1 acceptance (docs/crtui_acceptance.md): LVGL software draw
+/* crtui Tranche 1 acceptance (docs/acceptance/crtui_acceptance.md): LVGL software draw
  * buffer -> CRT display adapter -> BGRA8888 pixels. Headless: renders a
  * Window > Container ("column") > Label/Button/Slider/Progress scene into
  * memory and checks real pixels (never just "it ran"), then cycles

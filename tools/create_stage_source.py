@@ -173,7 +173,7 @@ STAGES = {
             # down explains; found for real by tools/test_stage_source_
             # closure.py itself once capture_avfoundation.c was added.
             "libcrtmedia/src/capture_avfoundation_test_control.h",
-            # Networking & Streaming Tranches 1-3 (docs/crtmedia_networking_
+            # Networking & Streaming Tranches 1-3 (docs/acceptance/crtmedia_networking_
             # acceptance.md): found missing here for real (2026-09-29,
             # verifying Tranche 3 on macOS) the same way every other
             # networking/encode-capture gap in this registry was found --

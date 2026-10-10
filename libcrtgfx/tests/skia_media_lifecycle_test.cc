@@ -1,5 +1,5 @@
 // Cross-host ownership/lifecycle regression for "Zero-copy decoded textures"
-// Tranche 5 (docs/crtmedia_zero_copy_decode_acceptance.md). This is the
+// Tranche 5 (docs/acceptance/crtmedia_zero_copy_decode_acceptance.md). This is the
 // headless counterpart to tools/skia_media_window_demo.cc: fifteen complete
 // extractor/decoder create -> decode -> GPU-frame import/draw -> destroy
 // cycles, using a real Ganesh offscreen surface so every imported native

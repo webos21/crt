@@ -1,5 +1,5 @@
 /* epoll_create1()/epoll_ctl()/epoll_wait() -- Linux-only in real Bionic
- * too, see docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-17 entry.
+ * too, see docs/porting/bionic_libc_gaps.md and HISTORY.md's 2026-08-17 entry.
  *
  * The struct epoll_event size check below runs on every host/architecture
  * this project builds for (not just Linux) -- it's purely about this

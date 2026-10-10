@@ -1,4 +1,4 @@
-// Networking & Streaming Tranche 2 fixture A (docs/crtmedia_networking_
+// Networking & Streaming Tranche 2 fixture A (docs/acceptance/crtmedia_networking_
 // acceptance.md): a real, ordinary (non-fragmented) MP4 -- the same
 // libcrtmedia/assets/test_video.mp4 fixture extractor_codec_test.c already
 // verifies over a local file -- served over a real repository-owned

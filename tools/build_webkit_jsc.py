@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build JavaScriptCore (WebKit's JSCOnly port) with the CRT toolchain and run the CRT
-acceptance (Web Tranche 1, docs/crtweb_acceptance.md).
+acceptance (Web Tranche 1, docs/acceptance/crtweb_acceptance.md).
 
 The build is driven the way an external consumer would drive it: the pinned WPE WebKit
 tarball (libcrtweb/third_party/webkit/recipe.json, verified by tools/fetch_webkit.py) is
@@ -722,7 +722,7 @@ def run_acceptance(mode: str, build: Path, run_env: dict, programs: dict, target
 
 
 # A shared library the process may load that is NOT a CRT artifact. Each entry is a known gap,
-# listed so the audit stays honest instead of being loosened (see docs/crtweb_acceptance.md).
+# listed so the audit stays honest instead of being loosened (see docs/acceptance/crtweb_acceptance.md).
 KNOWN_HOST_LIBRARIES: dict[str, str] = {}
 
 

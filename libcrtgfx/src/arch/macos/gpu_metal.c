@@ -22,7 +22,7 @@
  * pointers here exactly like window_cocoa.c's own NSWindow/NSView/
  * CALayer handling), not third-party source needing the "third-party
  * source being ported" exception `-fcrt-real-apple-sdk`/skia_bridge.cc's
- * own Metal branch need (docs/libcrtgfx_api_policy.md's own Non-Goals
+ * own Metal branch need (docs/design/libcrtgfx_api_policy.md's own Non-Goals
  * clause) -- confirmed for real (2026-09-04) via a standalone probe on
  * this real macOS host: `tools/crt-cc` (plain C, no special flags at all)
  * compiled and linked this exact `objc_msgSend`-driven `MTLCopyAllDevices`
@@ -372,7 +372,7 @@ crtgfx_result crtgfx_gpu_metal_surface_clear(
  * crtgfx_cocoa_get_metal_layer() already performs, just read back instead
  * of recomputed. Reasoned-but-not-locally-verified this session (no
  * macOS hardware -- matches every other macOS-only addition's own
- * discipline, see docs/libcrtgfx_wayland_plan.md). */
+ * discipline, see docs/design/libcrtgfx_wayland_plan.md). */
 crtgfx_result crtgfx_gpu_metal_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height) {
   struct crtgfx_gpu_metal_surface_state* state =
       (struct crtgfx_gpu_metal_surface_state*)surface->backend_state;

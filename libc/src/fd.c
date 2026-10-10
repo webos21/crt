@@ -907,7 +907,7 @@ static long build_proc_self_status(char* buffer, size_t size) {
  * would be actively misleading, so every counter here is a real, honest
  * zero rather than a guess. What genuinely is real: the "cpu"/"cpuN" line
  * count itself, from the same sysconf(_SC_NPROCESSORS_ONLN) PAL hook
- * docs/sysroot_ports.md already documents (GetSystemInfo on Windows,
+ * docs/porting/sysroot_ports.md already documents (GetSystemInfo on Windows,
  * Darwin sysctl on macOS) -- enough for anything that only wants this
  * file's line shape or core count, not real CPU-time accounting. */
 static long build_proc_stat(char* buffer, size_t size) {

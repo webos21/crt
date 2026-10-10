@@ -11,7 +11,7 @@
 # libcrtgfx/CMakeLists.txt's own comment), needed only so skia_bridge.cc's
 # Metal/D3D12/Vulkan bridge functions (crtgfx/skia_media.h)
 # can see crtmedia_gpu_frame's real layout -- this does not make libcrtgfx
-# depend on libcrtmedia in general (docs/crtmedia_zero_copy_decode_
+# depend on libcrtmedia in general (docs/acceptance/crtmedia_zero_copy_decode_
 # acceptance.md's own "Library boundary" section); only this one already-
 # real-host-SDK-header translation unit gains the include paths,
 # and only crtgfx_skia/crtgfx_skia_shared (never plain crtgfx/crtgfx_gpu)
@@ -69,7 +69,7 @@ function(crt_add_crtgfx_skia_object_target)
       # switched 2026-09-04) -- Skia's own public include/gpu/ganesh/d3d/
       # GrD3DTypes.h unconditionally #includes <d3d12.h>/<dxgi1_4.h>, a
       # real, forced exception to this project's own no-host-header policy
-      # (see docs/libcrtgfx_api_policy.md). skia_bridge.cc's own D3D12
+      # (see docs/design/libcrtgfx_api_policy.md). skia_bridge.cc's own D3D12
       # branch transitively includes it, so this target needs the same
       # real flags tools/build_skia.py's own sibling call already adds for
       # Skia's *own* GrD3D*.cpp sources -- see that file's own comments
@@ -187,7 +187,7 @@ function(crt_add_crtgfx_skia_object_target)
       # via GrMtlTypes.h/include/ports/SkCFObject.h) #includes real
       # <TargetConditionals.h>/<CoreFoundation/CoreFoundation.h>/<Metal/
       # Metal.h>, a real, forced exception to this project's own no-host-
-      # SDK-header policy (see docs/libcrtgfx_api_policy.md), exactly like
+      # SDK-header policy (see docs/design/libcrtgfx_api_policy.md), exactly like
       # the D3D12 branch's own GrD3DTypes.h above.
       #
       # Two real calling contexts now share this function (2026-09-11):
@@ -408,7 +408,7 @@ function(crt_add_crtgfx_skia_static_target)
     # out of crtgfx_skia's own interface anyway, on purpose: each real
     # consumer of crtgfx_skia_import_media_frame() links crtmedia directly,
     # alongside crtgfx_skia (see crtgfx_skia_media_window_demo's own target
-    # definition, libcrtgfx/CMakeLists.txt) -- matching docs/crtmedia_
+    # definition, libcrtgfx/CMakeLists.txt) -- matching docs/acceptance/crtmedia_
     # zero_copy_decode_acceptance.md's own "Library boundary" framing more
     # literally: a consumer of the bridge opts into both dependencies
     # itself, rather than crtgfx_skia forcing crtmedia on every macOS

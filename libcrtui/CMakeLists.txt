@@ -1,7 +1,7 @@
 # libcrtui: the CRT-owned application UI API (stage 05-ui). Tranche 0 ships the
 # frozen contract (include/crtui/ui.h) and its headless, resource-free model
 # implementation (src/core.c); LVGL arrives privately in Tranche 1 and never
-# appears in an installed header. See docs/crtui_acceptance.md.
+# appears in an installed header. See docs/acceptance/crtui_acceptance.md.
 
 # Networking-style optional dependency gate (like CRTMEDIA_ENABLE_CURL): the
 # LVGL-backed renderer is compiled only when CRTUI_ENABLE_LVGL is ON, so an
@@ -444,7 +444,7 @@ set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtui_input_test_runs)
 # crtui_contract_shared_test (macOS): the same contract test, linked against the
 # installed-style libcrtui.dylib instead of libcrtui.a. The static-link tests
 # above cannot notice which libc a *shared* crtui binds to; this one aborted with
-# a heap overflow before the link-order fix above (docs/crtui_acceptance.md,
+# a heap overflow before the link-order fix above (docs/acceptance/crtui_acceptance.md,
 # Tranche 3 macOS replay), and it proves the dylib exports the whole contract API.
 if(CRT_TARGET_OS STREQUAL "macos")
   add_executable(crtui_contract_shared_test

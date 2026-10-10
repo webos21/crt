@@ -1,4 +1,4 @@
-/* eventfd() -- Linux-only in real Bionic too, see docs/bionic_libc_gaps.md
+/* eventfd() -- Linux-only in real Bionic too, see docs/porting/bionic_libc_gaps.md
  * and HISTORY.md's 2026-08-17 entry. The real behavior (below, under
  * CRT_TARGET_OS_LINUX) exercises the new raw eventfd2 syscall trampoline
  * (libc/src/arch/linux/{x86_64,aarch64}/syscall.S) for real -- reasoned

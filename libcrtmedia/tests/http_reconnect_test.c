@@ -1,4 +1,4 @@
-// Networking & Streaming Tranche 4 acceptance (docs/crtmedia_networking_
+// Networking & Streaming Tranche 4 acceptance (docs/acceptance/crtmedia_networking_
 // acceptance.md): reconnect and discontinuity. A repository-owned loopback
 // server (tests/http_test_server.h, tests/http_upload_test_server.h) injects
 // the real failures -- closing mid-response, changing the resource between

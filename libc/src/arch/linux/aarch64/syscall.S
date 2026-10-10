@@ -847,7 +847,7 @@ __crt_sys_rt_sigprocmask:
 .size __crt_sys_rt_sigprocmask, . - __crt_sys_rt_sigprocmask
 
 /* eventfd()/timerfd_*()/epoll_*() -- Linux-only in real Bionic too (see
- * docs/bionic_libc_gaps.md, HISTORY.md's 2026-08-17 entry). Syscall
+ * docs/porting/bionic_libc_gaps.md, HISTORY.md's 2026-08-17 entry). Syscall
  * numbers from the generic table (include/uapi/asm-generic/unistd.h,
  * what aarch64 uses), all well-established/stable. NOT independently
  * verified on real Linux hardware from this session (Windows-only dev

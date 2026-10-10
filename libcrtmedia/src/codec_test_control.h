@@ -1,7 +1,7 @@
 #pragma once
 
 /* Private, non-installed diagnostic surface for hardware-decode acceptance
- * tests (docs/crtmedia_hardware_decode_acceptance.md, "Hardware video
+ * tests (docs/acceptance/crtmedia_hardware_decode_acceptance.md, "Hardware video
  * decode" Tranche 2). Generic tests may query the fine-grained six-state
  * hardware-decode model through this header, but never see an FFmpeg type
  * (AVCodecContext/AVHWDeviceContext/AVFrame/...) or a concrete crtmedia_
@@ -43,7 +43,7 @@ typedef struct crtmedia_codec_hw_diagnostics {
    * value: a real hardware-resident frame was successfully delivered to
    * the caller, either via crtmedia_codec_dequeue_output()'s CPU
    * transfer or crtmedia_codec_dequeue_gpu_frame()'s GPU-resident handoff
-   * (docs/crtmedia_zero_copy_decode_acceptance.md). Included here too so
+   * (docs/acceptance/crtmedia_zero_copy_decode_acceptance.md). Included here too so
    * a caller can build a complete diagnostic record from one query. */
   int hw_frame_transferred;
   /* True only once a real hardware frame was delivered as

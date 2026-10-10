@@ -18,7 +18,7 @@
  * __crt_windows_spawn_broker_main() very early in mainCRTStartup(), before
  * the normal fd/rootfs bootstrap, and never returns.
  *
- * See docs/windows_fork_emulation.md, "Chosen Direction: Spawn Broker".
+ * See docs/design/windows_fork_emulation.md, "Chosen Direction: Spawn Broker".
  */
 int __crt_windows_is_unregistered_clone(void);
 

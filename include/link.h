@@ -1,8 +1,8 @@
 #ifndef CRT_LINK_H
 #define CRT_LINK_H
 
-/* dl_iterate_phdr() -- see docs/dynamic_loading.md and
- * docs/bionic_libc_gaps.md/HISTORY.md's 2026-08-17 entry.
+/* dl_iterate_phdr() -- see docs/design/dynamic_loading.md and
+ * docs/porting/bionic_libc_gaps.md/HISTORY.md's 2026-08-17 entry.
  *
  * Matches real Bionic's own minimal struct dl_phdr_info (4 fields; the
  * dlpi_adds/dlpi_subs/dlpi_tls_modid/dlpi_tls_data fields glibc adds on top
@@ -17,7 +17,7 @@
  *   linker's own struct r_debug/link_map rendezvous list (see
  *   libdl/src/arch/linux/dl_linux.c's own comment), not by this project
  *   loading anything itself: dlopen() on Linux still does not actually
- *   load new shared objects today (see docs/dynamic_loading.md's "Linux"
+ *   load new shared objects today (see docs/design/dynamic_loading.md's "Linux"
  *   section), but every Linux executable/DSO this project builds is
  *   *linked* against the real system dynamic linker
  *   (`-dynamic-linker /lib/ld-linux-*.so.1`), which does the actual

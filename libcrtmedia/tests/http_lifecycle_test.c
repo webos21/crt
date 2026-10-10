@@ -1,4 +1,4 @@
-// Networking & Streaming Tranche 6 acceptance (docs/crtmedia_networking_
+// Networking & Streaming Tranche 6 acceptance (docs/acceptance/crtmedia_networking_
 // acceptance.md): repeated connect / stream / cancel / reconnect / destroy
 // lifecycle stress across every network path -- the HTTP input transport, the
 // URL extractor (plain, reconnecting, and over TLS), and the HTTP upload

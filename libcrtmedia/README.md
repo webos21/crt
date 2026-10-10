@@ -11,10 +11,10 @@ surfaces zero-copy; Windows uses the accepted D3D11-to-D3D12 GPU-copy fallback
 without CPU readback. Capture (V4L2, AVFoundation, Media Foundation) and
 software/hardware encode pass mux/decode-back and lifecycle gates, and HTTP/HTTPS
 input, fragmented-MP4 upload and reconnect are verified against loopback fixtures.
-See `docs/crtmedia_hardware_decode_acceptance.md`,
-`docs/crtmedia_zero_copy_decode_acceptance.md`,
-`docs/crtmedia_encode_capture_acceptance.md` and
-`docs/crtmedia_networking_acceptance.md`; the sections below keep the dated
+See `docs/acceptance/crtmedia_hardware_decode_acceptance.md`,
+`docs/acceptance/crtmedia_zero_copy_decode_acceptance.md`,
+`docs/acceptance/crtmedia_encode_capture_acceptance.md` and
+`docs/acceptance/crtmedia_networking_acceptance.md`; the sections below keep the dated
 implementation trail.
 
 The CPU video frame handoff contract is defined:
@@ -25,7 +25,7 @@ and `crtmedia_frame_convert_to_rgba()`. `tests/frame_test.c` covers it
 deterministically; `tests/frame_skia_smoke.cc` (built and registered from
 `libcrtgfx/CMakeLists.txt`, not this directory's own -- see that file's
 own comment) hands a synthetic frame in each format to a real Skia
-`SkImage`/`SkSurface`. See `HISTORY.md`'s 2026-08-31 entry for the full
+`SkImage`/`SkSurface`. See [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s 2026-08-31 entry for the full
 design trail.
 
 A real FFmpeg-backed demux/software-decode bridge exists behind the
@@ -41,7 +41,7 @@ that recipe's own notes). `tests/demux_decode_test.c` verifies it
 end-to-end against a real, tiny, project-authored WAV fixture
 (`assets/test_tone.wav`). Verified end-to-end on all three hosts: Linux
 (WSL), macOS, and native Windows -- see `porting/recipes/ffmpeg.json`'s
-own `status`/`notes` for the full per-host fix trail and `HISTORY.md`'s
+own `status`/`notes` for the full per-host fix trail and [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s
 2026-09-01 entries for the dated narrative.
 
 Real H.264+AAC (MP4) and MP3 fixture coverage exists too:
@@ -50,7 +50,7 @@ EOF drain/flush) and `tests/demux_decode_mp3_test.c` (the `mp3`/`mp3float`
 decode path specifically), plus `tests/demux_decode_malformed_test.c`
 (null args, a nonexistent path, non-media bytes, a truncated real
 fixture -- no crash, a real defined error/EOF outcome every time). See
-`assets/README.md` for the new fixtures' own provenance and `HISTORY.md`'s
+`assets/README.md` for the new fixtures' own provenance and [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s
 2026-09-02 entry for the full trail. Verified on all three hosts, Linux,
 Windows, and macOS (macOS re-verified the same day, `crtmedia_demux_video_
 test` doubling as the first real confirmation that FFmpeg's own threaded
@@ -59,7 +59,7 @@ H.264 decode works through this project's pthread PAL on macOS too).
 The public media API policy -- an `AMediaFormat`/`AMediaExtractor`/
 `AMediaCodec`-shaped core layered under the existing, retained
 `crtmedia_demuxer_*` convenience API, FFmpeg never in a public header --
-is decided in `docs/libcrtmedia_api_policy.md`. The core itself is now
+is decided in `docs/design/libcrtmedia_api_policy.md`. The core itself is now
 implemented and verified on all three hosts: `include/crtmedia/format.h`
 (`crtmedia_format`, a real key-value store including `csd-0` codec-config
 buffers for H.264/AAC), `include/crtmedia/extractor.h` (`crtmedia_
@@ -85,7 +85,7 @@ per decodable track instead of its own independent FFmpeg integration
 a real `CRTMEDIA_WOULD_BLOCK` backpressure path that never silently drops
 an unqueued sample. Every existing `crtmedia_demux_*_test` passes
 completely unchanged after the rebuild -- verified on Linux, Windows,
-and macOS (macOS re-verified the same day). See `HISTORY.md`'s
+and macOS (macOS re-verified the same day). See [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s
 2026-09-02 entry for the full trail.
 
 The software player (`TODO.md`'s upper-runtime roadmap) is under way:
@@ -150,5 +150,5 @@ audio-failure fallback on Linux/WSL; and on real macOS hardware plays in a
 real, correctly-paced ~1.19 real second of wall-clock time through the
 real CoreAudio backend's own device-backpressure path (5 consecutive runs,
 no flakiness) -- macOS is the one host whose run never needs the audio-
-failure fallback at all. See `HISTORY.md`'s 2026-09-03 entry for the full
+failure fallback at all. See [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s 2026-09-03 entry for the full
 trail.

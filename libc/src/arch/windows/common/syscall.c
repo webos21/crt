@@ -283,7 +283,7 @@ struct crt_memory_status_ex {
  * suspend/resume ordering; it is not a fix for true producer/consumer
  * concurrency (a write larger than this would still deadlock), just a
  * large enough ceiling that it doesn't matter in practice. See
- * docs/windows_fork_emulation.md for the fork()-cost background. */
+ * docs/design/windows_fork_emulation.md for the fork()-cost background. */
 #define CRT_PIPE_BUFFER_SIZE (4 * 1024 * 1024)
 
 #if defined(_M_IX86) || defined(__i386__)
@@ -739,7 +739,7 @@ static int ntdll_initialized;
  * A process with this flag set is a raw NT-level clone that never went
  * through CreateProcess's CSRSS registration handshake: CreateProcessA
  * (and anything else that needs a working CSR connection) crashes if
- * called directly from here. See docs/windows_fork_emulation.md, "Chosen
+ * called directly from here. See docs/design/windows_fork_emulation.md, "Chosen
  * Direction: Spawn Broker". */
 static int windows_unregistered_clone;
 static HANDLE child_process_table[CRT_FD_TABLE_SIZE];
@@ -750,7 +750,7 @@ static DWORD child_pid_table[CRT_FD_TABLE_SIZE];
  * reported as a fresh SIGCHLD-worthy event on every subsequent check --
  * matches real SIGCHLD's edge-triggered semantics (delivered once per state
  * transition, not repeatedly while a zombie sits unreaped). See
- * docs/signal_delivery.md, "Windows". */
+ * docs/design/signal_delivery.md, "Windows". */
 static unsigned char child_notified_table[CRT_FD_TABLE_SIZE];
 static HANDLE private_wait_process;
 static DWORD private_wait_pid;
@@ -2270,7 +2270,7 @@ static long fd_snapshot_prepare_child_duplicates(
  *
  * libc/src/arch/windows/common/fork_capable_relaunch.c relaunches this
  * process's own image under a mitigation policy that makes memory-copy
- * fork() viable (see docs/windows_fork_emulation.md). That relaunch is
+ * fork() viable (see docs/design/windows_fork_emulation.md). That relaunch is
  * itself an ordinary CreateProcessA() hop, so without help it only
  * forwards the 3 standard handles -- any other fd this process itself
  * received (e.g. via posix_spawn_file_actions_adddup2()) is silently
@@ -3053,7 +3053,7 @@ static void forget_child_process_at(int index) {
   child_notified_table[index] = 0;
 }
 
-/* Real SIGCHLD delivery for Windows -- see docs/signal_delivery.md,
+/* Real SIGCHLD delivery for Windows -- see docs/design/signal_delivery.md,
  * "Windows". Windows has no kernel mechanism that generates an async
  * child-exit signal, so this replaces one: it is a cheap, synchronous,
  * non-blocking scan of the existing child registry (child_process_table),
@@ -4527,7 +4527,7 @@ static short poll_socket(SOCKET socket_handle, short events) {
   if ((events & POLLIN) != 0) {
     /* FIONREAD alone is wrong for a *listening* socket: found for real
      * chasing a loopback HTTP test server (Networking & Streaming Tranche
-     * 2, docs/crtmedia_networking_acceptance.md) whose own accept() loop
+     * 2, docs/acceptance/crtmedia_networking_acceptance.md) whose own accept() loop
      * never woke up even though a real client had already connected and
      * sent a full request -- confirmed with a minimal standalone repro
      * (connect() returns 0 immediately, as expected for loopback, but
@@ -5746,7 +5746,7 @@ long __crt_sys_tcsetattr(int fd, const struct termios* termios_p) {
  * honest no-ops (once a real tty fd is confirmed) -- matching this
  * project's existing TIOCSWINSZ precedent: declare the real POSIX
  * surface, document what a console genuinely can't back, don't fake it.
- * See docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-17 entry. */
+ * See docs/porting/bionic_libc_gaps.md and HISTORY.md's 2026-08-17 entry. */
 long __crt_sys_tcdrain(int fd) {
   HANDLE handle = get_fd_handle(fd);
   DWORD mode = 0;
@@ -6513,7 +6513,7 @@ long __crt_sys_thread_id(void) {
 /* Cygwin/MSYS-style memory-copy fork(), verified on real Windows aarch64
  * hardware and (via this machine's x64 emulation) Windows x86_64 -- see
  * libc/src/arch/windows/{aarch64,x86_64}/fork_memcopy.c and
- * docs/windows_fork_emulation.md, "Spawn Broker Retired". Replaces the
+ * docs/design/windows_fork_emulation.md, "Spawn Broker Retired". Replaces the
  * RtlCloneUserProcess path below: the child is a normally
  * CreateProcessA()'d, CSRSS-registered process, so none of the
  * "unregistered clone" workarounds (windows_unregistered_clone,
@@ -6546,7 +6546,7 @@ long __crt_sys_fork(void) {
  * architectures elsewhere. Retains the pre-Phase-C "unregistered clone"
  * behavior: correct for a pure fork()+_exit() pattern, but fork()-then-
  * spawn-an-external-command from the child does not work (see
- * docs/windows_fork_emulation.md's Summary section). */
+ * docs/design/windows_fork_emulation.md's Summary section). */
 long __crt_sys_fork(void) {
   struct crt_rtl_user_process_information info;
   unsigned char inherit_touched[CRT_FD_TABLE_SIZE];

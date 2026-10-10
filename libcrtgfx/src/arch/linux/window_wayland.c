@@ -52,7 +52,7 @@ static int crtgfx_wl_debug_enabled(void) {
  * guessed -- a wrong opcode or argument order is a hard protocol error
  * from the compositor's side, not a soft failure.
  *
- * Scope, matching docs/libcrtgfx_wayland_plan.md's "start with the
+ * Scope, matching docs/design/libcrtgfx_wayland_plan.md's "start with the
  * simplest available path" direction:
  *  - one shared Wayland connection per process (2026-08-29, Phase 1 of the
  *    window/event API completion plan): crtgfx_wl_connection holds the fd

@@ -90,7 +90,7 @@ int main(void) {
   // hand-rolled matcher had no alternation support at all and silently
   // treated `|` as a literal character, which broke GNU Autoconf's own
   // `checking for a sed that does not truncate output` / grep-and-egrep
-  // acceptance self-tests (see docs/windows_fork_emulation.md's "Windows
+  // acceptance self-tests (see docs/design/windows_fork_emulation.md's "Windows
   // Pipe Buffer Size" section for the unrelated pipe-deadlock half of
   // that story, and TODO.md for the full trail).
   if (regcomp(&pat, "bar|baz", REG_EXTENDED) != 0) return fail("regcomp ere alternation");

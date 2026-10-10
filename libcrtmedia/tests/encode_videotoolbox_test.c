@@ -1,4 +1,4 @@
-/* Encode & Capture Tranche 4B acceptance (docs/crtmedia_encode_capture_
+/* Encode & Capture Tranche 4B acceptance (docs/acceptance/crtmedia_encode_capture_
  * acceptance.md): 100 deterministic CPU frames -> VideoToolbox H.264
  * hardware encoder -> MP4 muxer -> extractor/software decoder -> 100
  * frames, compared against the same round trip through the existing
@@ -301,7 +301,7 @@ int main(void) {
   CHECK(videotoolbox_result == 0, "VideoToolbox H.264 encode/mux/decode-back round trip");
   CHECK(videotoolbox_frames == FRAME_COUNT, "VideoToolbox round trip decoded exactly 100 frames");
 
-  /* The software fallback comparison (docs/crtmedia_encode_capture_
+  /* The software fallback comparison (docs/acceptance/crtmedia_encode_capture_
    * acceptance.md Tranche 4B's own "compare timing/ownership with the
    * software fallback" requirement, mirroring Tranche 3's own VA-API
    * test) -- the existing, already-accepted mp4v-es path (Tranche 1), run

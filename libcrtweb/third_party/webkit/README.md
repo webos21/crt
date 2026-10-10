@@ -1,6 +1,6 @@
 # WPE WebKit provenance
 
-The CRT Web Runtime (`06-web`, [`docs/crtweb_acceptance.md`](../../../docs/crtweb_acceptance.md))
+The CRT Web Runtime (`06-web`, [`docs/acceptance/crtweb_acceptance.md`](../../../docs/acceptance/crtweb_acceptance.md))
 is a **WebKit CRT Port** (`PlatformCRT`). WPE WebKit is the reference it is built
 from and compared against. This directory holds the **pin**, not the source:
 nothing here is vendored, fetched into a build, or compiled yet (Web Tranche 0).
@@ -37,8 +37,8 @@ affected. CRT therefore targets WPEPlatform only and does not use the legacy API
 
 - **Never patch upstream.** A missing CRT/PAL surface is fixed in CRT
   (`AGENTS.md`). A carried patch needs a row in
-  [`docs/crtweb_porting.md`](../../../docs/crtweb_porting.md) with its upstream
+  [`docs/porting/crtweb_porting.md`](../../../docs/porting/crtweb_porting.md) with its upstream
   reference and removal condition.
 - **No WebKit/WPE/GLib type in a public CRT header.** `tools/verify_dist.py` will
   enforce this for the `06-web` stage as it does for LVGL in `05-ui`.
-- **Security and bumps.** See Tranche 0 in `docs/crtweb_acceptance.md`.
+- **Security and bumps.** See Tranche 0 in `docs/acceptance/crtweb_acceptance.md`.

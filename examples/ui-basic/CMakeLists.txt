@@ -7,7 +7,7 @@ endif()
 
 # The whole point of this example: an application uses crtui and crtgfx only.
 # It includes no LVGL header and links no LVGL library, because LVGL is a private
-# implementation detail inside libcrtui (docs/crtui_acceptance.md, Tranche 3).
+# implementation detail inside libcrtui (docs/acceptance/crtui_acceptance.md, Tranche 3).
 find_path(CRTGFX_INCLUDE_DIR crtgfx/window.h
   PATHS "${CMAKE_SYSROOT}/include" NO_DEFAULT_PATH REQUIRED)
 find_path(CRTUI_INCLUDE_DIR crtui/ui.h

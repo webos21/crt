@@ -65,15 +65,15 @@
     "fetch": "tools/fetch_webkit.py (download and verify); tools/scan_webkit_licenses.py (license inventory); extraction arrives with Tranche 1",
     "notes": [
       "The archive is a release tarball, not a git archive, so it carries no commit header: expected_commit is the authority for provenance and is recorded from the signed tag, while archive_sha256 pins the exact bytes CRT builds from.",
-      "WPE WebKit 2.54 is the reference for Tranche 2 and the structural model for PlatformCRT. It is not itself the product: the CRT port is a separate platform implementation (docs/crtweb_porting.md).",
-      "Do not patch upstream source to hide a missing CRT/PAL surface (AGENTS.md porting loop). Any carried patch needs a row in docs/crtweb_porting.md with its upstream reference and removal condition."
+      "WPE WebKit 2.54 is the reference for Tranche 2 and the structural model for PlatformCRT. It is not itself the product: the CRT port is a separate platform implementation (docs/porting/crtweb_porting.md).",
+      "Do not patch upstream source to hide a missing CRT/PAL surface (AGENTS.md porting loop). Any carried patch needs a row in docs/porting/crtweb_porting.md with its upstream reference and removal condition."
     ]
   },
   "security_policy": {
     "advisory_feed": "https://wpewebkit.org/security/",
     "advisory_mailing_list": "webkit-wpe",
     "observed_cadence_2026": "WSA-2026-0001 2026-03-18, 0002 2026-03-28, 0003 2026-06-02, 0004 2026-07-10, 0006 2026-09-29 (0005 date not recorded)",
-    "rule": "A pinned version is affected by an advisory when it is older than the advisory's fixed version. Re-check the pin against every new advisory; see docs/crtweb_acceptance.md Tranche 0."
+    "rule": "A pinned version is affected by an advisory when it is older than the advisory's fixed version. Re-check the pin against every new advisory; see docs/acceptance/crtweb_acceptance.md Tranche 0."
   },
   "public_api_policy": [
     "No WebKit, WPE or GLib type, macro or header appears in any installed libcrtweb or crtui header.",

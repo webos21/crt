@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 /* Regression test for the "Windows mksh subshell status quirk" TODO.md
- * and docs/sysroot_ports.md documented (found via zlib's own
+ * and docs/porting/sysroot_ports.md documented (found via zlib's own
  * `-@ ($(RANLIB) $@ || true) >/dev/null 2>&1` line, worked around at the
  * recipe level with `RANLIB=true` but never root-caused). Root-caused
  * this session: a `(subshell); next_command` sequence -- a TLIST node

@@ -41,7 +41,7 @@ Current baseline:
   Objective-C runtime's own C ABI (`objc_msgSend`/`objc_getClass`/...), no
   `.m` file, matching the same no-host-SDK-headers ethos. Presents frames
   through `CALayer.contents` (hardware-composited), not `-drawRect:`.
-  See `docs/libcrtgfx_wayland_plan.md` for both adapters' design, known
+  See `docs/design/libcrtgfx_wayland_plan.md` for both adapters' design, known
   scope cuts, and real-hardware verification record.
 - `crtgfx_window_begin_frame()`/`crtgfx_window_end_frame()` expose the first
   software buffer present path, using BGRA8888 premultiplied pixels. Every
@@ -66,8 +66,8 @@ Current baseline:
 
 **Current state:** all three hosts now have real GPU backends (Vulkan on Linux,
 D3D12 on Windows, Metal on macOS) behind this contract, with Skia/Ganesh live
-presentation verified on each; see `STATUS.md`, `docs/libcrtgfx_gpu_backend_boundary.md`
-and `docs/libcrtgfx_live_presentation_acceptance.md`. The paragraphs below record
+presentation verified on each; see `STATUS.md`, `docs/design/libcrtgfx_gpu_backend_boundary.md`
+and `docs/acceptance/libcrtgfx_live_presentation_acceptance.md`. The paragraphs below record
 the state as each step landed.
 
 `include/crtgfx/gpu.h` (TODO.md's upper-runtime roadmap "Fix the common GPU
@@ -94,7 +94,7 @@ fixed a real, previously-latent libc bug: `pthread_cond_timedwait()` never
 actually honored `pthread_condattr_setclock(PTHREAD_COND_CLOCK_MONOTONIC)`,
 always treating the deadline as `CLOCK_REALTIME` -- fixed in
 `libc/src/pthread.c`, re-verified for real (elapsed wall time, not just
-the return code) on all three hosts. See `HISTORY.md`'s 2026-09-03 entry
+the return code) on all three hosts. See [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s 2026-09-03 entry
 for the full trail.
 
 **Enable Skia GPU rendering -- Linux/Vulkan offscreen vertical slice**
@@ -127,7 +127,7 @@ host-library integration on Linux. Verified for real on Linux (WSL) and
 Windows (this slice's own Linux-only branches left Windows untouched);
 macOS re-verification pending (no macOS code touched at all). Windows/
 D3D12, macOS/Metal, and live on-screen presentation remain explicit,
-separate follow-up steps. See `HISTORY.md`'s 2026-09-03 entry for the full
+separate follow-up steps. See [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s 2026-09-03 entry for the full
 trail, including two further real findings (this project's own `dlopen()`
 has no real ELF dynamic loading yet, and `skia_use_vma=false` silently
 disabled Ganesh's own internal memory-allocator fallback entirely).
@@ -169,7 +169,7 @@ on Windows (`crtgfx_skia_gpu_offscreen_smoke`'s full device-loss/recovery
 cycle included) and Linux/WSL (confirming zero regression to the Vulkan
 slice or the libcxx/libunwind bootstrap from the shared win32_shim/
 crt-ar changes); macOS re-verification stays separately pending, same as
-the Vulkan slice. See `HISTORY.md`'s 2026-09-04 entry for the full trail.
+the Vulkan slice. See [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s 2026-09-04 entry for the full trail.
 
-See `docs/libcrtgfx_api_policy.md` for the API boundary decision.
-See `docs/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.
+See `docs/design/libcrtgfx_api_policy.md` for the API boundary decision.
+See `docs/design/libcrtgfx_wayland_plan.md` for the Wayland/compositor plan.

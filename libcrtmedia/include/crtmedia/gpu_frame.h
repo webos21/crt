@@ -43,7 +43,7 @@ extern "C" {
  * Hardware decode now produces CRTMEDIA_GPU_MEMORY_GPU on macOS, Windows,
  * and Linux when the platform surface can be handed to the optional graphics
  * bridge. `native_handle` then has the private per-host identity frozen in
- * docs/crtmedia_zero_copy_decode_acceptance.md and `plane_count == 0`.
+ * docs/acceptance/crtmedia_zero_copy_decode_acceptance.md and `plane_count == 0`.
  * CRTMEDIA_GPU_MEMORY_GPU means "GPU-resident frame", not necessarily
  * end-to-end zero-copy: the Windows D3D11VA -> D3D12 bridge performs one
  * GPU copy. `crtmedia_gpu_frame_create_cpu()` remains the real CPU-fallback

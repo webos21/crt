@@ -1,4 +1,4 @@
-// Networking & Streaming Tranche 5 acceptance (docs/crtmedia_networking_
+// Networking & Streaming Tranche 5 acceptance (docs/acceptance/crtmedia_networking_
 // acceptance.md, "TLS trust policy"): HTTPS *authentication*, not merely
 // "the TLS handshake and decrypt work". A repository-owned loopback TLS
 // terminator (tests/tls_test_server.h, mbedTLS over CRT sockets, PKI

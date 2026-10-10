@@ -21,7 +21,7 @@ typedef enum crtmedia_muxer_output_format {
   /* Fragmented MP4 (moof/mdat pairs interleaved throughout the stream
    * instead of one big index atom at the end) -- a real forward-only
    * reader (Networking & Streaming Tranche 2's own non-seekable HTTP
-   * custom AVIO, docs/crtmedia_networking_acceptance.md) can start
+   * custom AVIO, docs/acceptance/crtmedia_networking_acceptance.md) can start
    * demuxing without ever seeking, unlike CRTMEDIA_MUXER_OUTPUT_MPEG_4's
    * plain moov-at-the-end layout. Also the output shape Tranche 3's own
    * non-seekable HTTP upload sink needs (a live upload stream cannot seek

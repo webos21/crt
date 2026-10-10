@@ -130,7 +130,7 @@ execute(struct op * volatile t,
 		 * j_sigchld() -- confirmed exchild() itself always computed and
 		 * returned the correct status; only this side effect was
 		 * missing. This is the "Windows mksh subshell status quirk"
-		 * TODO.md/docs/sysroot_ports.md documented from zlib's own
+		 * TODO.md/docs/porting/sysroot_ports.md documented from zlib's own
 		 * `-@ ($(RANLIB) $@ || true) >/dev/null 2>&1` line (that
 		 * specific line never surfaced a wrong *build* result only
 		 * because `-@` already tells make to ignore the whole line's

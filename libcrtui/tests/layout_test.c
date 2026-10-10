@@ -1,4 +1,4 @@
-/* crtui Tranche 4 acceptance (docs/crtui_acceptance.md): the layout engine, the
+/* crtui Tranche 4 acceptance (docs/acceptance/crtui_acceptance.md): the layout engine, the
  * style properties and the v1 widget behaviors, checked against the CRT-owned
  * model -- no window, display or LVGL, so it runs on every host. The pixels
  * these produce are checked by crtui_render_test. */

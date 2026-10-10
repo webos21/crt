@@ -840,7 +840,7 @@ __crt_signal_restore_rt:
 .size __crt_signal_restore_rt, . - __crt_signal_restore_rt
 
 /* eventfd()/timerfd_*()/epoll_*() -- Linux-only in real Bionic too (see
- * docs/bionic_libc_gaps.md, HISTORY.md's 2026-08-17 entry). Syscall
+ * docs/porting/bionic_libc_gaps.md, HISTORY.md's 2026-08-17 entry). Syscall
  * numbers from arch/x86/entry/syscalls/syscall_64.tbl, all well-
  * established/stable (this table only ever appends, never renumbers).
  * NOT independently verified on real Linux hardware from this session

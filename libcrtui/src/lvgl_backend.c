@@ -1,5 +1,5 @@
 /* crtui's private LVGL software renderer: the "CRT display adapter" of
- * docs/crtui_acceptance.md Tranche 1. LVGL draws into a CPU buffer (software
+ * docs/acceptance/crtui_acceptance.md Tranche 1. LVGL draws into a CPU buffer (software
  * draw unit only, no GPU backend); the result is copied out as BGRA8888 for
  * the caller to hand to crtgfx. Every widget is styled explicitly here, so the
  * look is defined by CRT code and does not depend on an LVGL theme. */

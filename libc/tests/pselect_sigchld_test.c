@@ -1,5 +1,5 @@
 /* Permanent regression test for the fork() + blocked-SIGCHLD + pselect()
- * lost-wakeup fix described in docs/signal_delivery.md ("pselect()
+ * lost-wakeup fix described in docs/design/signal_delivery.md ("pselect()
  * Atomicity"). Before that fix, a SIGCHLD that was already pending (blocked,
  * child already exited) before the caller ever entered pselect() was
  * silently swallowed by the non-atomic "unblock, then select()" sequence,

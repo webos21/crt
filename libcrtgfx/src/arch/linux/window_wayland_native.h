@@ -2,7 +2,7 @@
 
 /* Shared glue between the two independent Linux Wayland window backends
  * (2026-09-07, "Finish live GPU presentation everywhere" -- Linux lands
- * first; see docs/libcrtgfx_wayland_plan.md's own dual-backend section for
+ * first; see docs/design/libcrtgfx_wayland_plan.md's own dual-backend section for
  * the full design and CRTGFX_WINDOW_GPU_PRESENTATION's own doc comment in
  * crtgfx/window.h for why a window cannot move between them after
  * creation):

@@ -1,6 +1,6 @@
 #pragma once
 
-/* Networking & Streaming Tranche 5 (docs/crtmedia_networking_acceptance.md,
+/* Networking & Streaming Tranche 5 (docs/acceptance/crtmedia_networking_acceptance.md,
  * "TLS trust policy"). https:// URLs are authenticated by default:
  * certificate chain and host name/IP verification are always on, and CRT
  * vendors no CA store, so the caller supplies the trust anchors. No libcurl,

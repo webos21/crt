@@ -1,6 +1,6 @@
 /* host_abi_firewall_test -- TODO.md's "Allocator baseline validation
  * before Upper Runtime" tranche 7 ("freeze the Host ABI firewall before
- * hardware decode"), the positive half. See docs/host_abi_firewall.md's
+ * hardware decode"), the positive half. See docs/design/host_abi_firewall.md's
  * "Mechanical detection" section for the full design and host_abi_
  * firewall_fake_host.c for the synthetic host library this drives.
  *

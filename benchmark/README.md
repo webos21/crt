@@ -76,7 +76,7 @@ tranche-4 follow-up run (1K/10K/100K tiers only, stopped before 10^6 by
 including a second real, unexplained host-memory anomaly: host-observed
 peak RSS stayed flat (~4.04MB) across all three tiers despite
 `live.peak_bytes` growing 3x between the 10K and 100K tiers -- see
-`HISTORY.md`'s matching 2026-09-16 tranche 4 entry for the full
+[`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s matching 2026-09-16 tranche 4 entry for the full
 investigation, including the known-good control that ruled out a bug in
 the sampling method itself.
 `macos/malloc_baseline-arm64-seed42-20260916T080822Z.jsonl` was captured

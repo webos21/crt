@@ -125,7 +125,7 @@ def release_grade_problems(stage: str, manifest: dict, dist: Path) -> list[str]:
                 "this 04-gfx-media was not produced by the isolated option-ON "
                 "stage build (no built_from.stage == '03-gfx-simple'); the "
                 "ordinary cumulative dist target keeps Skia and FFmpeg OFF "
-                "(build it with tools/crt-stage-build.py, see docs/release_preview.md)")
+                "(build it with tools/crt-stage-build.py, see docs/guides/release_preview.md)")
         declared = {item.get("name") for item in
                     manifest.get("redistributed_dependencies", [])}
         for name in OPTION_ON_DEPENDENCIES:

@@ -10,7 +10,7 @@ object loading deferred in the freestanding profile.
 The long-term policy is documented in:
 
 ```text
-docs/linker_loader.md
+docs/design/dynamic_loading.md
 ```
 
 Initial `linker/` work should start only when a concrete ELF loader milestone is

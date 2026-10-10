@@ -361,7 +361,7 @@ set_tests_properties(shell_smoke_test_runs PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
-# TODO.md's/docs/sysroot_ports.md's "Windows mksh subshell status quirk"
+# TODO.md's/docs/porting/sysroot_ports.md's "Windows mksh subshell status quirk"
 # item: a `(subshell); next_command` sequence lost the subshell's real
 # exit status on Windows -- see mksh_subshell_status_test.c's own top
 # comment for the full root cause (shell/mksh/src/exec.c's execute())
@@ -594,7 +594,7 @@ add_crt_test(pselect_sigchld_test pselect_sigchld_test.c)
 set_tests_properties(pselect_sigchld_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "pselect_sigchld_test: ok"
   # The scenario under test is a real fork() + blocked-SIGCHLD +
-  # pselect() lost-wakeup pattern (docs/signal_delivery.md); the test
+  # pselect() lost-wakeup pattern (docs/design/signal_delivery.md); the test
   # itself uses a bounded 5s pselect() timeout so a regression fails
   # fast instead of hanging, but this TIMEOUT is the outer safety net.
   TIMEOUT 30
@@ -677,7 +677,7 @@ set_tests_properties(malloc_fault_test_runs PROPERTIES
 
 # host_abi_firewall_test / host_abi_firewall_fault_test: TODO.md's
 # "Allocator baseline validation before Upper Runtime" tranche 7 ("freeze
-# the Host ABI firewall before hardware decode") -- see docs/host_abi_
+# the Host ABI firewall before hardware decode") -- see docs/design/host_abi_
 # firewall.md's own "Mechanical detection" section for the full design.
 # Reuses malloc_fault_instance_b.c as-is (tranche 6) to give the synthetic
 # fake host static library its own genuinely separate allocator domain. A
@@ -1173,7 +1173,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
 
   # Permanent regression test for libc/src/arch/windows/common/
   # dwarf_unwind_safety_net.c -- see that file's own top comment (TODO.md
-  # item 7 / docs/cxx_runtime.md's "Known cost: DWARF-compiled code has
+  # item 7 / docs/design/cxx_runtime.md's "Known cost: DWARF-compiled code has
   # zero Windows-native unwind info") for the full empirical background,
   # and windows_dwarf_unwind_safety_net_test.c/_victim.c's own comments
   # for this test's own shape. The victim needs an explicit

@@ -8,15 +8,15 @@ manifests.
 ## Notice
 
 - Keep recipe statuses current in
-  [`porting/recipes/*.json`](porting/recipes/) and
-  [`docs/porting_status.md`](docs/porting_status.md) whenever a host is
+  [`porting/recipes/*.json`](porting/recipes) and
+  [`docs/porting/porting_status.md`](docs/porting/porting_status.md) whenever a host is
   rerun. Porting policy and the normal configure/make loop live in
-  [`docs/sysroot_ports.md`](docs/sysroot_ports.md); completed porting
+  [`docs/porting/sysroot_ports.md`](docs/porting/sysroot_ports.md); completed porting
   investigations belong in [`HISTORY.md`](HISTORY.md).
 - A port is not done until both static and shared builds are attempted
   in the same pass on each host, with any host-specific deferral recorded
   in the recipe notes and status matrix. See
-  [`docs/porting_status.md`](docs/porting_status.md) for status meanings.
+  [`docs/porting/porting_status.md`](docs/porting/porting_status.md) for status meanings.
 - For CMake wiring changes, do not trust a long-lived local `out/`
   directory. Verify with a fresh clone or at least
   `cmake --fresh --preset <preset>` before calling the change done; stale
@@ -24,20 +24,20 @@ manifests.
   bugs before. The resolved cases are recorded in [`HISTORY.md`](HISTORY.md).
 - Keep toybox applet enablement tied to audited CRT/PAL support, especially
   LLP64 assumptions on Windows. The live applet list and deferrals are in
-  [`docs/toybox_applet_status.md`](docs/toybox_applet_status.md).
+  [`docs/porting/toybox_applet_status.md`](docs/porting/toybox_applet_status.md).
 - Keep terminal/tty behavior coherent for shell and configure use. Current
   syscall/ioctl coverage is tracked in
-  [`docs/sysroot_ports.md`](docs/sysroot_ports.md), with interactive job
-  control policy deferred in [`docs/job_control.md`](docs/job_control.md).
+  [`docs/porting/sysroot_ports.md`](docs/porting/sysroot_ports.md), with interactive job
+  control policy deferred in [`docs/design/job_control.md`](docs/design/job_control.md).
 - Treat `CRT_SPAWN_NATIVE_WINDOWS=1` as a narrow launcher hint for native
   host tools only. The wrapper details live in [`tools/crt-cc`](tools/crt-cc),
   [`tools/crt-c++`](tools/crt-c++), [`tools/crt-native-tool`](tools/crt-native-tool),
-  and [`docs/sysroot_ports.md`](docs/sysroot_ports.md).
+  and [`docs/porting/sysroot_ports.md`](docs/porting/sysroot_ports.md).
 - If a new public libc or `__crt_sys_*` symbol is added, regenerate or replace
   [`porting/recipes/mbedtls-windows-exclude-symbols.rsp`](porting/recipes/mbedtls-windows-exclude-symbols.rsp)
   in the same pass. The reason is documented in
   [`porting/recipes/mbedtls.json`](porting/recipes/mbedtls.json) and
-  [`docs/porting_status.md`](docs/porting_status.md).
+  [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 - Keep work status in exactly one place per purpose, not restated across all
   three: [`HISTORY.md`](HISTORY.md) holds the detailed, dated record of what
   was actually done and why; an item here in `TODO.md` should track live
@@ -61,10 +61,10 @@ newest entry first) rather than leaving it here.
 
 Promoted 2026-10-03 after Application UI (`05-ui`, Tranches 0-7) closed on
 Windows/x64, macOS/arm64 and Linux/x86_64; its External Surface contract is the
-accepted prerequisite (`HISTORY.md`, `docs/crtui_acceptance.md`). The contract,
+accepted prerequisite (`HISTORY.md`, `docs/acceptance/crtui_acceptance.md`). The contract,
 gates and host order live in
-[`docs/crtweb_acceptance.md`](docs/crtweb_acceptance.md); the upstream mapping in
-[`docs/crtweb_porting.md`](docs/crtweb_porting.md). Keep completed evidence in
+[`docs/acceptance/crtweb_acceptance.md`](docs/acceptance/crtweb_acceptance.md); the upstream mapping in
+[`docs/porting/crtweb_porting.md`](docs/porting/crtweb_porting.md). Keep completed evidence in
 `HISTORY.md`; this list tracks only tranche state. Linux first (WPE is the
 reference), with an early three-host JavaScriptCore replay, then Windows/x64,
 then macOS/arm64.
@@ -72,14 +72,14 @@ then macOS/arm64.
 * [x] **0. Scope, version and license freeze.** Closed 2026-10-03: WPE WebKit
   2.54.0 pinned and verified (`libcrtweb/third_party/webkit/`: recomputed SHA-256, signed
   tag, license-file inventory), upstream mapping written, security/SBOM policy
-  confirmed; evidence in `HISTORY.md` and `docs/crtweb_acceptance.md`.
+  confirmed; evidence in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
 * [x] **1. JavaScriptCore / JSCOnly bring-up.** Closed 2026-10-09 on
   Linux/x86_64, Linux/aarch64, Windows/x64 and macOS/arm64. The interpreter,
   Baseline JIT, concurrent DFG, FTL/B3, WebAssembly and separate sampling-
   profiler builds pass their compile proofs, context/watchdog gates and host-
   ABI audits; Linux/aarch64 was the final 1D-B/C/D replay. Detailed per-host
   evidence and the remaining non-gating hardening limits are in `HISTORY.md`
-  and `docs/crtweb_acceptance.md`. The next active product tranche is the
+  and `docs/acceptance/crtweb_acceptance.md`. The next active product tranche is the
   `PlatformCRT` graphics/input prototype below.
 * [x] **2. Linux WPE reference baseline.** Closed 2026-10-10 on Linux/x86_64:
   verified upstream WPE 2.54.0, unmodified, renders local HTML through its
@@ -89,7 +89,7 @@ then macOS/arm64.
   patch manifest before the first carried patch.) 3A: Linux WPEPlatform
   prototype (shared memory -> `crtgfx` -> `crtui` external surface); 3B+: the
   `PlatformCRT` WebKit port, then GPU-buffer output. The frame-producer and input
-  contracts are frozen before 3A (`docs/crtweb_acceptance.md`).
+  contracts are frozen before 3A (`docs/acceptance/crtweb_acceptance.md`).
 * [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
   `crtui`'s web view; no WebKit type in a public header.
 * [ ] **5. Multi-process lifecycle.** UI/Web/Network/GPU processes: launch, IPC,
@@ -123,17 +123,17 @@ message instead of a missing `ui-basic/main.c` (it needs
 
 The completed cross-host baseline and its exact validation evidence stay in
 [`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
-and dependency order stay in [`docs/runtime_roadmap.md`](docs/runtime_roadmap.md).
+and dependency order stay in [`docs/design/runtime_roadmap.md`](docs/design/runtime_roadmap.md).
 The allocator baseline decision gate is closed: keep the current allocator and
 leave Scudo conditional. Hardware video decode, Zero-copy decoded textures,
 Encode and capture, Networking and streaming, and Application UI (`05-ui`) are
-all closed on Linux/x86_64, macOS/arm64, and Windows/x64 (`HISTORY.md`,
+all closed on Linux/x86_64, macOS/arm64, and Windows/x64 ([`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md),
 2026-09-22..10-03; tranche-by-tranche detail in
-`docs/crtmedia_encode_capture_acceptance.md`,
-`docs/crtmedia_networking_acceptance.md` and `docs/crtui_acceptance.md`). The
+`docs/acceptance/crtmedia_encode_capture_acceptance.md`,
+`docs/acceptance/crtmedia_networking_acceptance.md` and `docs/acceptance/crtui_acceptance.md`). The
 Web Runtime (`06-web`) is in progress above.
 
-Deferred (not gates; see `docs/runtime_roadmap.md`): WebRTC, QuickJS (unless a
+Deferred (not gates; see `docs/design/runtime_roadmap.md`): WebRTC, QuickJS (unless a
 non-WebKit lightweight runtime becomes a real product requirement), WebGPU,
 EME/DRM, and JS-native application bindings.
 
@@ -144,7 +144,7 @@ The remaining execution order is `06-web`.
 
 These remain independent follow-ups. Promote one at a time when a concrete
 consumer or failure justifies their cost. The backend object-boundary work
-that had to precede further Upper Runtime expansion is complete (`HISTORY.md`,
+that had to precede further Upper Runtime expansion is complete ([`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md),
 2026-09-17..18); the items here were never part of that acceptance gate.
 
 1. **Remove the "build once, then reconfigure" CMake pattern.** The native
@@ -262,7 +262,7 @@ mksh job control remain in the separate deferred section below.
    the TERM-to-KILL `-k` path. Re-run the existing `pselect_sigchld`, process-
    stress, fd-snapshot, fork, waitpid, shell, and full Windows CTest coverage;
    rebuild the packaged shell/dist and repeat the timeout cases there. Only
-   then enable the applet, update `docs/toybox_applet_status.md`, move the
+   then enable the applet, update `docs/porting/toybox_applet_status.md`, move the
    completed record to `HISTORY.md`, and remove this Planned section.
 
 ### Focused CRT/PAL follow-ups
@@ -283,21 +283,21 @@ or host investigation supplies the required evidence.
   mutex in its transport structs, so it is exposed too, just not crashing so far.
   Decide whether to fix `crt_configure_shared_runtime()` for all of them and
   add a dylib-linked test per library. Found 2026-09-30
-  (`docs/crtui_acceptance.md`, Tranche 3 macOS replay).
+  (`docs/acceptance/crtui_acceptance.md`, Tranche 3 macOS replay).
 - Make the ordinary in-tree Linux `crt-gfx-media-dist` verifiable with
   `CRTMEDIA_ENABLE_CURL=ON`: `libcrtmedia.so` links the shared `libcurl.so.4`
   in-tree (static zlib is not PIC) and `verify_dist.py` reports `undeclared
   libcurl.so.4`, which blocks `crt-ui-dist` in a curl-enabled dev tree. Either
   ship/declare the shared curl chain or document that the ordinary dist is
   options-OFF only; the isolated stage (static curl) is unaffected. Found
-  2026-09-30 (`docs/crtui_acceptance.md`, Tranche 0 Linux replay).
+  2026-09-30 (`docs/acceptance/crtui_acceptance.md`, Tranche 0 Linux replay).
 - The options-default Linux `crt-ui-dist` tree (`out/linux-ui-check`) packaged no
   `libxdg-shell-protocol.a` (that tree never fetched/built Wayland), so
   `examples/ui-basic` could not be rebuilt against its own SDK without borrowing the
   archive from a Wayland-enabled tree. Determine whether a fresh checkout's
   ordinary Linux dist chain always builds Wayland (then this tree was just
   stale) or whether `crt-ui-dist` should depend on it. Found 2026-09-30
-  (`docs/crtui_acceptance.md`, Tranche 3 Linux replay).
+  (`docs/acceptance/crtui_acceptance.md`, Tranche 3 Linux replay).
 - Extend the resolver from its current synchronous UDP IPv4/A-record baseline
   when IPv6, TCP fallback, search domains, or caching becomes a consumer
   requirement.
@@ -316,35 +316,35 @@ or host investigation supplies the required evidence.
 
 ### Interactive job control (deferred until it's an actual priority)
 
-`docs/job_control.md`'s "Interactive Job Control" section has the decided
+`docs/design/job_control.md`'s "Interactive Job Control" section has the decided
 design for all three pieces below; nothing here is implemented yet, and this
 project's own mksh build has job control compiled out entirely on every host
 (`MKSH_NOPROSPECTOFWORK`), not just Windows -- see that section for why this
 is forward-looking policy, not a current gap being actively worked.
-Re-evaluated (2026-08-16) against `docs/runtime_roadmap.md`: none of the
+Re-evaluated (2026-08-16) against `docs/design/runtime_roadmap.md`: none of the
 planned upper-runtime components (`crtui`/LVGL, `libcrtweb`/WebKit, `libcrtgfx`, `libcrtmedia`)
 actually depend on POSIX job-control signals (`SIGSTOP`/`SIGTSTP`/`SIGCONT`)
 or real fg/bg switching -- confirmed genuinely optional infrastructure, not
 something blocking the roadmap. (V8's own "signal/process behavior"
 prerequisite in that doc is a separate matter -- `SIGSEGV`-trap-based WASM
 bounds checks and `SIGPROF`-style profiling, the "vectored exception
-handling" question `docs/signal_delivery.md` already tracks independently,
+handling" question `docs/design/signal_delivery.md` already tracks independently,
 answerable with fully documented Windows APIs.) A full Windows stop/resume
 implementation would also need reversing this project's "avoid undocumented
 NT internals" pattern (`NtSuspendProcess`/`NtResumeProcess` -- see
-`docs/job_control.md`'s own "Stopped-child status" note for the design that
+`docs/design/job_control.md`'s own "Stopped-child status" note for the design that
 was investigated and the alternatives ruled out). Stays deferred.
 
 - Bridge `SetConsoleCtrlHandler` (`CTRL_C_EVENT`/`CTRL_BREAK_EVENT`, both to
   `SIGINT`) into `signal_actions[]`/`raise()`, mirroring `SIGCHLD`'s existing
-  pending-flag-plus-checkpoint pattern (`docs/signal_delivery.md`).
+  pending-flag-plus-checkpoint pattern (`docs/design/signal_delivery.md`).
 - Track the real Windows process-group id behind this project's own
   CRT-managed `pgid` integer once a job is actually spawned into a new
   process group, so `tcsetpgrp()` and a targeted `CTRL_BREAK_EVENT` have a
   real id to act on.
 - Re-enable `MKSH_UNEMPLOYED` (mksh's own job control) once the above exists,
   and only then decide whether stopped-child (`WIFSTOPPED`) support is worth
-  the low-level Windows work it would need -- `docs/job_control.md` currently
+  the low-level Windows work it would need -- `docs/design/job_control.md` currently
   keeps that explicitly out of scope.
 
 ### Toybox applet expansion (deferred until it's an actual priority)
@@ -354,7 +354,7 @@ Full applet-by-applet status (what's enabled,
 what's still open and why, the deferred-applet list with each one's
 concrete reason, and the `globals.h`/`flags.h` registration traps found
 while enabling `df`/`stty`) now lives in
-[`docs/toybox_applet_status.md`](docs/toybox_applet_status.md) -- this
+[`docs/porting/toybox_applet_status.md`](docs/porting/toybox_applet_status.md) -- this
 bullet stays a pointer. Still open there: `expand`/`logger`/`fold`/
 `uudecode`/`cal`/`split`/`strings` (a `globals.h` fix, plus a per-applet
 `flags.h` check); `timeout` (tracked by the concrete Windows process-signal

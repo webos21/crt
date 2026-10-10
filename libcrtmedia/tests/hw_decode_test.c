@@ -24,7 +24,7 @@
 // pixel-format plumbing (crtmedia/frame.h, src/frame_convert.c) actually
 // works end to end, not just that it compiles.
 //
-// Tranche 2 (2026-09-18, docs/crtmedia_hardware_decode_acceptance.md)
+// Tranche 2 (2026-09-18, docs/acceptance/crtmedia_hardware_decode_acceptance.md)
 // additions, now that macOS/arm64 has a real VideoToolbox green: this
 // test also asserts the *state transitions* of crtmedia_codec_is_
 // hardware_accelerated() itself, not just its final value -- false
@@ -56,7 +56,7 @@
 #error "CRTMEDIA_TEST_VIDEO_PATH must be defined (see libcrtmedia/CMakeLists.txt)"
 #endif
 
-// docs/crtmedia_hardware_decode_acceptance.md's own per-host backend name,
+// docs/acceptance/crtmedia_hardware_decode_acceptance.md's own per-host backend name,
 // matching src/codec.c's hw_type_for_platform() mapping exactly -- kept
 // here as a plain compile-time string, not a new crtmedia API, since the
 // RESULT line below is test/diagnostic reporting (this tranche's own ABI-
@@ -299,7 +299,7 @@ int main(void) {
   crtmedia_codec_release(video_codec);
   crtmedia_extractor_release(extractor);
 
-  // docs/crtmedia_hardware_decode_acceptance.md's own frozen RESULT line.
+  // docs/acceptance/crtmedia_hardware_decode_acceptance.md's own frozen RESULT line.
   // Every hw_* field now comes from the private diagnostics snapshot taken
   // above, each independently tracked at its own real event (device
   // creation, pixel-format negotiation, frame observation) rather than

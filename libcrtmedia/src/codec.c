@@ -11,7 +11,7 @@
  * Left duplicated deliberately rather than refactored into a shared
  * internal header this pass: crtmedia_demuxer_* (demux.h) is still its
  * own, separate, already-verified implementation, not yet rebuilt over
- * this new core (see docs/libcrtmedia_api_policy.md's own Decision and
+ * this new core (see docs/design/libcrtmedia_api_policy.md's own Decision and
  * TODO.md's own next step) -- sharing code between the two now would mean
  * refactoring already-working demux.c mid-way through landing this new,
  * separate, not-yet-integrated layer, a real regression risk for no
@@ -59,7 +59,7 @@ struct crtmedia_codec {
    * existing behavior" discipline.
    *
    * Six-state diagnostic model (2026-09-18, "Hardware video decode"
-   * Tranche 2, docs/crtmedia_hardware_decode_acceptance.md): hw_requested/
+   * Tranche 2, docs/acceptance/crtmedia_hardware_decode_acceptance.md): hw_requested/
    * hw_device_created/hw_pixfmt_offered/hw_frame_observed are private,
    * fine-grained state, each latched true the first time its own real
    * event happens and never reset (matching hardware_accelerated's own
@@ -85,7 +85,7 @@ struct crtmedia_codec {
    * copy while macOS/Linux sample decoder storage directly. */
   int hw_gpu_frame_delivered;
   /* Linux VA-API H.264 hardware encode (2026-09-28, "Encode and capture"
-   * Tranche 3, docs/crtmedia_encode_capture_acceptance.md). Set only when
+   * Tranche 3, docs/acceptance/crtmedia_encode_capture_acceptance.md). Set only when
    * crtmedia_codec_create_encoder() was asked for mime="video/avc" and a
    * real VA-API encode device+frame pool actually came up -- there is no
    * software H.264 fallback within this codec instance (FFmpeg ships no
@@ -906,7 +906,7 @@ static void release_gpu_video_frame_owned_avframe(crtmedia_gpu_frame* frame, voi
  * `avframe`'s own real pixel planes, the same real layout fill_video_
  * frame() above already produces for crtmedia_frame. Deliberately does
  * not carry color_range/color_space: crtmedia_gpu_frame has no such
- * fields today (docs/crtmedia_zero_copy_decode_acceptance.md's own Scope
+ * fields today (docs/acceptance/crtmedia_zero_copy_decode_acceptance.md's own Scope
  * section -- no real external consumer needs them yet). Takes ownership
  * of `avframe` (release frees it), matching fill_video_frame()'s own
  * ownership contract. */
@@ -939,7 +939,7 @@ static void fill_gpu_video_frame_cpu(AVFrame* avframe, crtmedia_gpu_frame* out_f
   out_frame->release_context = avframe;
 }
 
-/* Real zero-copy branch for macOS/VideoToolbox (Tranche 1 -- docs/crtmedia_
+/* Real zero-copy branch for macOS/VideoToolbox (Tranche 1 -- docs/acceptance/crtmedia_
  * zero_copy_decode_acceptance.md's own native_handle table): `avframe` here
  * is still genuinely hardware-resident (its own
  * format equals AV_PIX_FMT_VIDEOTOOLBOX), never downloaded.
@@ -992,7 +992,7 @@ static void release_gpu_video_frame_d3d11(crtmedia_gpu_frame* frame, void* relea
   free(backing);
 }
 
-/* Real zero-copy branch (Windows/D3D11VA -- docs/crtmedia_zero_copy_decode_
+/* Real zero-copy branch (Windows/D3D11VA -- docs/acceptance/crtmedia_zero_copy_decode_
  * acceptance.md's own native_handle table). `avframe` here is still
  * genuinely hardware-resident (its own format equals AV_PIX_FMT_D3D11,
  * never downloaded). FFmpeg's own hwcontext_d3d11va.c places the real
@@ -1199,7 +1199,7 @@ crtmedia_result crtmedia_codec_dequeue_output(
 }
 
 /* crtmedia/codec.h's own top comment has the full frozen contract
- * (docs/crtmedia_zero_copy_decode_acceptance.md). Shares avcodec_
+ * (docs/acceptance/crtmedia_zero_copy_decode_acceptance.md). Shares avcodec_
  * receive_frame()'s single decode-order source of truth with dequeue_
  * output() above -- the two are freely interchangeable frame-by-frame on
  * the same codec instance. */

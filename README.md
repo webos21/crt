@@ -13,7 +13,8 @@ The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-
 > CRT is pre-1.0 developer software under active development.  
 > The accepted product runtime now reaches **`05-ui`**: `crtui` application widgets, layout, input, external-surface composition, and a GPU-composed `MediaView`, verified on all three hosts. The current upper-runtime work is **`06-web`**, a WebKit CRT Port with JavaScriptCore, WebCore, WebKit, `PlatformCRT`, and `WebView`. Its bring-up has closed JavaScriptCore acceptance on all four required host/architecture pairs and the pristine native WPE reference on Linux/x86_64; `PlatformCRT` and the public `crtweb` API are the next product work.
 
-[Roadmap](docs/runtime_roadmap.md) ·
+[Documentation](docs/README.md) ·
+[Roadmap](docs/design/runtime_roadmap.md) ·
 [Current Status](STATUS.md) ·
 [Work Queue](TODO.md) ·
 [History](HISTORY.md) ·
@@ -134,7 +135,7 @@ CRT is **not**:
 - a complete Qt/GTK replacement
 - production-ready `1.0`
 
-For comparisons with other approaches, see the [FAQ](docs/faq.md).
+For comparisons with other approaches, see the [FAQ](docs/guides/faq.md).
 
 ---
 
@@ -204,7 +205,7 @@ Web Runtime          <-- current
 
 WebRTC, WebGPU, EME/DRM, and other large Web capabilities are intentionally consumer-driven follow-ups rather than prerequisites for the WebKit bring-up.
 
-See [docs/runtime_roadmap.md](docs/runtime_roadmap.md) for the dependency order and stage policy.
+See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
 
 ---
 
@@ -257,7 +258,7 @@ Interactive real-device input is not automated; the input evidence is scripted.
 `tools/prepare_release_assets.py` does not yet know `05-ui`, so it is not a
 release asset.
 
-See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
+See [docs/acceptance/crtui_acceptance.md](docs/acceptance/crtui_acceptance.md).
 
 ### `06-web`: current work
 
@@ -291,8 +292,8 @@ distribution exists yet.
 
 See:
 
-- [docs/crtweb_acceptance.md](docs/crtweb_acceptance.md)
-- [docs/crtweb_porting.md](docs/crtweb_porting.md)
+- [docs/acceptance/crtweb_acceptance.md](docs/acceptance/crtweb_acceptance.md)
+- [docs/porting/crtweb_porting.md](docs/porting/crtweb_porting.md)
 
 ---
 
@@ -407,10 +408,10 @@ D3D11VA -> GPU-copy interop -> D3D12 -> Skia
 
 See:
 
-- [Hardware decode acceptance](docs/crtmedia_hardware_decode_acceptance.md)
-- [Zero-copy decode acceptance](docs/crtmedia_zero_copy_decode_acceptance.md)
-- [Encode and capture acceptance](docs/crtmedia_encode_capture_acceptance.md)
-- [Networking acceptance](docs/crtmedia_networking_acceptance.md)
+- [Hardware decode acceptance](docs/acceptance/crtmedia_hardware_decode_acceptance.md)
+- [Zero-copy decode acceptance](docs/acceptance/crtmedia_zero_copy_decode_acceptance.md)
+- [Encode and capture acceptance](docs/acceptance/crtmedia_encode_capture_acceptance.md)
+- [Networking acceptance](docs/acceptance/crtmedia_networking_acceptance.md)
 
 ---
 
@@ -418,7 +419,7 @@ See:
 
 CRT's portability claim is tested by rebuilding real upstream software against the CRT sysroot and then running it.
 
-Recipes are pinned and checksum-verified under [`porting/recipes/`](porting/recipes/).
+Recipes are pinned and checksum-verified under [`porting/recipes/`](porting/recipes).
 
 | Upstream | Version | Linux / Windows / macOS | Evidence |
 | --- | --- | --- | --- |
@@ -442,7 +443,7 @@ The rule is important:
 
 When an upstream library expects Linux/Bionic behavior, CRT implements that behavior at the runtime/PAL boundary whenever practical.
 
-Per-port details are in [docs/porting_status.md](docs/porting_status.md).
+Per-port details are in [docs/porting/porting_status.md](docs/porting/porting_status.md).
 
 To reproduce a recipe:
 
@@ -482,7 +483,7 @@ build + test + package
 
 This prevents a repository build tree from silently satisfying undeclared dependencies.
 
-See [docs/distribution.md](docs/distribution.md).
+See [docs/guides/distribution.md](docs/guides/distribution.md).
 
 ---
 
@@ -535,7 +536,7 @@ only built then. The Skia/`MediaView` companions and their tests also need a
 Skia/FFmpeg-enabled tree. The in-tree `crt-gfx-media-dist` keeps Skia and FFmpeg
 OFF; the release-grade `04-gfx-media` and `05-ui` SDKs come from the isolated
 stage builds (`tools/crt-stage-build.py`, see
-[docs/release_preview.md](docs/release_preview.md)).
+[docs/guides/release_preview.md](docs/guides/release_preview.md)).
 
 ---
 
@@ -650,7 +651,7 @@ The C++ runtime is imported and built as part of CRT's staged runtime.
 
 On Windows, CRT uses the Bionic/Itanium ABI lane and project-built libunwind. C++ exceptions use DWARF CFI rather than depending on the native Windows SEH C++ ABI.
 
-See [docs/cxx_runtime.md](docs/cxx_runtime.md).
+See [docs/design/cxx_runtime.md](docs/design/cxx_runtime.md).
 
 ---
 
@@ -734,7 +735,7 @@ The external surface is the architecture boundary that keeps GPU-backed content 
 
 Video stays GPU-backed instead of being copied into an LVGL CPU framebuffer, and the same contract is meant to carry Web content.
 
-See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
+See [docs/acceptance/crtui_acceptance.md](docs/acceptance/crtui_acceptance.md).
 
 ---
 
@@ -773,8 +774,8 @@ WebRTC is also intentionally deferred until an actual Web/application consumer r
 
 See:
 
-- [docs/crtweb_acceptance.md](docs/crtweb_acceptance.md)
-- [docs/crtweb_porting.md](docs/crtweb_porting.md)
+- [docs/acceptance/crtweb_acceptance.md](docs/acceptance/crtweb_acceptance.md)
+- [docs/porting/crtweb_porting.md](docs/porting/crtweb_porting.md)
 
 ---
 
@@ -808,32 +809,32 @@ docs/             design, policy, roadmap and acceptance records
 
 Start here:
 
-- [Runtime roadmap](docs/runtime_roadmap.md)
+- [Runtime roadmap](docs/design/runtime_roadmap.md)
 - [Current status](STATUS.md)
 - [Current work queue](TODO.md)
 - [History](HISTORY.md)
-- [FAQ](docs/faq.md)
-- [Project meaning](docs/project_meanings.md)
+- [FAQ](docs/guides/faq.md)
+- [Project meaning](docs/design/project_meanings.md)
 
 Runtime/application layers:
 
-- [crtui acceptance](docs/crtui_acceptance.md)
-- [crtweb acceptance](docs/crtweb_acceptance.md)
-- [crtweb porting plan](docs/crtweb_porting.md)
-- [Graphics API policy](docs/libcrtgfx_api_policy.md)
-- [Media API policy](docs/libcrtmedia_api_policy.md)
-- [Hardware decode acceptance](docs/crtmedia_hardware_decode_acceptance.md)
-- [Zero-copy decode acceptance](docs/crtmedia_zero_copy_decode_acceptance.md)
-- [Encode and capture acceptance](docs/crtmedia_encode_capture_acceptance.md)
-- [Networking acceptance](docs/crtmedia_networking_acceptance.md)
+- [crtui acceptance](docs/acceptance/crtui_acceptance.md)
+- [crtweb acceptance](docs/acceptance/crtweb_acceptance.md)
+- [crtweb porting plan](docs/porting/crtweb_porting.md)
+- [Graphics API policy](docs/design/libcrtgfx_api_policy.md)
+- [Media API policy](docs/design/libcrtmedia_api_policy.md)
+- [Hardware decode acceptance](docs/acceptance/crtmedia_hardware_decode_acceptance.md)
+- [Zero-copy decode acceptance](docs/acceptance/crtmedia_zero_copy_decode_acceptance.md)
+- [Encode and capture acceptance](docs/acceptance/crtmedia_encode_capture_acceptance.md)
+- [Networking acceptance](docs/acceptance/crtmedia_networking_acceptance.md)
 
 Build/distribution:
 
-- [Distribution stages](docs/distribution.md)
-- [Developer preview release contract](docs/release_preview.md)
-- [Sysroot porting](docs/sysroot_ports.md)
-- [C++ runtime](docs/cxx_runtime.md)
-- [Porting status](docs/porting_status.md)
+- [Distribution stages](docs/guides/distribution.md)
+- [Developer preview release contract](docs/guides/release_preview.md)
+- [Sysroot porting](docs/porting/sysroot_ports.md)
+- [C++ runtime](docs/design/cxx_runtime.md)
+- [Porting status](docs/porting/porting_status.md)
 
 ---
 

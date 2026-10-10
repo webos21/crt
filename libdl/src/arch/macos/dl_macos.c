@@ -14,7 +14,7 @@
  * exact same capability to resolve the *real* libSystem sigaction()/
  * sigprocmask(), and libc cannot depend on libdl (libdl already depends on
  * libc) to get it via dlopen()/dlsym(). See
- * libc/include/private/crt_macho_symbol.h and docs/dynamic_loading.md for
+ * libc/include/private/crt_macho_symbol.h and docs/design/dynamic_loading.md for
  * the full design writeup. This file only adds the dlopen()/dlsym()-specific
  * policy on top: which image a NULL/RTLD_DEFAULT/RTLD_NEXT handle resolves
  * to, and loading a not-yet-mapped image via NSAddImage().

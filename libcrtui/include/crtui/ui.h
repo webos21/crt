@@ -2,7 +2,7 @@
 
 /* crtui -- the CRT-owned application UI API (stage `05-ui`).
  *
- * This header is the frozen Tranche 0 contract of docs/crtui_acceptance.md.
+ * This header is the frozen Tranche 0 contract of docs/acceptance/crtui_acceptance.md.
  * No LVGL type, header or symbol appears here or in any installed header: LVGL
  * (arriving in Tranche 1) is a private implementation dependency behind this
  * API, exactly as libcurl/mbedTLS sit behind crtmedia's transport. Everything

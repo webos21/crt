@@ -1,5 +1,5 @@
 /* timerfd_create()/timerfd_settime()/timerfd_gettime() -- Linux-only in
- * real Bionic too, see docs/bionic_libc_gaps.md and HISTORY.md's
+ * real Bionic too, see docs/porting/bionic_libc_gaps.md and HISTORY.md's
  * 2026-08-17 entry. Same unverified-pending-real-Linux caveat as
  * eventfd_test.c's own comment. */
 #include <errno.h>

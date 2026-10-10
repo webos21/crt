@@ -3,7 +3,7 @@
 
 /* Linux-only in real Bionic too (Android only ever runs on the Linux
  * kernel, so Bionic never needed to stub this out for another host) --
- * see docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-17 entry. Declared
+ * see docs/porting/bionic_libc_gaps.md and HISTORY.md's 2026-08-17 entry. Declared
  * on every host so portable code that merely #includes this and compiles
  * against the surface keeps working everywhere. Windows gets a real,
  * from-scratch emulation (a Win32 Event HANDLE + a 64-bit counter --

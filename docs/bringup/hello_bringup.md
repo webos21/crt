@@ -9,8 +9,8 @@ ABI, buffering, memory streams, `stdio_ext`, and a gdtoa-backed
 `printf`/`scanf` formatter family, not just the small bootstrap formatter
 described here; and libc now covers process/fd/signal/pthread/shell surface
 far beyond this initial subset list. For current status, see
-`../porting_status.md` (third-party library porting) and
-`../sysroot_ports.md` (sysroot/PAL policy and behavior-difference tables).
+[porting status](../porting/porting_status.md) (third-party library porting) and
+[sysroot porting](../porting/sysroot_ports.md) (sysroot/PAL policy and behavior-difference tables).
 This file stays as a record of what the *first* milestone looked like, not
 because it's wrong to read, just because reading it as "current" would be.
 

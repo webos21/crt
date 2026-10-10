@@ -1,7 +1,7 @@
 #pragma once
 
 /* A minimal, repository-owned loopback HTTP/1.1 server, test-only
- * infrastructure for Networking & Streaming Tranche 2 (docs/crtmedia_
+ * infrastructure for Networking & Streaming Tranche 2 (docs/acceptance/crtmedia_
  * networking_acceptance.md) -- no production coupling at all, built
  * entirely on this project's own <sys/socket.h>/<netinet/in.h> (the same
  * calling convention libc/tests/socket_network_test.c already proves),

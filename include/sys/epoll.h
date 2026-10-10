@@ -2,7 +2,7 @@
 #define CRT_SYS_EPOLL_H
 
 /* Linux-only in real Bionic too -- see sys/eventfd.h's own comment for why
- * this is still declared on every host, and docs/bionic_libc_gaps.md/
+ * this is still declared on every host, and docs/porting/bionic_libc_gaps.md/
  * HISTORY.md's 2026-08-17 entry.
  *
  * struct epoll_event's layout is architecture-conditional in the REAL

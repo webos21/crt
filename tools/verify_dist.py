@@ -247,7 +247,7 @@ def validate_ui_stage(dist: Path, manifest: dict, redistributed: dict, suffix: s
     """Checks specific to the 05-ui SDK (in-tree and isolated); split out of main()
     so tools/test_verify_dist.py can exercise it on a small fake tree."""
     # crtui: the public header and both libraries. No LVGL header may leak
-    # into the installed SDK (LVGL is a private dependency, docs/crtui_
+    # into the installed SDK (LVGL is a private dependency, docs/acceptance/crtui_
     # acceptance.md), so its absence is checked too.
     for header in ("ui.h", "api.h", "crtgfx.h"):
         require(dist / "include" / "crtui" / header)

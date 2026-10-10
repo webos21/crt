@@ -1,4 +1,4 @@
-/* crtui Tranche 0 acceptance (docs/crtui_acceptance.md): the frozen contract of
+/* crtui Tranche 0 acceptance (docs/acceptance/crtui_acceptance.md): the frozen contract of
  * crtui/ui.h, checked by a resource-free test -- no window, GPU, display or
  * LVGL, only the headless model in libcrtui/src/core.c. Covers thread
  * ownership, handle lifetime, event ordering/bubbling/re-entrancy, default

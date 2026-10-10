@@ -893,7 +893,7 @@ def main():
              "(Windows only, D3D12 Ganesh vertical slice) -- Skia's own public "
              "include/gpu/ganesh/d3d/GrD3DTypes.h unconditionally #includes <d3d12.h>/"
              "<dxgi1_4.h>, a real, forced exception to this project's own no-host-SDK-header "
-             "policy Skia itself requires (see docs/libcrtgfx_api_policy.md); mingw-w64's own "
+             "policy Skia itself requires (see docs/design/libcrtgfx_api_policy.md); mingw-w64's own "
              "header set is used instead of the raw Microsoft Windows SDK's, which is a real, "
              "confirmed dead end under this project's mingw-target clang (see tools/"
              "fetch_mingw_w64_headers.py's own top comment). Omit when not building with "

@@ -1,6 +1,6 @@
 #pragma once
 
-/* Networking & Streaming Tranche 2 (docs/crtmedia_networking_acceptance.md)
+/* Networking & Streaming Tranche 2 (docs/acceptance/crtmedia_networking_acceptance.md)
  * -- a private FFmpeg custom AVIOContext wrapping http_transport.h. This is
  * the seam between the CRT-owned HTTP transport and FFmpeg's own demuxer:
  * everything below this file only ever deals in raw bytes
@@ -17,7 +17,7 @@
  * the source seekable (a validated 206 response); a non-seekable source's
  * AVIOContext gets no seek callback at all (NULL), matching FFmpeg's own
  * documented "seek not supported" convention and this project's own
- * source/sink capability contract (docs/crtmedia_networking_acceptance.md
+ * source/sink capability contract (docs/acceptance/crtmedia_networking_acceptance.md
  * -- "no public API may imply that a non-seekable stream supports
  * arbitrary seek").
  *

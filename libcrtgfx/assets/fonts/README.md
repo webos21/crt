@@ -28,7 +28,7 @@ Used by `porting/recipes/freetype.json`'s own `glyph-rasterize-*` port tests
 (a real `FT_New_Face()`/`FT_Set_Pixel_Sizes()`/`FT_Load_Char(..., FT_LOAD_RENDER)`
 round trip, not just a version-string check) and by `libcrtgfx`'s own Skia
 `SkFontMgr_New_Custom_Directory` integration -- see
-`docs/runtime_roadmap.md`/`docs/libcrtgfx_wayland_plan.md` for the broader
+`docs/design/runtime_roadmap.md`/`docs/design/libcrtgfx_wayland_plan.md` for the broader
 text-rendering plan this is part of. Kept available as an explicit fallback
 family (`crtgfx_skia_default_typeface()`, `crtgfx/skia.h`) once Pretendard
 GOV became the project default below.

@@ -1,12 +1,12 @@
 // Manual, real on-screen demo for the decoded-texture GPU bridge
 // (2026-09-23, "Zero-copy decoded textures" Tranche 1 -- crtgfx/skia_media.h,
-// docs/crtmedia_zero_copy_decode_acceptance.md has the full frozen
+// docs/acceptance/crtmedia_zero_copy_decode_acceptance.md has the full frozen
 // contract). The real, end-to-end proof that tranche's own acceptance gate
 // requires: crtmedia_codec_dequeue_gpu_frame()'s real hardware-resident
 // output (memory_kind == CRTMEDIA_GPU_MEMORY_GPU) reaches a real, live,
 // on-screen Ganesh/Skia window through crtgfx_skia_import_media_frame(),
 // with no decoder-to-bridge CPU readback, and with the same resize-
-// and-pixel-check discipline docs/libcrtgfx_live_presentation_
+// and-pixel-check discipline docs/acceptance/libcrtgfx_live_presentation_
 // acceptance.md already established for tools/skia_gpu_window_demo.cc's
 // own synthetic-scene sibling.
 //

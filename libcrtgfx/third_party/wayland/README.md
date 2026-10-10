@@ -5,7 +5,7 @@ future Wayland or Weston-derived import. It is intentionally not a checkout.
 
 The current Linux adapter is a narrow, hand-written client of the real core
 Wayland and stable xdg-shell wire protocols. It does not link host
-`libwayland-client`; see `docs/libcrtgfx_wayland_plan.md`.
+`libwayland-client`; see `docs/design/libcrtgfx_wayland_plan.md`.
 
 When an upstream protocol parser, generated bindings, or compositor component
 is imported, record its upstream revision, license/provenance, and local build

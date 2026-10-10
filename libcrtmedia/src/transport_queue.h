@@ -1,6 +1,6 @@
 #pragma once
 
-/* Networking & Streaming Tranche 1 (docs/crtmedia_networking_acceptance.md)
+/* Networking & Streaming Tranche 1 (docs/acceptance/crtmedia_networking_acceptance.md)
  * -- a fixed-capacity byte queue with explicit high/low watermarks,
  * cancellation, timeout, and sticky EOF, shared by a producer thread and a
  * consumer thread. Deliberately has no socket, curl, or TLS dependency at
@@ -32,7 +32,7 @@
  * *out_eof set.
  * A caller that only checks *out_eof without checking the return code
  * would otherwise treat a truncated transfer as a clean, complete one --
- * exactly the corruption docs/crtmedia_networking_acceptance.md's own
+ * exactly the corruption docs/acceptance/crtmedia_networking_acceptance.md's own
  * reconnect section warns about. This was missing from Tranche 1's
  * original delivery (only EOF/cancellation existed) -- a real gap found
  * wiring the first real producer on top of it, added additively here
@@ -49,7 +49,7 @@
  * indefinitely, zero never blocks at all (CRTMEDIA_WOULD_BLOCK if no
  * progress is immediately possible), positive is a bounded wait that
  * reports CRTMEDIA_ERROR_TIMEOUT if it elapses with no progress -- the
- * same WOULD_BLOCK/TIMEOUT distinction docs/crtmedia_networking_
+ * same WOULD_BLOCK/TIMEOUT distinction docs/acceptance/crtmedia_networking_
  * acceptance.md's own Tranche 0 error-model section freezes. */
 
 #include <stddef.h>

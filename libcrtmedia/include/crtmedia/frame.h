@@ -17,7 +17,7 @@ extern "C" {
  * formats below round-trips into a real Skia SkImage/SkSurface.
  *
  * GPU texture handoff is deliberately out of scope here -- see this
- * project's own docs/libcrtgfx_api_policy.md "Open Questions": CPU pixel
+ * project's own docs/design/libcrtgfx_api_policy.md "Open Questions": CPU pixel
  * buffer first, GPU texture interop after the host GPU backend is stable.
  */
 
@@ -30,7 +30,7 @@ typedef enum crtmedia_result {
    * (dequeue output first) -- a real, expected, non-fatal backpressure
    * signal, not an error condition a caller should treat as failure.
    * Named to match this project's own existing crtmedia_result naming,
-   * not AMediaCodec's own INFO_TRY_AGAIN_LATER -- see docs/libcrtmedia_
+   * not AMediaCodec's own INFO_TRY_AGAIN_LATER -- see docs/design/libcrtmedia_
    * api_policy.md's own Decision on why exact NDK naming is not adopted. */
   CRTMEDIA_WOULD_BLOCK = -3,
   /* A host resource was present but an operating-system operation failed.
@@ -220,7 +220,7 @@ void crtmedia_frame_release(crtmedia_frame* frame);
  * UNSPECIFIED default to BT.709/LIMITED (this codebase's most common
  * real-world case, matching typical un-signaled H.264 content) rather
  * than erroring, since a genuinely color-managed pipeline is not this
- * contract's job -- see docs/libcrtgfx_api_policy.md's own crtgfx_
+ * contract's job -- see docs/design/libcrtgfx_api_policy.md's own crtgfx_
  * pixel_format comment for the matching "no color management applied"
  * policy on the RGB side. Returns CRTMEDIA_ERROR_INVALID_ARGUMENT for a
  * null src/dst, a dst not in CRTMEDIA_PIXEL_FORMAT_RGBA8888, or a width/

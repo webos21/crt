@@ -34,7 +34,7 @@ enum {
    * so a legacy-backend window's own surface can never be "upgraded"
    * after creation). This flag must be set at crtgfx_window_create()
    * time, before any real connection is made for this window -- see
-   * docs/libcrtgfx_wayland_plan.md's own dual-backend section for the
+   * docs/design/libcrtgfx_wayland_plan.md's own dual-backend section for the
    * full design and its own real, honest current feature scope (Vulkan-
    * only; no software wl_shm/multi-window/clipboard yet). Windows/macOS
    * currently ignore this bit entirely (their own existing swap chain/

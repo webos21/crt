@@ -3,7 +3,7 @@
 # framebuffer, the GPU backend, and the Skia bridge become physically
 # separate source/object graphs" item): CRTGFX_WINDOW_SOURCES feeds
 # crtgfx_window_objects/crtgfx_window(_shared) alone -- no GPU or Skia
-# code compiles into it at all, matching docs/libcrtgfx_api_policy.md's
+# code compiles into it at all, matching docs/design/libcrtgfx_api_policy.md's
 # Simple Graphics contract for real, not just via a header-install
 # COMPONENT split. src/gpu.c moves to CRTGFX_GPU_SOURCES (see the
 # per-OS CRTGFX_WINDOW_BACKEND_SOURCES/CRTGFX_GPU_BACKEND_SOURCES block
@@ -435,7 +435,7 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
     # CRTGFX_LINUX_VULKAN_LIB condition as gpu_vulkan.c itself: this
     # backend exists specifically to give Vulkan's own vkCreateWayland
     # SurfaceKHR() a live wl_surface*/wl_display* from a real connection
-    # (see docs/libcrtgfx_wayland_plan.md's own dual-backend section for
+    # (see docs/design/libcrtgfx_wayland_plan.md's own dual-backend section for
     # the full "why" -- the legacy hand-rolled backend's wire-protocol
     # object ids can never be retrofitted into a real libwayland-client
     # wl_proxy). No real reason to fetch/build/link libwayland-client at
@@ -1286,7 +1286,7 @@ endif()
 
 # --- crtgfx_window (STATIC): window/input/software-framebuffer only.
 # No GPU or Skia object code, no Vulkan/D3D12/Metal/libskia.a on its
-# link line -- this is what makes docs/libcrtgfx_api_policy.md's Simple
+# link line -- this is what makes docs/design/libcrtgfx_api_policy.md's Simple
 # Graphics contract real rather than just a header-install COMPONENT.
 add_library(crtgfx_window STATIC
   $<TARGET_OBJECTS:crtgfx_window_common_objects>
@@ -1496,7 +1496,7 @@ if(CRTGFX_ENABLE_SKIA)
   # trailing slash, which is exactly what is wanted here: every real Skia
   # header, both this project's own consumer code (crtgfx/skia.h, skia_
   # bridge.cc, the Skia test binaries) and Skia's own internal cross-
-  # header includes (never patched -- see docs/libcrtgfx_api_policy.md's
+  # header includes (never patched -- see docs/design/libcrtgfx_api_policy.md's
   # "use normal Skia headers unmodified" policy), spells this exact same
   # include as `#include "include/core/SkXxx.h"`, matching Skia's own
   # upstream repo-relative path convention verbatim. Since the include
@@ -2164,7 +2164,7 @@ if(CRTGFX_ENABLE_SKIA)
 
   # crtgfx_skia_media_window_demo: manual, real on-screen acceptance demo
   # for the zero-copy decoded-texture bridge (2026-09-23, "Zero-copy
-  # decoded textures" Tranche 1/2 -- crtgfx/skia_media.h, docs/crtmedia_
+  # decoded textures" Tranche 1/2 -- crtgfx/skia_media.h, docs/acceptance/crtmedia_
   # zero_copy_decode_acceptance.md) -- see tools/skia_media_window_demo.cc's
   # own top comment for the full "why". Real on macOS and (2026-09-23)
   # Windows -- crtgfx_skia_import_media_frame() is declared under either

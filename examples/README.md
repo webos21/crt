@@ -64,7 +64,7 @@ fallback otherwise -- never a hard requirement), and prints
 path actually ran. Set `CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1` in the
 environment to force software decode instead, for a host/driver combination
 where even attempting hardware decode is known to misbehave (see
-[`docs/crtmedia_hardware_decode_acceptance.md`](../docs/crtmedia_hardware_decode_acceptance.md)).
+[`docs/acceptance/crtmedia_hardware_decode_acceptance.md`](../docs/acceptance/crtmedia_hardware_decode_acceptance.md)).
 
 The isolated option-ON `04-gfx-media` that a release ships includes this
 example (source, clip, standalone project, and prebuilt binary).

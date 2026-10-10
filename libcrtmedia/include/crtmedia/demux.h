@@ -19,7 +19,7 @@ extern "C" {
  * `crtmedia_demuxer` is opaque -- no FFmpeg type (`AVFormatContext`,
  * `AVCodecContext`, ...) ever appears in this public header, matching this
  * project's established "no host/upstream SDK type in a public header"
- * policy (see docs/libcrtgfx_api_policy.md's own Non-Goals for the same
+ * policy (see docs/design/libcrtgfx_api_policy.md's own Non-Goals for the same
  * rule applied to libcrtgfx's own Win32/Direct3D/Cocoa/Metal boundary).
  * Decoded video lands in the *existing* crtmedia_frame contract
  * (crtmedia/frame.h) as CRTMEDIA_PIXEL_FORMAT_YUV420P -- H.264's native

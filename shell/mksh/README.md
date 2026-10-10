@@ -37,7 +37,7 @@ glue in a dedicated `shell/toybox/crt/` directory.
 
 ## Import Rules
 
-- Follow the shared policy in `docs/shell_import.md`.
+- Follow the shared policy in `docs/guides/shell_import.md`.
 - Keep imported source separate from project-owned glue.
 - Prefer CRT/PAL fixes over upstream source patches.
 - If a patch is unavoidable, keep it small and record why the behavior cannot be

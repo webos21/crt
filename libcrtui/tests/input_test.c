@@ -1,4 +1,4 @@
-/* crtui Tranche 2 acceptance (docs/crtui_acceptance.md): CRT keyboard, pointer,
+/* crtui Tranche 2 acceptance (docs/acceptance/crtui_acceptance.md): CRT keyboard, pointer,
  * wheel and resize events -> crtui, through the crtgfx adapter, checked against
  * the widget model. Headless: crtgfx_event values are synthesized (the same
  * struct a real crtgfx window queues), so this needs no window, display or

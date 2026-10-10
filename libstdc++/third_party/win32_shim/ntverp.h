@@ -6,7 +6,7 @@
  * defines from that header (VER_PRODUCTBUILD) is only actually read inside
  * an `#if defined(_LIBUNWIND_SUPPORT_SEH_UNWIND)` block further down --
  * dead code in this project's build, since CRT builds Windows C++ with
- * -fdwarf-exceptions, not native SEH (see docs/cxx_runtime.md's "Windows
+ * -fdwarf-exceptions, not native SEH (see docs/design/cxx_runtime.md's "Windows
  * exception-table format: DWARF CFI, not native SEH"). The #include itself
  * still has to resolve regardless of whether the value is ever consumed.
  *

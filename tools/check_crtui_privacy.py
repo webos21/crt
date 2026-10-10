@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove that LVGL is a private dependency of crtui (docs/crtui_acceptance.md,
+"""Prove that LVGL is a private dependency of crtui (docs/acceptance/crtui_acceptance.md,
 Tranche 3).
 
 Checks, each independently:

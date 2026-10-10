@@ -1,4 +1,4 @@
-/* Networking & Streaming Tranche 1 acceptance (docs/crtmedia_networking_
+/* Networking & Streaming Tranche 1 acceptance (docs/acceptance/crtmedia_networking_
  * acceptance.md): deterministic proof of the bounded transport queue's
  * contract -- fully resource-free, no socket/curl/TLS dependency, real
  * pthread producer/consumer threads driving the actual concurrency paths

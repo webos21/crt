@@ -11,12 +11,12 @@
 extern "C" {
 #endif
 
-/* Async buffer-queue codec, the third piece of docs/libcrtmedia_
+/* Async buffer-queue codec, the third piece of docs/design/libcrtmedia_
  * api_policy.md's decided core (TODO.md's "Separate extractor and codec"
  * item). Shaped after AMediaCodec's own real dequeue/queue buffer-queue
  * model -- deliberately NOT the literal `AMediaCodec`/`AMediaCodec_*`
  * symbols, and deliberately NOT AMediaCodec's own raw indexed-buffer-pool
- * bookkeeping either (see docs/libcrtmedia_api_policy.md's own Decision):
+ * bookkeeping either (see docs/design/libcrtmedia_api_policy.md's own Decision):
  * this crtmedia_codec instead hands out one explicitly owned
  * crtmedia_frame/crtmedia_gpu_frame/crtmedia_audio_buffer or compressed
  * sample per output, matching this project's own already-established
@@ -143,7 +143,7 @@ crtmedia_result crtmedia_codec_dequeue_output(
 
 /* GPU-frame sibling of crtmedia_codec_dequeue_output() above (2026-09-23,
  * "Zero-copy decoded textures" Tranche 0/1 --
- * docs/crtmedia_zero_copy_decode_acceptance.md has the full frozen
+ * docs/acceptance/crtmedia_zero_copy_decode_acceptance.md has the full frozen
  * contract). Same calling convention, same CRTMEDIA_WOULD_BLOCK/EOF
  * behavior, and freely interchangeable with dequeue_output() frame-by-
  * frame on the same codec instance -- this only changes how the *next*
@@ -182,7 +182,7 @@ crtmedia_result crtmedia_codec_flush(crtmedia_codec* codec);
 
 /* Real, honest report (2026-09-08, "hardware decode, phase A"; semantics
  * corrected 2026-09-18, Tranche 2; broadened, not redefined, 2026-09-23,
- * "Zero-copy decoded textures" -- docs/crtmedia_zero_copy_decode_
+ * "Zero-copy decoded textures" -- docs/acceptance/crtmedia_zero_copy_decode_
  * acceptance.md) of whether `codec` has actually decoded at least one
  * real hardware-backed frame and successfully delivered it to the caller
  * on this host -- only ever true for a video codec created with

@@ -3,7 +3,7 @@
 
 /* Linux-only in real Bionic too -- see sys/eventfd.h's own comment for why
  * this is still declared on every host (portable-compile, real-behavior-
- * only-on-Linux), and docs/bionic_libc_gaps.md/HISTORY.md's 2026-08-17
+ * only-on-Linux), and docs/porting/bionic_libc_gaps.md/HISTORY.md's 2026-08-17
  * entry. Reuses this project's existing struct itimerspec/CLOCK_REALTIME/
  * CLOCK_MONOTONIC from <time.h> rather than redeclaring them. */
 

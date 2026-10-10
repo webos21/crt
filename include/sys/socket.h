@@ -183,7 +183,7 @@ int shutdown(int sockfd, int how);
 /* sendmsg()/recvmsg() and SCM_RIGHTS ancillary-data fd passing --
  * Wayland's core wire-protocol mechanism (every wl_shm buffer and the
  * initial socket handshake pass fds this way over an AF_UNIX socket), see
- * docs/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. Linux and
+ * docs/porting/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. Linux and
  * macOS both have full native kernel/BSD support for this; Windows has no
  * SCM_RIGHTS-equivalent mechanism for AF_UNIX sockets at all (Windows'
  * cross-process handle sharing is DuplicateHandle()-based, a completely

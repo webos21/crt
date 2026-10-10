@@ -1,5 +1,5 @@
 /* crtui core: the CRT-owned widget tree, event routing, focus, and geometry
- * model behind crtui/ui.h (the Tranche 0 contract, docs/crtui_acceptance.md).
+ * model behind crtui/ui.h (the Tranche 0 contract, docs/acceptance/crtui_acceptance.md).
  * Headless and host-neutral: no window, GPU or LVGL. Later tranches render
  * this model through a private LVGL backend without changing these rules. */
 

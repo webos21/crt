@@ -2,7 +2,7 @@
  * macOS host window backend for libcrtgfx: maps a Wayland-style toplevel
  * surface (src/wayland_weston.c) onto a real Cocoa NSWindow, the
  * same "one top-level surface maps to one host-native window" shape
- * docs/libcrtgfx_wayland_plan.md already established for Windows
+ * docs/design/libcrtgfx_wayland_plan.md already established for Windows
  * (src/arch/windows/window_win32.c) and Linux (src/arch/linux/
  * window_wayland.c). This file follows Win32's own precedent of never
  * including a host SDK header at all: every AppKit/Foundation/
@@ -10,7 +10,7 @@
  * hand-declared from Apple's own public, stable ABI, exactly the way
  * window_win32.c hand-declares Win32 rather than #include <windows.h>.
  *
- * Architecture reference: docs/libcrtgfx_wayland_plan.md names Wawona/
+ * Architecture reference: docs/design/libcrtgfx_wayland_plan.md names Wawona/
  * Wayoa/Cocoa-Way-style projects as the macOS/iOS reference for mapping
  * Wayland-shaped surfaces onto native Cocoa windows with GPU-composited
  * presentation. The concrete technique this file takes from that
@@ -49,7 +49,7 @@
  * call blocking the main thread on every frame, and no involvement of
  * the (much slower) legacy view-drawing machinery at all. This matches
  * the "software buffer path first, then GPU texture/direct-render
- * paths" staging in docs/libcrtgfx_wayland_plan.md: it is still a CPU-
+ * paths" staging in docs/design/libcrtgfx_wayland_plan.md: it is still a CPU-
  * built pixel buffer (no Metal/GPU texture yet), but it reaches the
  * screen through the same fast, hardware-composited presentation path a
  * real GPU-backed layer would use, which is the concrete "performance"

@@ -43,7 +43,7 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # SkPaint::SkPaint(void)`) never matches. This was not a deliberate
   # architectural choice in the first place -- it was Clang's own bare
   # default going unquestioned, and it directly contradicted this
-  # project's own already-documented policy (docs/cxx_runtime.md's own
+  # project's own already-documented policy (docs/design/cxx_runtime.md's own
   # "ABI Policy" section: "CRT-targeted C++ code should use the Bionic/
   # Itanium C++ ABI lane. Windows-native C++ DLL interoperability should
   # be handled by a *separate* MSVC ABI bridge lane" -- deliberately kept

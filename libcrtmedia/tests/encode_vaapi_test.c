@@ -1,4 +1,4 @@
-/* Encode & Capture Tranche 3 acceptance (docs/crtmedia_encode_capture_
+/* Encode & Capture Tranche 3 acceptance (docs/acceptance/crtmedia_encode_capture_
  * acceptance.md): 100 deterministic CPU frames -> VA-API H.264 hardware
  * encoder -> MP4 muxer -> extractor/software decoder -> 100 frames,
  * compared against the same round trip through the existing mp4v-es
@@ -294,7 +294,7 @@ int main(void) {
   CHECK(vaapi_result == 0, "VA-API H.264 encode/mux/decode-back round trip");
   CHECK(vaapi_frames == FRAME_COUNT, "VA-API round trip decoded exactly 100 frames");
 
-  /* The software fallback comparison (docs/crtmedia_encode_capture_
+  /* The software fallback comparison (docs/acceptance/crtmedia_encode_capture_
    * acceptance.md Tranche 3's own "compare timing/ownership with the
    * software fallback" requirement) -- the existing, already-accepted
    * mp4v-es path (Tranche 1), run back to back on the identical synthetic

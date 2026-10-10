@@ -1,5 +1,5 @@
 /* host_abi_firewall_fault_victim -- deliberately violates the Host ABI
- * firewall rule (docs/host_abi_firewall.md): allocates a fake host
+ * firewall rule (docs/design/host_abi_firewall.md): allocates a fake host
  * object through the host's own API, then frees it via this project's
  * OWN ordinary free() instead of fake_host_release() -- exactly the
  * class of bug the rule exists to prevent ("CRT adapter code must never

@@ -35,7 +35,7 @@ what gets fetched; those CACHE variables remain the override mechanism (pass
   given.
 - The build uses `tools/crt-cc`, `tools/crt-c++`, and `tools/crt-ar` against
   the active CRT sysroot, routed through the project-owned imported libc++
-  (see `TODO.md`'s dated 2026-08-22 sub-bullet and `HISTORY.md`'s matching
+  (see `TODO.md`'s dated 2026-08-22 sub-bullet and [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s matching
   entry for the toolchain-wiring work this took). `crt-ar` expands GN
   response files before calling a host archiver because Apple `ar` does not
   support them natively. Windows GN invokes the matching `tools/crt-ar.cmd`

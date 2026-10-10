@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-/* Key-value format description, the first piece of docs/libcrtmedia_
+/* Key-value format description, the first piece of docs/design/libcrtmedia_
  * api_policy.md's decided core (TODO.md's "Separate extractor and codec"
  * item). Shaped after AMediaFormat's own design -- a generic key-value
  * store instead of one fixed struct per container/codec -- deliberately
@@ -46,7 +46,7 @@ typedef struct crtmedia_format crtmedia_format;
  * AudioSpecificConfig, ...; FFmpeg calls this "extradata", real Android
  * calls it "csd-0" -- named to match AMediaFormat's own real key exactly,
  * a real, useful point of shape alignment even without a full
- * compatibility claim, see docs/libcrtmedia_api_policy.md). Not every
+ * compatibility claim, see docs/design/libcrtmedia_api_policy.md). Not every
  * track has one (PCM/MP3 need none) -- crtmedia_format_get_buffer()
  * returning CRTMEDIA_ERROR_UNSUPPORTED for a track with no real config
  * data is expected, not a bug. */

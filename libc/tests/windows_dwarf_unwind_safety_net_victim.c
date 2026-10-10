@@ -3,7 +3,7 @@
  * explicit -fdwarf-exceptions flag (see this file's own CMakeLists.txt
  * custom_command) so its non-leaf functions carry NO Windows-native
  * `.pdata`/`.xdata` unwind info at all -- exactly the real-world shape
- * TODO.md item 7 / docs/cxx_runtime.md's "Known cost" section describes
+ * TODO.md item 7 / docs/design/cxx_runtime.md's "Known cost" section describes
  * for this project's own DWARF-compiled C++ runtime, reproduced here in
  * plain C (no libc++/libcxx dependency needed at all: -fdwarf-exceptions
  * affects codegen/unwind-table emission the same way regardless of

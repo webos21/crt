@@ -1,6 +1,6 @@
 /* Windows startup self-relaunch under the fork()-enabling mitigation
  * policy. See libc/src/arch/windows/{aarch64,x86_64}/fork_memcopy.c and
- * docs/windows_fork_emulation.md ("Spawn Broker Retired") for why this is
+ * docs/design/windows_fork_emulation.md ("Spawn Broker Retired") for why this is
  * needed at all: Phase B only verified that *children spawned under the
  * mitigation policy* get deterministic heap/stack addresses -- the
  * original process itself still gets ordinary, per-launch-randomized
@@ -236,7 +236,7 @@ void __crt_windows_ensure_fork_capable_relaunch(const char* command_line) {
    * via posix_spawn_file_actions_adddup2() to spawn *this* process) is
    * silently lost across this relaunch hop, since its handle value is
    * only meaningful in this process, not the relaunched one -- see
-   * docs/windows_fork_emulation.md "Current Open Issues". Best-effort:
+   * docs/design/windows_fork_emulation.md "Current Open Issues". Best-effort:
    * if this fails, fall back to relaunching without it, same as before
    * this fd handoff existed. */
   {

@@ -215,7 +215,7 @@ if(EXISTS "${CRT_MKSH_ROOT}/Android.bp")
   # MKSH_DEFAULT_PROFILEDIR/MKSHRC_PATH/MKSH_DEFAULT_EXECSHELL/MKSH_DEFAULT_
   # TMPDIR: real Android-rootfs absolute paths (/system/etc, /data/local),
   # NOT shared across every host the way the definitions above are --
-  # docs/android_shell_environment.md's own "Initial Namespace Policy" is
+  # docs/guides/android_shell_environment.md's own "Initial Namespace Policy" is
   # explicit that CRT_ROOTFS absolute-path mapping (`/data/local` ->
   # `<CRT_ROOTFS>/data/local`, etc.) is a *Windows-only* PAL feature.
   # Linux/macOS have no such mapping at all -- these paths hit the real,

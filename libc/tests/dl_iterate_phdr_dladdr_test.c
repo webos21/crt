@@ -1,5 +1,5 @@
-/* dl_iterate_phdr()/dladdr() -- see docs/dynamic_loading.md and
- * docs/bionic_libc_gaps.md/HISTORY.md's 2026-08-17 entry.
+/* dl_iterate_phdr()/dladdr() -- see docs/design/dynamic_loading.md and
+ * docs/porting/bionic_libc_gaps.md/HISTORY.md's 2026-08-17 entry.
  *
  * elf.h's struct sizes are checked directly (a fixed, documented binary
  * spec, not host-dependent -- meaningful on every host this project

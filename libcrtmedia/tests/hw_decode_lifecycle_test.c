@@ -1,5 +1,5 @@
 // "Hardware video decode" Tranche 2, item 7 (2026-09-18,
-// docs/crtmedia_hardware_decode_acceptance.md): bounded repeated
+// docs/acceptance/crtmedia_hardware_decode_acceptance.md): bounded repeated
 // create/decode/release lifecycle coverage on real VideoToolbox hardware.
 // A deliberately small, fixed iteration count (15, within the plan's own
 // 10-20 range) -- this is a CTest correctness regression, not a stress

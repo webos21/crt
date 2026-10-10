@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream": "WPE WebKit 2.54.0 (libcrtweb/third_party/webkit/recipe.json)",
-  "policy": "Nothing here is applied silently: tools/build_webkit_jsc.py verifies the SHA-256 of each file before the patch (or accepts the recorded result), applies it, verifies the result, and records it in the configure fingerprint. Add an entry only with a reason and a removal condition (docs/crtweb_porting.md).",
+  "policy": "Nothing here is applied silently: tools/build_webkit_jsc.py verifies the SHA-256 of each file before the patch (or accepts the recorded result), applies it, verifies the result, and records it in the configure fingerprint. Add an entry only with a reason and a removal condition (docs/porting/crtweb_porting.md).",
   "patches": [
     {
       "id": "0001-wtf-rawhex-int64-distinct-from-intptr",

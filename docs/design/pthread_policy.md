@@ -1,0 +1,140 @@
+# pthread policy
+
+This project keeps a Bionic-shaped public pthread ABI while adapting the backend
+to Linux, macOS, and Windows.
+
+## Implemented baseline
+
+- Thread create, join, detach, exit, and `pthread_self`.
+- `pthread_once`.
+- Thread-specific data keys and four-pass TLS destructor execution.
+- Mutexes: normal, recursive, and error-check.
+- Condition variables backed by the project wait-by-address layer.
+- Read/write locks.
+- Spin locks.
+- Barriers.
+- Attribute objects for detach state, stack size, user stack, guard size, basic
+  scheduler fields, process-shared policy, and robust-mutex policy.
+- Bionic extension surface for `pthread_getattr_np`, `pthread_gettid_np`,
+  `pthread_setname_np`, `pthread_getname_np`, `pthread_getcpuclockid`, and
+  `pthread_setschedprio`.
+
+## Backend policy
+
+- `pthread_self`, `__errno`, pthread key storage, and the current-thread name
+  buffer go through the private `crt_tls` adapter. Public pthread ABI stays
+  Bionic-shaped, while each host can use its native current-thread mechanism
+  behind that adapter.
+- Linux uses project-owned `clone` threads and a detached-thread reaper. Joinable
+  threads release their control block and owned stack during `pthread_join`.
+  Its `crt_tls` backend uses a runtime thread-context registry keyed by kernel
+  tid. Native ELF TLS setup and its x86_64/aarch64 loader assumptions are
+  defined in [Linux pthread lifecycle](linux_pthread_lifecycle.md).
+- macOS keeps the project pthread ABI and calls libSystem pthread entry points
+  behind the adaptation layer for native thread lifecycle. Its `crt_tls` backend
+  may use compiler TLS because libSystem creates threads with a valid native TLS
+  environment.
+- Windows keeps the project pthread ABI and maps thread lifecycle to Kernel32
+  thread and TLS primitives. Its `crt_tls` backend uses Win32 TLS slots, keeping
+  the freestanding startup path independent of MSVC CRT PE TLS initialization.
+- Project-created threads return the project control-block handle from
+  `pthread_self`, so it matches the `pthread_t` value returned by
+  `pthread_create`. Threads not created by this runtime fall back to the backend
+  thread id for `pthread_self`.
+
+## Scheduler and stack policy
+
+- Scheduler attribute constants follow Bionic: `PTHREAD_EXPLICIT_SCHED` is `0`
+  and `PTHREAD_INHERIT_SCHED` is `1`.
+- `pthread_attr_setschedpolicy` and `pthread_attr_setschedparam` store
+  `SCHED_OTHER`, `SCHED_FIFO`, `SCHED_RR`, and the requested priority in the
+  attribute object, matching Bionic's attr-object behavior.
+- `pthread_create` does not apply stored scheduler attributes to the host
+  backend yet. Linux/Bionic uses `sched_setscheduler` at creation time, but this
+  runtime defers that cross-platform mapping until a later backend tranche.
+- Direct thread scheduler changes through `pthread_setschedparam` are limited
+  to the no-op `SCHED_OTHER` with priority `0`. Other policies or non-zero
+  priority return `ENOTSUP`.
+- Process scope returns `ENOTSUP`.
+- Linux-owned thread stacks apply the recorded guard size with `mprotect` before
+  the usable stack region. The default guard size is one 4096-byte page.
+- `pthread_attr_setstack` is supported at the attribute-object level on every
+  host. `pthread_attr_getstack` returns the caller-provided address and size even
+  on hosts that cannot apply that stack during thread creation.
+- Caller-provided stacks disable runtime guard ownership, matching the rule that
+  stack ownership remains with the caller.
+- macOS passes stack size, guard size, and caller-provided stacks into native
+  libSystem pthread attributes when the native entry points are available. When the kernel allocates the
+  stack (only a size was given), the new thread records the real bounds from `pthread_get_stackaddr_np`/
+  `pthread_get_stacksize_np` so `pthread_getattr_np()` reports them (JavaScriptCore's soft stack limit read a
+  null base and wrote the LLInt frame zero-fill to address 0x800000 before this). The initial thread's stack is
+  the startup-recorded top minus the soft stack limit.
+- Windows passes stack size to `CreateThread`. Caller-provided stacks return
+  `ENOTSUP` at `pthread_create` time, not at `pthread_attr_setstack` time,
+  because Kernel32 does not accept an arbitrary caller-owned stack for
+  `CreateThread`.
+
+### Default stack-size ownership
+
+The CRT pthread default remains 1 MiB on all three hosts. It is a runtime
+default, not a promise that every application workload fits in 1 MiB. The
+JavaScriptCore bring-up exercised the assembly interpreter, Baseline/DFG/FTL
+compiler threads, WebAssembly, stack-overflow detection, 1/4/8-thread VM cycles
+and sampling-profiler workers successfully with that default. Those results
+reject a general CRT stack defect and keep a larger stack out of Tranche 1's
+acceptance gates.
+
+An embedder that runs arbitrary script, recursive code or another workload with
+a documented larger requirement must set `pthread_attr_setstacksize()` for the
+threads it owns. Raising the global CRT default to accommodate one consumer
+would multiply reserved address space across every thread and is not the policy.
+
+## Windows emulated-TLS lifetime
+
+Clang `-femulated-tls` storage is process-wide in `libc.dll`, so every DLL sees
+one control-index namespace and one Win32 TLS key. The key is never destroyed by
+an `atexit()` handler: process-exit callbacks run while other threads may still
+use TLS, which caused JavaScriptCore's former exit-status-134 race. Instead, a
+CRT-created pthread frees only its own emulated-TLS objects and slot array after
+pthread-key destructors have run. Normal routine return and explicit
+`pthread_exit()` use the same cleanup; live threads and future threads retain the
+process-wide key. The initial thread and any non-CRT-created host thread remain
+OS/process-lifetime storage.
+
+`emutls_thread_churn_test` enforces this boundary with two sequential batches of
+128 short-lived threads, each touching a 256 KiB emulated-TLS object. Before the
+pthread-exit cleanup, the second batch added 42,024,960 private bytes and the two
+batches added 84,049,920 bytes. With cleanup, both measured growth values are
+zero on the Windows/x64 acceptance host. `emutls_exit_race_test` separately
+keeps the no-process-exit-teardown rule covered.
+
+## Bionic extension policy
+
+- `pthread_getattr_np` returns the stored project pthread attributes. For the
+  initial thread on Linux it reports the real stack (the end of the
+  `/proc/self/maps` mapping holding the stack pointer, sized by `RLIMIT_STACK`,
+  8 MiB if unlimited); elsewhere it returns default attributes.
+- `pthread_kill` is real on Linux (`tgkill`). A `pthread_t` is the control block only for a thread
+  created by `pthread_create`; the initial thread's is its kernel tid, so the handle is validated against
+  the registry of live CRT threads before it is dereferenced. On macOS (arm64) it is libSystem's
+  `pthread_kill` on the control block's native thread (the initial thread's own Apple pthread). Toward another
+  thread it fails with `ENOTSUP` on Windows and on macOS/x86_64, which have no delivery mechanism yet.
+- `pthread_gettid_np` returns the backend thread id when the project has a
+  control block. For the current thread it asks the backend directly.
+- Thread names are stored in the project thread context.
+  Backend-visible OS thread naming is deferred.
+- `pthread_getcpuclockid` is present but returns `ENOTSUP`; per-thread CPU clock
+  mapping is deferred.
+
+## Explicitly unsupported
+
+- Process-shared pthread objects return `ENOTSUP`.
+- Robust mutexes return `ENOTSUP`; the default robust policy is
+  `PTHREAD_MUTEX_STALLED`.
+- Thread cancellation is not implemented. `pthread_cancel` returns `ENOTSUP`.
+  Cancellation state/type setters accept the disabled/deferred no-op state, and
+  enabling or asynchronous cancellation returns `ENOTSUP`.
+
+These choices are intentional bootstrap constraints, not accidental gaps. They
+keep the ABI surface linkable while preventing callers from assuming semantics
+that the current runtime cannot honor.

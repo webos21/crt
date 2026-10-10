@@ -226,7 +226,7 @@ elseif(CRT_TARGET_OS STREQUAL "macos")
   # Bind libc symbols to the CRT's libc.dylib, not Apple's libSystem: two-level
   # namespace binding takes the first dylib that defines a symbol, so without
   # this libcrtui calls Apple's 64-byte pthread_mutex_init() on the CRT's
-  # 40-byte pthread_mutex_t (docs/crtui_acceptance.md, Tranche 3 macOS replay).
+  # 40-byte pthread_mutex_t (docs/acceptance/crtui_acceptance.md, Tranche 3 macOS replay).
   # UNVERIFIED in this isolated stage until the macOS replay.
   target_link_options(crtui_shared PRIVATE "${CMAKE_SYSROOT}/lib/libc.dylib")
   set_target_properties(crtui_shared PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "")
