@@ -80,9 +80,10 @@ then macOS/arm64.
   ABI audits; Linux/aarch64 was the final 1D-B/C/D replay. Detailed per-host
   evidence and the remaining non-gating hardening limits are in `HISTORY.md`
   and `docs/crtweb_acceptance.md`. The next active product tranche is the
-  unchanged Linux WPE reference baseline below.
-* [ ] **2. Linux WPE reference baseline.** Upstream WPE unchanged rendering
-  local HTML; the known-good baseline to diff `PlatformCRT` against.
+  `PlatformCRT` graphics/input prototype below.
+* [x] **2. Linux WPE reference baseline.** Closed 2026-10-10 on Linux/x86_64:
+  verified upstream WPE 2.54.0, unmodified, renders local HTML through its
+  built-in headless backend and produces the accepted 640x480 snapshot.
 * [ ] **3. `PlatformCRT` graphics and input prototype.** (Gates before 3B: pin the full
   WebKit commit behind the signed tag as the `PlatformCRT` product source; per-file license scan and
   patch manifest before the first carried patch.) 3A: Linux WPEPlatform

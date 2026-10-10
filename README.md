@@ -11,7 +11,7 @@ It provides a common C/C++ runtime and platform layer, then builds upward into n
 The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-Pi-class consoles, industrial HMIs, smart displays, and automotive IVI systems. Windows and macOS are first-class native development and execution hosts, not emulation environments.
 
 > CRT is pre-1.0 developer software under active development.  
-> The accepted upper runtime now reaches **`05-ui`**: `crtui` application widgets, layout, input, external-surface composition, and a GPU-composed `MediaView`, verified on all three hosts. The current upper-runtime work is **`06-web`**, a WebKit CRT Port with JavaScriptCore, WebCore, WebKit, `PlatformCRT`, and `WebView`; it is in bring-up: JavaScriptCore builds and passes its interpreter and Baseline-JIT acceptance on Linux, and no WebCore, WebKit or `PlatformCRT` code exists yet.
+> The accepted product runtime now reaches **`05-ui`**: `crtui` application widgets, layout, input, external-surface composition, and a GPU-composed `MediaView`, verified on all three hosts. The current upper-runtime work is **`06-web`**, a WebKit CRT Port with JavaScriptCore, WebCore, WebKit, `PlatformCRT`, and `WebView`. Its bring-up has closed JavaScriptCore acceptance on all four required host/architecture pairs and the pristine native WPE reference on Linux/x86_64; `PlatformCRT` and the public `crtweb` API are the next product work.
 
 [Roadmap](docs/runtime_roadmap.md) ·
 [Current Status](STATUS.md) ·
@@ -76,7 +76,9 @@ Today, the lower and middle layers are already working across all three hosts:
 - `crtui` application widgets with CRT-owned layout, styling, input and focus
 - external-surface composition, including GPU video (`MediaView`) composed in the final present
 
-The Web runtime remains roadmap work and is not claimed as implemented.
+The `crtweb` product runtime remains in progress and is not claimed as
+implemented. Its JavaScriptCore and native Linux WPE reference baselines are
+verified bring-up evidence, not a packaged `06-web` SDK.
 
 ---
 
@@ -152,7 +154,7 @@ Examples include:
 
 `crtui` extends that base into a real application-facing widget layer.
 
-The planned `06-web` stage will add an embedded Web runtime rather than making Web technology a prerequisite for the native stack.
+The active `06-web` stage will add an embedded Web runtime rather than making Web technology a prerequisite for the native stack.
 
 ---
 
@@ -176,7 +178,7 @@ The planned `06-web` stage will add an embedded Web runtime rather than making W
   external-surface composition
   MediaView
       |
-06-web                        <-- current upper-runtime work (JavaScriptCore bring-up)
+06-web                        <-- current upper-runtime work (PlatformCRT prototype next)
   JavaScriptCore
   WebCore
   WebKit
@@ -279,6 +281,14 @@ CRT PAL      crtgfx       crtmedia
 
 WPE WebKit is the Linux reference port during bring-up. The final target is one CRT-facing Web runtime and `WebView` API across Linux, Windows, and macOS.
 
+Tranches 0-2 are closed: the WPE WebKit 2.54.0 provenance is frozen;
+JavaScriptCore passes interpreter, Baseline/DFG/FTL JIT, WebAssembly, and
+sampling-profiler acceptance on Linux/x86_64, Linux/aarch64, macOS/arm64, and
+Windows/x64; and pristine native WPE renders the accepted local HTML fixture
+through its built-in headless backend on Linux/x86_64. These are bring-up and
+reference baselines. No `PlatformCRT`, public `crtweb` API, WebView, or `06-web`
+distribution exists yet.
+
 See:
 
 - [docs/crtweb_acceptance.md](docs/crtweb_acceptance.md)
@@ -340,7 +350,7 @@ Each cell describes evidence on that host, not a future promise.
 | Video encode / capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, AVFoundation/VideoToolbox. |
 | Network streaming | Verified | Verified | Verified | Bounded HTTP/HTTPS input/output, reconnect, lifecycle and package acceptance. |
 | Application UI (`crtui`) | Verified | Verified | Verified | Contract, input, private-LVGL wrapper, widgets, external surfaces, MediaView and the isolated `05-ui` package (Tranches 0-7) accepted on all hosts. |
-| Web runtime (`crtweb`) | In progress | Planned | Planned | WebKit CRT Port (`06-web`). Tranche 0 (WPE WebKit 2.54.0 pinned and verified) is closed; JavaScriptCore (interpreter and Baseline JIT) builds and passes on Linux; the Windows/macOS replays, the DFG/FTL tiers, WebCore, WebKit and `PlatformCRT` are still to come. |
+| Web runtime (`crtweb`) | In progress | In progress | In progress | WebKit CRT Port (`06-web`). JavaScriptCore Tranche 1 is accepted on Linux/x86_64, Linux/aarch64, macOS/arm64, and Windows/x64; the pristine WPE reference Tranche 2 is accepted on Linux/x86_64. `PlatformCRT`, the public API, WebView, and packaging remain. |
 
 The authoritative detailed evidence lives in [STATUS.md](STATUS.md), [HISTORY.md](HISTORY.md), and the subsystem acceptance documents.
 
@@ -454,7 +464,7 @@ CRT is built as cumulative SDK stages.
 | `03-gfx-simple` | `02-cxx` + native window/input/software framebuffer |
 | `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg, media/networking |
 | `05-ui` | `04-gfx-media` + `crtui`, LVGL-backed widgets, application composition |
-| `06-web` | in progress (Tranche 1: JavaScriptCore interpreter and Baseline JIT green on Linux): `05-ui` + JavaScriptCore/WebCore/WebKit, `PlatformCRT`, `crtweb`/WebView |
+| `06-web` | in progress (Tranches 0-2 closed; Tranche 3 next): `05-ui` + JavaScriptCore/WebCore/WebKit, `PlatformCRT`, `crtweb`/WebView |
 
 A later stage is expected to contain everything from the preceding stage.
 
@@ -730,7 +740,7 @@ See [docs/crtui_acceptance.md](docs/crtui_acceptance.md).
 
 ## Web Runtime
 
-The planned Web layer is a **WebKit CRT Port**.
+The in-progress Web layer is a **WebKit CRT Port**.
 
 The goal is not to expose WPE or WebKit types directly to applications.
 
@@ -744,7 +754,7 @@ crtui WebView
 
 while WebKit is integrated through `PlatformCRT`.
 
-Initial WebKit work is planned around:
+The WebKit work is sequenced as follows (the first three items are closed):
 
 1. pinned WebKit/JSC provenance and license policy
 2. JavaScriptCore/JSCOnly bring-up
@@ -852,17 +862,18 @@ isolated 05-ui source-stage build
 
 ```text
 WebKit CRT Port (06-web):
-WPE WebKit 2.54.0 pinned and verified (Tranche 0 closed);
-JavaScriptCore interpreter and Baseline JIT: green on Linux/x86_64
-(Windows/macOS replays, W^X, DFG/FTL tiers to come)
+Tranches 0-2 closed;
+JavaScriptCore accepted through interpreter, Baseline/DFG/FTL,
+WebAssembly, and sampling profiler on all four required host pairs;
+pristine native WPE headless reference accepted on Linux/x86_64
 ```
 
 ### Planned
 
 ```text
-JavaScriptCore cross-host replays and the DFG/FTL tiers
-PlatformCRT (WebCore, WebKit)
+PlatformCRT graphics/input prototype
 crtweb / WebView
+multi-process cross-host replay and 06-web packaging
 ```
 
 Claims in this README are intentionally evidence-based.
@@ -879,7 +890,7 @@ Each component retains its applicable license and provenance requirements.
 
 Bionic/OpenBSD-derived imports are tracked under `third_party/`. External runtime, graphics, media, UI, shell, and porting dependencies have project-owned recipe/import metadata alongside their integration.
 
-The planned WebKit stage will keep WebKit/JSC/WebCore provenance and license obligations explicit and separate from CRT-owned platform adapter code.
+The active WebKit stage keeps WebKit/JSC/WebCore provenance and license obligations explicit and separate from CRT-owned platform adapter code.
 
 ---
 

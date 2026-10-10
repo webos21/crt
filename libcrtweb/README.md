@@ -6,13 +6,13 @@ tranche order and evidence: [`docs/crtweb_acceptance.md`](../docs/crtweb_accepta
 upstream mapping: [`docs/crtweb_porting.md`](../docs/crtweb_porting.md).
 
 **Status: bring-up.** Web Tranche 0 (scope, version and license freeze) is closed.
-Tranche 1 (JavaScriptCore) is green through 1C (interpreter and Baseline JIT) on
-Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64. 1D-A (DFG/concurrent JIT) is green
-on all four hosts; 1D-B (FTL/B3), 1D-C (WebAssembly) and 1D-D (sampling profiler) are green
-on Linux/x86_64, macOS/arm64 and Windows/x64. Linux/aarch64 is the remaining 1D-B/C/D replay.
-All are built by `tools/build_webkit_jsc.py` from the verified pin against an installed SDK.
-W^X remains separate hardening. No WebCore, WebKit, `PlatformCRT` or `crtweb` API code exists yet, and
-`libcrtweb` is not part of the root CMake build.
+Tranche 1 (JavaScriptCore) is closed on Linux/x86_64, Linux/aarch64, macOS/arm64
+and Windows/x64 through interpreter, Baseline/DFG/FTL, WebAssembly and the sampling
+profiler. Tranche 2 is closed on Linux/x86_64: the verified, unmodified WPE WebKit
+2.54.0 source renders a local fixture through WPEPlatform's built-in headless
+backend and captures the accepted 640x480 reference frame. W^X remains separate
+hardening. No `PlatformCRT` or `crtweb` API code exists yet, and `libcrtweb` is not
+part of the root CMake build.
 
 ## Layout
 
@@ -20,13 +20,15 @@ W^X remains separate hardening. No WebCore, WebKit, `PlatformCRT` or `crtweb` AP
   `jsc_jit_acceptance.js` (run through the `jsc` shell), `jsc_context_cycle.cpp` (VM
   create/use/release on several threads) and `jsc_watchdog_test.cpp` (terminating compiled
   code with a signal-based trap).
+- `tests/wpe-reference/` -- the Tranche 2 native Linux fixture and headless WPE
+  harness. It is deliberately a host program, not a CRT program.
 - `third_party/webkit/` -- the pinned WPE WebKit 2.54.0 reference: `recipe.json`
   (URL, size, SHA-256, signed tag and commit, license and security policy),
   `license-inventory.json` (the archive's 64 license/notice files and bundled
   third-party trees) and `README.md` (provenance). The source itself is never
   vendored; `tools/fetch_webkit.py` downloads and verifies it.
 
-Planned, following the tranche order (none of it exists):
+Current and planned layout, following the tranche order:
 
 - `include/crtweb/` -- the public API. No WebKit, WPE or GLib type may appear here;
   `tools/verify_dist.py` will enforce it for `06-web` as it does for LVGL in `05-ui`.
@@ -43,6 +45,9 @@ Planned, following the tranche order (none of it exists):
 - `tools/build_webkit_jsc.py` -- fetch, extract, configure, build and accept JavaScriptCore
   (JSCOnly) with the CRT toolchain; writes `webkit-jsc-config.json` (the inputs of a run) and
   a host-ABI audit of what the binaries load.
+- `tools/build_webkit_wpe_reference.py` -- build the pristine WPE port with the
+  native Linux toolchain, install it into a private work prefix, and validate a
+  local HTML DOM/canvas proof plus a 640x480 headless snapshot.
 - `tools/fetch_webkit.py` -- download and verify the pinned archive
   (`tools/test_fetch_webkit.py`).
 - `tools/scan_webkit_licenses.py` -- regenerate the license inventory from the

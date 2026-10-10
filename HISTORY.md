@@ -8,6 +8,40 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-10
+
+### Web Tranche 2 closed: native Linux WPE reference baseline
+
+Built the verified, pristine WPE WebKit 2.54.0 release on the physical Ubuntu
+26.04.1/x86_64 host with GCC 15.2.0, CMake 4.2.3 and Ninja 1.13.2. The new
+`tools/build_webkit_wpe_reference.py` verifies the archive and every upstream
+`sha256_before` named by the CRT patch manifest, configures the WPE port with
+legacy/DRM-display/Wayland backends off and the built-in headless backend on,
+builds MiniBrowser plus its process/resources/bundle closure, and installs it
+under a private work prefix. Native development packages were unpacked only
+under `out/web-reference/sysroot`; the host installation was not changed, and
+this is deliberately not a CRT SDK build.
+
+The repository-owned C11 harness and local HTML fixture explicitly create and
+connect the headless display, construct a WebKit web view for it, resize to
+640x480, and exercise HTML, CSS, DOM, JavaScript and canvas. The real
+multi-process run returned the exact proof
+`CRT WPE reference|local-html-ok|42|192x96`, a 640x480/stride-2560 BGRA8888 image with
+multiple colors, and FNV-1a `da2864e59e05c36f`. The resulting PPM SHA-256 is
+`efef2b53b70d6882cda4ad00d4bccfa12c2c11d1cc65bfd98ebb250d980a51c3`.
+The pixel hash is recorded as local evidence, not made a portable gate.
+
+The bring-up also resolved three reference-configuration traps without patching
+upstream. Disabling Video while leaving WebCodecs on produces an incomplete
+`VideoFrame`; disabling both still leaves the WPE build's generated
+`JSHTMLMediaElement` custom binding inconsistent. The accepted build therefore
+keeps their supported upstream relationship. Disabling `USE_LIBDRM` also hides
+`drm_fourcc.h` while the snapshot backing-store path still uses
+`DRM_FORMAT_XRGB8888`, so libdrm stays enabled even though the DRM display backend
+is off. Finally, Release builds ignore `WEBKIT_EXEC_PATH`; using a private CMake
+install prefix supplies the compiled-in Web/Network process paths without a
+system install. No WebKit source file, CRT runtime code or carried patch changed.
+
 ## 2026-10-09
 
 ### Web Tranche 1 closed with the Linux/aarch64 1D-B/C/D replay

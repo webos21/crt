@@ -23,7 +23,7 @@ external toolchain contract.
 | `03-gfx-simple` | `02-cxx` plus one window, keyboard/mouse input, and a CPU-writable software framebuffer | Industrial HMI and simple native UI |
 | `04-gfx-media` | `03-gfx-simple` plus the GPU API, Skia CPU/GPU rendering, Vulkan/D3D12/Metal presentation, and FFmpeg media | accelerated UI and playback |
 | `05-ui` | 04-gfx-media + crtui + private LVGL 9.6, CRT-owned layout/style/v1 widgets, input/focus/resize, external-surface composition and `MediaView`, the optional Skia/media companions | native application UI |
-| `06-web` (in progress, Tranche 0 closed) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
+| `06-web` (in progress, Tranches 0-2 closed; no SDK yet) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
 `05-ui` is accepted: the repository builds it in-tree (`crt-ui-dist`) and as an
 isolated `04-gfx-media -> 05-ui` stage on Windows/x64, macOS/arm64 and

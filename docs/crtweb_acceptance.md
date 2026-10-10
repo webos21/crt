@@ -1,7 +1,11 @@
 # crtweb Acceptance (Stage `06-web`)
 
-**Status: in progress -- Tranche 0 (scope, version and license freeze) is closed;
-Tranche 1 (JavaScriptCore bring-up) is in progress: 1A, 1B and 1C (Baseline JIT) are green on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64; 1D-A (DFG + concurrent JIT) is green on all four hosts; 1D-B (FTL), 1D-C (WebAssembly) and 1D-D (sampling profiler) are green on Linux/x86_64, macOS/arm64 and Windows/x64. Linux/aarch64 1D-B/C/D remains. W^X is separate hardening. No WebCore, WebKit or `PlatformCRT` code is built yet.** Detailed contract and tranche order for the
+**Status: in progress -- Tranches 0-2 are closed. JavaScriptCore passes the
+interpreter, Baseline/DFG/FTL tiers, WebAssembly and sampling-profiler
+acceptance on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64. The
+pristine native WPE 2.54.0 reference renders the accepted local fixture on
+Linux/x86_64. W^X is separate hardening; no `PlatformCRT` or public `crtweb`
+API exists yet. Tranche 3 is next.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](crtweb_porting.md). Evidence is recorded
@@ -959,9 +963,49 @@ above; W^X remains separate hardening.
 
 ### 2. Linux WPE reference baseline
 
-Build upstream WPE unchanged and render local HTML with its own built-in
-backend. No CRT integration; the purpose is a known-good baseline to diff
-against when `PlatformCRT` misbehaves.
+**Closed 2026-10-10 on Linux/x86_64.** The repository-owned entry point is:
+
+```sh
+python3 tools/build_webkit_wpe_reference.py \
+  --native-sysroot out/web-reference/sysroot
+```
+
+`--native-sysroot` is an optional lookup root for unpacked *native Linux*
+development packages; it is not a CRT sysroot. The tool verifies the pinned
+2.54.0 archive (SHA-256
+`efa9bcc3cb891c2d88f50eec710d9ccee71cbdf1040420361eb98c17355eb452`),
+extracts it without changes, and rejects any source file named by the current
+CRT patch manifest unless it still has its upstream `sha256_before`. It builds
+WPE WebKit, MiniBrowser, the Web/Network processes, inspector resources and the
+injected bundle with the host compiler, then installs them under the work tree.
+The private install is significant: an upstream Release build intentionally
+ignores `WEBKIT_EXEC_PATH` and uses its compiled-in process locations.
+
+The reference enables WPEPlatform and only its built-in headless display;
+legacy WPE, DRM-display and Wayland backends are off. `USE_LIBDRM` remains on
+without enabling the DRM backend because the supported WPE snapshot/buffer path
+uses DRM pixel-format definitions. Video and WebCodecs remain in their upstream
+supported relationship. No CRT header, library, SDK or carried WebKit patch is
+used.
+
+The fixture is `libcrtweb/tests/wpe-reference/reference.html`. The native C11
+harness explicitly creates and connects `wpe_display_headless_new()`, constructs
+the web view for that display, resizes its toplevel to 640x480, loads the local
+file, and requires both:
+
+- DOM/canvas proof: `CRT WPE reference|local-html-ok|42|192x96`.
+- Visible `WebKitImage`: 640x480, valid BGRA8888 storage, and at least four
+  distinct rendered colors before conversion to PPM.
+
+Accepted output on Ubuntu 26.04.1/x86_64 (GCC 15.2.0, CMake 4.2.3, Ninja
+1.13.2): `WPE_REFERENCE_SNAPSHOT width=640 height=480 stride=2560
+fnv1a64=da2864e59e05c36f`. The PPM SHA-256 is
+`efef2b53b70d6882cda4ad00d4bccfa12c2c11d1cc65bfd98ebb250d980a51c3`.
+`out/web-reference/configure-fingerprint.json`, `result/result.json` and
+`result/wpe-reference.ppm` retain the local evidence. The exact pixel hash is
+observational (fonts and native graphics stacks can vary); the portable pass
+gate is the proof string, dimensions, storage validity and multi-color frame.
+This is the known-good native baseline to diff when `PlatformCRT` misbehaves.
 
 ### 3. `PlatformCRT` graphics and input prototype
 

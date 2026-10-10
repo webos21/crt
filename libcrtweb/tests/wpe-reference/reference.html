@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CRT WPE reference</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body {
+      background: #10243c;
+      color: #f7f7f2;
+      font: 20px sans-serif;
+      overflow: hidden;
+    }
+    main { display: grid; grid-template-columns: 2fr 1fr; height: 100%; }
+    section { padding: 48px; }
+    h1 { margin: 0 0 24px; font-size: 42px; }
+    #marker { color: #ffca3a; }
+    aside { background: #1982c4; padding: 48px 24px; }
+    canvas { display: block; margin-top: 30px; border: 8px solid #8ac926; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>WPE headless baseline</h1>
+      <p id="marker">local-html-ok</p>
+      <canvas id="proof" width="192" height="96"></canvas>
+    </section>
+    <aside>WebKit 2.54.0<br>built-in backend</aside>
+  </main>
+  <script>
+    const context = document.querySelector('#proof').getContext('2d');
+    context.fillStyle = '#ff595e';
+    context.fillRect(0, 0, 96, 96);
+    context.fillStyle = '#6a4c93';
+    context.fillRect(96, 0, 96, 96);
+    document.documentElement.dataset.referenceReady = '42';
+  </script>
+</body>
+</html>
