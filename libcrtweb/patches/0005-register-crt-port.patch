@@ -1,0 +1,10 @@
+--- a/Source/cmake/WebKitCommon.cmake
++++ b/Source/cmake/WebKitCommon.cmake
+@@ -73,6 +73,7 @@
+     # Determine which port will be built
+     # -----------------------------------------------------------------------------
+     set(ALL_PORTS
++        CRT
+         GTK
+         IOS
+         JSCOnly

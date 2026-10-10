@@ -11,6 +11,30 @@ substantive update.
 
 ## 2026-10-10
 
+### Web Tranche 3B plan and milestone B1: `-DPORT=CRT` builds JavaScriptCore from the pinned commit
+
+Plan (`docs/acceptance/crtweb_acceptance.md`, "3B plan"). Reading the pinned tree settled the shape
+of the port before writing any of it: WebKit selects a port by *file name*
+(`Options${PORT}.cmake`, per-module `Platform${PORT}.cmake`) and by `-DWTF_PLATFORM_<PORT>=1`, so a
+port is mostly new files; the only existing file that must change is the `ALL_PORTS` list. Of the
+non-GLib ports, PlayStation has 59 port-specific files (WTF 4, WebCore 16, WebKit 36, JSC shell 2,
+WebDriver 1), uses the generic run loop, curl, Skia and a C view API, and is the structural model;
+Win (182 files) is the model for Windows-only parts (IPC, launch) at Tranche 6; WPE/GTK stay the
+reference. The curl backend and WebCrypto need OpenSSL and an OpenSSL-backed libcurl, which CRT's
+mbedTLS curl is not: a new port pair for the web stage. Milestones B1-B7 each have a measurable
+gate.
+
+B1. `libcrtweb/port/` holds the CRT-owned files (`Source/cmake/OptionsCRT.cmake`, and
+`PlatformCRT.cmake` for WTF, bmalloc and JavaScriptCore, which for now include the JSCOnly lists);
+patch 0005 registers the name (one line); the manifest declares the four files under `new_files`.
+`tools/build_webkit_jsc.py --port CRT` composes the tree (the pinned commit checked out sparsely
+and verified, hard-linked into a work tree, overlay copied, patches applied; the checkout is never
+modified) and builds as before. Linux/x86_64 from the installed `05-ui` SDK: configure 11 s, build
+about 5 min, the 1B interpreter acceptance and the 1C/1D baseline-jit acceptance (DFG, FTL, Wasm)
+pass with the host-ABI audit clean; the composed tree and the manifest check
+(`tools/check_webkit_patch_manifest.py --tree`) agree. No functional change relative to JSCOnly,
+which is the point: the port mechanism is proven before WebCore is added.
+
 ### Web Tranche 3B gates: the full WebKit commit pinned, the tarball proven a subset of it, per-file license scan
 
 Source gate. `recipe.json` gained `product_source` (role *PlatformCRT product source*): the commit

@@ -149,6 +149,24 @@
       ],
       "reason": "CRT presents macOS to WebKit as OS(LINUX) to select the Bionic/Linux-shaped source surface, but generated code still follows the actual Darwin arm64 object and calling-convention ABI. ARM64Registers.h's Linux branch marks x18 allocatable, while Darwin reserves x18 as the platform register. Under FTL/B3 register pressure that mismatch let generated code use x18 across a runtime call and produced a null-address write near operationStringFromCharCode. The harness defines WTF_CRT_DARWIN_ARM64_ABI only for macOS arm64, selecting WebKit's existing non-Linux register table without enabling Apple SDK source branches; Linux/aarch64 is unchanged.",
       "remove_when": "WebKit derives the x18 reservation from the target ABI/object format rather than OS(LINUX), or CRT can select WebKit's Darwin ABI traits independently of its Apple SDK source surface."
+    },
+    {
+      "id": "0005-register-crt-port",
+      "patch": "0005-register-crt-port.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/cmake/WebKitCommon.cmake",
+          "sha256_before": "fd9902edefdcee19c623f6bb5d6e88bab4774245ac8042d188e16bae09963469",
+          "sha256_after": "e501411545fc87c7be92487fbab4f173677d2469a603f22a6241fecc73665bc2",
+          "license": "no-license-header",
+          "license_basis": "no header of its own; the build files around it in Source/cmake carry the Apple BSD-2-Clause notice (47 of the directory's 96 files; none carry another license), and the file belongs to the same Apple-authored CMake build system"
+        }
+      ],
+      "reason": "WebKitCommon.cmake accepts only the ports in ALL_PORTS and stops with 'Please choose which WebKit port to build' for any other -DPORT. The CRT port is a new port (Source/cmake/OptionsCRT.cmake and the per-module PlatformCRT.cmake files are new CRT-owned files, libcrtweb/port); its name has to be in that list. Everything else the port needs is selected by file name (Options${PORT}.cmake, Platform${PORT}.cmake) or by -DWTF_PLATFORM_CRT=1, as the PlayStation port does, so this is the only change to an existing file for milestone B1.",
+      "remove_when": "Never as long as CRT carries its own port: a port that is not upstream has to be registered. It is a one-line, rebase-friendly change."
     }
   ],
   "license_policy": {
@@ -166,5 +184,34 @@
     ],
     "crt_default_license": "BSD-2-Clause"
   },
-  "new_files": []
+  "new_files": [
+    {
+      "file": "Source/cmake/OptionsCRT.cmake",
+      "source": "libcrtweb/port/Source/cmake/OptionsCRT.cmake",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "the port's options (B1: JSCOnly's, plus the BUILDING_CRT__/WTF_PLATFORM_CRT identity)"
+    },
+    {
+      "file": "Source/WTF/wtf/PlatformCRT.cmake",
+      "source": "libcrtweb/port/Source/WTF/wtf/PlatformCRT.cmake",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "WTF platform file list (B1: JSCOnly's)"
+    },
+    {
+      "file": "Source/bmalloc/PlatformCRT.cmake",
+      "source": "libcrtweb/port/Source/bmalloc/PlatformCRT.cmake",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "bmalloc platform file list (B1: JSCOnly's)"
+    },
+    {
+      "file": "Source/JavaScriptCore/PlatformCRT.cmake",
+      "source": "libcrtweb/port/Source/JavaScriptCore/PlatformCRT.cmake",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "JavaScriptCore platform file list (B1: JSCOnly's)"
+    }
+  ]
 }

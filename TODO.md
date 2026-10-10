@@ -88,10 +88,14 @@ then macOS/arm64.
   2026-10-10:** the frame-producer and input contracts are frozen (v1), a WPEPlatform `crt`
   display module (no WebKit patch) delivers WebKit frames to a CRT consumer through shared memory
   and takes input back, with a hermetic `crtui` SurfaceView test and a native end-to-end run
-  (`HISTORY.md`, `docs/acceptance/crtweb_acceptance.md`). **3B source and licensing gates closed 2026-10-10** (full commit pinned with
-tree id and listing digest; whole-tarball correspondence measured; per-file license scan and schema-2
-patch manifest with a checker). **Open:** the `PlatformCRT` WebKit port itself, then GPU-buffer
-output; a Windows/macOS transport decision; live crtgfx presentation of a web SurfaceView.
+  (`HISTORY.md`, `docs/acceptance/crtweb_acceptance.md`). **3B source and licensing gates closed 2026-10-10**; the **3B plan** (PlayStation-shaped
+port, milestones B1-B7, `docs/acceptance/crtweb_acceptance.md`) is decided and **B1 is done on
+Linux/x86_64**: `-DPORT=CRT` builds JavaScriptCore from the pinned commit plus `libcrtweb/port`
+(one carried patch, 0005) and passes the interpreter and Baseline/DFG/FTL/Wasm acceptance.
+**Next: B2**, the WebCore dependency ports (HarfBuzz, libjpeg, libwebp, libxml2, libpsl, OpenSSL,
+OpenSSL-backed libcurl), then B3 WebCore/PAL with the bundled Skia, B4 multi-process, B5 first
+render through the 3A contract, B6 input, B7 close. Also open: a Windows/macOS transport decision;
+live crtgfx presentation of a web SurfaceView; GPU-buffer output (Tranche 9).
 * [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
   `crtui`'s web view; no WebKit type in a public header.
 * [ ] **5. Multi-process lifecycle.** UI/Web/Network/GPU processes: launch, IPC,

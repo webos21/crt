@@ -148,6 +148,47 @@ def fetch_and_extract(recipe: Path, cache: Path, work: Path) -> Path:
 
 
 PATCHES = ROOT / "libcrtweb" / "patches"
+PORT_OVERLAY = ROOT / "libcrtweb" / "port"
+
+
+def compose_port_source(recipe: Path, work: Path) -> Path:
+    """The PlatformCRT source tree (Web Tranche 3B): the pinned full WebKit commit
+    (tools/fetch_webkit_commit.py, verified by commit id, tree id and listing digest), with the
+    CRT-owned port files of libcrtweb/port copied over it. Carried patches are applied afterwards by
+    apply_patches() (target "crt-port" plus the host's). The upstream checkout is never modified."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import fetch_webkit_commit as commit_source
+    recipe_data = json.loads(recipe.read_text(encoding="utf-8"))
+    source = commit_source.product_source(recipe_data)
+    product = work / "product"
+    repo = commit_source.fetch_commit(product, source)
+    commit_source.verify_commit(repo, source)
+    checkout = product / "checkout"
+    if not (checkout / ".git").exists() or commit_source.git(checkout, "rev-parse", "HEAD", check=False).strip() \
+            != source["commit"]:
+        commit_source.checkout(source, checkout)
+    tree = work / "src" / "webkit-crt"
+    if tree.exists():
+        shutil.rmtree(tree)
+    tree.parent.mkdir(parents=True, exist_ok=True)
+    # Hard links where possible: the tree is large and only the overlay and patches write to it.
+    def link_or_copy(src, dst):
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+    shutil.copytree(checkout, tree, ignore=shutil.ignore_patterns(".git"), copy_function=link_or_copy)
+    # Break the hard links of every file a patch will touch, so the checkout stays pristine.
+    manifest = json.loads((PATCHES / "manifest.json").read_text(encoding="utf-8"))
+    for entry in manifest["patches"]:
+        for item in entry["files"]:
+            target = tree / item["file"]
+            if target.exists():
+                data = target.read_bytes()
+                target.unlink()
+                target.write_bytes(data)
+    shutil.copytree(PORT_OVERLAY, tree, dirs_exist_ok=True)
+    return tree
 
 
 def sha256_file(path: Path) -> str:
@@ -155,7 +196,7 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def apply_patches(tree: Path, target_os: str) -> list:
+def apply_patches(tree: Path, target_os: str, extra_targets: tuple = ()) -> list:
     """Apply the carried patches that target this host (libcrtweb/patches/manifest.json).
 
     Each patch lists the files it changes with their SHA-256 before and after. Every file must hash
@@ -165,7 +206,7 @@ def apply_patches(tree: Path, target_os: str) -> list:
     manifest = json.loads((PATCHES / "manifest.json").read_text(encoding="utf-8"))
     applied = []
     for entry in manifest["patches"]:
-        if target_os not in entry["targets"]:
+        if target_os not in entry["targets"] and not set(extra_targets) & set(entry["targets"]):
             continue
         states = []
         for item in entry["files"]:
@@ -300,8 +341,10 @@ DFG_COMPILE_REPORT = re.compile(r"\busing DFG\b")
 FTL_COMPILE_REPORT = re.compile(r"\busing FTL(?:ForOSREntry)? with FTL\b")
 
 
-def configure_options(mode: str):
-    return COMMON_OPTIONS + MODE_OPTIONS[mode]
+def configure_options(mode: str, port: str = "JSCOnly"):
+    options = [(option, why) for option, why in COMMON_OPTIONS if not option.startswith("-DPORT=")]
+    return [(f"-DPORT={port}", "JavaScriptCore alone (no WebCore/WebKit)" if port == "JSCOnly"
+             else "the PlatformCRT port (libcrtweb/port); B1 builds JavaScriptCore only")] + options + MODE_OPTIONS[mode]
 
 
 def target_c_flags(target_os: str, arch: str):
@@ -328,7 +371,8 @@ def target_c_flags(target_os: str, arch: str):
     return flags
 
 
-def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_os: str, arch: str, mode: str):
+def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_os: str, arch: str, mode: str,
+              port: str = "JSCOnly"):
     toolchain = sdk / "crt-toolchain.cmake"
     if not toolchain.is_file():
         raise SystemExit(f"{toolchain} not found: --sdk-root must be an installed CRT SDK")
@@ -371,7 +415,7 @@ def configure(tree: Path, build: Path, sdk: Path, deps: Path, env: dict, target_
     command = ["cmake", "-S", tree, "-B", build, "-G", "Ninja",
                f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", f"-DICU_ROOT={deps}"]
     command += macos_options
-    command += [option for option, _ in configure_options(mode)]
+    command += [option for option, _ in configure_options(mode, port)]
     command += [f"-DCMAKE_C_FLAGS={' '.join(c_flags)}", f"-DCMAKE_CXX_FLAGS={' '.join(cxx_flags)}"]
     if link_flags:
         command += [f"-DCMAKE_EXE_LINKER_FLAGS={' '.join(link_flags)}",
@@ -875,7 +919,8 @@ def host_abi_audit(sdk: Path, deps: Path, build: Path, binaries, run_env: dict, 
             "libraries": inventory}
 
 
-def write_fingerprint(work: Path, recipe: Path, sdk: Path, deps: Path, tools: dict, arch: str, mode: str):
+def write_fingerprint(work: Path, recipe: Path, sdk: Path, deps: Path, tools: dict, arch: str, mode: str,
+                      label: str = "", port: str = "JSCOnly"):
     """What this configuration was built from, so a later success or failure can be tied to
     exactly these inputs."""
     import hashlib
@@ -890,12 +935,16 @@ def write_fingerprint(work: Path, recipe: Path, sdk: Path, deps: Path, tools: di
         "icu_prefix": str(deps),
         "icu_recipe_sha256": hashlib.sha256((ROOT / "porting/recipes/icu.json").read_bytes()).hexdigest(),
         "host_tools": tools,
-        "configuration": {"port": "JSCOnly", "mode": mode, "jit": mode != "interpreter",
+        "configuration": {"port": port, "mode": mode, "jit": mode != "interpreter",
                           "c_loop": mode == "interpreter", "event_loop": "Generic",
-                          "options": [option for option, _ in configure_options(mode)],
+                          "options": [option for option, _ in configure_options(mode, port)],
                           "jit_run_options": JIT_ON_OPTIONS if mode != "interpreter" else {}},
     }
-    (work / f"webkit-jsc-config-{mode}.json").write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
+    if port == "CRT":
+        source = recipe_data["product_source"]
+        fingerprint["webkit"]["product_source"] = {"commit": source["commit"], "tree": source["tree"],
+                                                   "ls_tree_sha256": source["ls_tree_sha256"]}
+    (work / f"webkit-jsc-config-{label or mode}.json").write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -910,6 +959,9 @@ def main() -> int:
     parser.add_argument("--mode", choices=sorted(MODE_OPTIONS), default="interpreter",
                         help="interpreter (1B, default), baseline-jit (1C/1D-A..C), or "
                              "sampling-profiler (1D-D); each mode has its own build tree")
+    parser.add_argument("--port", choices=("JSCOnly", "CRT"), default="JSCOnly",
+                        help="JSCOnly (the release tarball, default) or CRT: the PlatformCRT port composed from "
+                             "the pinned full commit and libcrtweb/port (Web Tranche 3B, milestone B1)")
     parser.add_argument("--skip-build", action="store_true",
                         help="reuse an existing build tree and only run the acceptance")
     args = parser.parse_args()
@@ -921,7 +973,9 @@ def main() -> int:
     work.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
     mode = args.mode
-    build = work / f"build-{mode}"
+    port = args.port
+    label = mode if port == "JSCOnly" else f"crt-{mode}"
+    build = work / f"build-{label}"
 
     target_os, arch = sdk_target(sdk)
     if target_os not in ("linux", "macos", "windows"):
@@ -937,17 +991,19 @@ def main() -> int:
         with phases.measure("check host build tools"):
             host_tools = require_host_tools()
             print(json.dumps(host_tools))
-            write_fingerprint(work, args.recipe, sdk, deps, host_tools, arch, mode)
+            write_fingerprint(work, args.recipe, sdk, deps, host_tools, arch, mode, label, port)
         env = build_environment(sdk, deps, target_os)
         if not args.skip_build:
-            with phases.measure("fetch, verify and extract WebKit"):
-                tree = fetch_and_extract(args.recipe, cache, work)
+            with phases.measure("fetch, verify and extract WebKit" if port == "JSCOnly"
+                                else "compose the PlatformCRT source (pinned commit + overlay)"):
+                tree = (fetch_and_extract(args.recipe, cache, work) if port == "JSCOnly"
+                        else compose_port_source(args.recipe, work))
             with phases.measure("apply carried patches"):
-                carried_patches = apply_patches(tree, target_os)
+                carried_patches = apply_patches(tree, target_os, ("crt-port",) if port == "CRT" else ())
                 (work / "carried-patches.json").write_text(json.dumps(carried_patches, indent=2) + "\n",
                                                           encoding="utf-8")
-            with phases.measure(f"configure JavaScriptCore (JSCOnly, {mode})"):
-                configure(tree, build, sdk, deps, env, target_os, arch, mode)
+            with phases.measure(f"configure JavaScriptCore ({port}, {mode})"):
+                configure(tree, build, sdk, deps, env, target_os, arch, mode, port)
             with phases.measure("build jsc"):
                 run(["ninja", "-C", build, "jsc"], env=env)
         run_env = runtime_library_path(sdk, deps, build, target_os, env)
@@ -961,7 +1017,7 @@ def main() -> int:
                 [build / "bin" / "jsc", jsc_library(build, target_os), *programs.values()], run_env, target_os)
             print(json.dumps(audit, indent=2))
             results["host_abi"] = {"ok": audit["ok"], **audit}
-        (work / f"acceptance-{mode}.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+        (work / f"acceptance-{label}.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
         results["passed"] = results["passed"] and results["host_abi"]["ok"]
         if not results["passed"]:
             raise SystemExit("JSC acceptance FAILED: " + json.dumps(results))

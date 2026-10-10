@@ -1188,6 +1188,76 @@ IME path; the consumer test runs without a window or GPU (raster target), so liv
 presentation of a web SurfaceView is not shown yet. The two host-side gates below (full-commit pin,
 per-file license scan and patch manifest) are closed (see above); 3B itself -- the `PlatformCRT` port -- has not started.
 
+#### 3B plan -- the `PlatformCRT` port (decided 2026-10-10)
+
+*What the port is.* A new WebKit port, `-DPORT=CRT`, built from the pinned full commit
+(`product_source`) plus CRT-owned files, with as few carried patches as possible. WebKit already
+selects everything per port by *file name* (`Source/cmake/Options${PORT}.cmake`, and
+`Platform${PORT}.cmake` in each module through `WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS`) and by
+`-DWTF_PLATFORM_<PORT>=1`, which is how the PlayStation port declares itself. So a port is mostly
+*new files*; the only change to an existing file so far is registering the name (patch 0005, one
+line). New files live in `libcrtweb/port/` (mirroring the WebKit tree), are declared under
+`new_files` in the patch manifest, and are copied over a hard-linked copy of the pinned checkout by
+`tools/build_webkit_jsc.py --port CRT`; the checkout itself is never modified.
+
+*Which port it follows.* Measured on the pinned tree, not assumed:
+
+| Port | Shape | Port-specific files | Verdict |
+|---|---|---:|---|
+| WPE/GTK | GLib main loop, GIO, libsoup, GStreamer, WPEPlatform | 272 (WPE) / 528 (GTK) + 499 under `glib` | the Tranche 2 *reference*, not the model: GLib would have to be ported to every host |
+| Win | Win32, curl, Skia, Windows IPC backend | 182 | the model for Windows-specific parts (IPC `win`, process launch) at Tranche 6 |
+| **PlayStation** | POSIX, **generic run loop**, curl, Skia, C embedding API (`WKView`), no GLib | **59** (WTF 4, WebCore 16, WebKit 36, JSC shell 2, WebDriver 1) | **the structural model**: the same shape as CRT's three-host runtime |
+
+*Decisions.*
+
+- D1 **Structure after PlayStation**: generic `RunLoop`/`WorkQueue`, POSIX threading and file system
+  from WTF's `posix/`, `unix/`, `generic/`; curl network; Skia painting; no GLib, GIO or GObject in the
+  port. The 59 PlayStation files give the surface to replace (system fonts, theme/scrollbar, screen,
+  MIME types, user agent, accessibility stubs, resource-usage stubs, process launcher, page client,
+  web view, process entry points).
+- D2 **Identity**: `-DBUILDING_CRT__=1 -DWTF_PLATFORM_CRT=1`; `PLATFORM(CRT)` then works with no WTF
+  patch. `OS(LINUX)` persona on all hosts, as in the JSC bring-up (patches 0001-0004 carry over).
+- D3 **Process model**: UI, Web and Network processes (GPU process off until Tranche 9); upstream
+  `Platform/IPC/unix` on Linux and macOS (the 3A transport already uses SOCK_SEQPACKET with
+  `SCM_RIGHTS` on CRT libc); upstream `Platform/IPC/win` is available for Windows (Tranche 6).
+- D4 **Graphics**: WebKit's bundled Skia (m154, its own copy) painting on the CPU in the Web process
+  into shared memory first, handed to the UI process and out through the frozen 3A frame contract;
+  GPU buffers are Tranche 9. WebGL, WebGPU, ANGLE, media and WebRTC are off.
+- D5 **Network**: WebKit's libcurl backend. It needs OpenSSL (`OpenSSLHelper`, `CurlSSLVerifier`,
+  `crypto/openssl`), and libcurl must be OpenSSL-backed (`CURLOPT_SSL_CTX_FUNCTION`), which CRT's curl
+  port (mbedTLS) is not. OpenSSL and an OpenSSL-backed libcurl are new CRT ports for this stage; the
+  `crtmedia` networking stack is untouched. Replacing the backend with CRT networking is Tranche 8.
+- D6 **Fonts**: no fontconfig. Skia's FreeType scaler over a CRT `SystemFontDatabase` that reads the
+  bundled font directory (`libcrtgfx/assets/fonts`) and configured host directories.
+- D7 **Embedding**: following PlayStation, a C view API (`WKView`-style) inside WebKit, wrapped by
+  `libcrtweb`'s own C API in Tranche 4; no WebKit, WPE or GLib type is public.
+- D8 **Dependencies are CRT ports** (AGENTS.md: no host-library shortcut). Needed beyond what
+  exists (ICU, zlib, libpng, SQLite, FreeType, curl): HarfBuzz (+ICU), libjpeg(-turbo), libwebp
+  (+demux), libxml2, libpsl, OpenSSL; libxslt (`ENABLE_XSLT`) and woff2/brotli (`USE_WOFF2`) start
+  disabled.
+
+*Milestones.* Each has a gate that is a command and a measurement; Linux/x86_64 first, and a milestone
+is not closed on another host until it passes there (Tranches 6/7 own those replays).
+
+| | Milestone | Gate |
+|---|---|---|
+| B0 | Source and licensing gates | closed above |
+| **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10**: the 1B/1C JSC acceptance passes through `--port CRT` |
+| B2 | Dependency ports (D8): HarfBuzz, libjpeg, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | each recipe configures, builds, installs and passes a link/run smoke against the CRT sysroot |
+| B3 | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link |
+| B4 | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | the UI process launches the Web and Network processes and a message round-trips; killing a child is detected |
+| B5 | First render | `reference.html` loads and the Tranche 2 proof holds (DOM/canvas string, 640x480, >= 4 colours), delivered through the 3A frame contract to `surface_probe`; the frame is diffed against the WPE reference and the difference is reported |
+| B6 | Input | the 3A input checks (pointer click -> page report and pixel change, key code/modifiers, wheel, text, resize, stalled consumer) pass against the CRT port instead of the WPE module |
+| B7 | Close | 100x create/destroy without growth, host-ABI audit clean, patch manifest and license scan re-run, docs and `HISTORY.md` updated |
+
+*Risks, named so they are watched rather than discovered.* (1) The bundled Skia m154 must build with
+CRT's clang and libc++ (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about
+16,000 files, so build time and the unified-source layout dominate iteration; (3) OpenSSL and an
+OpenSSL-backed curl add a TLS stack beside mbedTLS in one SDK, which needs a clear
+boundary (web stage only); (4) fonts without fontconfig change text metrics against the WPE reference,
+so B5 compares structure and colours, not text pixels; (5) thread stack and TLS limits the JSC work
+left open (1 MiB default stack, `__tls_get_addr`) will be hit harder by the Web process.
+
 ### 4. `libcrtweb` and the WebView
 
 `crtweb_runtime_create`, `crtweb_view_create/load_url/load_html/go_back/
