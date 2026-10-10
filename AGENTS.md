@@ -301,7 +301,8 @@ runtime은 다음 계층으로 나누어 설계한다.
     `prepare_release_assets.py`, 바이너리/텍스트 검사(`crt_elf.py`, `crt_macho.py`,
     `crt_pe.py`, `crt_text_relocate.py`).
   - upstream pin fetch: `fetch_skia.py`, `fetch_lvgl.py`, `fetch_wayland.py`,
-    `fetch_xkbcommon.py`, `fetch_webkit.py`, `fetch_mingw_w64_headers.py`;
+    `fetch_xkbcommon.py`, `fetch_webkit.py`, `fetch_webkit_commit.py`(PlatformCRT 제품 소스 pin),
+    `scan_webkit_headers.py`/`check_webkit_patch_manifest.py`(라이선스 게이트), `fetch_mingw_w64_headers.py`;
     `crt-libcxx-build.py`(imported libc++ 빌드), allocator baseline 도구.
   - `test_*.py`: 위 도구들의 단위/통합 테스트 (`tools/` 안에서 직접 실행).
 - `distribution/`

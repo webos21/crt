@@ -29,10 +29,13 @@ or `crtweb` API code exists yet; the root CMake build only adds the consumer-sid
   hermetic `crtui` SurfaceView test run by CTest). Driver: `tools/build_webkit_wpe_crt.py`.
 - `tests/wpe-reference/` -- the Tranche 2 native Linux fixture and headless WPE
   harness. It is deliberately a host program, not a CRT program.
+- `patches/` -- carried WebKit patches and `manifest.json` (schema 2: per-file license class,
+  `new_files`), checked by `tools/check_webkit_patch_manifest.py`.
 - `third_party/webkit/` -- the pinned WPE WebKit 2.54.0 reference: `recipe.json`
   (URL, size, SHA-256, signed tag and commit, license and security policy),
   `license-inventory.json` (the archive's 64 license/notice files and bundled
-  third-party trees) and `README.md` (provenance). The source itself is never
+  third-party trees), `license-scan.json` (per-file header classes of the product source) and
+  the `product_source` pin of the full commit (`tools/fetch_webkit_commit.py`) and `README.md` (provenance). The source itself is never
   vendored; `tools/fetch_webkit.py` downloads and verifies it.
 
 Current and planned layout, following the tranche order:

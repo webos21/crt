@@ -24,9 +24,65 @@
       "caveats": "The key is not certified through any web of trust here, so this proves the tag was signed by that key, not independently who holds it. The key is DSA-1024 (created 2008, expires 2027-03-16); a release that outlives the expiry needs the key's renewal checked."
     }
   },
+  "product_source": {
+    "role": "PlatformCRT product source",
+    "tool": "tools/fetch_webkit_commit.py",
+    "repository": "https://github.com/WebKit/WebKit",
+    "tag": "wpewebkit-2.54.0",
+    "tag_object": "1616e9ae260d8d0601da601de24cd8d96adc5e0f",
+    "commit": "73f39d84ea9d4071994214373efbde3665402b05",
+    "tree": "6d856c316a194c1717414b5b3e9c5ad492bafb5f",
+    "tree_entries": 461979,
+    "ls_tree_sha256": "5c3722776c424b927943b66773f76f51a69f278d057b997bfc3d272ae8aae371",
+    "pinned": "2026-10-10",
+    "fetch": "git fetch --depth=1 --filter=blob:none <repository> <commit>: trees only (about 14 MB); blobs of the checkout paths are fetched on demand",
+    "checkout_paths": [
+      "Source"
+    ],
+    "notes": [
+      "The commit id and its tree id pin every byte of the tree (git hashes the commit, the directories and each file); ls_tree_sha256 and tree_entries additionally pin the recursive listing, so adding or dropping a file is also detected.",
+      "The WPE tarball stays the *reference* source (WPE baseline, JSCOnly, 3A). This source exists because the tarball has no Windows port (no PlatformWin.cmake, no Windows IPC backend) and PlatformCRT's Mac/Win reference reading needs the whole tree.",
+      "Nothing from this tree is patched in place. A PlatformCRT file is either a new CRT-owned file or a recorded patch (libcrtweb/patches/manifest.json) with its license class."
+    ],
+    "tarball_correspondence": {
+      "tool": "tools/fetch_webkit_commit.py --correspondence",
+      "measured": "2026-10-10",
+      "archive_files": 38842,
+      "identical_to_commit": 34417,
+      "same_after_crlf_to_lf": 130,
+      "content_differs_from_commit": 0,
+      "only_in_archive": {
+        "Documentation (generated API docs)": 4294,
+        "NEWS": 1
+      },
+      "only_in_commit_under_Source": 35810,
+      "only_in_commit_by_top_level": {
+        ".": 20,
+        ".claude": 11,
+        ".codex": 1,
+        ".gemini": 1,
+        ".github": 2,
+        "Configurations": 10,
+        "JSTests": 69173,
+        "LayoutTests": 303325,
+        "ManualTests": 634,
+        "PerformanceTests": 3093,
+        "Source": 35810,
+        "TestExpectations": 1,
+        "Tools": 4196,
+        "WebDriverTests": 1500,
+        "WebKit.xcworkspace": 8,
+        "WebKitLibraries": 591,
+        "Websites": 9044,
+        "metadata": 4,
+        "resources": 9
+      },
+      "reading": "Every file of the release tarball is the tagged commit's blob, byte for byte, except 130 ANGLE files (Windows shader headers and one .bat) that have CRLF line endings in the tarball and LF in git (.gitattributes eol conversion); zero files differ in content. The tarball is a strict subset of the tree plus generated Documentation and NEWS. The 35,810 Source files only the commit has are the ports the tarball leaves out (Windows, Mac, iOS, ...), which is why PlatformCRT needs the commit."
+    }
+  },
   "license": {
-    "summary": "Mixed per-file licensing. License files in the archive: LGPL-2 and LGPL-2.1 texts (Source/WebCore/LICENSE-LGPL-2, LICENSE-LGPL-2.1, Source/JavaScriptCore/COPYING.LIB), an Apple BSD-style 2-clause notice (Source/WebCore/LICENSE-APPLE), and bundled third-party components each with their own license file. Per-file headers were not scanned; the inventory records the license files only.",
-    "scan_status": "license files inventoried 2026-10-03 (64 files, libcrtweb/third_party/webkit/license-inventory.json); per-file header scan not done",
+    "summary": "Mixed per-file licensing. License files in the archive: LGPL-2 and LGPL-2.1 texts (Source/WebCore/LICENSE-LGPL-2, LICENSE-LGPL-2.1, Source/JavaScriptCore/COPYING.LIB), an Apple BSD-style 2-clause notice (Source/WebCore/LICENSE-APPLE), and bundled third-party components each with their own license file. Per-file headers: see license-scan.json (Apple/WebKit BSD-2-Clause and BSD-3-Clause are the bulk of the code, LGPL-2+/2.1+ the rest of WebKit's own; bundled components keep their licenses).",
+    "scan_status": "license files inventoried 2026-10-03 (64 files, license-inventory.json); per-file header scan of the whole Source tree of the pinned commit done 2026-10-10 (69,573 files, license-scan.json, tools/scan_webkit_headers.py); patch manifest checked by tools/check_webkit_patch_manifest.py",
     "notices_required_in_sdk": true,
     "source_correspondence_required": true,
     "bundled_third_party": {
@@ -52,11 +108,11 @@
       "The archive was downloaded and its SHA-256 recomputed locally: efa9bcc3cb891c2d88f50eec710d9ccee71cbdf1040420361eb98c17355eb452, size 46202080, identical to the release page (tools/fetch_webkit.py).",
       "The tag's signature verifies with gpg (see source.tag_signature).",
       "Six sampled source files (Source/cmake/OptionsWPE.cmake, Source/JavaScriptCore/COPYING.LIB, Source/WebCore/LICENSE-LGPL-2.1, Source/ThirdParty/skia/include/core/SkMilestone.h, Source/WTF/wtf/Platform.h, CMakeLists.txt) are byte-identical (git blob SHA-1) to the tree at the tagged commit; the top-level NEWS is a release-tarball file with no counterpart at that commit. The tarball is not otherwise proven to equal the commit tree.",
-      "The archive bundles its own Skia (milestone 154, Source/ThirdParty/skia/include/core/SkMilestone.h) and ANGLE; CRT's Skia is m148."
+      "The archive bundles its own Skia (milestone 154, Source/ThirdParty/skia/include/core/SkMilestone.h) and ANGLE; CRT's Skia is m148.",
+      "2026-10-10 (Tranche 3B): the whole tarball, not six samples, was compared with the tagged commit's tree by git blob id: 34,417 files identical, 130 identical after CRLF->LF, 0 content differences, 4,295 only in the archive (generated Documentation, NEWS); see product_source.tarball_correspondence.",
+      "2026-10-10 (Tranche 3B): per-file license headers of all 69,573 files under Source/ of the pinned commit were classified (libcrtweb/third_party/webkit/license-scan.json): the classifier recognises standard texts and SPDX tags and reports the rest as unclassified, never guessed."
     ],
     "not_yet_verified": [
-      "Per-file license headers (SPDX or header text) were not scanned; only license files were inventoried.",
-      "The tarball is not proven equal to the tagged commit beyond the six sampled files.",
       "Upstream's security support window for a stable series is not documented on the pages consulted."
     ]
   },

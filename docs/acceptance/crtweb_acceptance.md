@@ -1017,20 +1017,59 @@ architecture. **3B+ -- the product:** `PlatformCRT` as a new WebKit port
 (`OptionsCRT.cmake`, `PlatformCRT.cmake`, `platform/crt`, `UIProcess/crt`, ...),
 then GPU-buffer output through the same external-surface contract.
 
-**Source gate before 3B.** The pinned WPE tarball is the *reference* source: the WPE
-baseline, the JSCOnly bring-up and the Linux 3A prototype. `PlatformCRT` is a new
-cross-platform port, and the tarball lacks the Windows port entirely (no
-`PlatformWin.cmake`, no Windows IPC backend). Before the first `PlatformCRT` file is
-written, the full WebKit commit that the signed tag points at (`73f39d84...`,
-already recorded in `recipe.json`) is pinned as a second source, role
-*PlatformCRT product source*, with its own fetch-and-verify path, so the Mac and Win
-ports can be read as references for process, IPC, font and input work instead of
-guessing. The WPE tarball pin stays as it is.
+**Source gate before 3B -- closed 2026-10-10.** The pinned WPE tarball is the *reference*
+source: the WPE baseline, the JSCOnly bring-up and the Linux 3A prototype. `PlatformCRT` is a new
+cross-platform port, and the tarball lacks the Windows port entirely (no `PlatformWin.cmake`, no
+Windows IPC backend; it also lacks `OptionsWin.cmake`, `PlatformMac.cmake` and 35,810 other `Source/`
+files). The full WebKit tree at the commit the signed tag points at (`73f39d84...`) is therefore
+pinned as a second source, role *PlatformCRT product source*, in `recipe.json`
+(`product_source`) with its own fetch-and-verify path, `tools/fetch_webkit_commit.py`:
 
-**Licensing gate.** Per-file license headers are not scanned yet (Tranche 0 recorded
-that honestly). The rule from here: before the first carried WebKit patch, scan the
-files per file and keep a patch manifest that distinguishes a new CRT-owned platform
-file from a modified LGPL/BSD WebKit file; Tranche 10 then closes it for release.
+- *What is pinned.* The commit id, its **tree id** (`6d856c31...`) and the SHA-256 of the complete
+  recursive listing (461,979 entries). A git commit/tree id is a hash over every directory and file,
+  so the three together pin every byte of the tree and also detect an added or dropped file.
+- *Fetch.* One depth-1, trees-only (`--filter=blob:none`) fetch of that commit, about 14 MB and a
+  couple of seconds; `--checkout` materialises only `product_source.checkout_paths` (`Source/`:
+  69,574 files, 1.2 GB, 30 s) and fetches their blobs in one batch. The tool verifies the commit and
+  tree ids and the listing, and (online) that the tag still peels to the pinned commit. Nothing is
+  patched in place.
+- *The tarball against the commit.* `--correspondence` hashes every file of the release tarball as a
+  git blob and compares it with the tree. Result: of 38,842 files, **34,417 are identical, 130 are
+  identical after CRLF->LF (ANGLE Windows shader headers and one `.bat`, converted by `.gitattributes`
+  when the tarball was made), 0 differ in content**, and 4,295 exist only in the tarball (generated
+  `Documentation/` and `NEWS`). So the tarball is a strict subset of the tagged tree; this replaces
+  the six-file sampling recorded in Tranche 0. The 35,810 `Source/` files only the commit has are the
+  Windows, Mac, iOS, PlayStation... ports.
+
+**Licensing gate -- closed 2026-10-10.** Per-file headers are now scanned
+(`tools/scan_webkit_headers.py`, result committed as `libcrtweb/third_party/webkit/license-scan.json`):
+69,573 files under `Source/` of the pinned commit, classified from SPDX tags and standard license
+texts; anything else is reported as unclassified, never guessed.
+
+| Class | Files | Where it matters |
+|---|---:|---|
+| BSD-2-Clause | 25,041 | Apple's and most WebKit code (WTF 704, JSC 3,292, WebCore 12,108, WebKit 5,951) |
+| BSD-3-Clause | 19,534 | Skia, ANGLE, Chromium-derived code, parts of WebCore |
+| LGPL-2+ / 2.1+ / 2 / 2.1 | 3,138 | WebKit's own LGPL code (WebCore 2,045, WebKit 672+42, JSC 197) |
+| Apache-2.0, MIT, MPL, Unicode/ICU, ISC, ... | ~4,200 | bundled components (pdf.js, mimalloc, ICU headers, ...) |
+| GPL / GPL-with-exception | 23 (+1 `GPL-2.0` in a `.clang-format`) / 14 | **none are WebKit code**: ANGLE's flex/bison skeletons (build-time tools) and bison-generated parsers carrying the Bison exception, yasm in libwebrtc, `WebCore/xml/XPathGrammar.*` (bison output) |
+| no header | 13,036 | build files, data, tests; inherits the directory license file (e.g. JSC `COPYING.LIB`) |
+| unclassified with a copyright line | 1,693 (85 in the components a port is built from, listed) | Info.plist/ICU/mimalloc/WebCore Cocoa and XR headers: to be classified by hand before they ship |
+
+What the gate decides for PlatformCRT: WebKit's own code is BSD-2 or LGPL-2(.1)+, both of which CRT
+can modify and redistribute with notices and source correspondence (already `notices_required_in_sdk`
+and `source_correspondence_required` in the recipe); no GPL file belongs to a port's runtime, and the
+build must keep the bundled GPL tools (ANGLE flex/bison, yasm) out of the product. The 85 unclassified
+core files and the bundled components' notices go into the Tranche 10 notice/SBOM closure.
+
+**Patch manifest.** `libcrtweb/patches/manifest.json` is schema 2: every modified WebKit file
+records its license class (all 17 current files are BSD-2-Clause; `JavaScriptCore/CMakeLists.txt` has
+no header and records `COPYING.LIB` as its directory-level license basis), the policy is stated in
+the file, and a `new_files` list is where CRT-owned platform files are declared (origin `crt`, the
+project default license from `LICENSE.md`, and the header must be present). A patch is a derivative
+under the modified file's license; CRT code is never mixed into an LGPL file beyond the patch.
+`tools/check_webkit_patch_manifest.py [--tree DIR]` enforces it (re-measuring classes and
+`sha256_before` against a tree) and is covered by `tools/test_webkit_licensing.py`.
 
 Two contracts are frozen before 3A starts, because `crtui` deliberately owns only
 scene metadata (bounds, clip, opacity, z-order, damage, hit-testing) and not the
@@ -1147,7 +1186,7 @@ Linux-only (`SOCK_SEQPACKET`; Windows and macOS need their own transport decisio
 named-pipe/stream framing, before Tranches 6 and 7); keys other than US-layout Latin text have no
 IME path; the consumer test runs without a window or GPU (raster target), so live crtgfx
 presentation of a web SurfaceView is not shown yet. The two host-side gates below (full-commit pin,
-per-file license scan and patch manifest) are still open and block 3B, not 3A.
+per-file license scan and patch manifest) are closed (see above); 3B itself -- the `PlatformCRT` port -- has not started.
 
 ### 4. `libcrtweb` and the WebView
 

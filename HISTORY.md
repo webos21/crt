@@ -11,6 +11,32 @@ substantive update.
 
 ## 2026-10-10
 
+### Web Tranche 3B gates: the full WebKit commit pinned, the tarball proven a subset of it, per-file license scan
+
+Source gate. `recipe.json` gained `product_source` (role *PlatformCRT product source*): the commit
+behind the signed tag, its tree id and the SHA-256 and count (461,979) of its recursive listing, which
+together pin every byte of the tree. `tools/fetch_webkit_commit.py` fetches exactly that commit (depth 1,
+trees only, about 14 MB, seconds), verifies the ids and listing and that the tag still peels to it, and
+checks out `Source/` sparsely (69,574 files, 30 s). Its `--correspondence` mode hashed every file of the
+release tarball as a git blob against the tree: 34,417 identical, 130 identical after CRLF->LF (ANGLE
+Windows headers, `.gitattributes`), 0 content differences, 4,295 tarball-only (generated Documentation,
+NEWS). The Tranche 0 caveat "not proven equal beyond six samples" is closed; the 35,810 `Source/` files
+only the commit has are the Windows/Mac/iOS/PlayStation ports the tarball omits (`PlatformWin.cmake`,
+`OptionsWin.cmake`, ... are present in the checkout).
+
+Licensing gate. `tools/scan_webkit_headers.py` classified the header of all 69,573 files under
+`Source/`: BSD-2-Clause 25,041, BSD-3-Clause 19,534, LGPL variants 3,138, no header 13,036, the rest
+bundled components; 23 GPL (+14 GPL-with-Bison-exception) files, none of them WebKit code (ANGLE's
+flex/bison tooling, yasm, bison output); 85 unclassified files in the core components, listed in
+`libcrtweb/third_party/webkit/license-scan.json`. The classifier's first version silently missed
+`version 2.1` and ICU texts (punctuation was left in the normalised text); the tests pin both. The patch
+manifest is now schema 2: each modified file records its license class (17 files, all BSD-2-Clause;
+`JavaScriptCore/CMakeLists.txt` has no header and records its directory-level `COPYING.LIB`), the
+policy is in the file, and `new_files` is where CRT-owned platform files are declared.
+`tools/check_webkit_patch_manifest.py` enforces it and `tools/test_webkit_licensing.py` (15 tests)
+covers the classifier, the recipe pin, the correspondence classes and the manifest rules.
+Not done: classifying the 85 core files by hand and the bundled components' notices (Tranche 10).
+
 ### Web Tranche 3A on Linux/x86_64: frame-producer and input contracts frozen, WPEPlatform `crt` display
 
 A WPE display can be added from outside the WebKit tree: `WPEDisplay` is a GIO extension point

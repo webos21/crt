@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "upstream": "WPE WebKit 2.54.0 (libcrtweb/third_party/webkit/recipe.json)",
   "policy": "Nothing here is applied silently: tools/build_webkit_jsc.py verifies the SHA-256 of each file before the patch (or accepts the recorded result), applies it, verifies the result, and records it in the configure fingerprint. Add an entry only with a reason and a removal condition (docs/porting/crtweb_porting.md).",
   "patches": [
@@ -13,7 +13,8 @@
         {
           "file": "Source/WTF/wtf/RawHex.h",
           "sha256_before": "d2f20a16dd821b744779cc302895bc4375022084aabcdb2669b886aa188ab340",
-          "sha256_after": "5d12a98dc9976ee8445dbe7c8ad9e20dd344a297f3894ea3f3f197194e66c6aa"
+          "sha256_after": "5d12a98dc9976ee8445dbe7c8ad9e20dd344a297f3894ea3f3f197194e66c6aa",
+          "license": "BSD-2-Clause"
         }
       ],
       "reason": "WTF::RawHex gives int64_t/uint64_t their own constructors only for CPU(ADDRESS32) or OS(DARWIN); elsewhere it assumes int64_t is intptr_t (true for Linux/Bionic LP64). CRT presents macOS to WebKit as a Linux-shaped platform (no __APPLE__), but the compiler's integer types stay Darwin's (int64_t is long long, intptr_t is long): clang's own arm_acle.h/arm_neon.h and builtins require uint64_t == __UINT64_TYPE__, so the typedef cannot be changed (tried: clang crashed). RawHex(uint64_t) was therefore ambiguous in JavaScriptCore/tools/Integrity.cpp. The patch adds one more condition, selected by -DWTF_CRT_INT64_IS_LONG_LONG which the harness passes on macOS.",
@@ -29,22 +30,26 @@
         {
           "file": "Source/WTF/wtf/InlineASM.h",
           "sha256_before": "6305669014715bc26ec80a370951adfec0eee411def10ad5eae6b8042defa3d1",
-          "sha256_after": "d641d5b3098ff1b757dedb2205f820cdc87c95ba4156f52ea42fba942f545d54"
+          "sha256_after": "d641d5b3098ff1b757dedb2205f820cdc87c95ba4156f52ea42fba942f545d54",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/JavaScriptCore/llint/LowLevelInterpreter.cpp",
           "sha256_before": "decd4c4a761c6bfdadcdfb2a123307c5608bc15847d2c9ba088e5b981b37c219",
-          "sha256_after": "5b23d7322f858231b12b0cb8c99d4c76f3ff08c52c71a0241055cd73237e05b7"
+          "sha256_after": "5b23d7322f858231b12b0cb8c99d4c76f3ff08c52c71a0241055cd73237e05b7",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/JavaScriptCore/offlineasm/asm.rb",
           "sha256_before": "4c5f1bfec9df2bb1d00527215d54b7513672a2e09e96246fc4ef5219121d5beb",
-          "sha256_after": "e06138a49a102b82280a8b7f435382d48ee50ed2c2c3fcd4daae9ec626efcadc"
+          "sha256_after": "e06138a49a102b82280a8b7f435382d48ee50ed2c2c3fcd4daae9ec626efcadc",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/JavaScriptCore/offlineasm/arm64.rb",
           "sha256_before": "a2469f60bc3709e9367322d3531d2c0f6d8b5882ceaef332dec259d283ad7240",
-          "sha256_after": "dc707187e9e4c940be359fcd2e2dd3188ec6279dffafcff222bd12afea5e6234"
+          "sha256_after": "dc707187e9e4c940be359fcd2e2dd3188ec6279dffafcff222bd12afea5e6234",
+          "license": "BSD-2-Clause"
         }
       ],
       "reason": "JavaScriptCore's inline assembler for the offlineasm LLInt and its thunks takes the assembler syntax from OS(DARWIN): the `_` symbol prefix (SYMBOL_STRING), `.private_extern _x` versus `.hidden x` (HIDE_SYMBOL), the local label prefix `L` versus `.L`, `.alt_entry`, and the absence of `.cfi_startproc` in the global asm blocks. Those are properties of the Mach-O object format, not of the OS, but CRT presents macOS to WebKit as a Linux-shaped platform (no __APPLE__; see 0001), so the ELF spellings were chosen and would not link or assemble. The patch ORs one more condition, selected by -DWTF_CRT_MACHO_ASM which the harness passes on macOS in baseline-jit mode, into those conditionals (the three in WTF/InlineASM.h, the alt-entry and two cfi conditionals in llint/LowLevelInterpreter.cpp, the `#if OS(DARWIN)` guard offlineasm itself writes into LLIntAssembly.h, and the two `#if OS(DARWIN)` guards arm64.rb writes for Mach-O versus ELF relocation specifiers (`@PAGE`/`@GOTPAGE` versus `:lo12:`/`:got:`)). offlineasm also emits ELF `.size`/`.type` debug directives whenever CMake passes --binary-format=ELF, which it does for CMAKE_SYSTEM_NAME Linux, so asm.rb additionally skips them when the environment variable WTF_CRT_MACHO_ASM is set (the harness sets it).",
@@ -60,57 +65,69 @@
         {
           "file": "Source/WTF/wtf/InlineASM.h",
           "sha256_before": "6305669014715bc26ec80a370951adfec0eee411def10ad5eae6b8042defa3d1",
-          "sha256_after": "9019ed4dc6dc0f2445a1ac2ef9b11de2a9519537929f19a2bd8b6514bc597a69"
+          "sha256_after": "9019ed4dc6dc0f2445a1ac2ef9b11de2a9519537929f19a2bd8b6514bc597a69",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/JavaScriptCore/offlineasm/asm.rb",
           "sha256_before": "4c5f1bfec9df2bb1d00527215d54b7513672a2e09e96246fc4ef5219121d5beb",
-          "sha256_after": "af0cf7a248eaaabcd678340bb3c369dcb6340240ecc74724694ece24c47f138c"
+          "sha256_after": "af0cf7a248eaaabcd678340bb3c369dcb6340240ecc74724694ece24c47f138c",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/JavaScriptCore/assembler/MacroAssemblerX86_64.cpp",
           "sha256_before": "874abac33021786f9a05ed0f9368d0ab1e322160b81afc3f475124e934d41767",
-          "sha256_after": "5beac39f07f46829c4ff539f29b533088fe4e566b132dc34464007c913abf674"
+          "sha256_after": "5beac39f07f46829c4ff539f29b533088fe4e566b132dc34464007c913abf674",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/JavaScriptCore/jit/ThunkGenerators.cpp",
           "sha256_before": "6b6f23ebdd96b9c2addc02fa9a28fcfc31f9585aa9afb3c45a2830206b0db2ce",
-          "sha256_after": "c417995d6b93267bedc55b8076896941c8df2b0ee7e33f17236d81f934ac612f"
+          "sha256_after": "c417995d6b93267bedc55b8076896941c8df2b0ee7e33f17236d81f934ac612f",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WTF/wtf/PlatformCallingConventions.h",
           "sha256_before": "88c373ae96c043e3ae9bc60526f2ee86e338e64738116c1e80466db319e70135",
-          "sha256_after": "665f0d153e2040eef4e3a98d65024ff7aa7e8d9aca80e20161445100bf6e823c"
+          "sha256_after": "665f0d153e2040eef4e3a98d65024ff7aa7e8d9aca80e20161445100bf6e823c",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WTF/wtf/FunctionTraits.h",
           "sha256_before": "63fe8053ad9f8f312b6e65366a4e42c0d60a5cf6c7f4979c42915d5898d4b370",
-          "sha256_after": "cf418ee76001e482c07af270ba8cf03be9204b44175c3a57ed75266dfbb76830"
+          "sha256_after": "cf418ee76001e482c07af270ba8cf03be9204b44175c3a57ed75266dfbb76830",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WTF/wtf/FunctionPtr.h",
           "sha256_before": "d3ec37c32d549ff35fe1613639e736455b65ce5749f0db6698026ea4428987af",
-          "sha256_after": "938b2e46c31edd8989a8754c16bab469250d9c03dbe0826cb78b448122485697"
+          "sha256_after": "938b2e46c31edd8989a8754c16bab469250d9c03dbe0826cb78b448122485697",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WTF/wtf/CodePtr.h",
           "sha256_before": "c04b9ff565c1ee510402661338462b98e57b5cdbb40ecc249782d8575110a651",
-          "sha256_after": "9806101d56bca1a23b9fd40f204ec2bea6e1aaf3ec9aacc853bf9f76280386a0"
+          "sha256_after": "9806101d56bca1a23b9fd40f204ec2bea6e1aaf3ec9aacc853bf9f76280386a0",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/JavaScriptCore/assembler/AbstractMacroAssembler.h",
           "sha256_before": "e6864c5e3f126df4fbc7c666a4271b1385355c2203a07edca37ca3a8b6f18478",
-          "sha256_after": "26cf67946b404e18d4207e0841a4921572f160d8f14e20e8203b251d75a7a26a"
+          "sha256_after": "26cf67946b404e18d4207e0841a4921572f160d8f14e20e8203b251d75a7a26a",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WTF/wtf/StackPointer.cpp",
           "sha256_before": "a5487bbf72869838bf50c422d7c2a2beffbccd59cf771c8774b504653f17b107",
-          "sha256_after": "fe65d8739dc287a46a1580ed747ef7a492e73fe2757fdbc50c160f4ce08d45e7"
+          "sha256_after": "fe65d8739dc287a46a1580ed747ef7a492e73fe2757fdbc50c160f4ce08d45e7",
+          "license": "BSD-2-Clause"
         },
         {
           "file": "Source/JavaScriptCore/CMakeLists.txt",
           "sha256_before": "60ea0825f56f7e8e7634ca3536935d9a157de46f3b0d1a6354dceb70a3373b25",
-          "sha256_after": "2612cfda0b0a238a8208ea50ed09ab66fb9fb7216fc3964348ee033d78bc7bdb"
+          "sha256_after": "2612cfda0b0a238a8208ea50ed09ab66fb9fb7216fc3964348ee033d78bc7bdb",
+          "license": "no-license-header",
+          "license_basis": "directory-level license file Source/JavaScriptCore/COPYING.LIB (GNU Library GPL, LGPL-2); the file has no header of its own"
         }
       ],
       "reason": "CRT presents Windows to WebKit as a Linux-shaped platform (libcrtweb/cmake/crt_webkit_platform.cmake), so JavaScriptCore's offlineasm and inline assembly take their ELF branches, but the object format is COFF and the assembler rejects the ELF-only forms (found by the Windows baseline-jit build: `.hidden`, `.size` and `.type name, function` are `unknown directive`/`expected absolute expression`, `.previous` is an unknown directive, and a `name@plt` reference does not exist in COFF). Selected by -DWTF_CRT_COFF_ASM (compiler side) and the WTF_CRT_COFF_ASM environment variable (offlineasm side), both set by tools/build_webkit_jsc.py on Windows: HIDE_SYMBOL expands to nothing, GLOBAL_REFERENCE is the plain symbol, the ELF debug directives are not emitted, and the `.previous` after the probe trampolines and the unary-double thunks (an ELF section-stack directive; nothing follows them in the same asm block) is dropped. Mach-O has its own variant (0002).",
@@ -126,11 +143,28 @@
         {
           "file": "Source/JavaScriptCore/assembler/ARM64Registers.h",
           "sha256_before": "61029ae32c6c2cefa8f179317ab2e06b3a5f22086c562f940d6617b38b6726e8",
-          "sha256_after": "ea7324312ba2fdad1dfa4906709f0fc4cb08af6d002abaa68887d175c4788966"
+          "sha256_after": "ea7324312ba2fdad1dfa4906709f0fc4cb08af6d002abaa68887d175c4788966",
+          "license": "BSD-2-Clause"
         }
       ],
       "reason": "CRT presents macOS to WebKit as OS(LINUX) to select the Bionic/Linux-shaped source surface, but generated code still follows the actual Darwin arm64 object and calling-convention ABI. ARM64Registers.h's Linux branch marks x18 allocatable, while Darwin reserves x18 as the platform register. Under FTL/B3 register pressure that mismatch let generated code use x18 across a runtime call and produced a null-address write near operationStringFromCharCode. The harness defines WTF_CRT_DARWIN_ARM64_ABI only for macOS arm64, selecting WebKit's existing non-Linux register table without enabling Apple SDK source branches; Linux/aarch64 is unchanged.",
       "remove_when": "WebKit derives the x18 reservation from the target ABI/object format rather than OS(LINUX), or CRT can select WebKit's Darwin ABI traits independently of its Apple SDK source surface."
     }
-  ]
+  ],
+  "license_policy": {
+    "rule": "A file this manifest modifies keeps its upstream license and header; the patch is a derivative under that license, so every entry records the class of the modified file (from tools/scan_webkit_headers.py) and it must be one CRT can carry: LGPL-2/2.1 (WebKit's own LGPL code), BSD-2/3-Clause (Apple's and most WebKit code) or another permissive class. A file CRT adds is a *new CRT-owned file*, listed under new_files with the project default license (LICENSE.md, BSD-2-Clause) and its header. Never mix: no CRT code is added to an LGPL file beyond the patch itself.",
+    "checked_by": "tools/check_webkit_patch_manifest.py",
+    "allowed_for_modified_files": [
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "MIT",
+      "LGPL-2+",
+      "LGPL-2.1+",
+      "LGPL-2.1",
+      "LGPL-2",
+      "no-license-header (only with a license_basis naming the directory-level license file)"
+    ],
+    "crt_default_license": "BSD-2-Clause"
+  },
+  "new_files": []
 }

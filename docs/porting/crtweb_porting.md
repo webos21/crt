@@ -52,7 +52,7 @@ the tranche that touches it reads the source. Not yet decided means blank.
 | Source | Role |
 | --- | --- |
 | WPE WebKit 2.54.0 release tarball (`recipe.json`) | *Reference*: the WPE baseline, JSCOnly bring-up, the Linux 3A prototype. Has no Windows port |
-| Full WebKit commit `73f39d84...` (the signed tag's target; to be pinned as its own source before Tranche 3B) | *PlatformCRT product source*: the Mac and Win ports as references, and the tree `PlatformCRT` lives in |
+| Full WebKit commit `73f39d84...` (the signed tag's target; pinned 2026-10-10 as `product_source`: commit, tree id and listing digest, `tools/fetch_webkit_commit.py`; licensing: `license-scan.json`, `tools/check_webkit_patch_manifest.py`) | *PlatformCRT product source*: the Mac and Win ports as references, and the tree `PlatformCRT` lives in |
 
 ## Rules
 

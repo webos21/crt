@@ -88,10 +88,10 @@ then macOS/arm64.
   2026-10-10:** the frame-producer and input contracts are frozen (v1), a WPEPlatform `crt`
   display module (no WebKit patch) delivers WebKit frames to a CRT consumer through shared memory
   and takes input back, with a hermetic `crtui` SurfaceView test and a native end-to-end run
-  (`HISTORY.md`, `docs/acceptance/crtweb_acceptance.md`). **Open:** 3B gates (pin the full WebKit
-  commit behind the signed tag as the `PlatformCRT` product source; per-file license scan and patch
-  manifest before the first carried patch), then the `PlatformCRT` WebKit port, then GPU-buffer
-  output; a Windows/macOS transport decision; live crtgfx presentation of a web SurfaceView.
+  (`HISTORY.md`, `docs/acceptance/crtweb_acceptance.md`). **3B source and licensing gates closed 2026-10-10** (full commit pinned with
+tree id and listing digest; whole-tarball correspondence measured; per-file license scan and schema-2
+patch manifest with a checker). **Open:** the `PlatformCRT` WebKit port itself, then GPU-buffer
+output; a Windows/macOS transport decision; live crtgfx presentation of a web SurfaceView.
 * [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
   `crtui`'s web view; no WebKit type in a public header.
 * [ ] **5. Multi-process lifecycle.** UI/Web/Network/GPU processes: launch, IPC,
