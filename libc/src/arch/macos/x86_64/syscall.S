@@ -410,6 +410,21 @@ ___crt_sys_poll:
   negq %rax
   retq
 
+.globl ___crt_sys_socketpair
+.p2align 4, 0x90
+___crt_sys_socketpair:
+  movq $0x2000087, %rax
+  movq %rcx, %r10
+  syscall
+  jc 1f
+  retq
+1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
+  ret
+
 .globl ___crt_sys_socket
 .p2align 4, 0x90
 ___crt_sys_socket:

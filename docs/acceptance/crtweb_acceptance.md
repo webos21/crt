@@ -1053,6 +1053,102 @@ producer's frame:
    **IME/composition is deferred past Web v1** (Latin committed text and basic key
    input only), together with selection handling and touch.
 
+**Contracts frozen for 3A (version 1, 2026-10-10).** The field-level definition is the
+header `libcrtweb/platform/crtweb_surface_wire.h`: plain C, fixed-width little-endian structs, no
+WebKit, GLib or CRT type, so the native WPE side and a CRT application include it unchanged. Both
+contracts are carried by one `AF_UNIX`/`SOCK_SEQPACKET` connection (one datagram per message,
+`SCM_RIGHTS` for buffer descriptors); the consumer listens, the producer connects.
+
+*Frame producer.*
+
+- **Roles.** The consumer (a `crtui` application, through `crtweb::SurfaceClient`) sends HELLO with
+  the view's logical size and scale; the producer answers CONFIG (version, pool size 3, pixel
+  format). `crtui` keeps only the SurfaceView's bounds, clip, opacity, z-order, damage and
+  hit-testing; the application associates the view id with the client's image
+  (`crtui_skia_surface_provider`).
+- **Pixels.** `AR24` (DRM_FORMAT_ARGB8888): B,G,R,A bytes, alpha premultiplied, origin top-left, a
+  row stride in bytes, device pixels (logical size x scale).
+- **Ownership and lifetime.** The producer owns a pool of three memfd-backed buffers and announces
+  each with BUFFER_ADD (descriptor, size, stride, format). A FRAME names a complete, immutable
+  picture; the consumer owns that buffer until it sends BUFFER_RELEASE, and the producer never writes
+  it meanwhile. The producer retires buffers (BUFFER_REMOVE) only after release, e.g. on resize.
+  No `WPEBuffer` is visible to the consumer: WebKit's buffer is copied into the pool, so WPE's
+  buffer lifetime rules stop at the producer.
+- **Damage and serials.** `serial` (frame) and `damage_serial` strictly increase; `damage` is
+  advisory and the buffer is always a complete picture (3A reports full damage).
+- **Acknowledgement and pacing.** FRAME_ACK(serial) tells the producer the frame was composed;
+  only then does WPE see `buffer_rendered`, which is what lets WebKit start the next frame. At most
+  one frame is in flight.
+- **Slow or stuck consumer (the drop policy).** The producer waits at most 250 ms for an
+  acknowledgement and then carries on, so page script and timers never freeze. Commits that arrive
+  while a frame is in flight, or while the consumer holds all three buffers, coalesce into one
+  pending commit, *latest wins*: no unbounded queue, no stale frame shown late. When the consumer
+  releases a buffer the pending picture is presented.
+- **Resize.** RESIZE(width, height, scale) from the consumer; the producer answers with buffers of
+  the new size (the old ones retire after release).
+- **Shutdown.** BYE or end of stream closes the view on the producer; the consumer treats the same
+  as the page going away.
+- **Not in v1.** GPU buffers (descriptor planes, fence/semaphore lifetime) are Tranche 9 and will
+  extend BUFFER_ADD/FRAME; cursor, clipboard and drag are Tranche 4.
+
+*Input.* A separate path (the Tranche 0 decision stands): `crtgfx` native event -> the client's
+`forward()` -> wire -> WPE event; `crtui` supplies only focus, bounds and hit-testing, and its frozen
+v1 key enum is not extended.
+
+- **Pointer.** Action (move/down/up/enter/leave), pointer type and id (mouse, pen, touch), button
+  (1 primary, 2 middle, 3 secondary), press count (1/2/3), modifiers, position in *view-local logical
+  pixels*; `forward()` converts window coordinates and drops positions outside the view.
+- **Wheel.** Position and pixel deltas.
+- **Keys.** X11/XKB *keysym* plus the *XKB keycode* (Linux evdev code + 8: `KEY_A` 30 -> 38), modifiers
+  Ctrl/Shift/Alt/Meta/CapsLock, repeat flag. WebKit derives `key` from the keysym and `code` from the
+  keycode, so both are carried; a keycode of 0 makes WebKit drop the event. A non-Linux consumer maps
+  its native scan code to the evdev numbering before sending.
+- **Text.** Committed Latin text (one grapheme per TEXT message) becomes a press/release of its
+  keysym on the key a US layout types it with. **IME/composition, selection and touch gestures are
+  deferred past Web v1**, as decided before 3A.
+- **Focus.** FOCUS(focused) becomes `wpe_view_focus_in/out`.
+
+**3A -- result (Linux/x86_64, 2026-10-10).** Three pieces in two worlds, and no WebKit patch:
+
+- `libcrtweb/platform/wpe-crt/wpe_crt_platform.c`: a GIO module that registers a `WPEDisplay`
+  named `crt` on WPE's `wpe-platform-display` extension point. A platform can therefore live
+  outside the WebKit tree (the 3A question in `crtweb_porting.md` is answered): it is selected by
+  `WPE_DISPLAY=crt` and `WPE_PLATFORMS_PATH`. It provides display, toplevel and view classes,
+  copies each committed WPE shared-memory buffer into the pool, forwards input as WPE events, and
+  exposes no EGL/DRM device, so WebKit renders into shared memory.
+- `libcrtweb/platform/crtweb_surface_client.h`: the consumer-side adapter (C++17, header-only). The
+  newest frame is a Skia raster image over the mapped buffer; its release proc returns the buffer;
+  `frame_presented()` acknowledges; `forward()` maps `crtui` pointer, wheel, key and text input.
+- Tests. `tools/build_webkit_wpe_crt.py` builds the module and a native host
+  (`libcrtweb/tests/platform-crt/wpe_crt_host.c`, a `WebKitWebView` on the `crt` display) against
+  the Tranche 2 reference build, builds `surface_probe.c` *with the CRT toolchain* from the installed
+  SDK, and runs them: the probe listens, the host connects. Checks: handshake and CONFIG; the first
+  640x480 frame's four fixture quadrants; serials increasing; ack/release; pointer down/up ->
+  page `click` report *and* the pixel effect in a later frame; key `a`, Ctrl+Shift+`b` (code and
+  modifiers), wheel, committed text into a focused field; resize to 320x240 (new buffers, proportional
+  quadrants); and a **stalled consumer** (no acknowledgement, no release, six repaints): the page keeps
+  reporting presses, the consumer ends up holding all three buffers, and after recovery a new frame
+  arrives. Passed 4 of 4 consecutive runs (about 4 s each). The page's `document.title` is the report
+  channel (the embedder, here the host program, forwards title changes to
+  `wpe_toplevel_set_title`; WebKit does not).
+  `crtweb_web_surface_test` (CTest, hermetic, CRT-built with Skia) drives `SurfaceClient` against a
+  fake producer without a browser: a SurfaceView composed between UI below and above, acknowledgement,
+  release when an image is dropped, latest-frame-wins, damage serial, title, input translation,
+  resize; it fails when a pixel expectation is mutated.
+
+*What the CRT runtime lacked, found by building the consumer with it:* `SOCK_SEQPACKET`,
+`MSG_TRUNC`, `MSG_CTRUNC`, `SOCK_RDM` (`<sys/socket.h>`) and `socketpair()` (Linux and macOS
+syscalls; ENOSYS on Windows). `socketpair_test` covers stream and seqpacket pairs, `SOCK_CLOEXEC`
+and record truncation.
+
+*Honest limits.* The producer copies each frame (one memcpy of the buffer per commit; fine for
+software output, replaced by buffer import in the GPU tranche); the prototype transport is
+Linux-only (`SOCK_SEQPACKET`; Windows and macOS need their own transport decision, e.g. a
+named-pipe/stream framing, before Tranches 6 and 7); keys other than US-layout Latin text have no
+IME path; the consumer test runs without a window or GPU (raster target), so live crtgfx
+presentation of a web SurfaceView is not shown yet. The two host-side gates below (full-commit pin,
+per-file license scan and patch manifest) are still open and block 3B, not 3A.
+
 ### 4. `libcrtweb` and the WebView
 
 `crtweb_runtime_create`, `crtweb_view_create/load_url/load_html/go_back/

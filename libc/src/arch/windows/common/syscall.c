@@ -4679,6 +4679,17 @@ static int translate_socket_option(int level, int optname) {
   return optname;
 }
 
+/* Winsock has no socketpair(): ENOSYS, as for the other POSIX facilities with no Windows
+ * equivalent. An emulation over a loopback listener is possible and deferred until a consumer
+ * needs it (the web surface protocol's Windows transport is its own decision). */
+long __crt_sys_socketpair(int domain, int type, int protocol, int* sv) {
+  (void)domain;
+  (void)type;
+  (void)protocol;
+  (void)sv;
+  return -ENOSYS;
+}
+
 long __crt_sys_socket(int domain, int type, int protocol) {
   SOCKET socket_handle;
   int fd;

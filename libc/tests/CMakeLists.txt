@@ -413,6 +413,10 @@ set_tests_properties(memfd_create_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "memfd_create_test: ok"
 )
 
+add_crt_test(socketpair_test socketpair_test.c)
+set_tests_properties(socketpair_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "socketpair_test: ok"
+  TIMEOUT 60)
 add_crt_test(sendmsg_scm_rights_test sendmsg_scm_rights_test.c)
 set_tests_properties(sendmsg_scm_rights_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "sendmsg_scm_rights_test: ok"

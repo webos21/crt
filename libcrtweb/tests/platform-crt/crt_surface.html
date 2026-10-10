@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>crt|loaded</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #202020; }
+  div.q { position: fixed; width: 50%; height: 50%; }
+  #a { left: 0;   top: 0;   background: #ff0000; }
+  #b { left: 50%; top: 0;   background: #00ff00; }
+  #c { left: 0;   top: 50%; background: #0000ff; }
+  #d { left: 50%; top: 50%; background: #ffff00; }
+  #e { right: 0; bottom: 0; width: 16px; height: 16px; background: #ff00ff; }
+  input { position: fixed; left: 8px; bottom: 8px; width: 40%; font-size: 20px; }
+</style>
+</head>
+<body>
+<div class="q" id="a"></div><div class="q" id="b"></div><div class="q" id="c"></div><div class="q" id="d"></div>
+<div class="q" id="e"></div>
+<input id="field" type="text">
+<script>
+  // Every input event the page receives is reported through document.title, which the WPE
+  // platform forwards to the consumer (crtweb_wire_title). A click also turns quadrant A white,
+  // so the consumer can verify the effect in pixels as well.
+  var seq = 0;
+  function report(text) { document.title = 'crt|' + text + '|' + (++seq); }
+  var flip = false;
+  addEventListener('mousedown', function (e) {
+    flip = !flip;
+    document.getElementById('e').style.background = flip ? '#00ffff' : '#ff00ff';  // a repaint per press
+    report('down|' + e.button + '|' + e.clientX + ',' + e.clientY);
+  });
+  addEventListener('mouseup', function (e) { report('up|' + e.button + '|' + e.clientX + ',' + e.clientY); });
+  addEventListener('click', function (e) {
+    document.getElementById('a').style.background = '#ffffff';
+    report('click|' + e.detail + '|' + e.clientX + ',' + e.clientY);
+  });
+  addEventListener('wheel', function (e) { report('wheel|' + Math.round(e.deltaX) + ',' + Math.round(e.deltaY)); }, { passive: true });
+  addEventListener('keydown', function (e) { report('key|' + e.key + '|' + e.code + '|' + (e.shiftKey ? 'S' : '-') + (e.ctrlKey ? 'C' : '-')); });
+  addEventListener('resize', function () { report('resize|' + innerWidth + 'x' + innerHeight); });
+  document.getElementById('field').addEventListener('input', function (e) { report('text|' + e.target.value); });
+</script>
+</body>
+</html>

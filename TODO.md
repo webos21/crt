@@ -84,12 +84,14 @@ then macOS/arm64.
 * [x] **2. Linux WPE reference baseline.** Closed 2026-10-10 on Linux/x86_64:
   verified upstream WPE 2.54.0, unmodified, renders local HTML through its
   built-in headless backend and produces the accepted 640x480 snapshot.
-* [ ] **3. `PlatformCRT` graphics and input prototype.** (Gates before 3B: pin the full
-  WebKit commit behind the signed tag as the `PlatformCRT` product source; per-file license scan and
-  patch manifest before the first carried patch.) 3A: Linux WPEPlatform
-  prototype (shared memory -> `crtgfx` -> `crtui` external surface); 3B+: the
-  `PlatformCRT` WebKit port, then GPU-buffer output. The frame-producer and input
-  contracts are frozen before 3A (`docs/acceptance/crtweb_acceptance.md`).
+* [ ] **3. `PlatformCRT` graphics and input prototype.** **3A done on Linux/x86_64
+  2026-10-10:** the frame-producer and input contracts are frozen (v1), a WPEPlatform `crt`
+  display module (no WebKit patch) delivers WebKit frames to a CRT consumer through shared memory
+  and takes input back, with a hermetic `crtui` SurfaceView test and a native end-to-end run
+  (`HISTORY.md`, `docs/acceptance/crtweb_acceptance.md`). **Open:** 3B gates (pin the full WebKit
+  commit behind the signed tag as the `PlatformCRT` product source; per-file license scan and patch
+  manifest before the first carried patch), then the `PlatformCRT` WebKit port, then GPU-buffer
+  output; a Windows/macOS transport decision; live crtgfx presentation of a web SurfaceView.
 * [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
   `crtui`'s web view; no WebKit type in a public header.
 * [ ] **5. Multi-process lifecycle.** UI/Web/Network/GPU processes: launch, IPC,

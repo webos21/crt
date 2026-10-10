@@ -11,6 +11,36 @@ substantive update.
 
 ## 2026-10-10
 
+### Web Tranche 3A on Linux/x86_64: frame-producer and input contracts frozen, WPEPlatform `crt` display
+
+A WPE display can be added from outside the WebKit tree: `WPEDisplay` is a GIO extension point
+(`wpe-platform-display`, modules scanned from `WPE_PLATFORMS_PATH`). `libcrtweb/platform/wpe-crt` is
+such a module; with `WPE_DISPLAY=crt` the unmodified WPE 2.54.0 reference build renders into it, and
+no WebKit file changed. Each committed shared-memory buffer is copied into a producer-owned pool of
+three memfds and announced over an `AF_UNIX` `SOCK_SEQPACKET` connection defined by
+`libcrtweb/platform/crtweb_surface_wire.h` (contract v1: pixel format, ownership, serials, damage,
+acknowledgement-paced single frame in flight, latest-wins coalescing with a 250 ms bounded wait,
+resize, shutdown; pointer/wheel/key/text/focus with XKB keysym + keycode). The consumer adapter
+`libcrtweb/platform/crtweb_surface_client.h` exposes the newest frame as a Skia image for a `crtui`
+SurfaceView and maps `crtui` input to the wire.
+
+Verification: `tools/build_webkit_wpe_crt.py` runs the native host against a CRT-built probe (frames
+and pixels, serials, ack/release, pointer -> click and its pixel effect, key code/modifiers, wheel,
+committed text, resize, and a stalled consumer that holds all buffers) 4/4 passes; the hermetic
+`crtweb_web_surface_test` (CRT-built, Skia raster target, fake producer) and the new
+`socketpair_test` pass in the full serial `ctest` (172/172, sound-card test excluded).
+
+Findings, all fixed in CRT rather than worked around: `wpe_buffer_import_to_pixels` is
+(transfer none), so unreffing it crashed after a few frames (our bug); WebKit never pushes the
+document title to the toplevel (the embedder does); WebKit takes XKB keycodes (evdev + 8) and drops
+key events with keycode 0, so the wire carries the XKB keycode and committed text maps ASCII through a
+US layout; and the CRT libc had no `SOCK_SEQPACKET`/`MSG_TRUNC`/`MSG_CTRUNC`/`SOCK_RDM` and no
+`socketpair()` (Linux and macOS syscalls added, ENOSYS on Windows). `crtweb_` joins the test-name
+prefixes the C-stage workflows exclude. Open: 3B gates, the Windows/macOS transport, a live
+crtgfx presentation of a web SurfaceView, GPU buffers. Not built here: the new `socketpair` syscall stubs for
+Linux/aarch64, macOS (both) and the Windows ENOSYS stub (written from the neighbouring `socket` stubs; the Linux/x86_64
+build and tests are the evidence).
+
 ### Documentation consolidation: adopted policy replaces exploratory drafts
 
 Removed 13 marketing/study/restructuring drafts after comparing them with the

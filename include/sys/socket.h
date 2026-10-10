@@ -43,6 +43,12 @@ struct sockaddr_storage {
 #define SOCK_STREAM 1
 #define SOCK_DGRAM 2
 #define SOCK_RAW 3
+#define SOCK_RDM 4
+/* Bionic/Linux value. A connection-oriented, record-preserving socket: AF_UNIX SOCK_SEQPACKET on
+ * Linux (the CRT web surface protocol, libcrtweb/platform/crtweb_surface_wire.h, needs one message
+ * per datagram with SCM_RIGHTS). The host kernel decides whether a pair is supported: Darwin and
+ * Windows AF_UNIX reject it at socket() time, which a caller sees as an ordinary errno. */
+#define SOCK_SEQPACKET 5
 /* Real Linux kernel ABI fact (not just a glibc choice, matching sys/
  * epoll.h's own EPOLL_CLOEXEC precedent): the kernel deliberately reuses
  * O_CLOEXEC's own bit value for this socket()/accept4() type flag, ORed
@@ -118,6 +124,9 @@ struct ucred {
 #define MSG_OOB 0x01
 #define MSG_PEEK 0x02
 #define MSG_DONTROUTE 0x04
+#define MSG_CTRUNC 0x08 /* msg_control was too small: ancillary data was discarded */
+#define MSG_TRUNC 0x20  /* the datagram/record was longer than the buffer */
+#define MSG_EOR 0x80
 #define MSG_WAITALL 0x100
 /* MSG_DONTWAIT/MSG_NOSIGNAL/MSG_CMSG_CLOEXEC: real Linux values (asm-
  * generic/socket.h, bits/socket.h), added 2026-08-24 for the Wayland core
@@ -155,6 +164,8 @@ struct ucred {
 #define MSG_CMSG_CLOEXEC 0x40000000
 
 int socket(int domain, int type, int protocol);
+/* Bionic. Linux and macOS; ENOSYS on Windows (no Winsock equivalent). */
+int socketpair(int domain, int type, int protocol, int sv[2]);
 int bind(int sockfd, const struct sockaddr* addr, socklen_t addrlen);
 int listen(int sockfd, int backlog);
 int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen);

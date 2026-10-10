@@ -257,6 +257,16 @@ __crt_sys_socket:
   retq
 .size __crt_sys_socket, . - __crt_sys_socket
 
+.globl __crt_sys_socketpair
+.type __crt_sys_socketpair, @function
+.p2align 4, 0x90
+__crt_sys_socketpair:
+  movq $53, %rax
+  movq %rcx, %r10
+  syscall
+  retq
+.size __crt_sys_socketpair, . - __crt_sys_socketpair
+
 .globl __crt_sys_connect
 .type __crt_sys_connect, @function
 .p2align 4, 0x90

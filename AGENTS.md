@@ -265,10 +265,13 @@ runtime은 다음 계층으로 나누어 설계한다.
   - `cmake/crtui_sources.cmake`: in-tree 빌드와 isolated stage가 공유하는 source
     목록. 상세는 `libcrtui/README.md`, `docs/acceptance/crtui_acceptance.md`.
 - `libcrtweb/`
-  - `06-web`(WebKit CRT Port)의 자리. **현재는 `third_party/webkit/`의 WPE WebKit
-    2.54.0 pin과 provenance(`recipe.json`, `license-inventory.json`)뿐이며**
-    `crtweb` API, `PlatformCRT`, 빌드 타깃은 아직 없고 루트 CMake에 연결되어 있지
-    않다. 계약은 `docs/acceptance/crtweb_acceptance.md`, upstream 매핑은
+  - `06-web`(WebKit CRT Port)의 자리. `third_party/webkit/`의 WPE WebKit 2.54.0 pin과
+    provenance(`recipe.json`, `license-inventory.json`), JSC/WPE reference 검증
+    (`tests/jsc`, `tests/wpe-reference`), 그리고 Tranche 3A의 계약과 prototype
+    (`platform/`: `crtweb_surface_wire.h`, `crtweb_surface_client.h`, WPEPlatform `crt`
+    display module; `tests/platform-crt/`)이 있다. `crtweb` API와 `PlatformCRT` 포트는
+    아직 없고, 루트 CMake에는 consumer 쪽 테스트(`crtweb_*`)만 연결되어 있다.
+    계약은 `docs/acceptance/crtweb_acceptance.md`, upstream 매핑은
     `docs/porting/crtweb_porting.md`.
 
 ### Provenance and porting
@@ -311,7 +314,7 @@ runtime은 다음 계층으로 나누어 설계한다.
     있는 독립 CMake 프로젝트이다.
 - `cmake/`
   - `run_core_tests.cmake`: 기본 workflow가 C stage CTest만 돌리도록 상위 계층 테스트
-    (`crtgfx_`, `crtmedia_`, `crtui_`, `*cxx`)를 제외하는 필터.
+    (`crtgfx_`, `crtmedia_`, `crtui_`, `crtweb_`, `*cxx`)를 제외하는 필터.
 - `benchmark/`
   - allocator baseline/contention 결과(`.jsonl`). 호스트별 결과를 한곳에 모으기 위해
     일부러 git에 커밋하며, 손으로 편집하지 않고 driver script로 재생성한다.

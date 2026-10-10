@@ -11,8 +11,9 @@ and Windows/x64 through interpreter, Baseline/DFG/FTL, WebAssembly and the sampl
 profiler. Tranche 2 is closed on Linux/x86_64: the verified, unmodified WPE WebKit
 2.54.0 source renders a local fixture through WPEPlatform's built-in headless
 backend and captures the accepted 640x480 reference frame. W^X remains separate
-hardening. No `PlatformCRT` or `crtweb` API code exists yet, and `libcrtweb` is not
-part of the root CMake build.
+hardening. Tranche 3A (Linux/x86_64) has frozen the frame-producer and input contracts and
+proves them with a WPEPlatform `crt` display module and a CRT-side consumer. No `PlatformCRT`
+or `crtweb` API code exists yet; the root CMake build only adds the consumer-side test.
 
 ## Layout
 
@@ -20,6 +21,12 @@ part of the root CMake build.
   `jsc_jit_acceptance.js` (run through the `jsc` shell), `jsc_context_cycle.cpp` (VM
   create/use/release on several threads) and `jsc_watchdog_test.cpp` (terminating compiled
   code with a signal-based trap).
+- `platform/` -- the Tranche 3A contracts and prototype: `crtweb_surface_wire.h` (the frozen
+  wire protocol, plain C), `crtweb_surface_client.h` (the consumer adapter for a `crtui`
+  SurfaceView) and `wpe-crt/wpe_crt_platform.c` (a GIO module registering the `crt` WPEDisplay).
+- `tests/platform-crt/` -- `surface_probe.c` (CRT-built consumer), `wpe_crt_host.c` (native
+  WebKitWebView on the `crt` display), `crt_surface.html`, and `web_surface_test.cc` (the
+  hermetic `crtui` SurfaceView test run by CTest). Driver: `tools/build_webkit_wpe_crt.py`.
 - `tests/wpe-reference/` -- the Tranche 2 native Linux fixture and headless WPE
   harness. It is deliberately a host program, not a CRT program.
 - `third_party/webkit/` -- the pinned WPE WebKit 2.54.0 reference: `recipe.json`

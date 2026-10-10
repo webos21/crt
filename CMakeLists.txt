@@ -956,6 +956,7 @@ add_subdirectory(shell)
 add_subdirectory(libcrtgfx)
 add_subdirectory(libcrtmedia)
 add_subdirectory(libcrtui)
+add_subdirectory(libcrtweb)
 
 # Hoisted ahead of add_subdirectory(libc/tests)/add_subdirectory(
 # libstdc++/tests) below, out of the if(Python3_Interpreter_FOUND) block
@@ -1327,7 +1328,7 @@ if(Python3_Interpreter_FOUND)
   get_property(CRT_ALL_REGISTERED_TESTS GLOBAL PROPERTY CRT_REGISTERED_TESTS)
   set(CRT_C_TEST_TARGETS)
   foreach(CRT_REGISTERED_TEST IN LISTS CRT_ALL_REGISTERED_TESTS)
-    if(NOT CRT_REGISTERED_TEST MATCHES "^(crtgfx_|crtmedia_|crtui_)" AND
+    if(NOT CRT_REGISTERED_TEST MATCHES "^(crtgfx_|crtmedia_|crtui_|crtweb_)" AND
        NOT CRT_REGISTERED_TEST MATCHES "cxx")
       string(REGEX REPLACE "_runs$" "" CRT_REGISTERED_TEST_TARGET "${CRT_REGISTERED_TEST}")
       if(TARGET "${CRT_REGISTERED_TEST_TARGET}")

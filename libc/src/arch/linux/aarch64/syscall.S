@@ -264,6 +264,15 @@ __crt_sys_socket:
   ret
 .size __crt_sys_socket, . - __crt_sys_socket
 
+.globl __crt_sys_socketpair
+.type __crt_sys_socketpair, %function
+.p2align 2
+__crt_sys_socketpair:
+  mov x8, #199
+  svc #0
+  ret
+.size __crt_sys_socketpair, . - __crt_sys_socketpair
+
 .globl __crt_sys_connect
 .type __crt_sys_connect, %function
 .p2align 2

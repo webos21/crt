@@ -409,6 +409,21 @@ ___crt_sys_poll:
   neg x0, x0
   ret
 
+.globl ___crt_sys_socketpair
+.p2align 2
+___crt_sys_socketpair:
+  mov x16, #135
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  stp x29, x30, [sp, #-16]!
+  mov x29, sp
+  bl ___crt_macos_to_bionic_errno
+  ldp x29, x30, [sp], #16
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_socket
 .p2align 2
 ___crt_sys_socket:

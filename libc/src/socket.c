@@ -81,6 +81,7 @@ void* dlsym(void* handle, const char* symbol);
 #endif
 
 long __crt_sys_socket(int domain, int type, int protocol);
+long __crt_sys_socketpair(int domain, int type, int protocol, int* sv);
 #if defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_close(int fd);
 #endif
@@ -498,6 +499,38 @@ int socket(int domain, int type, int protocol) {
   return fd;
 #else
   return (int)normalize_socket_result(__crt_sys_socket(domain, type, protocol));
+#endif
+}
+
+/* socketpair(2): Linux passes straight through (SOCK_CLOEXEC is a kernel type flag there). Darwin
+ * has no such flag, so it is stripped and applied with fcntl() to both ends, as socket() does.
+ * Which socket types a domain supports is the host kernel's call (AF_UNIX SOCK_SEQPACKET: Linux
+ * only); an unsupported combination is an ordinary errno. Windows: ENOSYS. */
+int socketpair(int domain, int type, int protocol, int sv[2]) {
+  if (sv == 0) {
+    return (int)__set_errno(EFAULT);
+  }
+#if defined(CRT_TARGET_OS_MACOS)
+  {
+    int cloexec = (type & SOCK_CLOEXEC) != 0;
+    int pair[2] = {-1, -1};
+    long result = __crt_sys_socketpair(domain, type & ~SOCK_CLOEXEC, protocol, pair);
+    int status = (int)normalize_socket_result(result);
+    if (status != 0) {
+      return status;
+    }
+    if (cloexec && (__crt_fd_set_cloexec(pair[0], 1) != 0 || __crt_fd_set_cloexec(pair[1], 1) != 0)) {
+      int saved_errno = errno;
+      __crt_sys_close(pair[0]);
+      __crt_sys_close(pair[1]);
+      return (int)__set_errno(saved_errno);
+    }
+    sv[0] = pair[0];
+    sv[1] = pair[1];
+    return 0;
+  }
+#else
+  return (int)normalize_socket_result(__crt_sys_socketpair(domain, type, protocol, sv));
 #endif
 }
 
