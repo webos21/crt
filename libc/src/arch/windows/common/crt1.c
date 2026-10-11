@@ -22,6 +22,9 @@ __declspec(dllimport) char* CRT_WINAPI GetCommandLineA(void);
 
 int main(int argc, char** argv, char** envp);
 void __crt_env_set_initial(char** envp);
+/* Defined by libc (syscall.c): the argument vector a parent spilled to a file because it did not
+ * fit the 32,767-character command line; 0 when there is none. */
+int __crt_windows_take_spilled_argv(char*** argv_out);
 void __crt_rootfs_bootstrap(int argc, char** argv);
 void exit(int status);
 /* Defined by libc/src/arch/windows/common/init_fini_array.c
@@ -63,6 +66,12 @@ void _crt_install_dwarf_unwind_safety_net(void);
  * than applying to every process unconditionally. */
 void __crt_windows_ensure_fork_capable_relaunch(const char* command_line) __attribute__((weak));
 #endif
+
+/* This image's __dso_handle (Itanium C++ ABI: the identity a C++ object's registration of its
+ * destructor names, __cxa_thread_atexit's third argument). The shared runtime linkage links no
+ * static libc++abi, whose own copy would otherwise provide it, so an executable of C++ objects with
+ * thread_local destructors (WebCore, Skia) had it undefined. Weak: libc++abi.a's shim wins. */
+__attribute__((weak)) void* __dso_handle = &__dso_handle;
 
 static char command_line_storage[CRT_COMMAND_LINE_MAX];
 static char* argv_storage[CRT_ARG_MAX];
@@ -123,6 +132,7 @@ static int parse_windows_command_line(char* command_line, char** argv, int max_a
 
 void mainCRTStartup(void) {
   char* command_line;
+  char** argv = argv_storage;
   int argc = 0;
 
   _pei386_runtime_relocator();
@@ -160,8 +170,18 @@ void mainCRTStartup(void) {
     argv_storage[1] = 0;
     argc = 1;
   }
-  __crt_windows_set_args(argc, argv_storage);
-  __crt_rootfs_bootstrap(argc, argv_storage);
+  {
+    /* After the relaunch check above, which re-runs this startup with the same environment. */
+    char** spilled = 0;
+    int spilled_count = __crt_windows_take_spilled_argv(&spilled);
+
+    if (spilled_count > 0) {
+      argv = spilled;
+      argc = spilled_count;
+    }
+  }
+  __crt_windows_set_args(argc, argv);
+  __crt_rootfs_bootstrap(argc, argv);
   __crt_run_init_array();
-  exit(main(argc, argv_storage, environ));
+  exit(main(argc, argv, environ));
 }

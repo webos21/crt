@@ -591,6 +591,17 @@ add_crt_test(unix_socket_test unix_socket_test.c)
 set_tests_properties(unix_socket_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "unix_socket_test: ok"
   TIMEOUT 120)
+# Windows: thread_local destructors (libc++abi builds __cxa_thread_atexit for UNIX only).
+if(CRT_TARGET_OS STREQUAL "windows")
+  add_crt_test(cxa_thread_atexit_test cxa_thread_atexit_test.c)
+  set_tests_properties(cxa_thread_atexit_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "cxa_thread_atexit_test: ok")
+endif()
+# A spawned child with an argument vector far beyond Windows' 32,767-character command line.
+add_crt_test(spawn_long_argv_test spawn_long_argv_test.c)
+set_tests_properties(spawn_long_argv_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "spawn_long_argv_test: ok"
+  TIMEOUT 120)
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"

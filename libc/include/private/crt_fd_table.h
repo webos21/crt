@@ -38,6 +38,11 @@
 #define CRT_BOOTSTRAP_ROOTFS_ENV "CRT_BOOTSTRAP_ROOTFS"
 #define CRT_BOOTSTRAP_SIGMASK_ENV "CRT_BOOTSTRAP_SIGMASK"
 #define CRT_BOOTSTRAP_SIGDEFAULT_ENV "CRT_BOOTSTRAP_SIGDEFAULT"
+/* The argument vector of a spawn that does not fit CreateProcess's 32,767-character command line
+ * (a Linux program may pass up to ARG_MAX, 2 MiB): the parent writes it to a file and names the
+ * file here; the child's startup reads it, deletes the file and unsets this variable. */
+#define CRT_ARGV_FILE_ENV "CRT_ARGV_FILE"
+#define CRT_ARGV_FILE_MAGIC 0x47524143U /* "CARG" */
 
 struct crt_fd_snapshot_entry {
   int fd;

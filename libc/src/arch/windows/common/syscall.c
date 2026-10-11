@@ -7728,7 +7728,186 @@ static BOOL crt_createprocess_with_retry(
   return created;
 }
 
+/* An argument vector that does not fit the 32,767-character command line: written as
+ * {magic, argc, byte count} followed by the NUL-terminated arguments, to a private file in the
+ * temp directory that the child's startup consumes (__crt_windows_take_spilled_argv). */
+static long spill_argv_to_file(char* const argv[], char* path, size_t path_size) {
+  static unsigned long counter;
+  char temp[260];
+  char name[32];
+  unsigned long long stamp = 0;
+  unsigned long id;
+  DWORD header[3];
+  DWORD written;
+  HANDLE file;
+  size_t argc = 0;
+  size_t bytes = 0;
+  size_t i;
+  size_t length;
+  size_t pos;
+  DWORD temp_length;
+  int digits;
+  unsigned long long value;
+
+  while (argv[argc] != 0) {
+    bytes += strlen(argv[argc]) + 1;
+    ++argc;
+  }
+  if (bytes > (size_t)0x7fffffff / 2) {
+    return -E2BIG;
+  }
+  temp_length = GetTempPathA((DWORD)sizeof(temp), temp);
+  if (temp_length == 0 || temp_length >= sizeof(temp)) {
+    return -ENOENT;
+  }
+  (void)QueryPerformanceCounter((long long*)&stamp);
+  id = (unsigned long)GetCurrentProcessId() ^ (unsigned long)(stamp & 0xffffffffULL) ^ ++counter;
+  /* "crtargv-" + decimal pid + "-" + decimal stamp + ".tmp", without snprintf (not needed here). */
+  length = 0;
+  {
+    static const char prefix[] = "crtargv-";
+    for (i = 0; i < sizeof(prefix) - 1; ++i) {
+      name[length++] = prefix[i];
+    }
+  }
+  value = (unsigned long long)id;
+  digits = 0;
+  {
+    char reversed[24];
+    do {
+      reversed[digits++] = (char)('0' + (int)(value % 10ULL));
+      value /= 10ULL;
+    } while (value != 0 && digits < 20);
+    while (digits > 0) {
+      name[length++] = reversed[--digits];
+    }
+  }
+  name[length++] = '.';
+  name[length++] = 't';
+  name[length++] = 'm';
+  name[length++] = 'p';
+  name[length] = 0;
+  if ((size_t)temp_length + length + 1 > path_size) {
+    return -ENAMETOOLONG;
+  }
+  memcpy(path, temp, temp_length);
+  memcpy(path + temp_length, name, length + 1);
+  file = CreateFileA(path, 0x40000000UL /* GENERIC_WRITE */, 0, 0, 1 /* CREATE_NEW */,
+                     0x80 /* FILE_ATTRIBUTE_NORMAL */, 0);
+  if (file == INVALID_HANDLE_VALUE) {
+    path[0] = 0;
+    return -EACCES;
+  }
+  header[0] = CRT_ARGV_FILE_MAGIC;
+  header[1] = (DWORD)argc;
+  header[2] = (DWORD)bytes;
+  if (!WriteFile(file, header, (DWORD)sizeof(header), &written, 0) || written != sizeof(header)) {
+    goto fail;
+  }
+  for (pos = 0; pos < argc; ++pos) {
+    size_t arg_length = strlen(argv[pos]) + 1;
+    size_t done = 0;
+
+    while (done < arg_length) {
+      DWORD chunk = (DWORD)((arg_length - done) > 65536 ? 65536 : (arg_length - done));
+
+      if (!WriteFile(file, argv[pos] + done, chunk, &written, 0) || written == 0) {
+        goto fail;
+      }
+      done += written;
+    }
+  }
+  CloseHandle(file);
+  return 0;
+fail:
+  CloseHandle(file);
+  DeleteFileA(path);
+  path[0] = 0;
+  return -ENOSPC;
+}
+
+/* Child side: if a spawning parent spilled this process's argument vector, load it. Returns the
+ * number of arguments (and sets *argv_out to a heap array) or 0 when nothing was spilled. */
+int __crt_windows_take_spilled_argv(char*** argv_out) {
+  const char* path = getenv(CRT_ARGV_FILE_ENV);
+  char path_copy[1024];
+  DWORD header[3];
+  DWORD got;
+  HANDLE file;
+  char* strings;
+  char** vector;
+  size_t length;
+  DWORD i;
+  DWORD index;
+
+  if (path == 0 || path[0] == 0) {
+    return 0;
+  }
+  length = strlen(path);
+  if (length >= sizeof(path_copy)) {
+    unsetenv(CRT_ARGV_FILE_ENV);
+    return 0;
+  }
+  memcpy(path_copy, path, length + 1);
+  unsetenv(CRT_ARGV_FILE_ENV);
+  file = CreateFileA(path_copy, 0x80000000UL /* GENERIC_READ */, 0x1 | 0x4 /* SHARE_READ|DELETE */, 0, 3,
+                     0x80, 0);
+  if (file == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  if (!ReadFile(file, header, (DWORD)sizeof(header), &got, 0) || got != sizeof(header) ||
+      header[0] != CRT_ARGV_FILE_MAGIC || header[1] == 0 || header[1] > 0x3fffffffUL ||
+      header[2] == 0 || header[2] > 0x7fffffffUL) {
+    CloseHandle(file);
+    DeleteFileA(path_copy);
+    return 0;
+  }
+  strings = (char*)malloc((size_t)header[2] + 1);
+  vector = (char**)malloc(((size_t)header[1] + 1) * sizeof(char*));
+  if (strings == 0 || vector == 0) {
+    free(strings);
+    free(vector);
+    CloseHandle(file);
+    DeleteFileA(path_copy);
+    return 0;
+  }
+  {
+    size_t done = 0;
+
+    while (done < header[2]) {
+      DWORD chunk = (DWORD)((header[2] - done) > 65536 ? 65536 : (header[2] - done));
+
+      if (!ReadFile(file, strings + done, chunk, &got, 0) || got == 0) {
+        break;
+      }
+      done += got;
+    }
+    if (done != header[2]) {
+      free(strings);
+      free(vector);
+      CloseHandle(file);
+      DeleteFileA(path_copy);
+      return 0;
+    }
+  }
+  CloseHandle(file);
+  DeleteFileA(path_copy);
+  strings[header[2]] = 0;
+  index = 0;
+  for (i = 0; i < header[2] && index < header[1]; ) {
+    vector[index++] = strings + i;
+    while (i < header[2] && strings[i] != 0) {
+      ++i;
+    }
+    ++i;
+  }
+  vector[index] = 0;
+  *argv_out = vector;
+  return (int)index;
+}
+
 struct crt_windows_spawn_context {
+  char argv_spill_path[1024];
   char application_path[4096];
   char command_line[32768];  /* CreateProcess's own limit is 32767 */
   struct crt_startupinfo startup;
@@ -7758,7 +7937,7 @@ long __crt_sys_posix_spawn(
   char bootstrap_pipe_text[17];
   char sigmask_text[17];
   char sigdefault_text[17];
-  struct crt_env_extra extras[7];
+  struct crt_env_extra extras[8];
   size_t extra_count = 0;
   sigset64_t sigmask;
   sigset64_t sigdefault;
@@ -7787,7 +7966,9 @@ long __crt_sys_posix_spawn(
 #define current_directory_buffer (ctx->current_directory_buffer)
 #define fd_snapshot_text (ctx->fd_snapshot_text)
 #define bootstrap_cwd (ctx->bootstrap_cwd)
-#define RETURN(value) do { long crt_spawn_return_value__ = (value); free(ctx); return crt_spawn_return_value__; } while (0)
+#define RETURN(value) do { long crt_spawn_return_value__ = (value); \
+    if (crt_spawn_return_value__ != 0 && ctx->argv_spill_path[0] != 0) DeleteFileA(ctx->argv_spill_path); \
+    free(ctx); return crt_spawn_return_value__; } while (0)
   ctx = (struct crt_windows_spawn_context*)calloc(1, sizeof(*ctx));
   if (ctx == 0) {
     return -ENOMEM;
@@ -7836,12 +8017,22 @@ long __crt_sys_posix_spawn(
       argv = ctx->shebang_argv;
     }
   }
+  native_windows_spawn = getenv("CRT_SPAWN_NATIVE_WINDOWS") != 0 ||
+                         envp_has_name(envp, "CRT_SPAWN_NATIVE_WINDOWS");
   result = build_process_command_line(path, argv, command_line, sizeof(command_line));
+  if (result == -E2BIG && !native_windows_spawn && argv != 0 && argv[0] != 0) {
+    /* A CRT child takes a longer vector out of band (see spill_argv_to_file). A native Windows
+     * program has only the command line, so it keeps E2BIG. */
+    char* const first_only[2] = {argv[0], 0};
+
+    result = spill_argv_to_file(argv, ctx->argv_spill_path, sizeof(ctx->argv_spill_path));
+    if (result == 0) {
+      result = build_process_command_line(path, first_only, command_line, sizeof(command_line));
+    }
+  }
   if (result != 0) {
     RETURN(result);
   }
-  native_windows_spawn = getenv("CRT_SPAWN_NATIVE_WINDOWS") != 0 ||
-                         envp_has_name(envp, "CRT_SPAWN_NATIVE_WINDOWS");
   if (native_windows_spawn) {
     extras[extra_count].name = "CRT_SPAWN_NATIVE_WINDOWS";
     extras[extra_count].value = 0;
@@ -8012,6 +8203,7 @@ long __crt_sys_posix_spawn(
   add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_ROOTFS_ENV, getenv("CRT_ROOTFS"));
   add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_SIGMASK_ENV, sigmask_text);
   add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_SIGDEFAULT_ENV, sigdefault_text);
+  add_env_extra(extras, &extra_count, CRT_ARGV_FILE_ENV, ctx->argv_spill_path);
   environment_block = build_windows_environment_block(envp, extras, extra_count);
   if (environment_block == 0) {
     if (fd_snapshot_ready) {

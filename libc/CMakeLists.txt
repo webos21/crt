@@ -154,7 +154,8 @@ set_source_files_properties(${CRT_REGEX_SOURCES} PROPERTIES
 # static libc and libc.dll; Windows DLL consumers link libc.dll's import
 # library and therefore cannot acquire independent compiler-rt copies.
 if(CRT_TARGET_OS STREQUAL "windows")
-  list(APPEND CRT_LIBC_SOURCES src/arch/windows/common/emutls.c)
+  list(APPEND CRT_LIBC_SOURCES src/arch/windows/common/emutls.c
+    src/arch/windows/common/cxa_thread_atexit.c)
 endif()
 
 add_library(c STATIC ${CRT_LIBC_SOURCES})

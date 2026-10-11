@@ -707,23 +707,29 @@ if(CRT_USE_COMPILER_RT)
       endif()
       string(REPLACE "\r\n" ";" CRT_COMPILER_RT_MEMBER_LIST "${CRT_COMPILER_RT_MEMBERS}")
       string(REPLACE "\n" ";" CRT_COMPILER_RT_MEMBER_LIST "${CRT_COMPILER_RT_MEMBER_LIST}")
-      set(CRT_COMPILER_RT_EMUTLS_MEMBER "")
+      # eprintf.c.obj is the same kind of problem: it is a GCC-compatibility
+      # helper whose object also defines an inline-UCRT `fprintf` and
+      # `__local_stdio_printf_options`, which resolves a consumer's `fprintf`
+      # ahead of libc.dll's import library (builtins precede it on the link
+      # line) and drags `__acrt_iob_func`/`__stdio_common_vfprintf` in.  No
+      # builtin helper needs it.
+      set(CRT_COMPILER_RT_DROP_MEMBERS "")
       foreach(CRT_COMPILER_RT_MEMBER IN LISTS CRT_COMPILER_RT_MEMBER_LIST)
-        if(CRT_COMPILER_RT_MEMBER MATCHES "(^|[\\\\/])emutls\\.c\\.(obj|o)$")
-          set(CRT_COMPILER_RT_EMUTLS_MEMBER "${CRT_COMPILER_RT_MEMBER}")
+        if(CRT_COMPILER_RT_MEMBER MATCHES "(^|[\\\\/])(emutls|eprintf)\\.c\\.(obj|o)$")
+          list(APPEND CRT_COMPILER_RT_DROP_MEMBERS "${CRT_COMPILER_RT_MEMBER}")
         endif()
       endforeach()
-      if(CRT_COMPILER_RT_EMUTLS_MEMBER)
+      foreach(CRT_COMPILER_RT_MEMBER IN LISTS CRT_COMPILER_RT_DROP_MEMBERS)
         execute_process(
           COMMAND "${CMAKE_AR}" d "${CRT_COMPILER_RT_FILTERED}"
-                  "${CRT_COMPILER_RT_EMUTLS_MEMBER}"
+                  "${CRT_COMPILER_RT_MEMBER}"
           RESULT_VARIABLE CRT_COMPILER_RT_FILTER_RESULT)
         if(NOT CRT_COMPILER_RT_FILTER_RESULT EQUAL 0)
-          message(FATAL_ERROR "cannot remove ${CRT_COMPILER_RT_EMUTLS_MEMBER} from compiler-rt builtins")
+          message(FATAL_ERROR "cannot remove ${CRT_COMPILER_RT_MEMBER} from compiler-rt builtins")
         endif()
-      endif()
+      endforeach()
       set(CRT_COMPILER_RT_BUILTINS "${CRT_COMPILER_RT_FILTERED}")
-      message(STATUS "compiler-rt builtins (without emutls): ${CRT_COMPILER_RT_BUILTINS}")
+      message(STATUS "compiler-rt builtins (without emutls/eprintf): ${CRT_COMPILER_RT_BUILTINS}")
     else()
       message(STATUS "compiler-rt builtins: ${CRT_COMPILER_RT_BUILTINS}")
     endif()
