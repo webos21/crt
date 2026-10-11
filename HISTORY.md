@@ -37,6 +37,41 @@ construction); both need a Windows transport decision and a Skia build of this t
 
 ## 2026-10-11
 
+### Web Tranche 3B milestone B3: WebCore and PAL build and link for the CRT platform with the bundled Skia
+
+`tools/build_webkit_crt_port.py` (new) composes the tree (pinned commit + `libcrtweb/port` + carried
+patches), configures `-DPORT=CRT -DCRT_ENABLE_WEBCORE=ON` against the B2 prefix, builds, and with
+`--run-tests` runs and audits `libcrtweb/tests/webcore/crtweb_webcore_graph_test`. `OptionsCRT.cmake`
+gained the WebCore configuration (PlayStation-shaped, Skia, curl + OpenSSL, no GPU process, WebGL,
+media or WebRTC) and `WebCore/PlatformCRT.cmake` plus `PAL/pal/PlatformCRT.cmake` list the files:
+PlayStation's plain stubs unchanged, libwpe's key/pasteboard/editor files, the EGL context files
+against a "no GPU" library. The bundled Skia m154 builds with CRT's clang and libc++ (782 sources),
+and WebCore (about 6,600 units) compiles and links with it. The test program starts WTF and JSC,
+calls `ProcessWarming::initializeNames()`, creates a `Document` and an element without a Page,
+paints two rectangles into a Skia `ImageBuffer` and checks the pixels, and draws text through
+fontconfig -> FreeType -> HarfBuzz -> Skia (86.70 px for nine DejaVu Sans Mono glyphs at 16 px, 216
+dark pixels); the program references no GLib symbol and needs only SDK, port-prefix and loader
+objects.
+
+What building found that the plan did not have: fontconfig is required (the bundled Skia and
+WebKit's Skia font backend use it off Android/Windows), so decision D6 is revised and fontconfig 2.17.1
+is a port; WebCore links EGL and GLES unconditionally and libwpe's CMake needs an EGL library, so a
+`crt-egl` port provides the Khronos headers and CRT-built `libEGL.so`/`libGLESv2.so` that answer
+every call with failure (replaced in Tranche 9); libwpe 1.16.3 is a static port as in PlayStation
+(its shared loader uses `dlopen()`, which the CRT Linux libdl does not implement); WebKit's OpenSSL
+crypto is written for OpenSSL 1.1 (a force-included shim for `EVP_PKEY_get0_RSA`, one file);
+`PLATFORM(PLAYSTATION)` selects types in nine WebCore files (patch 0007) and `Page.cpp` calls a
+setting that exists only for GTK/WPE (patch 0008), because upstream's PlayStation port does not build
+with Skia at this commit. `tools/crt-port-build.py` gained `build.system headers` and
+`crt_shared_libraries`. In CRT: the BSD `timer*` macros, `initstate()`/`setstate()`,
+`shm_open()`/`shm_unlink()`, and the Bionic liblog functions (declared, never defined); in
+`tools/crt-c++`, `__dso_handle` for shared-runtime executables and the loader as a needed object so
+`__tls_get_addr` (libc++abi, ICU) resolves for `thread_local` destructors.
+
+Verified: see `docs/acceptance/crtweb_acceptance.md` ("B3 result"). Not exercised: node insertion into
+a Page-less document (crashes in `Element::insertionSteps`; needs a window), networking and TLS, the
+process model. Open: macOS, Linux/aarch64, Windows; the CA bundle; CRT-owned user agent and display.
+
 ### IPv6 on macOS through CRT libc, curl HTTPS over ::1 without Apple frameworks
 
 CRT's macOS socket layer was IPv4-only. Added: `AF_INET6` socket/sockaddr_in6/IPV6_* translation to Darwin, IPv6

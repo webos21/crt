@@ -81,3 +81,37 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
   by the macOS FTL/B3 replay: the Linux register table allocated x18 and generated code faulted
   after a runtime call. `WTF_CRT_DARWIN_ARM64_ABI` is emitted only for macOS/arm64, so
   Linux/aarch64 retains WebKit's Linux table.
+- `0005` registers `CRT` in `ALL_PORTS` (a port that is not upstream has to be registered).
+- `0007` widens nine `PLATFORM(PLAYSTATION)` sites in WebCore to `(PLATFORM(PLAYSTATION) ||
+  PLATFORM(CRT))`: PlatformCRT compiles the PlayStation port's files for the same roles (the
+  accessibility wrapper class, `RenderTheme`/`PlatformRenderTheme`, ChromeClient accessibility
+  notifications, SQLite extras, ICU searcher). Defining `WTF_PLATFORM_PLAYSTATION` as well was
+  rejected: it changes WTF's `PlatformEnable`/`PlatformHave` and 28 WTF sites for every module.
+- `0008` makes `Page::filterRenderingModes()` skip `Settings::hardwareAccelerationEnabled()` for
+  `PLATFORM(CRT)`: that preference exists only for GTK/WPEPlatform, and the CRT port has no
+  hardware-acceleration setting (CPU painting until Tranche 9).
+
+## WebCore files of PlatformCRT (milestone B3)
+
+`libcrtweb/port/Source/WebCore/PlatformCRT.cmake` and `.../PAL/pal/PlatformCRT.cmake` follow
+`PlatformPlayStation.cmake`. Upstream files used unchanged (they are plain stubs or generic code):
+
+| Role | Upstream file used | Note |
+| --- | --- | --- |
+| Accessibility | `accessibility/playstation/*` | stubs; widened by `0007` |
+| Resource usage | `page/playstation/*` | stubs |
+| Network state | `platform/network/playstation/NetworkStateNotifierPlayStation.cpp` | |
+| MIME types, screen, theme, scrollbar theme | `platform/playstation/*`, `rendering/playstation/*` | |
+| System fonts | `platform/graphics/playstation/SystemFontDatabasePlayStation.cpp` | returns the standard family; real data comes from fontconfig |
+| Keyboard keys, pasteboard, editor | `platform/libwpe/*`, `editing/libwpe/*` | through the static `libwpe` port |
+| EGL/GL context, display | `platform/graphics/egl/*`, `PlatformDisplay.cpp` | compiled and linked against the CRT "no GPU" libraries; no context is created |
+
+Not taken from PlayStation: `UserAgentPlayStation.cpp` (PlayStation's user-agent string), the
+curl TLS-handle file (certificate store API of the PlayStation SDK), `PlatformDisplayLibWPE` and
+`GLContextLibWPE` (the WPE renderer backend): CRT-owned replacements arrive with B4/B5 (user agent,
+CA bundle, display). The WebCore side of key events is libwpe's; the WebKit side is B6.
+
+Findings that differ from the plan: the PAL directory is `Source/WebCore/PAL/pal`; upstream's
+PlayStation port is not compile-clean with Skia at this commit (`PlatformDisplaySkia.cpp`,
+`Page.cpp`), so PlatformCRT is the first non-GTK/WPE Skia port to build.
+

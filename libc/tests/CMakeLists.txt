@@ -418,6 +418,18 @@ set_tests_properties(memfd_create_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "memfd_create_test: ok"
 )
 
+add_crt_test(android_log_test android_log_test.c)
+set_tests_properties(android_log_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "I/crtlog: value=42 name=wpe.*E/crtlog: plain text.*W/crtlog: buf x.*android_log_test: ok"
+)
+add_crt_test(random_state_test random_state_test.c)
+set_tests_properties(random_state_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "random_state_test: ok"
+)
+add_crt_test(shm_open_test shm_open_test.c)
+set_tests_properties(shm_open_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "shm_open_test: ok"
+)
 add_crt_test(socketpair_test socketpair_test.c)
 set_tests_properties(socketpair_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "socketpair_test: ok"

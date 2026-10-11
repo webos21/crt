@@ -185,6 +185,88 @@
       ],
       "reason": "On a Darwin build host the top-level CMakeLists.txt includes WebKitXcodeSDK.cmake before project(), which resolves an Apple SDK with xcrun, pins Xcode's compilers and tools, and stops with 'Building for an Apple platform without an SDK directory (CMAKE_OSX_SYSROOT) or supported PORT variable' for any port other than Mac, IOS and JSCOnly. The CRT port is not an Apple port: it builds against the CRT sysroot with the CRT toolchain file and compilers, and presents macOS to WebKit as a Linux-shaped platform (patches 0001, 0002, 0004; Host ABI firewall), so it must not select an Apple SDK at all. The patch skips the include for PORT=CRT.",
       "remove_when": "WebKit decides on the SDK from the target (CMAKE_SYSTEM_NAME/CMAKE_TOOLCHAIN_FILE) instead of the build host, or accepts a port that opts out of Apple SDK resolution."
+    },
+    {
+      "id": "0007-platform-crt-is-playstation-shaped",
+      "patch": "0007-platform-crt-is-playstation-shaped.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebCore/editing/ICUSearcher.h",
+          "sha256_before": "895ea737650bc6ebecec452f13b117b332d8ae90dc39166eeff03253a41a0c45",
+          "sha256_after": "f26af24041d31150e464ebb806f7510d912ac73feb2b5b1cf6702a8b2935ee8b",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebCore/editing/ICUSearcher.cpp",
+          "sha256_before": "a3e75e6c787d35db4476ade81f070c48eab39fbedff3d72485fd19272ab6bc89",
+          "sha256_after": "237146eac8c6b960a5556d94d784c49ed9d252a4aaf8efc7e99a6b77bd34c19b",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebCore/editing/CachedMatchFinder.cpp",
+          "sha256_before": "bcdd4b7309c3b9658b2f4c2ccb72a52fe54d9dc215259e2aba7e5f3dbcff6f4b",
+          "sha256_after": "be4dcc21f26e65c191c1a836f46d20f722afc775a2675cd872d3c449d205d944",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebCore/platform/sql/SQLiteExtras.h",
+          "sha256_before": "0702487c80362eea5d65615828c89e4401026cea2ea5469801ed37c1786f883b",
+          "sha256_after": "600f8907f4ac915e5817852061a9bdded69aca3358d19e1cba12041fa85b110e",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebCore/page/ChromeClient.h",
+          "sha256_before": "619783769453b47305b90a067f8a904c7a342db82523be7ac27b23798aa39bee",
+          "sha256_after": "6beede7b0ac6fb9c53313d23b95de661ee80f5d41876191344bda3a9e2b2b6ec",
+          "license": "LGPL-2+"
+        },
+        {
+          "file": "Source/WebCore/loader/EmptyClients.h",
+          "sha256_before": "ee754dac27b01f46ba42c46aaae80db39a8829caba07ed9741b0d8c5301f2230",
+          "sha256_after": "9ba226d36b30239c60ed7396dfdb2b34e29b12872d3c9f4b1b9986b49fe9cd3e",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebCore/rendering/PlatformRenderTheme.h",
+          "sha256_before": "ff3eedb62d12af6f2228e249379f5c177b4ae32eab8840db32c1580f5b39cf3c",
+          "sha256_after": "5b83eaa62033c02169a8d47e26815079eb81ceefe7bb2706ee6fad509b120540",
+          "license": "LGPL-2+"
+        },
+        {
+          "file": "Source/WebCore/rendering/RenderTheme.h",
+          "sha256_before": "c8cff212775de922897342c3d17480ad710c77127903fa26bfbe1a223d7ef3b7",
+          "sha256_after": "9d69ec53be422a30e05184831ab2822d22d204f7fb3438270f4546ad2165412e",
+          "license": "LGPL-2+"
+        },
+        {
+          "file": "Source/WebCore/accessibility/AXCoreObject.h",
+          "sha256_before": "90888cca0933d88da9b0db896919dbb4a40c9c6ad29f35ca0ddefb9b3a01a4f1",
+          "sha256_after": "e79ed76aa490940b5172ea973411369d76984b0cfbdd623eb261a4b364d1982a",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "Nine WebCore files select per-port types and behaviour with PLATFORM(PLAYSTATION) (the accessibility wrapper class, the RenderTheme/PlatformRenderTheme base, ChromeClient accessibility notifications, the SQLite extras, ICU searcher variants). PlatformCRT compiles the PlayStation port's own files for these roles (docs/acceptance/crtweb_acceptance.md, 3B plan), so it must take the same branches; defining WTF_PLATFORM_PLAYSTATION as well was rejected because 28 sites in WTF and the PlatformEnable/PlatformHave headers would then change for every module and JavaScriptCore and WebCore would no longer see the same macros. Each hunk only widens PLATFORM(PLAYSTATION) to (PLATFORM(PLAYSTATION) || PLATFORM(CRT)).",
+      "remove_when": "Upstream adds a CRT (or a generic non-GLib) platform guard, or the files are replaced by CRT-owned implementations of the same roles; rebase by re-running the same textual widening."
+    },
+    {
+      "id": "0008-skia-without-hardware-acceleration-setting",
+      "patch": "0008-skia-without-hardware-acceleration-setting.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebCore/page/Page.cpp",
+          "sha256_before": "b61a2e33705b7726c248330560b72959fe5014153b82f508bca2509187d1ea1b",
+          "sha256_after": "c53c07b12f5db59c822491f6ad4e1e391157e7d9179c059ad0a06392a177229e",
+          "license": "LGPL-2+"
+        }
+      ],
+      "reason": "Page::filterRenderingModes() calls Settings::hardwareAccelerationEnabled() for every Skia platform except Windows and WPE-without-WPEPlatform, but the HardwareAccelerationEnabled preference exists only for PLATFORM(GTK) || ENABLE(WPE_PLATFORM) (Source/WTF/Scripts/Preferences/UnifiedWebPreferences.yaml). A Skia port that is neither (Skia is upstream's only 2D renderer at this commit, but only GTK/WPE build with it) fails to compile. The CRT port paints on the CPU and has no hardware-acceleration setting, so it takes the software branch.",
+      "remove_when": "Upstream makes the call conditional on the preference's own condition, or the preference's condition includes the other Skia ports."
     }
   ],
   "license_policy": {
@@ -208,14 +290,14 @@
       "source": "libcrtweb/port/Source/cmake/OptionsCRT.cmake",
       "origin": "crt",
       "license": "BSD-2-Clause",
-      "purpose": "the port's options (B1: JSCOnly's, plus the BUILDING_CRT__/WTF_PLATFORM_CRT identity)"
+      "purpose": "the port's options (B1: JSCOnly's; B3: with -DCRT_ENABLE_WEBCORE=ON the WebCore/Skia configuration), plus the BUILDING_CRT__/WTF_PLATFORM_CRT identity"
     },
     {
       "file": "Source/WTF/wtf/PlatformCRT.cmake",
       "source": "libcrtweb/port/Source/WTF/wtf/PlatformCRT.cmake",
       "origin": "crt",
       "license": "BSD-2-Clause",
-      "purpose": "WTF platform file list (B1: JSCOnly's)"
+      "purpose": "WTF platform file list (JSCOnly's, plus unix/UnixFileDescriptor.h for WebCore's SharedMemory)"
     },
     {
       "file": "Source/bmalloc/PlatformCRT.cmake",
@@ -230,6 +312,27 @@
       "origin": "crt",
       "license": "BSD-2-Clause",
       "purpose": "JavaScriptCore platform file list (B1: JSCOnly's)"
+    },
+    {
+      "file": "Source/WebCore/PlatformCRT.cmake",
+      "source": "libcrtweb/port/Source/WebCore/PlatformCRT.cmake",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "WebCore platform file list (B3), modelled on PlatformPlayStation.cmake"
+    },
+    {
+      "file": "Source/WebCore/PAL/pal/PlatformCRT.cmake",
+      "source": "libcrtweb/port/Source/WebCore/PAL/pal/PlatformCRT.cmake",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "PAL platform file list (B3): OpenSSL digests, generic clock"
+    },
+    {
+      "file": "Source/WebCore/platform/crt/OpenSSL3Compat.h",
+      "source": "libcrtweb/port/Source/WebCore/platform/crt/OpenSSL3Compat.h",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "force-included into CryptoKeyRSAOpenSSL.cpp: EVP_PKEY_get0_RSA() returning RSA* as OpenSSL 1.1 did"
     }
   ]
 }

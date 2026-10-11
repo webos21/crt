@@ -66,6 +66,8 @@ int rand(void);
 void srand(unsigned int seed);
 long random(void);
 void srandom(unsigned int seed);
+char* initstate(unsigned int seed, char* state, size_t size);
+char* setstate(char* state);
 void exit(int status) __attribute__((noreturn));
 void _Exit(int status) __attribute__((noreturn));
 void quick_exit(int status) __attribute__((noreturn));

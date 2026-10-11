@@ -71,6 +71,14 @@ def check(manifest: dict, tree: Path | None, repo: Path) -> list:
                     problems.append(f"{where}: header says {measured!r}, manifest records {recorded!r}")
                 if hashlib.sha256(data).hexdigest() != entry.get("sha256_before"):
                     problems.append(f"{where}: not the upstream bytes (sha256_before)")
+    # Every file of the overlay is CRT-owned and must be declared, so none is added unreviewed.
+    overlay = repo / "libcrtweb" / "port"
+    declared = {entry.get("source") for entry in manifest.get("new_files", [])}
+    if overlay.is_dir():
+        for found in sorted(path for path in overlay.rglob("*") if path.is_file()):
+            relative = found.relative_to(repo).as_posix()
+            if relative not in declared:
+                problems.append(f"new_files: {relative} is in libcrtweb/port but not declared")
     for entry in manifest.get("new_files", []):
         path = entry.get("file", "?")
         if entry.get("origin") != "crt":

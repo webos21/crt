@@ -1227,8 +1227,12 @@ line). New files live in `libcrtweb/port/` (mirroring the WebKit tree), are decl
   `crypto/openssl`), and libcurl must be OpenSSL-backed (`CURLOPT_SSL_CTX_FUNCTION`), which CRT's curl
   port (mbedTLS) is not. OpenSSL and an OpenSSL-backed libcurl are new CRT ports for this stage; the
   `crtmedia` networking stack is untouched. Replacing the backend with CRT networking is Tranche 8.
-- D6 **Fonts**: no fontconfig. Skia's FreeType scaler over a CRT `SystemFontDatabase` that reads the
-  bundled font directory (`libcrtgfx/assets/fonts`) and configured host directories.
+- D6 **Fonts**: ~~no fontconfig~~ *revised at B3*: the bundled Skia's CMake and WebKit's Skia font
+  backend (`FontCacheSkia.cpp`, `SkiaSystemFallbackFontCache.cpp`) use fontconfig on every platform
+  that is not Android or Windows, so keeping it out needs a WebKit patch. fontconfig is a CRT port
+  (`porting/recipes/fontconfig.json`); the font set is whatever the embedder's `FcConfig` scans
+  (`FONTCONFIG_FILE`, later `crtweb`'s own), which for the tests is `libcrtgfx/assets/fonts`. The
+  CRT `SystemFontDatabase` stays the standard-family stub of the PlayStation file until B5.
 - D7 **Embedding**: following PlayStation, a C view API (`WKView`-style) inside WebKit, wrapped by
   `libcrtweb`'s own C API in Tranche 4; no WebKit, WPE or GLib type is public.
 - D8 **Dependencies are CRT ports** (AGENTS.md: no host-library shortcut). Needed beyond what
@@ -1244,7 +1248,7 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 | B0 | Source and licensing gates | closed above |
 | **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10; replayed 2026-10-11 on macOS/arm64**: the 1B/1C JSC acceptance passes through `--port CRT` |
 | **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64), replayed 2026-10-11 (macOS/arm64)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
-| B3 | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link |
+| **B3** | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | **done 2026-10-11 (Linux/x86_64)**: `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link (`tools/build_webkit_crt_port.py --run-tests`) |
 | B4 | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | the UI process launches the Web and Network processes and a message round-trips; killing a child is detected |
 | B5 | First render | `reference.html` loads and the Tranche 2 proof holds (DOM/canvas string, 640x480, >= 4 colours), delivered through the 3A frame contract to `surface_probe`; the frame is diffed against the WPE reference and the difference is reported |
 | B6 | Input | the 3A input checks (pointer click -> page report and pixel change, key code/modifiers, wheel, text, resize, stalled consumer) pass against the CRT port instead of the WPE module |
@@ -1346,8 +1350,35 @@ named shared mapping in place of descriptor passing is the obvious shape) is sti
 *Not covered by the macOS replay:* the CA bundle, SIMD/asm paths (still off), Linux/aarch64 and Windows for B2, and
 promoting the web group into the automated all-ports set (it waits for Windows).
 
-*Risks, named so they are watched rather than discovered.* (1) The bundled Skia m154 must build with
-CRT's clang and libc++ (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about
+*B3 result (Linux/x86_64, 2026-10-11).* `tools/build_webkit_crt_port.py --run-tests` composes the
+tree (pinned commit + `libcrtweb/port` + patches 0001-0008), configures `-DPORT=CRT
+-DCRT_ENABLE_WEBCORE=ON` against the B2 prefix and builds WTF, bmalloc, JavaScriptCore (all JIT
+tiers, as B1), the bundled Skia m154 (782 sources, 2.6 min at 12 jobs: risk 1 below is retired),
+PAL and WebCore (about 6,600 translation units; a full build took roughly half an hour to an hour
+at 12 jobs, not timed separately) into
+`crtweb_webcore_graph_test`, which runs: WTF and JSC initialisation, `ProcessWarming::
+initializeNames()`, a `Document` (no Page) with an element created in it, a Skia-backed
+`ImageBuffer` painted with two rectangles and read back (exact pixels), and text drawn through
+fontconfig -> FreeType -> HarfBuzz -> Skia (width 86.70 px for nine DejaVu Sans Mono glyphs at
+16 px, 216 dark pixels). The program has no GLib/GIO/GObject symbol and its `DT_NEEDED` set is the
+SDK, the port prefix and the loader (`acceptance-b3.json`). Dependencies added by this milestone,
+all CRT ports: `fontconfig` 2.17.1, `crt-egl` (Khronos headers + the CRT "no GPU" EGL/GLES
+libraries) and static `libwpe` 1.16.3. *What the plan did not foresee, found by building:* fontconfig
+is mandatory (D6); WebCore links EGL/GLES unconditionally; WebKit's OpenSSL crypto sources are
+written for OpenSSL 1.1 and need a force-included shim for `EVP_PKEY_get0_RSA` (one file, no source
+change); `PLATFORM(PLAYSTATION)` guards select types in nine WebCore files (patch 0006) and
+`Page.cpp` calls a setting that exists only for GTK/WPE (patch 0008), because upstream's PlayStation
+port is not Skia-clean at this commit; the CRT toolchain needed `__dso_handle` for shared-runtime
+executables and the loader as a needed object for `__tls_get_addr`
+(`docs/porting/bionic_libc_gaps.md`). *Not exercised:* inserting nodes into a Page-less
+`Document` crashes in `Element::insertionSteps` (WebCore expects a window; the test creates but does
+not insert), networking and TLS, any process model, the CA bundle. *Open:* macOS, Linux/aarch64
+and Windows for B3; `UserAgent`, curl TLS handle (CA store) and display files are still the
+PlayStation SDK ones or absent and are CRT-owned work in B4/B5; first-run font scan of the bundled
+fonts takes about two minutes (fontconfig cache).
+
+*Risks, named so they are watched rather than discovered.* (1) ~~The bundled Skia m154 must build with
+CRT's clang and libc++~~ *retired by B3 (it does)* (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about
 16,000 files, so build time and the unified-source layout dominate iteration; (3) OpenSSL and an
 OpenSSL-backed curl add a TLS stack beside mbedTLS in one SDK, which needs a clear
 boundary (web stage only); (4) fonts without fontconfig change text metrics against the WPE reference,

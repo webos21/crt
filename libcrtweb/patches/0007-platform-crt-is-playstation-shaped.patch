@@ -1,0 +1,125 @@
+diff -urN a/Source/WebCore/accessibility/AXCoreObject.h b/Source/WebCore/accessibility/AXCoreObject.h
+--- a/Source/WebCore/accessibility/AXCoreObject.h	2026-10-11 13:29:18.859395114 +0900
++++ b/Source/WebCore/accessibility/AXCoreObject.h	2026-10-11 13:29:18.859935059 +0900
+@@ -81,7 +81,7 @@
+ 
+ typedef WebCore::AccessibilityObjectAtspi AccessibilityObjectWrapper;
+ 
+-#elif PLATFORM(PLAYSTATION) || PLATFORM(HAIKU)
++#elif (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || PLATFORM(HAIKU)
+ class AccessibilityObjectWrapper : public RefCounted<AccessibilityObjectWrapper> { };
+ #else
+ class AccessibilityObjectWrapper;
+@@ -1505,7 +1505,7 @@
+     RetainPtr<WebAccessibilityObjectWrapper> m_wrapper;
+ #elif PLATFORM(WIN)
+     COMPtr<AccessibilityObjectWrapper> m_wrapper;
+-#elif PLATFORM(PLAYSTATION) || PLATFORM(HAIKU)
++#elif (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || PLATFORM(HAIKU)
+     RefPtr<AccessibilityObjectWrapper> m_wrapper;
+ #elif USE(ATSPI)
+     RefPtr<AccessibilityObjectAtspi> m_wrapper;
+diff -urN a/Source/WebCore/editing/CachedMatchFinder.cpp b/Source/WebCore/editing/CachedMatchFinder.cpp
+--- a/Source/WebCore/editing/CachedMatchFinder.cpp	2026-10-11 13:29:18.856376303 +0900
++++ b/Source/WebCore/editing/CachedMatchFinder.cpp	2026-10-11 13:29:18.856428147 +0900
+@@ -101,7 +101,7 @@
+     };
+ 
+     if (backwards) {
+-#if !PLATFORM(PLAYSTATION)
++#if !(PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+         icuSearcher.setOffset(startOffset);
+         while (true) {
+             std::optional<size_t> matchStartCandidate = icuSearcher.previous();
+diff -urN a/Source/WebCore/editing/ICUSearcher.cpp b/Source/WebCore/editing/ICUSearcher.cpp
+--- a/Source/WebCore/editing/ICUSearcher.cpp	2026-10-11 13:29:18.855676527 +0900
++++ b/Source/WebCore/editing/ICUSearcher.cpp	2026-10-11 13:29:18.855736477 +0900
+@@ -163,7 +163,7 @@
+     return static_cast<size_t>(result);
+ }
+ 
+-#if !PLATFORM(PLAYSTATION)
++#if !(PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+ std::optional<size_t> ICUSearcher::previous()
+ {
+     UErrorCode status = U_ZERO_ERROR;
+diff -urN a/Source/WebCore/editing/ICUSearcher.h b/Source/WebCore/editing/ICUSearcher.h
+--- a/Source/WebCore/editing/ICUSearcher.h	2026-10-11 13:29:18.855320226 +0900
++++ b/Source/WebCore/editing/ICUSearcher.h	2026-10-11 13:29:18.855358422 +0900
+@@ -40,7 +40,7 @@
+     void setText(std::span<const char16_t>);
+     void setOffset(size_t);
+     std::optional<size_t> next();
+-#if !PLATFORM(PLAYSTATION)
++#if !(PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     std::optional<size_t> previous();
+ #endif
+     size_t matchedLength();
+diff -urN a/Source/WebCore/loader/EmptyClients.h b/Source/WebCore/loader/EmptyClients.h
+--- a/Source/WebCore/loader/EmptyClients.h	2026-10-11 13:29:18.858000906 +0900
++++ b/Source/WebCore/loader/EmptyClients.h	2026-10-11 13:29:18.858039345 +0900
+@@ -174,7 +174,7 @@
+     void AXFinishFrameLoad() final { }
+ #endif
+ 
+-#if PLATFORM(PLAYSTATION) || PLATFORM(HAIKU)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || PLATFORM(HAIKU)
+     void postAccessibilityNotification(AccessibilityObject&, AXNotification) final { }
+     void postAccessibilityNodeTextChangeNotification(AccessibilityObject*, AXTextChange, unsigned, const String&) final { }
+     void postAccessibilityFrameLoadingEventNotification(AccessibilityObject*, AXLoadingEvent) final { }
+diff -urN a/Source/WebCore/page/ChromeClient.h b/Source/WebCore/page/ChromeClient.h
+--- a/Source/WebCore/page/ChromeClient.h	2026-10-11 13:29:18.857317164 +0900
++++ b/Source/WebCore/page/ChromeClient.h	2026-10-11 13:29:18.857402484 +0900
+@@ -587,7 +587,7 @@
+     virtual void AXFinishFrameLoad() = 0;
+ #endif
+ 
+-#if PLATFORM(PLAYSTATION) || PLATFORM(HAIKU)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || PLATFORM(HAIKU)
+     virtual void postAccessibilityNotification(AccessibilityObject&, AXNotification) = 0;
+     virtual void postAccessibilityNodeTextChangeNotification(AccessibilityObject*, AXTextChange, unsigned, const String&) = 0;
+     virtual void postAccessibilityFrameLoadingEventNotification(AccessibilityObject*, AXLoadingEvent) = 0;
+diff -urN a/Source/WebCore/platform/sql/SQLiteExtras.h b/Source/WebCore/platform/sql/SQLiteExtras.h
+--- a/Source/WebCore/platform/sql/SQLiteExtras.h	2026-10-11 13:29:18.856986636 +0900
++++ b/Source/WebCore/platform/sql/SQLiteExtras.h	2026-10-11 13:29:18.857018505 +0900
+@@ -37,7 +37,7 @@
+ inline int sqliteBindBlob(sqlite3_stmt* statement, int index, std::span<const uint8_t> data, void(*destructor)(void*) = SQLITE_TRANSIENT)
+ {
+     // sqlite3_bind_blob64() symbol is undefined on the PlayStation port.
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     return sqlite3_bind_blob(statement, index, data.data(), data.size(), destructor); // NOLINT
+ #else
+     return sqlite3_bind_blob64(statement, index, data.data(), data.size(), destructor); // NOLINT
+diff -urN a/Source/WebCore/rendering/PlatformRenderTheme.h b/Source/WebCore/rendering/PlatformRenderTheme.h
+--- a/Source/WebCore/rendering/PlatformRenderTheme.h	2026-10-11 13:29:18.858559764 +0900
++++ b/Source/WebCore/rendering/PlatformRenderTheme.h	2026-10-11 13:29:18.858587437 +0900
+@@ -25,6 +25,6 @@
+ #include <WebCore/RenderThemeMac.h>
+ #elif USE(THEME_ADWAITA)
+ #include <WebCore/RenderThemeAdwaita.h>
+-#elif PLATFORM(PLAYSTATION)
++#elif (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+ #include <WebCore/RenderThemePlayStation.h>
+ #endif
+diff -urN a/Source/WebCore/rendering/RenderTheme.h b/Source/WebCore/rendering/RenderTheme.h
+--- a/Source/WebCore/rendering/RenderTheme.h	2026-10-11 13:29:18.858763567 +0900
++++ b/Source/WebCore/rendering/RenderTheme.h	2026-10-11 13:29:18.858816135 +0900
+@@ -60,7 +60,7 @@
+ class RenderThemeIOS;
+ #elif USE(THEME_ADWAITA)
+ class RenderThemeAdwaita;
+-#elif PLATFORM(PLAYSTATION)
++#elif (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+ class RenderThemePlayStation;
+ #endif
+ 
+@@ -88,7 +88,7 @@
+     WEBCORE_EXPORT static RenderThemeIOS& singleton();
+ #elif USE(THEME_ADWAITA)
+     WEBCORE_EXPORT static RenderThemeAdwaita& singleton();
+-#elif PLATFORM(PLAYSTATION)
++#elif (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     WEBCORE_EXPORT static RenderThemePlayStation& singleton();
+ #else
+     WEBCORE_EXPORT static RenderTheme& singleton();

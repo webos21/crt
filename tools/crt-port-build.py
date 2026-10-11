@@ -1923,6 +1923,28 @@ def port_sysroot_for(recipe, sysroot, preset_build_dir):
     return candidate
 
 
+def build_headers_port(root, work, port_prefix, recipe, env):
+    """build.system "headers": install header trees from the extracted source into the prefix, for
+    API definitions that ship no build system (build.headers: [{"from": dir, "to": dir-in-prefix}])."""
+    for item in recipe["build"]["headers"]:
+        source = work / item["from"]
+        if not source.is_dir():
+            raise SystemExit(f"{recipe['name']}: header directory {item['from']} not found in the source")
+        destination = Path(port_prefix) / item["to"]
+        destination.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, destination, dirs_exist_ok=True)
+        progress(f"{recipe['name']}: installed {item['from']} -> {destination}")
+    # CRT-owned shared libraries built from one local source file (crt_shared_libraries:
+    # [{"output": name, "source": repo-relative path}]), for interfaces CRT answers itself.
+    for item in recipe["build"].get("crt_shared_libraries", []):
+        library_dir = Path(port_prefix) / "lib"
+        library_dir.mkdir(parents=True, exist_ok=True)
+        command = shlex.split(env["CC"]) + ["-shared", "-fPIC", "-O2", str(root / item["source"]),
+                                            f"-Wl,-soname,{item['output']}",
+                                            "-o", str(library_dir / item["output"])]
+        run(command, work, env, f"{recipe['name']}: build {item['output']}")
+
+
 def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, use_crt_shell=False, configure_only=False, built=None, jobs=None):
     if built is None:
         built = set()
@@ -1934,7 +1956,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
 
     recipe = recipes[port]
     build = recipe["build"]
-    if build["system"] not in ("configure", "amalgamation", "android_host_tool", "cmake"):
+    if build["system"] not in ("configure", "amalgamation", "android_host_tool", "cmake", "headers"):
         raise SystemExit(f"{port}: build system '{build['system']}' is not supported by crt-port-build.py yet")
 
     if build["system"] == "configure" and port != "make" and not configure_only and "make" in recipes:
@@ -1969,6 +1991,8 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
         build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
     elif build["system"] == "cmake":
         build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, jobs)
+    elif build["system"] == "headers":
+        build_headers_port(root, work, port_prefix, recipe, env)
     if configure_only:
         # A configure probe has not installed the port. Writing the ordinary
         # completion stamp here made the next real build silently skip it.

@@ -734,7 +734,7 @@ native Linux desktop: `crtmedia_hw_decode_test` reports
 `hw_frame_observed=yes cpu_transfer=pass fallback=no`; flush/reuse and
 15/15 hardware lifecycle pass; full `ctest` 132/132.
 
-## Web-stage ports (Web Tranche 3B, milestone B2; Linux/x86_64 2026-10-10, macOS/arm64 2026-10-11)
+## Web-stage ports (Web Tranche 3B, milestones B2 and B3; Linux/x86_64 2026-10-10..11, macOS/arm64 B2 2026-10-11)
 
 The dependencies WebKit's non-GLib ports require (`Source/cmake/OptionsWin.cmake`,
 `OptionsPlayStation.cmake`). They carry `"group": "web"`: `port-build-web`/`port-test-web` build and
@@ -751,6 +751,9 @@ calls against the prefix and fails on any host-path resolution.
 | `harfbuzz` | 14.6.0 | `cmake`, with FreeType and ICU | shaping through FreeType, ICU Unicode funcs | HarfBuzz >= 1.4.2, ICU component |
 | `openssl` | 3.5.9 (LTS) | configure (`./Configure`), libraries only | SHA-256, HMAC, AES-GCM, ECDSA, a full TLS 1.3 handshake and data exchange, static + shared | OpenSSL (curl backend, WebCrypto) |
 | `curl-openssl` | 8.21.0 | configure, installs to `<prefix>/curl-openssl` | HTTPS against an in-process TLS server, backend `OpenSSL/3.5.9`, `CURLOPT_SSL_CTX_FUNCTION` called with an `SSL_CTX` | CURL >= 7.87 with the OpenSSL backend |
+| `fontconfig` | 2.17.1 | configure, FreeType + expat | in-memory configuration, family match, character coverage | required by the bundled Skia and WebKit's Skia font backend (B3); first-run scan of the bundled fonts takes ~2 min (the Pretendard OTFs) |
+| `crt-egl` | Khronos headers `db3425b` + CRT stub | `headers` (new) + CRT-built `libEGL.so`/`libGLESv2.so` | `eglInitialize` fails, `eglGetError` is `EGL_NOT_INITIALIZED` | WebCore links EGL/GLES unconditionally, libwpe's CMake needs an EGL library; replaced in Tranche 9 |
+| `libwpe` | 1.16.3 | `cmake`, static (`libwpe.a`), no XKB | key-symbol to Unicode, pasteboard singleton with a CRT-supplied loader interface | WPE >= 1.14 (PlayStation-shaped WebCore: key codes, pasteboard, editor) |
 
 All eleven `find_package()` calls (the seven above plus ICU, PNG, SQLite3 and ZLIB from the existing
 ports) resolve under the CRT prefix with WebKit's own Find modules. Verified on Linux/x86_64 and
@@ -772,3 +775,8 @@ four findings: `docs/acceptance/crtweb_acceptance.md`, B1/B2 on macOS.
 Not verified by anything in this table: that these libraries work *inside* WebKit (B3 and later),
 SIMD paths (libjpeg-turbo built without them; OpenSSL with `no-asm`), and the OpenSSL CA bundle
 (deliberately unset).
+
+B3 linked these libraries into WebCore, Skia and one test program and ran it (fonts, painting,
+Unicode, ICU, HarfBuzz); the network and TLS libraries are not exercised there (that is B4/B5).
+Not verified by anything in this table: SIMD paths (libjpeg-turbo built without them; OpenSSL with
+`no-asm`) and the OpenSSL CA bundle (deliberately unset).

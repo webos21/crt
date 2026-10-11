@@ -432,3 +432,32 @@ Bionic: the OpenSSL recipe compiles with `-D__ANDROID__=1` so OpenSSL takes its 
 (no SysV shm, no ucontext async), which is the branch that matches a Bionic-compatible libc.
 Earlier the same day the web surface protocol had added `SOCK_SEQPACKET`, `MSG_TRUNC`, `MSG_CTRUNC`
 and `socketpair()`. Covered by the OpenSSL and curl-openssl port tests and `socketpair_test`.
+
+## Found by the WebCore build (Web Tranche 3B, milestone B3; 2026-10-11)
+
+Building fontconfig, libwpe and WebCore against the SDK showed these gaps, all fixed in CRT:
+
+- `<sys/time.h>`: `timerclear`, `timerisset`, `timercmp`, `timeradd`, `timersub` (Bionic has them;
+  fontconfig's cache code uses `timercmp`).
+- `<stdlib.h>`: `initstate()` and `setstate()` (fontconfig's `FcRandom`). The generator has one
+  feedback polynomial, so the buffer holds the 48-bit state of one independent sequence and the size
+  only has to be >= 8 bytes (BSD selects among several polynomials by size).
+- `<sys/mman.h>`: `shm_open()` and `shm_unlink()`. Bionic has neither (Android uses ashmem); WebKit's
+  `SharedMemoryUnix.cpp` falls back to them after `memfd_create()`. Implemented as files named
+  `crt_shm_<name>` in the temporary directory, the way `memfd_create()` is; not a kernel object.
+- `<android/log.h>`: `__android_log_buf_write` was declared and not defined. `__android_log_write`,
+  `__android_log_print`, `__android_log_vprint`, `__android_log_buf_print`, `__android_log_assert`
+  and `log_id_t` now exist; records go to standard error as `P/tag: text`. There is no separate
+  `liblog`, so libwpe is configured with `HAVE_ANDROID_LOG_H=0` (a link of `-llog` would fail).
+- Toolchain, not libc: a shared-runtime C++ executable that contains static destructors (any large
+  static library) failed with `undefined reference to __dso_handle`, because `libc.so`'s is hidden;
+  `tools/crt-c++` now links `crtbegin_so.o` into such executables as it does into shared objects. And
+  `libc++abi.so`/`libicuuc.so` call the loader's `__tls_get_addr`, which resolves only if the loader
+  is a `DT_NEEDED` object (glibc's `libc.so.6` is one, CRT's `libc.so` is not): the wrapper adds an
+  empty stub carrying the loader's soname, so a `thread_local` with a destructor
+  (`__cxa_thread_atexit`) no longer dies with a symbol lookup error. Neither change links a host
+  library.
+
+Covered by `random_state_test`, `shm_open_test`, `android_log_test`, the fontconfig and libwpe port
+tests and `crtweb_webcore_graph_test`.
+

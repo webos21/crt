@@ -1,0 +1,12 @@
+diff -urN a/Source/WebCore/page/Page.cpp b/Source/WebCore/page/Page.cpp
+--- a/Source/WebCore/page/Page.cpp	2026-10-11 13:14:45.758017556 +0900
++++ b/Source/WebCore/page/Page.cpp	2026-10-11 13:14:45.758402175 +0900
+@@ -4909,7 +4909,7 @@
+         modes.add(FilterRenderingMode::Accelerated);
+ #endif
+ 
+-#if USE(SKIA) && !PLATFORM(WIN) && (!PLATFORM(WPE) || ENABLE(WPE_PLATFORM))
++#if USE(SKIA) && !PLATFORM(WIN) && !PLATFORM(CRT) && (!PLATFORM(WPE) || ENABLE(WPE_PLATFORM))
+     if (settings().hardwareAccelerationEnabled())
+         modes.add(FilterRenderingMode::Accelerated);
+ #endif

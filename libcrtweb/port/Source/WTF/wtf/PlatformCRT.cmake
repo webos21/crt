@@ -26,3 +26,8 @@
 # PlatformCRT: B1 reuses the JSCOnly file lists unchanged; the CRT-specific lists start with the
 # WebCore milestone. (WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS includes Platform${PORT}.cmake.)
 include(${CMAKE_CURRENT_LIST_DIR}/PlatformJSCOnly.cmake)
+
+# WebCore's SharedMemory.h uses WTF::UnixFileDescriptor.
+list(APPEND WTF_PUBLIC_HEADERS
+    unix/UnixFileDescriptor.h
+)

@@ -84,6 +84,15 @@ extern "C" {
  * docs/porting/bionic_libc_gaps.md and HISTORY.md's 2026-08-16 entry. */
 int memfd_create(const char* name, unsigned int flags);
 
+/* shm_open()/shm_unlink() -- POSIX, absent from Bionic (Android uses ashmem). Provided for
+ * sources that fall back to them (WebKit's SharedMemoryUnix.cpp), implemented the same way as
+ * memfd_create(): a file in the temporary directory ($TMPDIR, $TEMP, $TMP or /tmp) named
+ * crt_shm_<name>. The name must be "/" plus at least one character and no further "/"
+ * (EINVAL otherwise), as POSIX allows an implementation to require. Not a kernel object:
+ * its lifetime is the file's. */
+int shm_open(const char* name, int oflag, mode_t mode);
+int shm_unlink(const char* name);
+
 void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset);
 void* mmap64(void* addr, size_t length, int prot, int flags, int fd, off64_t offset);
 int mprotect(void* addr, size_t length, int prot);

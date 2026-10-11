@@ -1070,7 +1070,40 @@ if [ "$target_os" = linux ]; then
   fi
 
   set -- "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
-    "${CRT_SYSROOT}/lib/crt1_init_array.o" -Wl,--start-group
+    "${CRT_SYSROOT}/lib/crt1_init_array.o"
+  # Shared runtime linkage uses libc.so, whose __dso_handle is hidden, so an executable that
+  # contains C++ objects with static destructors (every static library of a large C++ project:
+  # WebCore, Skia) needs its own, exactly as a shared object does above. Found by the Web
+  # Tranche 3B WebCore link: "undefined reference to `__dso_handle'".
+  if [ "$runtime_linkage" = shared ] && [ -f "${CRT_SYSROOT}/lib/crtbegin_so.o" ] &&
+     [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
+    set -- "$@" "${CRT_SYSROOT}/lib/crtbegin_so.o"
+  fi
+  # The host loader's global-dynamic TLS entry point. libc++abi.so and libicuuc.so are built with
+  # the general-dynamic TLS model and call __tls_get_addr, which only the dynamic loader defines
+  # (the accepted loader boundary, docs/acceptance/crtweb_acceptance.md). The loader is searched
+  # for that symbol only when some object lists it as DT_NEEDED -- glibc's own libc.so.6 does,
+  # CRT's libc.so does not -- so first use of `thread_local` with a destructor
+  # (__cxa_thread_atexit in WebCore) died with "symbol lookup error". Name the loader as a needed
+  # object through an empty stub that carries the loader's soname: nothing of the host is linked
+  # and the soname resolves to the interpreter already mapped.
+  if [ "$runtime_linkage" = shared ]; then
+    case "${CRT_TARGET_ARCH:-$(uname -m)}" in
+      *aarch64*|*arm64*|*ARM64*) loader_arch=aarch64; loader_soname="ld-linux-aarch64.so.1" ;;
+      *) loader_arch=x86_64; loader_soname="ld-linux-x86-64.so.2" ;;
+    esac
+    loader_stub="${TMPDIR:-/tmp}/crt-loader-needed-$(id -u)-${loader_arch}.so"
+    if [ ! -f "$loader_stub" ]; then
+      loader_stub_tmp="${loader_stub}.$$"
+      printf '' | "$cxx" -x c - -shared -nostdlib -fPIC "-Wl,-soname,${loader_soname}" \
+        -o "$loader_stub_tmp" 2>/dev/null && mv -f "$loader_stub_tmp" "$loader_stub"
+      rm -f "$loader_stub_tmp"
+    fi
+    if [ -f "$loader_stub" ]; then
+      set -- "$@" -Wl,--no-as-needed "$loader_stub" -Wl,--as-needed
+    fi
+  fi
+  set -- "$@" -Wl,--start-group
   if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
     if [ "$runtime_linkage" = shared ]; then
       set -- "$@" "$cxx_lib"

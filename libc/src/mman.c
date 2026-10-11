@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -246,6 +247,39 @@ static const char* memfd_tmpdir(void) {
     return dir;
   }
   return "/tmp";
+}
+
+static int shm_object_path(const char* name, char* path, size_t size) {
+  int written;
+
+  if (name == 0 || name[0] != '/' || name[1] == '\0' || strchr(name + 1, '/') != 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  written = snprintf(path, size, "%s/crt_shm_%s", memfd_tmpdir(), name + 1);
+  if (written < 0 || (size_t)written >= size) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  return 0;
+}
+
+int shm_open(const char* name, int oflag, mode_t mode) {
+  char path[4096];
+
+  if (shm_object_path(name, path, sizeof(path)) != 0) {
+    return -1;
+  }
+  return open(path, oflag & (O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC), mode);
+}
+
+int shm_unlink(const char* name) {
+  char path[4096];
+
+  if (shm_object_path(name, path, sizeof(path)) != 0) {
+    return -1;
+  }
+  return unlink(path);
 }
 
 int memfd_create(const char* name, unsigned int flags) {

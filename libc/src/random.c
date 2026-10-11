@@ -74,6 +74,53 @@ long random(void) {
   return (long)((random_state >> 17) & 0x7fffffffULL);
 }
 
+// initstate()/setstate(): the caller-supplied buffer holds the generator
+// state of one independent sequence (the 48-bit state, saved when another
+// sequence is selected). BSD's buffers also select a different feedback
+// polynomial by size; this generator has only one, so any size >= 8 bytes
+// is accepted and the size has no other effect. The first call returns the
+// internal buffer that holds the initial sequence, as BSD does.
+static unsigned char random_internal_state[8];
+static char* random_current = (char*)random_internal_state;
+
+static void random_save(char* buffer) {
+  unsigned long long state = random_state;
+  for (int i = 0; i < 8; i++) {
+    buffer[i] = (char)(state >> (8 * i));
+  }
+}
+
+static void random_load(const char* buffer) {
+  unsigned long long state = 0;
+  for (int i = 0; i < 8; i++) {
+    state |= (unsigned long long)(unsigned char)buffer[i] << (8 * i);
+  }
+  random_state = state;
+}
+
+char* initstate(unsigned int seed, char* state, size_t size) {
+  char* previous = random_current;
+  if (state == NULL || size < 8) {
+    return NULL;
+  }
+  random_save(previous);
+  random_current = state;
+  srandom(seed);
+  random_save(state);
+  return previous;
+}
+
+char* setstate(char* state) {
+  char* previous = random_current;
+  if (state == NULL) {
+    return NULL;
+  }
+  random_save(previous);
+  random_load(state);
+  random_current = state;
+  return previous;
+}
+
 void srand(unsigned int seed) {
   srandom(seed);
 }

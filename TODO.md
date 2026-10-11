@@ -92,10 +92,11 @@ then macOS/arm64.
 port, milestones B1-B7, `docs/acceptance/crtweb_acceptance.md`) is decided and **B1 is done on
 Linux/x86_64**: `-DPORT=CRT` builds JavaScriptCore from the pinned commit plus `libcrtweb/port`
 (one carried patch, 0005) and passes the interpreter and Baseline/DFG/FTL/Wasm acceptance.
-**B2 is done on Linux/x86_64** (HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL,
-OpenSSL-backed libcurl as `group: web` ports; WebKit's own `find_package()` resolves all eleven
-dependencies). **Next: B3**, WebCore/PAL with the bundled Skia, then B4 multi-process, B5 first
-render through the 3A contract, B6 input, B7 close; B2's macOS/arm64 replay (with B1) is done 2026-10-11; its Linux/aarch64 and Windows replays are open. Also open: a Windows/macOS transport decision;
+**B2 is done on Linux/x86_64** (the dependency ports; WebKit's own `find_package()` resolves all
+eleven) and **B3 is done on Linux/x86_64**: WebCore and PAL build and link with the bundled Skia into
+a program that paints and draws text (`tools/build_webkit_crt_port.py --run-tests`). **Next: B4**
+(UI/Web/Network processes, process launcher, IPC), then B5 first render through the 3A contract, B6
+input, B7 close; B1/B2 are replayed on macOS/arm64 (2026-10-11); the B3 replay and the Linux/aarch64 and Windows replays are open. Also open: a Windows/macOS transport decision;
 live crtgfx presentation of a web SurfaceView; GPU-buffer output (Tranche 9).
 * [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
   `crtui`'s web view; no WebKit type in a public header.

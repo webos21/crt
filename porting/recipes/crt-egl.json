@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "name": "crt-egl",
+  "version": "db3425b",
+  "group": "web",
+  "source": {
+    "url": "https://github.com/KhronosGroup/EGL-Registry/archive/db3425b8246136faccb5e2782b5694960bd6edf1.tar.gz",
+    "archive": "EGL-Registry-db3425b8246136faccb5e2782b5694960bd6edf1.tar.gz",
+    "source_dir": "EGL-Registry-db3425b8246136faccb5e2782b5694960bd6edf1",
+    "sha256": "3d6b42b23da8030f5b29ade07d7384c5f885e713f17f04650f6cd4b8329b88e8"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "headers",
+    "headers": [
+      {
+        "from": "api/EGL",
+        "to": "include/EGL"
+      },
+      {
+        "from": "api/KHR",
+        "to": "include/KHR"
+      }
+    ],
+    "crt_shared_libraries": [
+      {
+        "output": "libEGL.so",
+        "source": "libcrtweb/platform/gles-stub/crt_gles_stub.c"
+      },
+      {
+        "output": "libGLESv2.so",
+        "source": "libcrtweb/platform/gles-stub/crt_gles_stub.c"
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "no-gpu",
+      "type": "compile-run",
+      "source": "porting/tests/egl_headers_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libEGL.so",
+        "@PORT_PREFIX@/lib/libGLESv2.so",
+        "-Wl,--allow-shlib-undefined"
+      ],
+      "expect_stdout": "egl_headers_test: ok"
+    }
+  ],
+  "status": {},
+  "notes": [
+    "Added 2026-10-11 for Web Tranche 3B milestone B3. The Khronos EGL-Registry headers (EGL, KHR; Apache-2.0/MIT per file; a pinned main-branch commit because the registry publishes no releases, archive checksum of the GitHub-generated tarball not independently verified) plus the CRT-owned 'no GPU' libEGL.so and libGLESv2.so (libcrtweb/platform/gles-stub). WebCore links OpenGL::GLES and EGL unconditionally and libwpe's CMake requires an EGL library, but the CRT port paints on the CPU until Tranche 9; the libraries answer every call with failure, so a context is never created. Not a host library: it is built from CRT source with the CRT toolchain."
+  ]
+}
