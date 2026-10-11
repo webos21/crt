@@ -772,6 +772,12 @@ the Apple-framework probe of upstream's configure is made to fail by `porting/sh
 `libc.dylib` is two libcs in one process; the wrappers drop `-lpthread`/`-lrt` on macOS. Details and the
 four findings: `docs/acceptance/crtweb_acceptance.md`, B1/B2 on macOS.
 
+On Windows/x64 (2026-10-12) the web group passes with `--use-crt-shell` through the `cmake` build system (new for
+Windows) and per-recipe `target_overrides.windows`: libjpeg-turbo, libwebp, libxml2, libpsl and HarfBuzz static and
+shared; OpenSSL and `curl-openssl` **static only** (`crt-windows-<arch>` OpenSSL target, `no-shared`; the shared tests
+are skipped on Windows with a recorded reason); fontconfig and libwpe as on the other hosts; `crt-egl` builds
+`libEGL.dll`/`libGLESv2.dll` with import libraries. Host tools: `pkgconf`, Perl (OpenSSL `Configure`), Python.
+
 The B3 ports (`fontconfig`, `libwpe`, `crt-egl`; group `web`) are also `shared-pass` on macOS/arm64 (2026-10-12):
 `fontconfig` needs `path_prepend` (the CRT gperf ahead of Xcode's, new recipe field) and `-D__linux__=1` for its
 `statfs` branch, `libwpe` and the `crt-egl` test need `-D__unix__=1` for `eglplatform.h`, and `crt-egl`'s

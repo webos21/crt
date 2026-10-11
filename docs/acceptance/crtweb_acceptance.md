@@ -1246,9 +1246,9 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 | | Milestone | Gate |
 |---|---|---|
 | B0 | Source and licensing gates | closed above |
-| **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10; replayed 2026-10-11 on macOS/arm64**: the 1B/1C JSC acceptance passes through `--port CRT` |
-| **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64), replayed 2026-10-11 (macOS/arm64)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
-| **B3** | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | **done 2026-10-11 (Linux/x86_64)**: `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link (`tools/build_webkit_crt_port.py --run-tests`) |
+| **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10; replayed 2026-10-11 on macOS/arm64 and 2026-10-12 on Windows/x64**: the 1B/1C JSC acceptance passes through `--port CRT` |
+| **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64), replayed 2026-10-11 (macOS/arm64) and 2026-10-12 (Windows/x64, OpenSSL and libcurl static)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
+| **B3** | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | **done 2026-10-11 (Linux/x86_64), replayed on macOS/arm64 and Windows/x64 (2026-10-12)**: `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link (`tools/build_webkit_crt_port.py --run-tests`) |
 | B4 | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | the UI process launches the Web and Network processes and a message round-trips; killing a child is detected |
 | B5 | First render | `reference.html` loads and the Tranche 2 proof holds (DOM/canvas string, 640x480, >= 4 colours), delivered through the 3A frame contract to `surface_probe`; the frame is diffed against the WPE reference and the difference is reported |
 | B6 | Input | the 3A input checks (pointer click -> page report and pixel change, key code/modifiers, wheel, text, resize, stalled consumer) pass against the CRT port instead of the WPE module |
@@ -1423,6 +1423,23 @@ soname; Mach-O loaded two `libcurl.4.dylib`), so the driver now puts `curl-opens
 
 *Not covered by the macOS replay:* the CA bundle, SIMD/asm paths (still off), Linux/aarch64 and Windows for B2, and
 promoting the web group into the automated all-ports set (it waits for Windows).
+
+*B1, B2 and B3 on Windows/x64 (2026-10-12).* Replayed on the in-tree SDK (`dist/05-ui`, rebuilt after the pull):
+**B1** `build_webkit_jsc.py --port CRT --mode baseline-jit` passes every step (a ~1% JSC `Invalid value for lock: 0`
+abort in one 4-thread context-cycle process, the failure already recorded for JSCOnly, passed on the repeat).
+**B2** the seven web ports configure, build, install and pass their run tests through `crt-port-build.py
+--use-crt-shell --test`; OpenSSL 3.5.9 and the OpenSSL-backed libcurl are **static only** on Windows (a target that
+keeps the LLP64 `BN_ULONG` as `unsigned long long`: `porting/shims/win32/openssl-crt-windows.conf`; the Unix target's
+ELF version script and soname have no PE counterpart), and the libcurl test fetches HTTPS from an in-process TLS
+server over IPv4 and over `::1`. `tools/check_web_dependencies.py` resolves all eleven `find_package()` calls inside
+the prefix (SQLite3 is the `sqlite-amalgamation` port). **B3** `build_webkit_crt_port.py --run-tests` builds WTF,
+bmalloc, JavaScriptCore, PAL, WebCore and the bundled Skia (about 7,900 steps) and the graph test prints text width
+86.70 and 216 dark text pixels, the Linux and macOS numbers; the import audit lists only CRT DLLs, port DLLs and
+KERNEL32, and no GLib symbol. The findings are in `HISTORY.md` (2026-10-12): COFF reports undefined symbols that an ELF
+`--gc-sections` link drops (`__dso_handle`, `__cxa_thread_atexit`, `CurlSSLHandle::platformInitialize()`,
+`SkStrikeRef`), the 8,191-character `.cmd` limit and the 32,767-character spawn limit, native-program redirection, and
+the OpenSSL LLP64 target. *Open on Windows:* the multi-process milestones B4-B7, shared OpenSSL/libcurl, the CA bundle,
+SIMD/asm paths, and a clean-prerequisite story for Perl and pkgconf (`docs/guides` does not list them yet).
 
 *B3 result (Linux/x86_64, 2026-10-11).* `tools/build_webkit_crt_port.py --run-tests` composes the
 tree (pinned commit + `libcrtweb/port` + patches 0001-0008), configures `-DPORT=CRT

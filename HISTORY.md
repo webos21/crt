@@ -22,6 +22,59 @@ and `dup`s share state, and a framed `dup` beyond the 4096-entry table is `EMFIL
 (`unix_socket_test`); each was confirmed to fail with its fix removed. Kept by decision: a sender that already wrote
 part of a record completes it (`EAGAIN` only when nothing was written).
 
+### Tranche 3B replayed on Windows/x64: B1, B2 and B3 (JavaScriptCore, the web ports, WebCore with Skia)
+
+`build_webkit_jsc.py --port CRT --mode baseline-jit` passes the whole acceptance (every Baseline/DFG/FTL/Wasm step, host ABI audit clean; one
+earlier run hit the known ~1% JSC `Invalid value for lock: 0` abort in a 4-thread context-cycle process and passed on
+the repeat, as recorded for the JSCOnly build). Seven web ports build and pass their run tests with
+`crt-port-build.py --use-crt-shell --test` (libjpeg-turbo, libwebp, libxml2, libpsl, HarfBuzz static+shared; OpenSSL
+and the OpenSSL-backed libcurl **static only**, including curl HTTPS over `::1` through the Windows IPv6 layer), plus
+SQLite, fontconfig, libwpe and the `crt-egl` no-GPU libraries; `check_web_dependencies.py` resolves all eleven
+`find_package()` calls inside the prefix; and `build_webkit_crt_port.py --run-tests` builds WTF, bmalloc, JavaScriptCore,
+PAL, WebCore and the bundled Skia from the pinned commit and passes the B3 gate with the Linux and macOS numbers
+(text width 86.70, 216 dark pixels, no GLib symbol, imports only CRT DLLs, port DLLs and KERNEL32).
+
+What the replay found, all fixed in the CRT, the tooling or the carried files:
+
+- *Link-time symbol resolution differs.* lld's COFF driver reports an undefined symbol from any object a link pulls
+  in; an ELF link with `--gc-sections` drops it silently when the referencing function is unreferenced. The WebCore link
+  therefore exposed four references that Linux and macOS have always carried unresolved: `__dso_handle` (a weak
+  definition in `crt1.c`; libc++abi.a's shim still wins where it is linked), `__cxa_thread_atexit` (libc++abi builds
+  it for UNIX only: `libc/src/arch/windows/common/cxa_thread_atexit.c`, on the pthread key CRT already runs at thread
+  exit, test `cxa_thread_atexit_test`), `CurlSSLHandle::platformInitialize()` (a CRT-owned empty hook,
+  `libcrtweb/port/.../CurlSSLHandleCRT.cpp`; the CA bundle stays unset) and `SkStrikeRef.cpp`, which WebKit's own Skia
+  CMake list omits (added to the `Skia` target from `PlatformCRT.cmake`).
+- *Command lines.* Windows passes at most 8,191 characters to a `.cmd` compiler wrapper (a WebCore compile line has
+  several hundred `-I`/`-D`): `CMAKE_NINJA_FORCE_RESPONSE_FILE=ON` moves defines, includes and flags into response files.
+  And a CRT-to-CRT spawn whose argument vector exceeds CreateProcess's 32,767 characters (OpenSSL's `ar qc libcrypto.a
+  <1,500 objects>`) failed with `E2BIG`: `__crt_sys_posix_spawn` now writes such a vector to a private temp file named by
+  `CRT_ARGV_FILE`, which the child's startup (`crt1.c`) reads and deletes; a native Windows program keeps the limit.
+  Test `spawn_long_argv_test` (4,000 arguments, 160 KB, plus a short grandchild).
+- *Native programs and redirection.* A native (non-CRT) Windows tool run by a CRT shell only receives the shell's
+  redirections when spawned in "native" mode (`CRT_SPAWN_NATIVE_WINDOWS`); `pkg-config` and Python now go through
+  `tools/crt-native-tool` like `ar`, and OpenSSL's generators run as `CRT_SPAWN_NATIVE_WINDOWS=1 perl` (the output file
+  was silently empty and the build then died on "did not return a true value").
+- *`crt-port-build.py` on Windows:* the `cmake` build system (compilers are the `.cmd` wrappers, native CMake
+  detection, `-I<prefix>/include` because CMake drops an implicit directory), a space-free `CONFIG_SHELL`
+  (`Program Files`), `PKG_CONFIG`/`PYTHON` for configure, `configure_interpreter` (OpenSSL's `./Configure` is Perl),
+  `@HOST_PERL@`, `@ROOT_POSIX@` (`/c/Users/...`, the spelling fontconfig accepts as absolute), test `skip`, DLL+import
+  library output for `crt_shared_libraries`, forward-slash `--prefix` for `install_subdir`, and a `fetch_ports.py` that
+  skips archive members whose path exceeds the 259 characters a classic Windows path allows (HarfBuzz test data).
+- *OpenSSL.* Windows' ABI is LLP64: the `linux-x86_64` target says `SIXTY_FOUR_BIT_LONG`, so `BN_ULONG` was a 32-bit
+  `unsigned long` counted as 64 bits ("bignum too long" at the first EC key). `porting/shims/win32/openssl-crt-windows.conf`
+  defines `crt-windows-{x86_64,aarch64}` (the Linux targets with `SIXTY_FOUR_BIT`). Shared OpenSSL is not built (the
+  Unix target's version script and soname have no PE counterpart), so libcurl is static as well.
+- *Toolchain.* `crt-cc` drops `-lpthread`/`-lrt` on Windows as on macOS; the builtins archive no longer contains
+  compiler-rt's `eprintf.c.obj`, whose `fprintf` shadowed libc.dll's (it broke linking Skia into `libcrtgfx_skia.dll`);
+  `build_webkit_jsc.py` finds `kernel32.lib` for the wrappers; the WebKit driver sets `PYTHONUTF8` (the CSS value
+  generator read a UTF-8 file as cp949), uses a native Windows Perl (MSYS Perl compares `/c/...` with `C:/...` in the
+  bindings generator) and `NVALGRIND` for bmalloc (valgrind.h casts pointers to `unsigned long`).
+
+Host tools the Windows replay needs beyond CMake/Ninja/Python/Ruby: `pkgconf` (libxml2, libpsl and fontconfig configure
+scripts, WebKit's Find modules) and a Perl that has `ExtUtils::MakeMaker`, `IPC::Cmd` and friends (OpenSSL's
+`Configure`; Git for Windows' Perl lacks them, so the run used MSYS Perl with a small overlay of pure-Perl core
+modules, and Strawberry Perl for WebKit's generators). Windows CTest 182/182.
+
 ### Tranche 3 replayed on macOS/arm64: 3A contracts and B3 (WebCore, PAL, Skia)
 
 `crtweb_wire_layout_test`, `crtweb_wire_transport_test` and `crtweb_web_surface_test` pass on macOS, and
