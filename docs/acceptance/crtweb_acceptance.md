@@ -1242,8 +1242,8 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 | | Milestone | Gate |
 |---|---|---|
 | B0 | Source and licensing gates | closed above |
-| **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10**: the 1B/1C JSC acceptance passes through `--port CRT` |
-| **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
+| **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10; replayed 2026-10-11 on macOS/arm64**: the 1B/1C JSC acceptance passes through `--port CRT` |
+| **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64), replayed 2026-10-11 (macOS/arm64)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
 | B3 | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link |
 | B4 | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | the UI process launches the Web and Network processes and a message round-trips; killing a child is detected |
 | B5 | First render | `reference.html` loads and the Tranche 2 proof holds (DOM/canvas string, 640x480, >= 4 colours), delivered through the 3A frame contract to `surface_probe`; the frame is diffed against the WPE reference and the difference is reported |
@@ -1267,6 +1267,41 @@ a second install (`<prefix>/curl-openssl`) because both curls share the soname `
 consumer must put its directory first (tests do) and the web stage should not put `<prefix>/lib` on
 `LD_LIBRARY_PATH` ahead of it. *Open:* macOS, Linux/aarch64 and Windows for every row (the `cmake`
 system is Linux/macOS only until replayed), SIMD (`WITH_SIMD=0`, `no-asm`), the CA bundle.
+
+*B1 and B2 on macOS/arm64 (2026-10-11).* Replayed on the in-tree SDK after a rebuild of `crt-ui-dist`
+(verified; full `ctest` 179/179). **B1:** `tools/build_webkit_jsc.py --port CRT` passes in `baseline-jit` mode from
+an empty work root (compose 29 s, configure 11 s, build 127 s; 43 acceptance steps including the FTL and
+WebAssembly tiers, clean Mach-O host-ABI audit) and in `interpreter` mode. It needed one more carried patch,
+`0006-crt-port-no-apple-sdk`: on a Darwin build host the pinned commit's top-level `CMakeLists.txt` includes
+`WebKitXcodeSDK.cmake`, which selects an Apple SDK and stops for any port but Mac, IOS and JSCOnly (the release
+tarball's file did not do this, so JSCOnly never met it); the patch skips the include for `PORT=CRT`
+(target group `crt-port-macos`, hash-checked against the pinned checkout by `check_webkit_patch_manifest.py --tree`).
+**B2:** all seven recipes configure, build, install and pass their run tests from a clean state, static and shared
+(OpenSSL: TLS 1.3 handshake in process; curl-openssl: HTTPS against an in-process TLS server and the
+`CURLOPT_SSL_CTX_FUNCTION` hook), libpng and SQLite3 included for the gate, and `tools/check_web_dependencies.py`
+resolves all eleven `find_package()` calls inside the prefix. Every image of the prefix and of the test binaries
+loads only CRT libraries and `libSystem`. What the replay found, all fixed in CRT or the tooling:
+
+1. *`-lpthread` bound libc to the host.* On macOS `-lpthread` is Apple's `libpthread.tbd`, a re-export of
+   `libSystem`; listed before the CRT libc it satisfied every libc symbol of a static OpenSSL test from the host
+   (100 imports, Apple's `pthread_once` with Bionic's `int` control, SIGBUS). `tools/crt-cc` now drops
+   `-lpthread`/`-lrt` on macOS, as `tools/crt-c++` already did on every host (Bionic merged them into libc).
+2. *Two libcs in one process.* A C test executable always linked the static `libc.a` while the port's dylibs load
+   `libc.dylib`; with a TLS server thread in the process, `curl-openssl`'s shared test crashed in about 10% of runs
+   with different corruption each time. `tools/crt-cc` honours `CRT_CXX_RUNTIME_LINKAGE=shared` for macOS
+   executables (libc.dylib plus the sysroot rpath, like `crt-c++`), tests may carry a per-test `env`, and the shared
+   tests of the six C recipes select it; 0/100 failures afterwards. (Older shared tests of existing recipes still link
+   `libc.a`; they pass because they do not cross threads and heap, and should move to the same switch.)
+3. *Recipe portability.* ELF-only flags moved into per-host overrides (`-Wl,--allow-shlib-undefined` in libpsl and
+   HarfBuzz), test link lines name `.dylib` on macOS, OpenSSL's `Configure` target is `darwin64-arm64-cc`
+   (`@CRT_ARCH_DARWIN@`), HarfBuzz uses the shared C++ runtime like ICU, and `check_web_dependencies.py` presents
+   `Darwin` (it hard-coded Linux).
+4. *Apple frameworks in libcurl.* With IPv6 enabled curl's configure links CoreFoundation, CoreServices and
+   SystemConfiguration on a Darwin host triple; `curl-openssl` now passes `--disable-ipv6` on macOS exactly as the
+   `curl` recipe does. **IPv6 on macOS is a gap shared by both curl recipes**, to be closed before WebKit relies on it.
+
+*Not covered by the macOS replay:* the CA bundle, SIMD/asm paths (still off), Linux/aarch64 and Windows for B2, and
+promoting the web group into the automated all-ports set (it waits for Windows).
 
 *Risks, named so they are watched rather than discovered.* (1) The bundled Skia m154 must build with
 CRT's clang and libc++ (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about

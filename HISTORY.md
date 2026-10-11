@@ -9,6 +9,20 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-11
+
+### Web Tranche 3B B1 and B2 replayed on macOS/arm64
+
+`--port CRT` (interpreter and Baseline/DFG/FTL/Wasm, 43 steps, clean Mach-O audit) and all seven web-group ports
+(static and shared run tests from a clean state, OpenSSL TLS 1.3 handshake and curl-openssl HTTPS included) pass, and
+WebKit's own `find_package()` resolves all eleven dependencies; every image loads only CRT libraries and
+`libSystem`. Found and fixed: patch 0006 (the pinned commit's top-level CMake selects an Apple SDK on a Darwin
+host); `-lpthread`/`-lrt` bound libc symbols to the host `libSystem` through `libpthread.tbd` (SIGBUS in a static
+OpenSSL test); a static `libc.a` in a test executable next to the ports' `libc.dylib` (two libcs, intermittent heap
+corruption with a server thread; `crt-cc` now honours `CRT_CXX_RUNTIME_LINKAGE=shared` on macOS and tests can carry
+an `env`); ELF-only flags and `.so` names in recipes; OpenSSL's Darwin `Configure` target; curl-openssl linking
+Apple frameworks unless `--disable-ipv6`. Open: IPv6 on macOS in both curl recipes, Linux/aarch64 and Windows for B2.
+
 ## 2026-10-10
 
 ### Web Tranche 3B milestone B2: the WebCore dependency ports

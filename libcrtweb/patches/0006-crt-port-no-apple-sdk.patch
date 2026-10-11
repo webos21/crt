@@ -1,0 +1,14 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -9,8 +9,9 @@
+ cmake_minimum_required(VERSION 3.20)
+ set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/Source/cmake")
+ 
+-if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+-    # Resolve the SDK and pin tools before the call to project().
++if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT PORT STREQUAL "CRT")
++    # Resolve the SDK and pin tools before the call to project(). The CRT port builds against the
++    # CRT sysroot with the CRT toolchain file, never an Apple SDK, so it does not select one.
+     include(WebKitXcodeSDK)
+ endif ()
+ 

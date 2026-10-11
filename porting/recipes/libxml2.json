@@ -55,18 +55,34 @@
       "cflags": [
         "-I@PORT_PREFIX@/include/libxml2"
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libxml2.so",
-        "@PORT_PREFIX@/lib/libz.so"
-      ],
-      "expect_stdout": "libxml2_parse_test: ok"
+      "link_args": [],
+      "expect_stdout": "libxml2_parse_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libxml2.so",
+            "@PORT_PREFIX@/lib/libz.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libxml2.dylib",
+            "@PORT_PREFIX@/lib/libz.dylib"
+          ],
+          "env": {
+            "CRT_CXX_RUNTIME_LINKAGE": "shared"
+          }
+        }
+      }
     }
   ],
   "status": {
-    "linux": "shared-pass"
+    "linux": "shared-pass",
+    "macos": "shared-pass"
   },
   "notes": [
     "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's WebCore XML parser (XMLDocumentParserLibxml2) and XSLT use libxml2; FindLibXml2 requires >= 2.9.7.",
-    "iconv and ICU are off: WebKit decodes through its own TextCodec layer before handing UTF-8/UTF-16 to libxml2. HTTP, modules, Python, lzma and readline are off. Linux/x86_64 only until the macOS and Windows replays."
+    "iconv and ICU are off: WebKit decodes through its own TextCodec layer before handing UTF-8/UTF-16 to libxml2. HTTP, modules, Python, lzma and readline are off. Linux/x86_64 only until the macOS and Windows replays.",
+    "macOS shared tests run with CRT_CXX_RUNTIME_LINKAGE=shared (test-level env): the executable links libc.dylib, the libc every dylib of the port loads, instead of a second static libc.a (Mach-O two-level namespace: two malloc/pthread registries in one process)."
   ]
 }

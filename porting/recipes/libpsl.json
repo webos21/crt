@@ -26,10 +26,16 @@
     "env": {
       "CFLAGS": "-O2",
       "PKG_CONFIG_LIBDIR": "@PORT_PREFIX@/lib/pkgconfig",
-      "PKG_CONFIG_PATH": "@PORT_PREFIX@/lib/pkgconfig",
-      "LDFLAGS": "-Wl,--allow-shlib-undefined"
+      "PKG_CONFIG_PATH": "@PORT_PREFIX@/lib/pkgconfig"
     },
-    "make_args": []
+    "make_args": [],
+    "target_overrides": {
+      "linux": {
+        "env": {
+          "LDFLAGS": "-Wl,--allow-shlib-undefined"
+        }
+      }
+    }
   },
   "tests": [
     {
@@ -39,19 +45,34 @@
       "cflags": [
         "-I@PORT_PREFIX@/include"
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libpsl.so",
-        "-Wl,--allow-shlib-undefined"
-      ],
-      "expect_stdout": "libpsl_suffix_test: ok"
+      "link_args": [],
+      "expect_stdout": "libpsl_suffix_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpsl.so",
+            "-Wl,--allow-shlib-undefined"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpsl.dylib"
+          ],
+          "env": {
+            "CRT_CXX_RUNTIME_LINKAGE": "shared"
+          }
+        }
+      }
     }
   ],
   "status": {
-    "linux": "shared-pass"
+    "linux": "shared-pass",
+    "macos": "shared-pass"
   },
   "notes": [
     "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's curl backend (PublicSuffixStoreCurl, platform/Curl.cmake links LibPSL::LibPSL) needs libpsl >= 0.20.2.",
     "runtime and builtin IDNA use ICU (the CRT icu port, found through its pkg-config files; PKG_CONFIG_LIBDIR is limited to the port prefix so a host ICU is never picked up). The built-in list is generated from list/public_suffix_list.dat in the tarball by libpsl's own tool (python3 on the build host).",
-    "LDFLAGS=-Wl,--allow-shlib-undefined: the CRT ICU shared libraries reference the loader-provided __tls_get_addr (global-dynamic TLS in ICU and libc++abi; the accepted loader boundary documented in docs/acceptance/crtweb_acceptance.md), which the link of a configure probe cannot resolve at link time."
+    "LDFLAGS=-Wl,--allow-shlib-undefined: the CRT ICU shared libraries reference the loader-provided __tls_get_addr (global-dynamic TLS in ICU and libc++abi; the accepted loader boundary documented in docs/acceptance/crtweb_acceptance.md), which the link of a configure probe cannot resolve at link time.",
+    "macOS shared tests run with CRT_CXX_RUNTIME_LINKAGE=shared (test-level env): the executable links libc.dylib, the libc every dylib of the port loads, instead of a second static libc.a (Mach-O two-level namespace: two malloc/pthread registries in one process)."
   ]
 }

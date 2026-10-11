@@ -1111,6 +1111,10 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # architecture (OpenSSL's linux-x86_64 / linux-aarch64).
         crt_arch = env.get("CRT_TARGET_ARCH") or ("aarch64" if platform.machine().lower() in ("aarch64", "arm64") else "x86_64")
         configure = [arg.replace("@CRT_ARCH@", crt_arch) for arg in configure]
+        # @CRT_ARCH_DARWIN@: the same architecture as Apple's toolchains and upstream Darwin
+        # target names spell it (OpenSSL's darwin64-arm64-cc / darwin64-x86_64-cc).
+        configure = [arg.replace("@CRT_ARCH_DARWIN@", "arm64" if crt_arch == "aarch64" else crt_arch)
+                     for arg in configure]
         # @ROOT@: the same gap this function's own @PORT_PREFIX@ comment
         # above already documents finding once (curl's --with-X= flags) --
         # confirmed for real again (2026-08-31, ffmpeg.json's own
@@ -1805,14 +1809,21 @@ def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix,
         cflags = substitute_recipe_values(cflags, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os)
         link_args = substitute_recipe_values(link_args, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os)
 
+        # Per-test environment (recipe "env", then target_overrides.<os>.env): e.g. macOS tests of
+        # shared libraries select CRT_CXX_RUNTIME_LINKAGE=shared so the executable shares the
+        # libraries' libc instead of carrying a second, static one.
+        test_env = dict(env)
+        test_env.update({key: str(value) for key, value in test.get("env", {}).items()})
+        test_env.update({key: str(value) for key, value in target.get("env", {}).items()})
+
         binary = test_root / f"{test_name}{suffix}"
         # "language": "c++" compiles the test with CXX (crt-c++, against the recipe's
         # sysroot_stage SDK) instead of CC, for a port whose library needs libc++.
         compiler_argv = cxx_argv if test.get("language") == "c++" else cc_argv
         compile_cmd = compiler_argv + cflags + [str(source)] + link_args + ["-o", str(binary)]
-        run(compile_cmd, test_root, env, f"{port_name}: test build {test_name}")
+        run(compile_cmd, test_root, test_env, f"{port_name}: test build {test_name}")
         extra_dirs = [str(d).replace("@PORT_PREFIX@", str(port_prefix)) for d in test.get("library_dirs", [])]
-        run_checked_output([str(binary)], test_root, port_test_env(env, port_prefix, target_os, extra_dirs),
+        run_checked_output([str(binary)], test_root, port_test_env(test_env, port_prefix, target_os, extra_dirs),
                            test.get("expect_stdout"), f"{port_name}: test run {test_name}")
 
 

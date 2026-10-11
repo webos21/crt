@@ -226,6 +226,26 @@ if { [ "$target_os" = linux ] || [ "$target_os" = macos ]; } && [ "$shared_mode"
   done
 fi
 
+# macOS: `-lpthread`/`-lrt` resolve to Apple's /usr/lib/libpthread.tbd (a re-export of
+# libSystem) and, listed before the CRT libc, bind every libc symbol the objects need to the
+# host libSystem: a static OpenSSL test linked with `-lpthread` imported malloc/pthread_once
+# from libSystem (100 imports), got Apple's pthread_once with Bionic's `int` once control and
+# died with SIGBUS (Web Tranche 3B B2 macOS replay). Bionic merged both libraries into libc,
+# as tools/crt-c++ already assumes for every host.
+if [ "$target_os" = macos ] && [ "$compile_only" -eq 0 ]; then
+  mac_lib_argc=$#
+  mac_lib_i=0
+  while [ "$mac_lib_i" -lt "$mac_lib_argc" ]; do
+    mac_lib_arg=$1
+    shift
+    case "$mac_lib_arg" in
+      -lpthread|-lrt) ;;
+      *) set -- "$@" "$mac_lib_arg" ;;
+    esac
+    mac_lib_i=$((mac_lib_i + 1))
+  done
+fi
+
 # -fcrt-real-apple-sdk: a sentinel, not a real clang flag -- mirrors tools/
 # crt-c++'s own identical sentinel (see that file's own top comment for the
 # full "why": a translation unit that itself needs real Apple system/
@@ -962,10 +982,24 @@ if [ "$target_os" = macos ]; then
     run_cc -nostdlib -nostartfiles -nodefaultlibs -Wl,-dead_strip \
       "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
   fi
-  set -- "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
-    "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
-    "${CRT_SYSROOT}/lib/libdl.a" \
-    "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -lSystem
+  if [ "${CRT_CXX_RUNTIME_LINKAGE:-static}" = shared ]; then
+    # An executable that loads CRT shared libraries (every dylib here links libc.dylib) must use
+    # that same libc: Mach-O's two-level namespace gives a process one malloc/pthread/TLS
+    # registry per libc image, so a static libc.a in the executable next to libc.dylib corrupts
+    # the heap as soon as memory or threads cross the boundary (Web Tranche 3B B2 macOS replay:
+    # curl-openssl's shared test, with an in-process TLS server thread, crashed intermittently).
+    # The same switch as tools/crt-c++ (libc++ is not linked by the C wrapper).
+    set -- "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
+      "${CRT_SYSROOT}/lib/libc.dylib" "${CRT_SYSROOT}/lib/libm.dylib" \
+      "${CRT_SYSROOT}/lib/libdl.dylib" \
+      "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -lSystem \
+      "-Wl,-rpath,${CRT_SYSROOT}/lib"
+  else
+    set -- "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
+      "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
+      "${CRT_SYSROOT}/lib/libdl.a" \
+      "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -lSystem
+  fi
   if [ "$want_real_apple_sdk" -eq 1 ]; then
     run_cc -nostdlib -nostartfiles -nodefaultlibs -Wl,-e,_start "$@"
   fi

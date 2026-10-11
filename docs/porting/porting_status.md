@@ -734,7 +734,7 @@ native Linux desktop: `crtmedia_hw_decode_test` reports
 `hw_frame_observed=yes cpu_transfer=pass fallback=no`; flush/reuse and
 15/15 hardware lifecycle pass; full `ctest` 132/132.
 
-## Web-stage ports (Web Tranche 3B, milestone B2; Linux/x86_64, 2026-10-10)
+## Web-stage ports (Web Tranche 3B, milestone B2; Linux/x86_64 2026-10-10, macOS/arm64 2026-10-11)
 
 The dependencies WebKit's non-GLib ports require (`Source/cmake/OptionsWin.cmake`,
 `OptionsPlayStation.cmake`). They carry `"group": "web"`: `port-build-web`/`port-test-web` build and
@@ -753,12 +753,21 @@ calls against the prefix and fails on any host-path resolution.
 | `curl-openssl` | 8.21.0 | configure, installs to `<prefix>/curl-openssl` | HTTPS against an in-process TLS server, backend `OpenSSL/3.5.9`, `CURLOPT_SSL_CTX_FUNCTION` called with an `SSL_CTX` | CURL >= 7.87 with the OpenSSL backend |
 
 All eleven `find_package()` calls (the seven above plus ICU, PNG, SQLite3 and ZLIB from the existing
-ports) resolve under the CRT prefix with WebKit's own Find modules. Only Linux/x86_64 is verified;
-macOS, Linux/aarch64 and Windows are open for every row. The first non-`configure` recipes came with
+ports) resolve under the CRT prefix with WebKit's own Find modules. Verified on Linux/x86_64 and
+macOS/arm64 (every row: static and shared run tests from a clean state, `shared-pass`); Linux/aarch64 and
+Windows are open for every row. The first non-`configure` recipes came with
 a `cmake` build system in `tools/crt-port-build.py` (generated cross toolchain file, find roots
 limited to the prefix and the sysroot, host build tools run without the prefix on the loader path),
 `configure_script`, `install_subdir`, `make_targets`/`install_targets`, `@CRT_ARCH@` and per-test
 `library_dirs`.
+
+macOS/arm64 replay (2026-10-11), differences from Linux worth knowing: OpenSSL's `Configure` target is
+`darwin64-arm64-cc` (`@CRT_ARCH_DARWIN@`); `curl-openssl` configures with `--disable-ipv6` (otherwise upstream
+links CoreFoundation/CoreServices/SystemConfiguration, as for the `curl` recipe); HarfBuzz builds with
+`CRT_CXX_RUNTIME_LINKAGE=shared`; tests of shared libraries select the shared C runtime per test
+(`env` in the test or its `target_overrides`), because a static `libc.a` in the executable next to the ports'
+`libc.dylib` is two libcs in one process; the wrappers drop `-lpthread`/`-lrt` on macOS. Details and the
+four findings: `docs/acceptance/crtweb_acceptance.md`, B1/B2 on macOS.
 
 Not verified by anything in this table: that these libraries work *inside* WebKit (B3 and later),
 SIMD paths (libjpeg-turbo built without them; OpenSSL with `no-asm`), and the OpenSSL CA bundle

@@ -95,7 +95,7 @@ Linux/x86_64**: `-DPORT=CRT` builds JavaScriptCore from the pinned commit plus `
 **B2 is done on Linux/x86_64** (HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL,
 OpenSSL-backed libcurl as `group: web` ports; WebKit's own `find_package()` resolves all eleven
 dependencies). **Next: B3**, WebCore/PAL with the bundled Skia, then B4 multi-process, B5 first
-render through the 3A contract, B6 input, B7 close; B2's macOS/aarch64/Windows replays are open. Also open: a Windows/macOS transport decision;
+render through the 3A contract, B6 input, B7 close; B2's macOS/arm64 replay (with B1) is done 2026-10-11; its Linux/aarch64 and Windows replays are open. Also open: a Windows/macOS transport decision;
 live crtgfx presentation of a web SurfaceView; GPU-buffer output (Tranche 9).
 * [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
   `crtui`'s web view; no WebKit type in a public header.

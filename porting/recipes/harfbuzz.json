@@ -31,8 +31,19 @@
     ],
     "env": {
       "CFLAGS": "-O2",
-      "CXXFLAGS": "-O2",
-      "LDFLAGS": "-Wl,--allow-shlib-undefined"
+      "CXXFLAGS": "-O2"
+    },
+    "target_overrides": {
+      "linux": {
+        "env": {
+          "LDFLAGS": "-Wl,--allow-shlib-undefined"
+        }
+      },
+      "macos": {
+        "env": {
+          "CRT_CXX_RUNTIME_LINKAGE": "shared"
+        }
+      }
     }
   },
   "tests": [
@@ -47,22 +58,38 @@
         "-I@PORT_PREFIX@/include/harfbuzz",
         "-DCRT_TEST_FONT_PATH=\"@ROOT@/libcrtgfx/assets/fonts/DejaVuSansMono.ttf\""
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libharfbuzz-icu.so",
-        "@PORT_PREFIX@/lib/libharfbuzz.so",
-        "@PORT_PREFIX@/lib/libfreetype.so",
-        "@PORT_PREFIX@/lib/libicuuc.so",
-        "@PORT_PREFIX@/lib/libicudata.so",
-        "-Wl,--allow-shlib-undefined"
-      ],
-      "expect_stdout": "harfbuzz_shape_test: ok"
+      "link_args": [],
+      "expect_stdout": "harfbuzz_shape_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libharfbuzz-icu.so",
+            "@PORT_PREFIX@/lib/libharfbuzz.so",
+            "@PORT_PREFIX@/lib/libfreetype.so",
+            "@PORT_PREFIX@/lib/libicuuc.so",
+            "@PORT_PREFIX@/lib/libicudata.so",
+            "-Wl,--allow-shlib-undefined"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libharfbuzz-icu.dylib",
+            "@PORT_PREFIX@/lib/libharfbuzz.dylib",
+            "@PORT_PREFIX@/lib/libfreetype.dylib",
+            "@PORT_PREFIX@/lib/libicuuc.dylib",
+            "@PORT_PREFIX@/lib/libicudata.dylib"
+          ]
+        }
+      }
     }
   ],
   "status": {
-    "linux": "shared-pass"
+    "linux": "shared-pass",
+    "macos": "shared-pass"
   },
   "notes": [
     "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's FindHarfBuzz requires >= 1.4.2 with the ICU component (WebCore's Skia font path is HarfBuzz + FreeType; harfbuzz-icu supplies the Unicode functions).",
-    "CMake build (the Meson build is not usable: Meson is not a CRT build tool). Shared libraries only; FreeType and ICU are the CRT ports. GLib, GObject, Graphite2, CoreText and the command-line utilities are off (the web port has no GLib)."
+    "CMake build (the Meson build is not usable: Meson is not a CRT build tool). Shared libraries only; FreeType and ICU are the CRT ports. GLib, GObject, Graphite2, CoreText and the command-line utilities are off (the web port has no GLib).",
+    "macOS: CRT_CXX_RUNTIME_LINKAGE=shared, as for the ICU port: libharfbuzz-icu.dylib depends on the CRT ICU dylibs, which depend on the shared libc.dylib/libc++.dylib, so the test executable must use the shared runtime (one libc in the process) and carry the sysroot rpath."
   ]
 }

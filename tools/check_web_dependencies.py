@@ -42,7 +42,7 @@ def main() -> int:
     work.mkdir(parents=True, exist_ok=True)
     toolchain = work / "toolchain.cmake"
     toolchain.write_text(
-        "set(CMAKE_SYSTEM_NAME Linux)\n"
+        f"set(CMAKE_SYSTEM_NAME {'Darwin' if sys.platform == 'darwin' else 'Linux'})\n"
         f'set(CMAKE_C_COMPILER "{sdk / "tools" / "crt-cc"}")\n'
         f'set(CMAKE_CXX_COMPILER "{sdk / "tools" / "crt-c++"}")\n'
         "set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)\n"
@@ -61,7 +61,7 @@ def main() -> int:
                      f'set(CMAKE_RANLIB "{ranlib}" CACHE FILEPATH "")\n')
     env = dict(os.environ)
     env["CRT_SYSROOT"] = str(sdk)
-    env["CRT_TARGET_OS"] = "linux"
+    env["CRT_TARGET_OS"] = "macos" if sys.platform == "darwin" else "linux"
     env["PKG_CONFIG_PATH"] = os.pathsep.join(str(d) for d in pkg_dirs)
     env["PKG_CONFIG_LIBDIR"] = env["PKG_CONFIG_PATH"]
     env.pop("LD_LIBRARY_PATH", None)

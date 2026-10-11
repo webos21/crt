@@ -167,6 +167,24 @@
       ],
       "reason": "WebKitCommon.cmake accepts only the ports in ALL_PORTS and stops with 'Please choose which WebKit port to build' for any other -DPORT. The CRT port is a new port (Source/cmake/OptionsCRT.cmake and the per-module PlatformCRT.cmake files are new CRT-owned files, libcrtweb/port); its name has to be in that list. Everything else the port needs is selected by file name (Options${PORT}.cmake, Platform${PORT}.cmake) or by -DWTF_PLATFORM_CRT=1, as the PlayStation port does, so this is the only change to an existing file for milestone B1.",
       "remove_when": "Never as long as CRT carries its own port: a port that is not upstream has to be registered. It is a one-line, rebase-friendly change."
+    },
+    {
+      "id": "0006-crt-port-no-apple-sdk",
+      "patch": "0006-crt-port-no-apple-sdk.patch",
+      "targets": [
+        "crt-port-macos"
+      ],
+      "files": [
+        {
+          "file": "CMakeLists.txt",
+          "sha256_before": "6261cdbed79a26d31a1a4c04811eadddc69dbccb4d0770db63f6c348375890a4",
+          "sha256_after": "b17d6be06061a2cb314bbe8992c8fb4f9be8238358fa37bbee1dcef7497d384a",
+          "license": "no-license-header",
+          "license_basis": "no header of its own; the build files of the tree (Source/cmake) carry the Apple BSD-2-Clause notice and the file belongs to the same Apple-authored CMake build system"
+        }
+      ],
+      "reason": "On a Darwin build host the top-level CMakeLists.txt includes WebKitXcodeSDK.cmake before project(), which resolves an Apple SDK with xcrun, pins Xcode's compilers and tools, and stops with 'Building for an Apple platform without an SDK directory (CMAKE_OSX_SYSROOT) or supported PORT variable' for any port other than Mac, IOS and JSCOnly. The CRT port is not an Apple port: it builds against the CRT sysroot with the CRT toolchain file and compilers, and presents macOS to WebKit as a Linux-shaped platform (patches 0001, 0002, 0004; Host ABI firewall), so it must not select an Apple SDK at all. The patch skips the include for PORT=CRT.",
+      "remove_when": "WebKit decides on the SDK from the target (CMAKE_SYSTEM_NAME/CMAKE_TOOLCHAIN_FILE) instead of the build host, or accepts a port that opts out of Apple SDK resolution."
     }
   ],
   "license_policy": {

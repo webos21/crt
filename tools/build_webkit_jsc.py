@@ -999,7 +999,7 @@ def main() -> int:
                 tree = (fetch_and_extract(args.recipe, cache, work) if port == "JSCOnly"
                         else compose_port_source(args.recipe, work))
             with phases.measure("apply carried patches"):
-                carried_patches = apply_patches(tree, target_os, ("crt-port",) if port == "CRT" else ())
+                carried_patches = apply_patches(tree, target_os, ("crt-port", f"crt-port-{target_os}") if port == "CRT" else ())
                 (work / "carried-patches.json").write_text(json.dumps(carried_patches, indent=2) + "\n",
                                                           encoding="utf-8")
             with phases.measure(f"configure JavaScriptCore ({port}, {mode})"):

@@ -16,7 +16,6 @@
     "system": "configure",
     "configure_script": "./Configure",
     "configure_args": [
-      "linux-@CRT_ARCH@",
       "--libdir=lib",
       "--openssldir=@PORT_PREFIX@/ssl",
       "no-docs",
@@ -37,7 +36,19 @@
     "install_targets": [
       "install_dev",
       "install_runtime_libs"
-    ]
+    ],
+    "target_overrides": {
+      "linux": {
+        "configure_args": [
+          "linux-@CRT_ARCH@"
+        ]
+      },
+      "macos": {
+        "configure_args": [
+          "darwin64-@CRT_ARCH_DARWIN@-cc"
+        ]
+      }
+    }
   },
   "tests": [
     {
@@ -62,21 +73,37 @@
       "cflags": [
         "-I@PORT_PREFIX@/include"
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libssl.so",
-        "@PORT_PREFIX@/lib/libcrypto.so"
-      ],
-      "expect_stdout": "openssl_tls_test: ok"
+      "link_args": [],
+      "expect_stdout": "openssl_tls_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libssl.so",
+            "@PORT_PREFIX@/lib/libcrypto.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libssl.dylib",
+            "@PORT_PREFIX@/lib/libcrypto.dylib"
+          ],
+          "env": {
+            "CRT_CXX_RUNTIME_LINKAGE": "shared"
+          }
+        }
+      }
     }
   ],
   "status": {
-    "linux": "shared-pass"
+    "linux": "shared-pass",
+    "macos": "shared-pass"
   },
   "notes": [
     "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's curl backend (OpenSSLHelper, CurlSSLVerifier, CertificateInfoCurl) and WebCrypto (crypto/openssl) use the OpenSSL API; Source/cmake/OptionsWin.cmake and OptionsPlayStation.cmake find_package(OpenSSL REQUIRED).",
     "3.5 is the current long-term-support series (3.0 and 3.5 are the LTS lines); 3.6 and 4.0 are non-LTS or remove interfaces WebKit 2.54 was written against. The tarball's SHA-256 matches the one the OpenSSL project publishes beside it.",
     "build.configure_script ./Configure with the target linux-@CRT_ARCH@ (tools/crt-port-build.py substitutes the CRT architecture). no-asm keeps the build portable across the CRT hosts and avoids the perl-generated assembler; it is a performance item, not a correctness one.",
     "CFLAGS -D__ANDROID__=1: OpenSSL treats `__linux && !__ANDROID__` as the glibc-specific branch (SysV shared memory in rand_unix.c, ucontext-based async, /dev/random select), none of which a Bionic-compatible libc provides (Bionic has no <sys/shm.h>); the Android branch is the one that matches the CRT surface. Scoped to this port's own compile; it is not installed in any header.",
-    "make_targets build_libs / install_targets install_dev install_runtime_libs: the libraries and headers only. The `openssl` command-line tool and its apps (speed, s_time) are not a web-stage need and use SysV shm, fd_set and getservbyname surface the CRT libc does not carry."
+    "make_targets build_libs / install_targets install_dev install_runtime_libs: the libraries and headers only. The `openssl` command-line tool and its apps (speed, s_time) are not a web-stage need and use SysV shm, fd_set and getservbyname surface the CRT libc does not carry.",
+    "macOS shared tests run with CRT_CXX_RUNTIME_LINKAGE=shared (test-level env): the executable links libc.dylib, the libc every dylib of the port loads, instead of a second static libc.a (Mach-O two-level namespace: two malloc/pthread registries in one process)."
   ]
 }

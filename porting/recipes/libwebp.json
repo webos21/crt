@@ -53,18 +53,34 @@
       "cflags": [
         "-I@PORT_PREFIX@/include"
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libwebpdemux.so",
-        "@PORT_PREFIX@/lib/libwebp.so"
-      ],
-      "expect_stdout": "libwebp_roundtrip_test: ok"
+      "link_args": [],
+      "expect_stdout": "libwebp_roundtrip_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libwebpdemux.so",
+            "@PORT_PREFIX@/lib/libwebp.so"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libwebpdemux.dylib",
+            "@PORT_PREFIX@/lib/libwebp.dylib"
+          ],
+          "env": {
+            "CRT_CXX_RUNTIME_LINKAGE": "shared"
+          }
+        }
+      }
     }
   ],
   "status": {
-    "linux": "shared-pass"
+    "linux": "shared-pass",
+    "macos": "shared-pass"
   },
   "notes": [
     "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's FindWebP requires libwebp with the demux component (WebCore's WebP image decoder uses WebPDemux).",
-    "Image-format tools (cwebp, dwebp, ...) and the GL/SDL/PNG/JPEG/TIFF/GIF front ends are off: only the libraries are needed. Linux/x86_64 only until the macOS and Windows replays."
+    "Image-format tools (cwebp, dwebp, ...) and the GL/SDL/PNG/JPEG/TIFF/GIF front ends are off: only the libraries are needed. Linux/x86_64 only until the macOS and Windows replays.",
+    "macOS shared tests run with CRT_CXX_RUNTIME_LINKAGE=shared (test-level env): the executable links libc.dylib, the libc every dylib of the port loads, instead of a second static libc.a (Mach-O two-level namespace: two malloc/pthread registries in one process)."
   ]
 }
