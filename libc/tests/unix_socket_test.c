@@ -625,18 +625,8 @@ static void test_fd_passing_between_processes(const char* self) {
 
 /* ---- Record semantics beyond the happy path (macOS framing, native on Linux, CRT layer on Windows) ---- */
 
-static int count_open_descriptors(void) {
-  int count = 0;
-  int fd;
-
-  for (fd = 0; fd < 512; ++fd) {
-    if (fcntl(fd, F_GETFD) >= 0) {
-      ++count;
-    }
-  }
-  return count;
-}
-
+#if !defined(_WIN32) && !defined(__MINGW32__)
+/* Linux (native) and macOS (CRT framing); the Windows layer has its own coverage above. */
 static void test_readv_writev_records(void) {
   int sv[2];
   char head[4] = {'H', 'E', 'A', 'D'};
@@ -844,7 +834,21 @@ static void test_high_descriptor_duplication(void) {
   close(sv[1]);
 }
 
+#endif /* !_WIN32 */
+
 #if defined(__APPLE__)
+static int count_open_descriptors(void) {
+  int count = 0;
+  int fd;
+
+  for (fd = 0; fd < 512; ++fd) {
+    if (fcntl(fd, F_GETFD) >= 0) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 extern int __crt_seqpacket_adopt(int fd);
 
 static void write_all(int fd, const void* data, size_t length) {
@@ -961,9 +965,11 @@ int main(int argc, char** argv) {
   if (argc > 2 && strcmp(argv[1], "child") == 0) {
     return run_child(argv[2]);
   }
+#if !defined(_WIN32) && !defined(__MINGW32__)
   if (argc > 2 && strcmp(argv[1], "inherit") == 0) {
     return run_inherit_child(atoi(argv[2]));
   }
+#endif
   test_stream_path();
   test_stream_nonblocking_and_poll();
   test_native_peer_sees_raw_bytes();
