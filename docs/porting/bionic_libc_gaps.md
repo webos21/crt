@@ -411,6 +411,15 @@ numbers, `inet_pton`/`inet_ntop` for IPv6 on every host, `in6addr_any`/`in6addr_
 returns IPv6 results as a list are now provided; details and tests in `docs/acceptance/crtweb_acceptance.md` (B2 on
 macOS). Still missing: interface-name zone ids, `IPV6_JOIN_GROUP`/packet-info options, AAAA in the built-in resolver.
 
+## IPv6 and socket option numbering on Windows (2026-10-12)
+
+The Windows PAL passed Bionic numbers to Winsock: `AF_INET6` (10 here, 23 there) failed, and so did the
+`SOL_SOCKET` options other than reuse/error/type. Now translated in `__crt_sys_*` (family field of every sockaddr in
+both directions, the `SOL_SOCKET` and `IPPROTO_IPV6` tables, `struct linger`); an unmapped option is `ENOPROTOOPT`.
+Still missing on Windows: AAAA in the built-in resolver (a real name resolves from A records), interface-name zone ids,
+`IPV6_JOIN_GROUP`/packet-info, `IP_*` level option numbers (`IP_TTL`, `IP_MULTICAST_*` differ between Bionic and
+Winsock and are passed through), `SO_RCVTIMEO`/`SO_SNDTIMEO` (a `timeval` here, milliseconds there), `SO_REUSEPORT`.
+
 ## Found by the web-stage ports (2026-10-10)
 
 OpenSSL 3.5's `BIO_ADDR`, `bio_sock2` and `bss_dgram` (Web Tranche 3B, milestone B2) needed the

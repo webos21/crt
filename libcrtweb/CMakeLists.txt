@@ -2,6 +2,12 @@
 # frame-producer/input contracts (docs/acceptance/crtweb_acceptance.md, Tranche 3). The WebKit
 # side (the "crt" WPEPlatform module, the JSC and WPE reference builds) is built by
 # tools/build_webkit_*.py against the native WPE build, not by this CMake project.
+# The frozen wire contract's sizes, offsets and numbers are checked on every host (plain C, no socket).
+add_crt_test(crtweb_wire_layout_test tests/platform-crt/wire_layout_test.c)
+target_include_directories(crtweb_wire_layout_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/platform")
+set_tests_properties(crtweb_wire_layout_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "wire_layout_test: ok")
+
 if(TARGET crtui_skia AND TARGET crtgfx_skia AND CRT_TARGET_OS STREQUAL "linux")
   add_executable(crtweb_web_surface_test
     ${CRT_STARTUP_OBJECTS}

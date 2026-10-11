@@ -179,6 +179,9 @@ struct crt_memory_status_ex {
 #define CRT_WS_SO_REUSEADDR 0x0004
 #define CRT_WS_SO_ERROR 0x1007
 #define CRT_WS_SO_TYPE 0x1008
+#define CRT_PUBLIC_AF_INET6 10
+#define CRT_WS_AF_INET6 23
+#define CRT_PUBLIC_IPPROTO_IPV6 41
 #define CRT_WS_FIONREAD 0x4004667fUL
 #define CRT_WS_FIONBIO 0x8004667eUL
 #define CRT_WSAEWOULDBLOCK 10035
@@ -4674,17 +4677,79 @@ static int translate_socket_level(int level) {
   return level == CRT_PUBLIC_SOL_SOCKET ? CRT_WS_SOL_SOCKET : level;
 }
 
+/* Address families and socket options are numbered the Bionic/Linux way at this boundary and the Winsock
+ * way below it. The families agree for AF_UNSPEC, AF_UNIX and AF_INET; AF_INET6 is 10 here and 23 in
+ * Winsock. struct sockaddr_in6 has the same layout in both, so only the family field is rewritten, in a
+ * copy for input and in place for output. */
+static int translate_address_family(int domain) {
+  return domain == CRT_PUBLIC_AF_INET6 ? CRT_WS_AF_INET6 : domain;
+}
+
+#define CRT_SOCKADDR_STORAGE_SIZE 128
+
+/* Returns addr untouched unless it needs its family rewritten, in which case it is copied to storage. */
+static const void* sockaddr_to_winsock(const void* addr, unsigned int addrlen, unsigned char* storage) {
+  uint16_t family;
+
+  if (addr == 0 || addrlen < 2 || addrlen > CRT_SOCKADDR_STORAGE_SIZE) {
+    return addr;
+  }
+  memcpy(&family, addr, sizeof(family));
+  if (family != CRT_PUBLIC_AF_INET6) {
+    return addr;
+  }
+  memcpy(storage, addr, addrlen);
+  family = CRT_WS_AF_INET6;
+  memcpy(storage, &family, sizeof(family));
+  return storage;
+}
+
+static void sockaddr_from_winsock(void* addr, int addrlen) {
+  uint16_t family;
+
+  if (addr == 0 || addrlen < 2) {
+    return;
+  }
+  memcpy(&family, addr, sizeof(family));
+  if (family == CRT_WS_AF_INET6) {
+    family = CRT_PUBLIC_AF_INET6;
+    memcpy(addr, &family, sizeof(family));
+  }
+}
+
+/* Socket option numbers. Returns the Winsock number, or -1 when this layer has no equivalent (the caller
+ * answers ENOPROTOOPT rather than hand Winsock a Linux number that means another option there). Levels
+ * other than SOL_SOCKET and IPPROTO_IPV6 pass through unchanged. */
 static int translate_socket_option(int level, int optname) {
-  if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_REUSEADDR) {
-    return CRT_WS_SO_REUSEADDR;
+  if (level == CRT_PUBLIC_SOL_SOCKET) {
+    switch (optname) {
+      case 2: return CRT_WS_SO_REUSEADDR;  /* SO_REUSEADDR */
+      case 3: return CRT_WS_SO_TYPE;       /* SO_TYPE */
+      case 4: return CRT_WS_SO_ERROR;      /* SO_ERROR */
+      case 6: return 0x0020;               /* SO_BROADCAST */
+      case 7: return 0x1001;               /* SO_SNDBUF */
+      case 8: return 0x1002;               /* SO_RCVBUF */
+      case 9: return 0x0008;               /* SO_KEEPALIVE */
+      case 13: return 0x0080;              /* SO_LINGER */
+      default: return -1;
+    }
   }
-  if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_ERROR) {
-    return CRT_WS_SO_ERROR;
-  }
-  if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_TYPE) {
-    return CRT_WS_SO_TYPE;
+  if (level == CRT_PUBLIC_IPPROTO_IPV6) {
+    switch (optname) {
+      case 16: return 4;   /* IPV6_UNICAST_HOPS */
+      case 17: return 9;   /* IPV6_MULTICAST_IF */
+      case 18: return 10;  /* IPV6_MULTICAST_HOPS */
+      case 19: return 11;  /* IPV6_MULTICAST_LOOP */
+      case 26: return 27;  /* IPV6_V6ONLY */
+      default: return -1;
+    }
   }
   return optname;
+}
+
+/* struct linger is {int, int} here and {u_short, u_short} in Winsock. */
+static int is_linger_option(int level, int optname) {
+  return level == CRT_PUBLIC_SOL_SOCKET && optname == 13;
 }
 
 /* Winsock has no socketpair(): ENOSYS, as for the other POSIX facilities with no Windows
@@ -4723,7 +4788,7 @@ long __crt_sys_socket(int domain, int type, int protocol) {
   if (init_result != 0) {
     return init_result;
   }
-  socket_handle = winsock.socket(domain, native_type, protocol);
+  socket_handle = winsock.socket(translate_address_family(domain), native_type, protocol);
   if (socket_handle == INVALID_SOCKET) {
     return -map_wsa_error(winsock.WSAGetLastError());
   }
@@ -4744,9 +4809,14 @@ long __crt_sys_bind(int sockfd, const void* addr, unsigned int addrlen) {
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  return winsock.bind(socket_handle, (const struct sockaddr*)addr, (int)addrlen) == SOCKET_ERROR
-             ? -map_wsa_error(winsock.WSAGetLastError())
-             : 0;
+  {
+    unsigned char storage[CRT_SOCKADDR_STORAGE_SIZE];
+    const void* native = sockaddr_to_winsock(addr, addrlen, storage);
+
+    return winsock.bind(socket_handle, (const struct sockaddr*)native, (int)addrlen) == SOCKET_ERROR
+               ? -map_wsa_error(winsock.WSAGetLastError())
+               : 0;
+  }
 }
 
 long __crt_sys_listen(int sockfd, int backlog) {
@@ -4780,6 +4850,7 @@ long __crt_sys_accept(int sockfd, void* addr, unsigned int* addrlen) {
   }
   if (addrlen != 0) {
     *addrlen = (unsigned int)len;
+    sockaddr_from_winsock(addr, len);
   }
   return fd;
 }
@@ -4791,8 +4862,13 @@ long __crt_sys_connect(int sockfd, const void* addr, unsigned int addrlen) {
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
-  if (winsock.connect(socket_handle, (const struct sockaddr*)addr, (int)addrlen) != SOCKET_ERROR) {
-    return 0;
+  {
+    unsigned char storage[CRT_SOCKADDR_STORAGE_SIZE];
+    const void* native = sockaddr_to_winsock(addr, addrlen, storage);
+
+    if (winsock.connect(socket_handle, (const struct sockaddr*)native, (int)addrlen) != SOCKET_ERROR) {
+      return 0;
+    }
   }
   /* connect() specifically needs its own errno mapping, not the general
    * map_wsa_error() every other socket call here uses: real Winsock
@@ -4872,12 +4948,15 @@ long __crt_sys_sendto(
      * goes through winsock.sendto() below, unaffected either way. */
     result = winsock.send(socket_handle, (const char*)buf, (int)len, flags);
   } else {
+    unsigned char storage[CRT_SOCKADDR_STORAGE_SIZE];
+    const void* native = sockaddr_to_winsock(dest_addr, addrlen, storage);
+
     result = winsock.sendto(
         socket_handle,
         (const char*)buf,
         (int)len,
         flags,
-        (const struct sockaddr*)dest_addr,
+        (const struct sockaddr*)native,
         (int)addrlen);
   }
   return result == SOCKET_ERROR ? -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError()) : result;
@@ -4918,6 +4997,7 @@ long __crt_sys_recvfrom(
   }
   if (addrlen != 0) {
     *addrlen = (unsigned int)inout_len;
+    sockaddr_from_winsock(src_addr, inout_len);
   }
   return result;
 }
@@ -4948,6 +5028,7 @@ static int windows_msg_control_has_scm_rights(const struct msghdr* msg) {
 
 long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags) {
   SOCKET socket_handle = get_fd_socket(sockfd);
+  unsigned char name_storage[CRT_SOCKADDR_STORAGE_SIZE];
   size_t total = 0;
   size_t i;
   char* buffer;
@@ -4976,7 +5057,8 @@ long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags) {
     result = msg->msg_name != 0
                  ? winsock.sendto(
                        socket_handle, "", 0, flags,
-                       (const struct sockaddr*)msg->msg_name, (int)msg->msg_namelen)
+                       (const struct sockaddr*)sockaddr_to_winsock(msg->msg_name, msg->msg_namelen, name_storage),
+                       (int)msg->msg_namelen)
                  : winsock.send(socket_handle, "", 0, flags);
     return result == SOCKET_ERROR ? -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError())
                                    : result;
@@ -4995,7 +5077,8 @@ long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags) {
   result = msg->msg_name != 0
                ? winsock.sendto(
                      socket_handle, buffer, (int)total, flags,
-                     (const struct sockaddr*)msg->msg_name, (int)msg->msg_namelen)
+                     (const struct sockaddr*)sockaddr_to_winsock(msg->msg_name, msg->msg_namelen, name_storage),
+                     (int)msg->msg_namelen)
                : winsock.send(socket_handle, buffer, (int)total, flags);
   free(buffer);
 
@@ -5047,6 +5130,7 @@ long __crt_sys_recvmsg(int sockfd, struct msghdr* msg, int flags) {
   }
   if (msg->msg_name != 0) {
     msg->msg_namelen = (unsigned int)inout_len;
+    sockaddr_from_winsock(msg->msg_name, inout_len);
   }
 
   /* Scatter the received bytes back out across the caller's iovec
@@ -5077,6 +5161,7 @@ long __crt_sys_getsockname(int sockfd, void* addr, unsigned int* addrlen) {
   }
   if (addrlen != 0) {
     *addrlen = (unsigned int)len;
+    sockaddr_from_winsock(addr, len);
   }
   return 0;
 }
@@ -5096,20 +5181,38 @@ long __crt_sys_getpeername(int sockfd, void* addr, unsigned int* addrlen) {
   }
   if (addrlen != 0) {
     *addrlen = (unsigned int)len;
+    sockaddr_from_winsock(addr, len);
   }
   return 0;
 }
 
 long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval, unsigned int optlen) {
   SOCKET socket_handle = get_fd_socket(sockfd);
+  int native_option;
+  unsigned short linger[2];
 
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
+  native_option = translate_socket_option(level, optname);
+  if (native_option < 0) {
+    return -ENOPROTOOPT;
+  }
+  if (is_linger_option(level, optname)) {
+    const int* given = (const int*)optval;
+
+    if (optval == 0 || optlen < 2 * sizeof(int)) {
+      return -EINVAL;
+    }
+    linger[0] = (unsigned short)(given[0] != 0);
+    linger[1] = (unsigned short)given[1];
+    optval = linger;
+    optlen = sizeof(linger);
+  }
   return winsock.setsockopt(
              socket_handle,
              translate_socket_level(level),
-             translate_socket_option(level, optname),
+             native_option,
              (const char*)optval,
              (int)optlen) == SOCKET_ERROR
              ? -map_wsa_error(winsock.WSAGetLastError())
@@ -5119,6 +5222,8 @@ long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval
 long __crt_sys_getsockopt(int sockfd, int level, int optname, void* optval, unsigned int* optlen) {
   SOCKET socket_handle = get_fd_socket(sockfd);
   int ws_optlen;
+  int native_option;
+  unsigned short linger[2];
 
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
@@ -5126,11 +5231,31 @@ long __crt_sys_getsockopt(int sockfd, int level, int optname, void* optval, unsi
   if (optlen == 0) {
     return -EFAULT;
   }
+  native_option = translate_socket_option(level, optname);
+  if (native_option < 0) {
+    return -ENOPROTOOPT;
+  }
+  if (is_linger_option(level, optname)) {
+    int* out = (int*)optval;
+
+    ws_optlen = sizeof(linger);
+    if (winsock.getsockopt(socket_handle, translate_socket_level(level), native_option, (char*)linger,
+                           &ws_optlen) == SOCKET_ERROR) {
+      return -map_wsa_error(winsock.WSAGetLastError());
+    }
+    if (optval == 0 || *optlen < 2 * sizeof(int)) {
+      return -EINVAL;
+    }
+    out[0] = linger[0];
+    out[1] = linger[1];
+    *optlen = 2 * sizeof(int);
+    return 0;
+  }
   ws_optlen = (int)*optlen;
   if (winsock.getsockopt(
           socket_handle,
           translate_socket_level(level),
-          translate_socket_option(level, optname),
+          native_option,
           (char*)optval,
           &ws_optlen) == SOCKET_ERROR) {
     return -map_wsa_error(winsock.WSAGetLastError());

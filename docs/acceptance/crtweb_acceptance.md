@@ -1332,6 +1332,17 @@ Apple framework in libcurl. Both parts were needed, because CRT's macOS socket l
   options, and the SDK-level `04-gfx-media` stage rebuild of curl with IPv6 (the recipe change reaches it on its next
   rebuild).
 
+*IPv6 and the Tranche 3A replay on Windows/x64 (2026-10-12).* The same finding held on Windows (the PAL passed Bionic
+numbers to Winsock) and is fixed there (`HISTORY.md`, `docs/porting/bionic_libc_gaps.md`): `AF_INET6`, `sockaddr_in6`,
+the `SOL_SOCKET`/`IPPROTO_IPV6` option tables, `getaddrinfo()` IPv6 results and RFC 6761 `localhost`. Evidence:
+`socket_ipv6_test` in full on Windows (literals, passive/loopback, `localhost` both families, TCP and UDP over `::1`,
+`IPV6_V6ONLY`, a dual-stack listener taking an IPv4 client as `::ffff:127.0.0.1`, `SO_KEEPALIVE`/`SO_LINGER`/buffers,
+`IPV6_UNICAST_HOPS`, `sendmsg`/`recvmsg` with a `sockaddr_in6` name; three mutations fail it), full CTest 167/167.
+The 3A wire contract passes `crtweb_wire_layout_test` unchanged on Windows. Not replayable on this host yet: the
+`SurfaceClient` consumer test and the WPE `crt` module, because `socketpair()`, `SOCK_SEQPACKET` and `SCM_RIGHTS` are
+Linux/macOS-only and this tree has no Skia; the transport for Windows (an AF_UNIX stream with length framing and a
+named shared mapping in place of descriptor passing is the obvious shape) is still the open decision.
+
 *Not covered by the macOS replay:* the CA bundle, SIMD/asm paths (still off), Linux/aarch64 and Windows for B2, and
 promoting the web group into the automated all-ports set (it waits for Windows).
 

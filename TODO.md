@@ -309,7 +309,7 @@ or host investigation supplies the required evidence.
   already answers AAAA) from its synchronous UDP IPv4/A-record baseline: AAAA,
   TCP fallback, search domains, caching, and Windows `AF_INET6` sockets, when a
   consumer needs them. IPv6 literals, sockets and `getaddrinfo()` lists are
-  there on Linux and macOS (2026-10-11, `socket_ipv6_test`).
+  there on Linux, macOS (2026-10-11) and Windows (2026-10-12), `socket_ipv6_test`.
 - Revisit a CRT-owned ELF loader/Android-linker boundary only after a real
   upper-runtime consumer requires behavior the host loader adapter cannot
   provide.

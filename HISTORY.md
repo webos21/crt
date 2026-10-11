@@ -9,6 +9,32 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-12
+
+### Windows/x64: IPv6 sockets, socket option numbering, and the Tranche 3A replay
+
+Asked whether the macOS IPv6 finding also holds on Windows: it did. The Windows socket layer handed Winsock the Bionic
+numbers unchanged, so `socket(AF_INET6)` (Bionic 10, Winsock 23) failed with `EAFNOSUPPORT`, a `sockaddr_in6` carried
+the wrong family, and `getaddrinfo()` kept `EAI_FAMILY`; `SOL_SOCKET` options other than `SO_REUSEADDR`/`SO_ERROR`/`SO_TYPE`
+went through with Linux numbers (`SO_KEEPALIVE` 9, `SO_BROADCAST` 6, `SO_LINGER` 13, `SO_SNDBUF` 7, `SO_RCVBUF` 8 are other
+options or nothing in Winsock; `SO_PASSCRED` 16 even landed on `SO_DONTROUTE`). The pulled `socket_ipv6_test` also did not
+build on Windows (`-Werror` unused functions behind its Windows branch). Done in the Windows PAL
+(`libc/src/arch/windows/common/syscall.c`): the AF_INET6 domain, the `sockaddr_in6` family field on bind, connect,
+sendto/recvfrom, sendmsg/recvmsg, accept, getsockname and getpeername (the layout is the same, only the family value
+differs), a `SOL_SOCKET` table (reuse, type, error, broadcast, send/receive buffer, keepalive, linger with its
+`{int,int}` to `{u_short,u_short}` conversion) and an `IPPROTO_IPV6` table (unicast hops, multicast if/hops/loop,
+`IPV6_V6ONLY`); an option without an equivalent answers `ENOPROTOOPT`. `getaddrinfo()` returns IPv6 results on Windows
+(it keeps no AAAA resolver, so a real name is still answered from A records) and answers `localhost`/`*.localhost`
+as loopback itself, `::1` then `127.0.0.1` (RFC 6761). `socket_ipv6_test` runs in full on Windows and gained options,
+`sendmsg`/`recvmsg` with a `sockaddr_in6` name and a dual-stack case; mutating the domain, the linger conversion or
+the hop-limit number each makes it fail. Full CTest 167/167 before the test additions.
+
+Tranche 3A on Windows, what replays and what does not. The wire contract (`crtweb_surface_wire.h`) is checked by the new
+`crtweb_wire_layout_test` (every message size, field offset and message number; passes under LLP64). `socketpair_test`
+keeps asserting `ENOSYS` for `socketpair()` on Windows. Not replayed: the consumer-side `crtweb_web_surface_test`
+(`SurfaceClient` over `SOCK_SEQPACKET`, `SCM_RIGHTS` and a memfd, with Skia) and the WPE `crt` display (Linux-only by
+construction); both need a Windows transport decision and a Skia build of this tree (`CRTGFX_ENABLE_SKIA` is off here).
+
 ## 2026-10-11
 
 ### IPv6 on macOS through CRT libc, curl HTTPS over ::1 without Apple frameworks

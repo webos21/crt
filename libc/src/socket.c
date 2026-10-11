@@ -1488,13 +1488,26 @@ static struct addrinfo* new_addrinfo(int family, const void* sockaddr, socklen_t
   return ai;
 }
 
-/* IPv6 results are produced on the hosts whose socket layer carries AF_INET6 (Linux natively,
- * macOS through the translation above). Windows keeps EAI_FAMILY until its Winsock translation
- * exists. */
-#if defined(CRT_TARGET_OS_WINDOWS)
-#define CRT_GETADDRINFO_IPV6 0
-#else
+/* IPv6 results are produced on every host: Linux natively, macOS and Windows through the
+ * AF_INET6/sockaddr_in6/option translation at their socket boundary. */
 #define CRT_GETADDRINFO_IPV6 1
+
+#if defined(CRT_TARGET_OS_WINDOWS)
+/* RFC 6761: "localhost" and "*.localhost" name the loopback interface and are answered without a
+ * resolver, so the answer does not depend on the A-record client below (which carries no AAAA query,
+ * and on Windows has no hosts file behind it). */
+static int is_localhost_name(const char* node) {
+  size_t length = strlen(node);
+  static const char suffix[] = ".localhost";
+
+  if (length > 0 && node[length - 1] == '.') {
+    --length;
+  }
+  if (length == 9) {
+    return strncasecmp(node, "localhost", 9) == 0;
+  }
+  return length > sizeof(suffix) - 1 && strncasecmp(node + length - (sizeof(suffix) - 1), suffix, sizeof(suffix) - 1) == 0;
+}
 #endif
 
 #if defined(CRT_TARGET_OS_MACOS)
@@ -1730,6 +1743,33 @@ int getaddrinfo(
   if ((flags & AI_NUMERICHOST) != 0) {
     return EAI_NONAME;
   }
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (is_localhost_name(node)) {
+    struct addrinfo* first = 0;
+    struct addrinfo* second = 0;
+
+    if (family != AF_INET) {
+      addr6.sin6_addr = in6addr_loopback;
+      first = new_addrinfo(AF_INET6, &addr6, (socklen_t)sizeof(addr6), socktype, protocol);
+      if (first == 0) {
+        return EAI_MEMORY;
+      }
+    }
+    if (family != AF_INET6) {
+      addr4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+      second = new_addrinfo(AF_INET, &addr4, (socklen_t)sizeof(addr4), socktype, protocol);
+      if (second == 0) {
+        freeaddrinfo(first);
+        return EAI_MEMORY;
+      }
+    }
+    if (first != 0) {
+      first->ai_next = second;
+    }
+    *res = first != 0 ? first : second;
+    return 0;
+  }
+#endif
 #if defined(CRT_TARGET_OS_MACOS)
   if (macos_host_resolve_hostname(node, CRT_GETADDRINFO_IPV6 ? family : AF_INET, flags, socktype, protocol,
                                   port, res) == 0) {
