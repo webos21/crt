@@ -11,6 +11,15 @@ substantive update.
 
 ## 2026-10-11
 
+### IPv6 on macOS through CRT libc, curl HTTPS over ::1 without Apple frameworks
+
+CRT's macOS socket layer was IPv4-only. Added: `AF_INET6` socket/sockaddr_in6/IPV6_* translation to Darwin, IPv6
+`inet_pton`/`inet_ntop`/`in6addr_*`, a list-returning `getaddrinfo()` with IPv6 literals and host-resolver answers
+translated into Bionic structs (Windows unchanged), a wider `SOL_SOCKET` option table. curl (both recipes) keeps IPv6
+on and drops the framework link through a fail-closed `TargetConditionals.h` shim on the include path. `socket_ipv6_test`
+and `curl_openssl_https_ipv6_test` (IPv6 literal and `localhost`, shared and static) pass; ctest 180/180. Linux/Windows
+effects of the shared `inet_*`/`getaddrinfo` changes are not re-run here.
+
 ### Web Tranche 3B B1 and B2 replayed on macOS/arm64
 
 `--port CRT` (interpreter and Baseline/DFG/FTL/Wasm, 43 steps, clean Mach-O audit) and all seven web-group ports
@@ -21,7 +30,7 @@ host); `-lpthread`/`-lrt` bound libc symbols to the host `libSystem` through `li
 OpenSSL test); a static `libc.a` in a test executable next to the ports' `libc.dylib` (two libcs, intermittent heap
 corruption with a server thread; `crt-cc` now honours `CRT_CXX_RUNTIME_LINKAGE=shared` on macOS and tests can carry
 an `env`); ELF-only flags and `.so` names in recipes; OpenSSL's Darwin `Configure` target; curl-openssl linking
-Apple frameworks unless `--disable-ipv6`. Open: IPv6 on macOS in both curl recipes, Linux/aarch64 and Windows for B2.
+Apple frameworks unless `--disable-ipv6`. Open then: IPv6 on macOS in both curl recipes (closed the same day, next entry), Linux/aarch64 and Windows for B2.
 
 ## 2026-10-10
 

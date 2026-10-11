@@ -25,6 +25,20 @@ struct crt_darwin_sockaddr_in {
   unsigned char sin_zero[8];
 };
 
+/* Darwin's struct sockaddr_in6: a length byte then a 1-byte family where this project's
+ * Bionic-shaped one has a 2-byte family; the rest is the same 28 bytes. */
+struct crt_darwin_sockaddr_in6 {
+  unsigned char sin6_len;
+  unsigned char sin6_family;
+  in_port_t sin6_port;
+  uint32_t sin6_flowinfo;
+  struct in6_addr sin6_addr;
+  uint32_t sin6_scope_id;
+};
+
+/* Darwin's AF_INET6 (30); Bionic/Linux numbers it 10, which on Darwin is AF_CHAOS-era space. */
+#define CRT_DARWIN_AF_INET6 30
+
 /* Darwin's real struct sockaddr_un (<sys/un.h>): unlike this project's own
  * Bionic/Linux-shaped struct sockaddr_un (sys/un.h, no length prefix,
  * 108-byte sun_path), every Darwin sockaddr variant starts with a 1-byte
@@ -45,13 +59,14 @@ struct crt_darwin_sockaddr_header {
   unsigned char sa_family;
 };
 
-/* Only AF_INET/AF_UNIX are translatable today -- see to_darwin_sockaddr()'s
+/* Only AF_INET/AF_INET6/AF_UNIX are translatable today -- see to_darwin_sockaddr()'s
  * own behavior below. Sized to fit whichever Darwin variant is larger
  * (currently sockaddr_un), so it's always safe to hand syscalls that fill
  * in an address (accept()/recvfrom()/getsockname()/recvmsg()) a pointer to
  * one of these regardless of which family the peer turns out to be. */
 union crt_darwin_sockaddr_storage {
   struct crt_darwin_sockaddr_in in;
+  struct crt_darwin_sockaddr_in6 in6;
   struct crt_darwin_sockaddr_un un;
 };
 
@@ -173,19 +188,12 @@ static int parse_ipv4_octet(const char** cursor, unsigned int* octet) {
   return 1;
 }
 
-int inet_pton(int af, const char* src, void* dst) {
+/* Dotted-quad text to four network-order bytes; the whole string must be consumed. */
+static int inet_pton4_bytes(const char* src, unsigned char out[4]) {
   const char* cursor = src;
   unsigned int octets[4];
   int i;
 
-  if (af != AF_INET) {
-    errno = EAFNOSUPPORT;
-    return -1;
-  }
-  if (src == 0 || dst == 0) {
-    errno = EINVAL;
-    return -1;
-  }
   for (i = 0; i < 4; ++i) {
     if (!parse_ipv4_octet(&cursor, &octets[i])) {
       return 0;
@@ -200,8 +208,126 @@ int inet_pton(int af, const char* src, void* dst) {
   if (*cursor != 0) {
     return 0;
   }
-  ((struct in_addr*)dst)->s_addr =
-      htonl((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]);
+  for (i = 0; i < 4; ++i) {
+    out[i] = (unsigned char)octets[i];
+  }
+  return 1;
+}
+
+static int hex_digit_value(int ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ch - '0';
+  }
+  if (ch >= 'a' && ch <= 'f') {
+    return ch - 'a' + 10;
+  }
+  if (ch >= 'A' && ch <= 'F') {
+    return ch - 'A' + 10;
+  }
+  return -1;
+}
+
+/* RFC 4291 text form: eight 16-bit groups, one "::" run, optional trailing dotted quad. */
+static int inet_pton6_bytes(const char* src, unsigned char dst[16]) {
+  unsigned char tmp[16];
+  unsigned char* tp = tmp;
+  unsigned char* const endp = tmp + 16;
+  unsigned char* colonp = 0;
+  const char* curtok;
+  unsigned int val = 0;
+  int seen_xdigits = 0;
+  int ch;
+
+  memset(tmp, 0, sizeof(tmp));
+  if (*src == ':') {
+    if (*++src != ':') {
+      return 0;
+    }
+  }
+  curtok = src;
+  while ((ch = (unsigned char)*src++) != 0) {
+    int digit = hex_digit_value(ch);
+
+    if (digit >= 0) {
+      val = (val << 4) | (unsigned int)digit;
+      if (++seen_xdigits > 4) {
+        return 0;
+      }
+      continue;
+    }
+    if (ch == ':') {
+      curtok = src;
+      if (!seen_xdigits) {
+        if (colonp != 0) {
+          return 0;
+        }
+        colonp = tp;
+        continue;
+      }
+      if (*src == 0 || tp + 2 > endp) {
+        return 0;
+      }
+      *tp++ = (unsigned char)(val >> 8);
+      *tp++ = (unsigned char)(val & 0xffU);
+      seen_xdigits = 0;
+      val = 0;
+      continue;
+    }
+    if (ch == '.' && tp + 4 <= endp && inet_pton4_bytes(curtok, tp)) {
+      tp += 4;
+      seen_xdigits = 0;
+      break;
+    }
+    return 0;
+  }
+  if (seen_xdigits) {
+    if (tp + 2 > endp) {
+      return 0;
+    }
+    *tp++ = (unsigned char)(val >> 8);
+    *tp++ = (unsigned char)(val & 0xffU);
+  }
+  if (colonp != 0) {
+    const int n = (int)(tp - colonp);
+    int i;
+
+    if (tp == endp) {
+      return 0;
+    }
+    for (i = 1; i <= n; ++i) {
+      endp[-i] = colonp[n - i];
+      colonp[n - i] = 0;
+    }
+    tp = endp;
+  }
+  if (tp != endp) {
+    return 0;
+  }
+  memcpy(dst, tmp, sizeof(tmp));
+  return 1;
+}
+
+const struct in6_addr in6addr_any = IN6ADDR_ANY_INIT;
+const struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
+
+int inet_pton(int af, const char* src, void* dst) {
+  unsigned char bytes[4];
+
+  if (af != AF_INET && af != AF_INET6) {
+    errno = EAFNOSUPPORT;
+    return -1;
+  }
+  if (src == 0 || dst == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (af == AF_INET6) {
+    return inet_pton6_bytes(src, ((struct in6_addr*)dst)->s6_addr);
+  }
+  if (!inet_pton4_bytes(src, bytes)) {
+    return 0;
+  }
+  memcpy(&((struct in_addr*)dst)->s_addr, bytes, 4);
   return 1;
 }
 
@@ -219,21 +345,111 @@ static char* append_decimal(char* out, unsigned int value) {
   return out;
 }
 
+static char* append_hex16(char* out, unsigned int value) {
+  static const char digits[] = "0123456789abcdef";
+  int shift;
+  int started = 0;
+
+  for (shift = 12; shift >= 0; shift -= 4) {
+    const unsigned int nibble = (value >> shift) & 0xfU;
+
+    if (nibble != 0 || started || shift == 0) {
+      *out++ = digits[nibble];
+      started = 1;
+    }
+  }
+  return out;
+}
+
+/* RFC 5952 text form: lowercase, the longest run (>= 2) of zero groups compressed to "::", an
+ * IPv4-mapped address as "::ffff:a.b.c.d". */
+static void inet_ntop6_text(const unsigned char* a, char* out) {
+  unsigned int words[8];
+  int best_base = -1;
+  int best_len = 0;
+  int cur_base = -1;
+  int cur_len = 0;
+  int i;
+
+  for (i = 0; i < 8; ++i) {
+    words[i] = ((unsigned int)a[i * 2] << 8) | a[i * 2 + 1];
+  }
+  for (i = 0; i < 8; ++i) {
+    if (words[i] == 0) {
+      if (cur_base < 0) {
+        cur_base = i;
+        cur_len = 1;
+      } else {
+        ++cur_len;
+      }
+    } else if (cur_base >= 0) {
+      if (cur_len > best_len) {
+        best_base = cur_base;
+        best_len = cur_len;
+      }
+      cur_base = -1;
+    }
+  }
+  if (cur_base >= 0 && cur_len > best_len) {
+    best_base = cur_base;
+    best_len = cur_len;
+  }
+  if (best_len < 2) {
+    best_base = -1;
+  }
+  for (i = 0; i < 8; ++i) {
+    if (best_base >= 0 && i >= best_base && i < best_base + best_len) {
+      if (i == best_base) {
+        *out++ = ':';
+      }
+      continue;
+    }
+    if (i != 0) {
+      *out++ = ':';
+    }
+    if (i == 6 && best_base == 0 && (best_len == 6 || (best_len == 5 && words[5] == 0xffffU))) {
+      out = append_decimal(out, a[12]);
+      *out++ = '.';
+      out = append_decimal(out, a[13]);
+      *out++ = '.';
+      out = append_decimal(out, a[14]);
+      *out++ = '.';
+      out = append_decimal(out, a[15]);
+      break;
+    }
+    out = append_hex16(out, words[i]);
+  }
+  if (best_base >= 0 && best_base + best_len == 8) {
+    *out++ = ':';
+  }
+  *out = 0;
+}
+
 const char* inet_ntop(int af, const void* src, char* dst, socklen_t size) {
   uint32_t addr;
   unsigned int octets[4];
-  char tmp[INET_ADDRSTRLEN];
+  char tmp[INET6_ADDRSTRLEN];
   char* out = tmp;
   int i;
   size_t len;
 
-  if (af != AF_INET) {
+  if (af != AF_INET && af != AF_INET6) {
     errno = EAFNOSUPPORT;
     return 0;
   }
   if (src == 0 || dst == 0) {
     errno = EINVAL;
     return 0;
+  }
+  if (af == AF_INET6) {
+    inet_ntop6_text(((const struct in6_addr*)src)->s6_addr, tmp);
+    len = strlen(tmp);
+    if (size <= len) {
+      errno = ENOSPC;
+      return 0;
+    }
+    memcpy(dst, tmp, len + 1);
+    return dst;
   }
   addr = ntohl(((const struct in_addr*)src)->s_addr);
   octets[0] = (addr >> 24) & 0xffU;
@@ -363,6 +579,24 @@ static int to_darwin_sockaddr(
     *outlen = (unsigned int)sizeof(out->in);
     return 0;
   }
+  if (addr->sa_family == AF_INET6) {
+    const struct sockaddr_in6* in6;
+
+    if (addrlen < sizeof(struct sockaddr_in6)) {
+      errno = EINVAL;
+      return -1;
+    }
+    in6 = (const struct sockaddr_in6*)addr;
+    memset(&out->in6, 0, sizeof(out->in6));
+    out->in6.sin6_len = (unsigned char)sizeof(out->in6);
+    out->in6.sin6_family = CRT_DARWIN_AF_INET6;
+    out->in6.sin6_port = in6->sin6_port;
+    out->in6.sin6_flowinfo = in6->sin6_flowinfo;
+    out->in6.sin6_addr = in6->sin6_addr;
+    out->in6.sin6_scope_id = in6->sin6_scope_id;
+    *outlen = (unsigned int)sizeof(out->in6);
+    return 0;
+  }
   if (addr->sa_family == AF_UNIX) {
     const struct sockaddr_un* in;
     size_t path_len;
@@ -457,6 +691,22 @@ static void from_darwin_sockaddr(
     *addrlen = (socklen_t)sizeof(*out);
     return;
   }
+  if (header->sa_family == CRT_DARWIN_AF_INET6) {
+    struct sockaddr_in6* out;
+
+    if (*addrlen < sizeof(struct sockaddr_in6)) {
+      return;
+    }
+    out = (struct sockaddr_in6*)addr;
+    memset(out, 0, sizeof(*out));
+    out->sin6_family = AF_INET6;
+    out->sin6_port = in->in6.sin6_port;
+    out->sin6_flowinfo = in->in6.sin6_flowinfo;
+    out->sin6_addr = in->in6.sin6_addr;
+    out->sin6_scope_id = in->in6.sin6_scope_id;
+    *addrlen = (socklen_t)sizeof(*out);
+    return;
+  }
   if (header->sa_family == AF_UNIX) {
     struct sockaddr_un* out;
     size_t path_len = (size_t)in->un.sun_len - offsetof(struct crt_darwin_sockaddr_un, sun_path);
@@ -491,7 +741,8 @@ int socket(int domain, int type, int protocol) {
    * already used for pipe()'s own missing pipe2() on this OS (see
    * __crt_sys_eventfd2() above, and pipe() below). */
   int cloexec = (type & SOCK_CLOEXEC) != 0;
-  long result = __crt_sys_socket(domain, type & ~SOCK_CLOEXEC, protocol);
+  long result = __crt_sys_socket(domain == AF_INET6 ? CRT_DARWIN_AF_INET6 : domain,
+                                 type & ~SOCK_CLOEXEC, protocol);
   int fd = (int)normalize_socket_result(result);
   if (fd >= 0 && cloexec && __crt_fd_set_cloexec(fd, 1) != 0) {
     int saved_errno = errno;
@@ -807,13 +1058,83 @@ int getpeername(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
   return socket_name_query(__crt_sys_getpeername, sockfd, addr, addrlen);
 }
 
+#if defined(CRT_TARGET_OS_MACOS)
+/* Bionic/Linux option number to Darwin's, for the options this libc declares. Returns -1 for an
+ * option that has no translation, which the caller reports as ENOPROTOOPT rather than handing a
+ * Linux number to a kernel that numbers it differently. */
+static int darwin_sol_socket_option(int optname) {
+  switch (optname) {
+    case SO_REUSEADDR:
+      return CRT_DARWIN_SO_REUSEADDR;
+    case SO_KEEPALIVE:
+      return 0x0008;
+    case SO_BROADCAST:
+      return 0x0020;
+    case SO_LINGER:
+      return 0x0080;
+    case SO_SNDBUF:
+      return 0x1001;
+    case SO_RCVBUF:
+      return 0x1002;
+    case SO_ERROR:
+      return CRT_DARWIN_SO_ERROR;
+    case SO_TYPE:
+      return CRT_DARWIN_SO_TYPE;
+    default:
+      return -1;
+  }
+}
+
+/* IPPROTO_IPV6 options: the level is 41 on both, the option numbers are not. */
+static int darwin_ipv6_option(int optname) {
+  switch (optname) {
+    case IPV6_UNICAST_HOPS:
+      return 4;
+    case IPV6_MULTICAST_IF:
+      return 9;
+    case IPV6_MULTICAST_HOPS:
+      return 10;
+    case IPV6_MULTICAST_LOOP:
+      return 11;
+    case IPV6_V6ONLY:
+      return 27;
+    default:
+      return -1;
+  }
+}
+
+/* Translates (level, optname) in place; 0 on success, -1 with errno set when untranslatable. */
+static int darwin_socket_option(int* level, int* optname) {
+  int translated;
+
+  if (*level == SOL_SOCKET) {
+    translated = darwin_sol_socket_option(*optname);
+    if (translated < 0) {
+      /* Keep the previous behaviour for anything not in the table: Darwin's own number if the
+       * caller already used one is passed on, as before this table existed. */
+      *level = CRT_DARWIN_SOL_SOCKET;
+      return 0;
+    }
+    *level = CRT_DARWIN_SOL_SOCKET;
+    *optname = translated;
+    return 0;
+  }
+  if (*level == IPPROTO_IPV6) {
+    translated = darwin_ipv6_option(*optname);
+    if (translated < 0) {
+      errno = ENOPROTOOPT;
+      return -1;
+    }
+    *optname = translated;
+  }
+  return 0;
+}
+#endif
+
 int setsockopt(int sockfd, int level, int optname, const void* optval, socklen_t optlen) {
 #if defined(CRT_TARGET_OS_MACOS)
-  if (level == SOL_SOCKET) {
-    level = CRT_DARWIN_SOL_SOCKET;
-    if (optname == SO_REUSEADDR) {
-      optname = CRT_DARWIN_SO_REUSEADDR;
-    }
+  if (darwin_socket_option(&level, &optname) != 0) {
+    return -1;
   }
 #endif
   return (int)normalize_socket_result(
@@ -830,15 +1151,8 @@ int getsockopt(int sockfd, int level, int optname, void* optval, socklen_t* optl
   }
   len = (unsigned int)*optlen;
 #if defined(CRT_TARGET_OS_MACOS)
-  if (level == SOL_SOCKET) {
-    level = CRT_DARWIN_SOL_SOCKET;
-    if (optname == SO_REUSEADDR) {
-      optname = CRT_DARWIN_SO_REUSEADDR;
-    } else if (optname == SO_ERROR) {
-      optname = CRT_DARWIN_SO_ERROR;
-    } else if (optname == SO_TYPE) {
-      optname = CRT_DARWIN_SO_TYPE;
-    }
+  if (darwin_socket_option(&level, &optname) != 0) {
+    return -1;
   }
 #endif
   result = __crt_sys_getsockopt(sockfd, level, optname, optval, &len);
@@ -1154,13 +1468,51 @@ static int dns_resolve_hostname(const char* hostname, struct in_addr* out) {
   return result;
 }
 
+/* One result: a heap addrinfo owning a heap sockaddr, as freeaddrinfo() releases it. */
+static struct addrinfo* new_addrinfo(int family, const void* sockaddr, socklen_t sockaddr_len,
+                                     int socktype, int protocol) {
+  struct addrinfo* ai = (struct addrinfo*)calloc(1, sizeof(*ai));
+  void* copy = calloc(1, sockaddr_len);
+
+  if (ai == 0 || copy == 0) {
+    free(ai);
+    free(copy);
+    return 0;
+  }
+  memcpy(copy, sockaddr, sockaddr_len);
+  ai->ai_family = family;
+  ai->ai_socktype = socktype;
+  ai->ai_protocol = protocol;
+  ai->ai_addrlen = sockaddr_len;
+  ai->ai_addr = (struct sockaddr*)copy;
+  return ai;
+}
+
+/* IPv6 results are produced on the hosts whose socket layer carries AF_INET6 (Linux natively,
+ * macOS through the translation above). Windows keeps EAI_FAMILY until its Winsock translation
+ * exists. */
+#if defined(CRT_TARGET_OS_WINDOWS)
+#define CRT_GETADDRINFO_IPV6 0
+#else
+#define CRT_GETADDRINFO_IPV6 1
+#endif
+
 #if defined(CRT_TARGET_OS_MACOS)
-static int macos_host_resolve_hostname(
-    const char* node,
-    const char* service,
-    int socktype,
-    int protocol,
-    struct sockaddr_in* out_addr) {
+static void addrinfo_append(struct addrinfo** head, struct addrinfo** tail, struct addrinfo* item) {
+  if (*head == 0) {
+    *head = item;
+  } else {
+    (*tail)->ai_next = item;
+  }
+  *tail = item;
+}
+
+/* Resolves a host name with the macOS system resolver (libsystem_info) and returns every result
+ * of the requested family as Bionic-shaped addrinfo entries. The host names are the only thing
+ * taken from the host: families, sockaddr layouts, flags and the port are this libc's. Returns 0
+ * with *out_head set, or -1 (no resolver symbol, lookup failure, or no result of that family). */
+static int macos_host_resolve_hostname(const char* node, int family, int flags, int socktype,
+                                       int protocol, in_port_t port, struct addrinfo** out_head) {
   static crt_darwin_getaddrinfo_fn real_getaddrinfo;
   static crt_darwin_freeaddrinfo_fn real_freeaddrinfo;
   static int real_symbols_resolved;
@@ -1168,6 +1520,8 @@ static int macos_host_resolve_hostname(
   struct crt_darwin_addrinfo hints;
   struct crt_darwin_addrinfo* results = 0;
   struct crt_darwin_addrinfo* it;
+  struct addrinfo* head = 0;
+  struct addrinfo* tail = 0;
   int rc;
 
   if (!real_symbols_resolved) {
@@ -1195,47 +1549,119 @@ static int macos_host_resolve_hostname(
   }
 
   memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_INET;
-  hints.ai_socktype = socktype;
+  hints.ai_family = family == AF_INET6 ? CRT_DARWIN_AF_INET6 : family == AF_INET ? AF_INET : AF_UNSPEC;
+  /* One entry per address: ask for a stream socket type even when the caller left it open, and
+   * report the caller's own (possibly zero) type in the result as this resolver always has. */
+  hints.ai_socktype = socktype != 0 ? socktype : SOCK_STREAM;
   hints.ai_protocol = protocol;
-  hints.ai_flags = CRT_DARWIN_AI_NUMERICSERV;
-  rc = real_getaddrinfo(node, service, &hints, &results);
+  /* Only the flags whose numbers are the same on both sides (AI_PASSIVE, AI_ADDRCONFIG, ...);
+   * the service is numeric and applied here, so the host never parses it. */
+  hints.ai_flags = (flags & (AI_ADDRCONFIG | AI_ALL | AI_V4MAPPED)) | CRT_DARWIN_AI_NUMERICSERV;
+  rc = real_getaddrinfo(node, 0, &hints, &results);
   if (rc != 0) {
     return -1;
   }
 
   for (it = results; it != 0; it = it->ai_next) {
-    const struct crt_darwin_sockaddr_in* darwin_addr;
-    if (it->ai_family != AF_INET || it->ai_addr == 0 ||
-        it->ai_addrlen < (socklen_t)sizeof(struct crt_darwin_sockaddr_in)) {
+    struct addrinfo* entry = 0;
+
+    if (it->ai_addr == 0) {
       continue;
     }
-    darwin_addr = (const struct crt_darwin_sockaddr_in*)it->ai_addr;
-    memset(out_addr, 0, sizeof(*out_addr));
-    out_addr->sin_family = AF_INET;
-    out_addr->sin_port = darwin_addr->sin_port;
-    out_addr->sin_addr = darwin_addr->sin_addr;
-    real_freeaddrinfo(results);
-    return 0;
-  }
+    if (it->ai_family == AF_INET && it->ai_addrlen >= (socklen_t)sizeof(struct crt_darwin_sockaddr_in) &&
+        family != AF_INET6) {
+      const struct crt_darwin_sockaddr_in* darwin_addr = (const struct crt_darwin_sockaddr_in*)it->ai_addr;
+      struct sockaddr_in out;
 
+      memset(&out, 0, sizeof(out));
+      out.sin_family = AF_INET;
+      out.sin_port = port;
+      out.sin_addr = darwin_addr->sin_addr;
+      entry = new_addrinfo(AF_INET, &out, (socklen_t)sizeof(out), socktype, protocol);
+    } else if (it->ai_family == CRT_DARWIN_AF_INET6 &&
+               it->ai_addrlen >= (socklen_t)sizeof(struct crt_darwin_sockaddr_in6) && family != AF_INET) {
+      const struct crt_darwin_sockaddr_in6* darwin_addr =
+          (const struct crt_darwin_sockaddr_in6*)it->ai_addr;
+      struct sockaddr_in6 out;
+
+      memset(&out, 0, sizeof(out));
+      out.sin6_family = AF_INET6;
+      out.sin6_port = port;
+      out.sin6_flowinfo = darwin_addr->sin6_flowinfo;
+      out.sin6_addr = darwin_addr->sin6_addr;
+      out.sin6_scope_id = darwin_addr->sin6_scope_id;
+      entry = new_addrinfo(AF_INET6, &out, (socklen_t)sizeof(out), socktype, protocol);
+    } else {
+      continue;
+    }
+    if (entry == 0) {
+      real_freeaddrinfo(results);
+      freeaddrinfo(head);
+      return -1;
+    }
+    addrinfo_append(&head, &tail, entry);
+  }
   real_freeaddrinfo(results);
-  return -1;
+  if (head == 0) {
+    return -1;
+  }
+  *out_head = head;
+  return 0;
 }
 #endif
+
+/* A numeric IPv6 literal with an optional "%scope" (a numeric zone index). */
+static int parse_ipv6_literal(const char* node, struct in6_addr* addr, uint32_t* scope_id) {
+  char text[INET6_ADDRSTRLEN + 16];
+  const char* percent = strchr(node, '%');
+  size_t length = percent != 0 ? (size_t)(percent - node) : strlen(node);
+
+  *scope_id = 0;
+  if (length == 0 || length >= sizeof(text) || strchr(node, ':') == 0) {
+    return 0;
+  }
+  memcpy(text, node, length);
+  text[length] = 0;
+  if (inet_pton(AF_INET6, text, addr) != 1) {
+    return 0;
+  }
+  if (percent != 0) {
+    unsigned long value = 0;
+    const char* zone = percent + 1;
+
+    if (*zone == 0) {
+      return 0;
+    }
+    for (; *zone != 0; ++zone) {
+      if (*zone < '0' || *zone > '9') {
+        return 0; /* interface names need if_nametoindex(), which this libc does not carry */
+      }
+      value = value * 10UL + (unsigned long)(*zone - '0');
+      if (value > 0xffffffffUL) {
+        return 0;
+      }
+    }
+    *scope_id = (uint32_t)value;
+  }
+  return 1;
+}
 
 int getaddrinfo(
     const char* node,
     const char* service,
     const struct addrinfo* hints,
     struct addrinfo** res) {
-  struct addrinfo* ai;
-  struct sockaddr_in* addr;
+  struct sockaddr_in addr4;
+  struct sockaddr_in6 addr6;
+  struct in6_addr literal6;
+  uint32_t scope_id = 0;
   in_port_t port;
   int family = hints != 0 ? hints->ai_family : AF_UNSPEC;
+  int flags = hints != 0 ? hints->ai_flags : 0;
   int socktype = hints != 0 ? hints->ai_socktype : 0;
   int protocol = hints != 0 ? hints->ai_protocol : 0;
   int service_result;
+  struct addrinfo* item;
 
   if (res == 0) {
     return EAI_FAIL;
@@ -1244,7 +1670,7 @@ int getaddrinfo(
   if (hints != 0 && (hints->ai_flags & ~AI_MASK) != 0) {
     return EAI_BADFLAGS;
   }
-  if (family != AF_UNSPEC && family != AF_INET) {
+  if (family != AF_UNSPEC && family != AF_INET && !(CRT_GETADDRINFO_IPV6 && family == AF_INET6)) {
     return EAI_FAMILY;
   }
   service_result = parse_service(service, &port);
@@ -1252,45 +1678,77 @@ int getaddrinfo(
     return service_result;
   }
 
-  ai = (struct addrinfo*)calloc(1, sizeof(*ai));
-  addr = (struct sockaddr_in*)calloc(1, sizeof(*addr));
-  if (ai == 0 || addr == 0) {
-    free(ai);
-    free(addr);
+  memset(&addr4, 0, sizeof(addr4));
+  addr4.sin_family = AF_INET;
+  addr4.sin_port = port;
+  memset(&addr6, 0, sizeof(addr6));
+  addr6.sin6_family = AF_INET6;
+  addr6.sin6_port = port;
+
+  if (node == 0 || node[0] == 0) {
+    const int passive = (flags & AI_PASSIVE) != 0;
+
+    if (CRT_GETADDRINFO_IPV6 && family == AF_INET6) {
+      addr6.sin6_addr = passive ? in6addr_any : in6addr_loopback;
+      item = new_addrinfo(AF_INET6, &addr6, (socklen_t)sizeof(addr6), socktype, protocol);
+    } else {
+      addr4.sin_addr.s_addr = passive ? htonl(INADDR_ANY) : htonl(INADDR_LOOPBACK);
+      item = new_addrinfo(AF_INET, &addr4, (socklen_t)sizeof(addr4), socktype, protocol);
+    }
+    if (item == 0) {
+      return EAI_MEMORY;
+    }
+    *res = item;
+    return 0;
+  }
+
+  if (inet_pton(AF_INET, node, &addr4.sin_addr) == 1) {
+    if (family == AF_INET6) {
+      return EAI_NONAME;
+    }
+    item = new_addrinfo(AF_INET, &addr4, (socklen_t)sizeof(addr4), socktype, protocol);
+    if (item == 0) {
+      return EAI_MEMORY;
+    }
+    *res = item;
+    return 0;
+  }
+  if (CRT_GETADDRINFO_IPV6 && parse_ipv6_literal(node, &literal6, &scope_id)) {
+    if (family == AF_INET) {
+      return EAI_NONAME;
+    }
+    addr6.sin6_addr = literal6;
+    addr6.sin6_scope_id = scope_id;
+    item = new_addrinfo(AF_INET6, &addr6, (socklen_t)sizeof(addr6), socktype, protocol);
+    if (item == 0) {
+      return EAI_MEMORY;
+    }
+    *res = item;
+    return 0;
+  }
+
+  if ((flags & AI_NUMERICHOST) != 0) {
+    return EAI_NONAME;
+  }
+#if defined(CRT_TARGET_OS_MACOS)
+  if (macos_host_resolve_hostname(node, CRT_GETADDRINFO_IPV6 ? family : AF_INET, flags, socktype, protocol,
+                                  port, res) == 0) {
+    return 0;
+  }
+#endif
+  /* Not a literal -- a real DNS lookup (the A-record client above) before giving up. It carries no
+   * AAAA query, so an IPv6-only request for a name has nothing to answer with. */
+  if (family == AF_INET6) {
+    return EAI_NONAME;
+  }
+  if (dns_resolve_hostname(node, &addr4.sin_addr) != 0) {
+    return EAI_NONAME;
+  }
+  item = new_addrinfo(AF_INET, &addr4, (socklen_t)sizeof(addr4), socktype, protocol);
+  if (item == 0) {
     return EAI_MEMORY;
   }
-
-  addr->sin_family = AF_INET;
-  addr->sin_port = port;
-  if (node == 0 || node[0] == 0) {
-    addr->sin_addr.s_addr =
-        (hints != 0 && (hints->ai_flags & AI_PASSIVE) != 0) ? htonl(INADDR_ANY) : htonl(INADDR_LOOPBACK);
-  } else if (inet_pton(AF_INET, node, &addr->sin_addr) != 1) {
-    if (hints != 0 && (hints->ai_flags & AI_NUMERICHOST) != 0) {
-      free(ai);
-      free(addr);
-      return EAI_NONAME;
-    }
-#if defined(CRT_TARGET_OS_MACOS)
-    if (macos_host_resolve_hostname(node, service, socktype, protocol, addr) == 0) {
-      port = addr->sin_port;
-    } else
-#endif
-    /* Not a literal IP -- try a real DNS lookup (see the DNS client
-     * section above) before giving up. */
-    if (dns_resolve_hostname(node, &addr->sin_addr) != 0) {
-      free(ai);
-      free(addr);
-      return EAI_NONAME;
-    }
-  }
-
-  ai->ai_family = AF_INET;
-  ai->ai_socktype = socktype;
-  ai->ai_protocol = protocol;
-  ai->ai_addrlen = (socklen_t)sizeof(*addr);
-  ai->ai_addr = (struct sockaddr*)addr;
-  *res = ai;
+  *res = item;
   return 0;
 }
 

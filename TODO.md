@@ -305,9 +305,11 @@ or host investigation supplies the required evidence.
   ordinary Linux dist chain always builds Wayland (then this tree was just
   stale) or whether `crt-ui-dist` should depend on it. Found 2026-09-30
   (`docs/acceptance/crtui_acceptance.md`, Tranche 3 Linux replay).
-- Extend the resolver from its current synchronous UDP IPv4/A-record baseline
-  when IPv6, TCP fallback, search domains, or caching becomes a consumer
-  requirement.
+- Extend the built-in resolver (Linux, Windows; macOS uses the system resolver and
+  already answers AAAA) from its synchronous UDP IPv4/A-record baseline: AAAA,
+  TCP fallback, search domains, caching, and Windows `AF_INET6` sockets, when a
+  consumer needs them. IPv6 literals, sockets and `getaddrinfo()` lists are
+  there on Linux and macOS (2026-10-11, `socket_ipv6_test`).
 - Revisit a CRT-owned ELF loader/Android-linker boundary only after a real
   upper-runtime consumer requires behavior the host loader adapter cannot
   provide.

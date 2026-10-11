@@ -762,8 +762,8 @@ limited to the prefix and the sysroot, host build tools run without the prefix o
 `library_dirs`.
 
 macOS/arm64 replay (2026-10-11), differences from Linux worth knowing: OpenSSL's `Configure` target is
-`darwin64-arm64-cc` (`@CRT_ARCH_DARWIN@`); `curl-openssl` configures with `--disable-ipv6` (otherwise upstream
-links CoreFoundation/CoreServices/SystemConfiguration, as for the `curl` recipe); HarfBuzz builds with
+`darwin64-arm64-cc` (`@CRT_ARCH_DARWIN@`); IPv6 is enabled in both curl recipes on macOS (CRT libc's IPv6, see below) and
+the Apple-framework probe of upstream's configure is made to fail by `porting/shims/macos/curl-no-apple-frameworks`; HarfBuzz builds with
 `CRT_CXX_RUNTIME_LINKAGE=shared`; tests of shared libraries select the shared C runtime per test
 (`env` in the test or its `target_overrides`), because a static `libc.a` in the executable next to the ports'
 `libc.dylib` is two libcs in one process; the wrappers drop `-lpthread`/`-lrt` on macOS. Details and the

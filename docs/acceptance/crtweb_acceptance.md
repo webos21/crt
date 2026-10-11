@@ -1296,9 +1296,41 @@ loads only CRT libraries and `libSystem`. What the replay found, all fixed in CR
    HarfBuzz), test link lines name `.dylib` on macOS, OpenSSL's `Configure` target is `darwin64-arm64-cc`
    (`@CRT_ARCH_DARWIN@`), HarfBuzz uses the shared C++ runtime like ICU, and `check_web_dependencies.py` presents
    `Darwin` (it hard-coded Linux).
-4. *Apple frameworks in libcurl.* With IPv6 enabled curl's configure links CoreFoundation, CoreServices and
-   SystemConfiguration on a Darwin host triple; `curl-openssl` now passes `--disable-ipv6` on macOS exactly as the
-   `curl` recipe does. **IPv6 on macOS is a gap shared by both curl recipes**, to be closed before WebKit relies on it.
+4. *Apple frameworks in libcurl, and IPv6.* With IPv6 enabled curl's configure links CoreFoundation, CoreServices
+   and SystemConfiguration on a Darwin host triple. The first answer, `--disable-ipv6` as in the `curl` recipe, left
+   IPv6 off; it is replaced (2026-10-11, below) by a CRT libc IPv6 surface on macOS plus a fail-closed configure probe.
+
+*IPv6 on macOS without Apple frameworks (2026-10-11).* Goal: curl HTTPS over IPv6 using CRT libc's IPv6, with no
+Apple framework in libcurl. Both parts were needed, because CRT's macOS socket layer had no IPv6 at all
+(`socket(AF_INET6)` passed Bionic's 10, which Darwin does not number AF_INET6; no `sockaddr_in6` translation;
+`inet_pton`/`inet_ntop` and `getaddrinfo` were IPv4-only):
+
+- *libc, all hosts:* `inet_pton`/`inet_ntop` for `AF_INET6` (RFC 4291 parse including `::` and trailing dotted quad,
+  RFC 5952 output including `::ffff:a.b.c.d`), `in6addr_any`/`in6addr_loopback`, `IN6ADDR_*_INIT` and the
+  `IPV6_V6ONLY`/`IPV6_UNICAST_HOPS`/`IPV6_MULTICAST_*` numbers (Bionic's), `getaddrinfo()` returning IPv6 literals
+  (with a numeric `%scope`) and `AF_INET6` results instead of `EAI_FAMILY`, as a list and not one entry. Windows
+  keeps `EAI_FAMILY` for IPv6 until its Winsock translation exists.
+- *libc, macOS translation:* `socket(AF_INET6)` to Darwin's 30; `sockaddr_in6` both ways (Darwin's length-prefixed
+  layout) for bind/connect/sendto/recvfrom/accept/getsockname/getpeername/recvmsg; `IPPROTO_IPV6` options to Darwin's
+  numbers, with an honest `ENOPROTOOPT` for any option without a translation; the `SOL_SOCKET` table now also covers
+  `SO_KEEPALIVE`, `SO_BROADCAST`, `SO_LINGER`, `SO_SNDBUF`, `SO_RCVBUF` (they were passed with Linux numbers);
+  `getaddrinfo()` takes only the *answers* for names from the host resolver and converts every A/AAAA entry to
+  Bionic structs and the caller's port. No Apple type reaches a consumer.
+- *curl:* `porting/shims/macos/curl-no-apple-frameworks/TargetConditionals.h` is placed first on the include path of
+  the two curl recipes on macOS (`target_overrides.macos.include_dirs`). Its content is an `#error`: curl's one
+  framework probe (a program that includes `<TargetConditionals.h>` and needs `TARGET_OS_MAC`; the CRT SDK header
+  answers yes for other consumers) fails closed and nothing else in libcurl includes that header. Configure now
+  reports `IPv6: enabled`, `otool -L` on both libcurls lists only CRT libraries and `libSystem`.
+- *Evidence:* `socket_ipv6_test` (text conversion, literals, passive/loopback, `localhost` through the host resolver
+  returning both families, TCP and UDP over `::1`, `IPV6_V6ONLY`; on macOS it cannot skip, and two mutations of the
+  translation make it fail) and `curl_openssl_https_ipv6_test` (shared and static: TLS server on `::1`,
+  `CURLOPT_IPRESOLVE_V6`, `https://[::1]:port/` and `https://localhost:port/`, required `CURL_VERSION_IPV6`,
+  `CURLINFO_PRIMARY_IP == "::1"`, the SSL_CTX hook); 40/40 repeated runs each; full `ctest` 180/180; the mbedTLS
+  `curl` roundtrip test passes with IPv6 on.
+- *Not done:* DNS AAAA in the built-in resolver used on Linux/Windows (macOS uses the system resolver; Linux still
+  answers only literals for IPv6), Windows AF_INET6, interface-name zones (`%en0`), `IPV6_JOIN_GROUP` and the packet-info
+  options, and the SDK-level `04-gfx-media` stage rebuild of curl with IPv6 (the recipe change reaches it on its next
+  rebuild).
 
 *Not covered by the macOS replay:* the CA bundle, SIMD/asm paths (still off), Linux/aarch64 and Windows for B2, and
 promoting the web group into the automated all-ports set (it waits for Windows).

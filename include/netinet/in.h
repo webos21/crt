@@ -45,6 +45,20 @@ struct sockaddr_in6 {
 #define IPPROTO_UDP 17
 #define IPPROTO_IPV6 41
 
+/* IPv6 socket options (Bionic <linux/in6.h> numbering; Darwin numbers them differently and the
+ * macOS socket layer translates, see libc/src/socket.c). */
+#define IPV6_UNICAST_HOPS 16
+#define IPV6_MULTICAST_IF 17
+#define IPV6_MULTICAST_HOPS 18
+#define IPV6_MULTICAST_LOOP 19
+#define IPV6_V6ONLY 26
+
+/* RFC 3493 constants: the unspecified and loopback addresses. */
+extern const struct in6_addr in6addr_any;
+extern const struct in6_addr in6addr_loopback;
+#define IN6ADDR_ANY_INIT {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
+#define IN6ADDR_LOOPBACK_INIT {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
+
 /* IN6_IS_ADDR_* classification macros (RFC 3493/POSIX): pure bit tests on
  * struct in6_addr's bytes, no syscall involved. Real-world <netinet/in.h>
  * always ships these; curl's own lib/cf-socket.c needs LINKLOCAL for real

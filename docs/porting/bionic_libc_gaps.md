@@ -403,6 +403,14 @@ completeness against this same sweep:
   (`libc/src/pthread.c`), matching `docs/guides/import_bionic.md`'s "Cancellation
   and robust mutexes are still deferred."
 
+## IPv6 on macOS (2026-10-11)
+
+Found by turning IPv6 back on in libcurl: the macOS socket layer translated only `AF_INET` and `AF_UNIX`.
+`AF_INET6` (Bionic 10, Darwin 30), `struct sockaddr_in6` (Darwin's length-prefixed layout), `IPPROTO_IPV6` option
+numbers, `inet_pton`/`inet_ntop` for IPv6 on every host, `in6addr_any`/`in6addr_loopback`, and a `getaddrinfo()` that
+returns IPv6 results as a list are now provided; details and tests in `docs/acceptance/crtweb_acceptance.md` (B2 on
+macOS). Still missing: interface-name zone ids, `IPV6_JOIN_GROUP`/packet-info options, AAAA in the built-in resolver.
+
 ## Found by the web-stage ports (2026-10-10)
 
 OpenSSL 3.5's `BIO_ADDR`, `bio_sock2` and `bss_dgram` (Web Tranche 3B, milestone B2) needed the

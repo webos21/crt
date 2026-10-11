@@ -221,6 +221,11 @@ set_tests_properties(socket_network_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "socket_network_test: ok"
 )
 
+add_crt_test(socket_ipv6_test socket_ipv6_test.c)
+set_tests_properties(socket_ipv6_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "socket_ipv6_test: (ok|windows)"
+)
+
 add_crt_test(dns_resolve_test dns_resolve_test.c)
 set_tests_properties(dns_resolve_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "dns_resolve_test: ok"
