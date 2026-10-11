@@ -403,19 +403,41 @@ completeness against this same sweep:
   (`libc/src/pthread.c`), matching `docs/guides/import_bionic.md`'s "Cancellation
   and robust mutexes are still deferred."
 
-## AF_UNIX SOCK_SEQPACKET and message flags on macOS (2026-10-12)
+## AF_UNIX SOCK_SEQPACKET and message flags on macOS (2026-10-12, revised after review)
 
 Darwin has no sequenced-packet AF_UNIX sockets (`EPROTONOSUPPORT`). CRT-provided, in `libc/src/socket.c` (macOS
-block) and hooks in `libc/src/fd.c`: a `SOCK_STREAM` socket with 4-byte length-prefixed records, `SCM_RIGHTS` sent in
-the same `sendmsg()` as the length; `socket()`/`socketpair()`/`accept()` mark a descriptor framed (`dup` copies the
-mark, `close` drops it, `fork` inherits it, `exec` does not), `SO_TYPE` answers `SOCK_SEQPACKET`, `MSG_TRUNC` follows
-Linux (return value is the real length when the flag is passed), `MSG_PEEK` is `EOPNOTSUPP`, records are capped at
-64 MiB, 64 iovecs. Both peers must be CRT; one thread should read a socket at a time; a non-blocking socket waits for
-the rest of a record once it began it. Separately, `recv`/`send`/`recvmsg`/`sendmsg` flags were passed to Darwin with
-Linux numbers (`MSG_DONTWAIT` arrived as `MSG_WAITALL`); `MSG_EOR`, `MSG_TRUNC`, `MSG_CTRUNC`, `MSG_NOSIGNAL` are
-translated, `MSG_CMSG_CLOEXEC` is applied to received descriptors, and Darwin's un-clamped `cmsg_len` after
-`MSG_CTRUNC` is clamped. Tests: `unix_socket_test` (Gate B runs on macOS), `socketpair_test`,
-`crtweb_wire_transport_test`.
+block) with hooks in `libc/src/fd.c` and `libc/src/process.c`: a `SOCK_STREAM` socket with 4-byte length-prefixed
+records, `SCM_RIGHTS` sent in the same `sendmsg()` as the length. Both peers must be CRT.
+
+- *State.* One `struct seq_socket` per framed socket, shared by every descriptor made with `dup`/`dup2`/`F_DUPFD`:
+  a send lock (a record is written by one thread at a time, also across `dup`ed descriptors), a receive lock, and the
+  partly received record (header bytes, payload, the descriptors that arrived with it). Descriptors the table cannot
+  hold (>= 4096) are refused with `EMFILE` for `socket`/`accept`/`dup`, never silently left as a plain stream.
+- *Receive.* The kernel is only ever read non-blockingly; the call waits (`poll`) only when the caller is blocking.
+  With `O_NONBLOCK` or `MSG_DONTWAIT` a half header or half payload is `EAGAIN` and the state is kept for the next
+  call. The whole record is buffered before delivery; descriptors that arrived with it are owned by the state until
+  then, so an oversize length (`EPROTO`, the connection is marked broken), a peer that closes mid-record
+  (`ECONNRESET`) or a record that is never delivered closes them. Delivery copies as many whole descriptors as the
+  caller's control buffer holds, closes the rest and sets `MSG_CTRUNC`; `MSG_CMSG_CLOEXEC` is applied; `MSG_TRUNC`
+  follows Linux (the return value is the real length when the flag is passed); `MSG_PEEK` is `EOPNOTSUPP`.
+- *Send.* A sender that could not write a single byte gets `EAGAIN` with nothing sent (a whole-record retry works).
+  Once any part of a record is on the wire it is completed, waiting for `POLLOUT` whatever the socket's mode, because
+  a half record would corrupt the stream. This is a documented difference from a kernel SEQPACKET (where a record is
+  accepted or refused whole); a caller that must never block mid-record should keep records small.
+- *Vectors.* `readv`/`writev` on a framed socket are one `recvmsg`/`sendmsg`, i.e. one record over all vectors.
+- *exec.* The framing flag lives in the process, so the spawn/exec paths (`posix_spawn`, `posix_spawnp`, `execve` and
+  what calls it) list the framed descriptors that are still sockets, after the file actions renumbered them, in
+  `CRT_SEQPACKET_FDS` of the new environment; `__crt_env_set_initial()` of the new image reads and removes it. A child
+  that is not CRT ignores the variable. `fork` copies the table and resets the locks in the child.
+- *Limits.* 64 MiB per record, 64 iovecs and 64 descriptors per record, descriptors below 4096; `MSG_PEEK` unsupported.
+
+Separately, `recv`/`send`/`recvmsg`/`sendmsg` flags were passed to Darwin with Linux numbers (`MSG_DONTWAIT` arrived
+as `MSG_WAITALL`); `MSG_EOR`, `MSG_TRUNC`, `MSG_CTRUNC`, `MSG_NOSIGNAL` are translated, `MSG_CMSG_CLOEXEC` is applied to
+received descriptors, and Darwin's un-clamped `cmsg_len` after `MSG_CTRUNC` is clamped. Tests: `unix_socket_test`
+(Gate B, plus on macOS: partial header/payload with `O_NONBLOCK` and `MSG_DONTWAIT`, descriptor cleanup for an oversize
+record and for a peer that closes mid-record, `readv`/`writev` records, four concurrent senders of 70 KB records,
+descriptor inheritance across `posix_spawn`, duplication at the table limit; each fails when the behaviour it covers is
+removed), `socketpair_test`, `crtweb_wire_transport_test`.
 
 ## IPv6 on macOS (2026-10-11)
 

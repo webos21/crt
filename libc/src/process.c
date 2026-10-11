@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <private/crt_fd_table.h>
+#include <private/crt_seqpacket.h>
 #include <private/crt_shell_process.h>
 #include <private/crt_signal.h>
 #include <private/crt_spawn.h>
@@ -637,9 +638,22 @@ long __crt_sys_posix_spawn(
     return child;
   }
   if (child == 0) {
+    char* const* child_env = envp != 0 ? envp : environ;
+
     apply_spawn_attr_or_exit(attr);
     apply_spawn_actions_or_exit(actions);
-    __crt_sys_execve(path, argv, envp != 0 ? envp : environ);
+#if defined(CRT_TARGET_OS_MACOS)
+    {
+      /* The framed AF_UNIX descriptors, after the file actions renumbered them, travel in the
+       * environment (libc/src/socket.c, "Handing framed descriptors across exec"). */
+      char** exported = __crt_seqpacket_export_env(child_env);
+
+      if (exported != 0) {
+        child_env = exported;
+      }
+    }
+#endif
+    __crt_sys_execve(path, argv, child_env);
     _exit(127);
   }
   if (pid != 0) {
@@ -1327,7 +1341,18 @@ int execve(const char* path, char* const argv[], char* const envp[]) {
 #if !defined(CRT_TARGET_OS_WINDOWS)
   path = translate_exec_path_for_rootfs(path, translated_path);
 #endif
+#if defined(CRT_TARGET_OS_MACOS)
+  {
+    char** exported = __crt_seqpacket_export_env(envp != 0 ? envp : environ);
+
+    result = __crt_sys_execve(path, argv, exported != 0 ? exported : envp);
+    if (exported != 0 && result < 0) {
+      free(exported); /* exec failed: the old image continues, the list was only for the new one */
+    }
+  }
+#else
   result = __crt_sys_execve(path, argv, envp);
+#endif
   if (result < 0 && result >= -4095) {
     errno = (int)-result;
     return -1;

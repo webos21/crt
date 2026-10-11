@@ -11,6 +11,17 @@ substantive update.
 
 ## 2026-10-12
 
+### macOS AF_UNIX SOCK_SEQPACKET layer re-examined and hardened after review
+
+A review of the first CRT-framed implementation (`6152300`) was checked against the source; the findings that held
+were fixed: non-blocking/`MSG_DONTWAIT` receive now keeps a partly received record per socket (it previously read the
+payload with blocking reads), descriptors that arrive with a record are owned by the state until delivery and closed
+when the record fails or does not fit the caller's control buffer, the framing flag is handed across `exec` through
+`CRT_SEQPACKET_FDS` (the answer to B4's launcher question), `readv`/`writev` are one record, sends are serialized
+and `dup`s share state, and a framed `dup` beyond the 4096-entry table is `EMFILE`. Regression tests for each
+(`unix_socket_test`); each was confirmed to fail with its fix removed. Kept by decision: a sender that already wrote
+part of a record completes it (`EAGAIN` only when nothing was written).
+
 ### Tranche 3 replayed on macOS/arm64: 3A contracts and B3 (WebCore, PAL, Skia)
 
 `crtweb_wire_layout_test`, `crtweb_wire_transport_test` and `crtweb_web_surface_test` pass on macOS, and

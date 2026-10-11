@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <private/crt_seqpacket.h>
 #include <private/crt_auxv.h>
 
 #define CRT_ENV_INITIAL_CAPACITY 64
@@ -201,6 +202,10 @@ size_t __crt_initial_stack_size;
 void __crt_env_set_initial(char** envp) {
   __crt_initial_envp = envp;
   __crt_initial_thread_id = __crt_sys_thread_id();
+#if defined(CRT_TARGET_OS_MACOS)
+  /* Framed AF_UNIX descriptors inherited across exec (libc/src/socket.c). */
+  __crt_seqpacket_import_env(envp);
+#endif
 #if defined(CRT_TARGET_OS_WINDOWS)
   {
     void* base = 0;

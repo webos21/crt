@@ -13,6 +13,9 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <pthread.h>
+#include <signal.h>
+#include <sys/resource.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -619,9 +622,347 @@ static void test_fd_passing_between_processes(const char* self) {
   unlink(file_path);
 }
 
+
+/* ---- Record semantics beyond the happy path (macOS framing, native on Linux, CRT layer on Windows) ---- */
+
+static int count_open_descriptors(void) {
+  int count = 0;
+  int fd;
+
+  for (fd = 0; fd < 512; ++fd) {
+    if (fcntl(fd, F_GETFD) >= 0) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+static void test_readv_writev_records(void) {
+  int sv[2];
+  char head[4] = {'H', 'E', 'A', 'D'};
+  char body[100];
+  char got_head[4];
+  char got_body[100];
+  struct iovec out[2];
+  struct iovec in[2];
+  char extra[8];
+
+  memset(body, 'b', sizeof(body));
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) == 0, "pair for readv/writev");
+  if (sv[0] < 0) {
+    return;
+  }
+  out[0].iov_base = head;
+  out[0].iov_len = sizeof(head);
+  out[1].iov_base = body;
+  out[1].iov_len = sizeof(body);
+  CHECK(writev(sv[0], out, 2) == 104, "writev of two vectors is one 104-byte record");
+  CHECK(send(sv[0], "tail", 4, 0) == 4, "a second record");
+  in[0].iov_base = got_head;
+  in[0].iov_len = sizeof(got_head);
+  in[1].iov_base = got_body;
+  in[1].iov_len = sizeof(got_body);
+  CHECK(readv(sv[1], in, 2) == 104 && memcmp(got_head, head, 4) == 0 && memcmp(got_body, body, 100) == 0,
+        "readv scatters one record over both vectors");
+  CHECK(recv(sv[1], extra, sizeof(extra), 0) == 4 && memcmp(extra, "tail", 4) == 0,
+        "the second record was not consumed by readv");
+  close(sv[0]);
+  close(sv[1]);
+}
+
+struct sender_arguments {
+  int fd;
+  int id;
+  int records;
+};
+
+#define CONCURRENT_RECORD 70000
+
+static void* sender_thread(void* argument) {
+  struct sender_arguments* args = (struct sender_arguments*)argument;
+  static const int unused = 0;
+  char* buffer = (char*)malloc(CONCURRENT_RECORD);
+  int i;
+
+  (void)unused;
+  if (buffer == 0) {
+    return (void*)1;
+  }
+  memset(buffer, 'A' + args->id, CONCURRENT_RECORD);
+  for (i = 0; i < args->records; ++i) {
+    if (send(args->fd, buffer, CONCURRENT_RECORD, 0) != CONCURRENT_RECORD) {
+      free(buffer);
+      return (void*)1;
+    }
+  }
+  free(buffer);
+  return 0;
+}
+
+static void test_concurrent_senders(void) {
+  int sv[2];
+  enum { kSenders = 4, kRecords = 40 };
+  pthread_t threads[kSenders];
+  struct sender_arguments args[kSenders];
+  char* buffer = (char*)malloc(CONCURRENT_RECORD);
+  int counts[kSenders] = {0};
+  int i;
+  int mixed = 0;
+
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) == 0, "pair for concurrent senders");
+  if (sv[0] < 0 || buffer == 0) {
+    free(buffer);
+    return;
+  }
+  for (i = 0; i < kSenders; ++i) {
+    args[i].fd = sv[0];
+    args[i].id = i;
+    args[i].records = kRecords;
+    CHECK(pthread_create(&threads[i], 0, sender_thread, &args[i]) == 0, "start a sender");
+  }
+  for (i = 0; i < kSenders * kRecords; ++i) {
+    ssize_t got = recv(sv[1], buffer, CONCURRENT_RECORD, 0);
+    int id;
+    int j;
+
+    if (got != CONCURRENT_RECORD) {
+      CHECK(0, "a record of the full size arrives");
+      break;
+    }
+    id = buffer[0] - 'A';
+    for (j = 1; j < CONCURRENT_RECORD; ++j) {
+      if (buffer[j] != buffer[0]) {
+        mixed = 1;
+        break;
+      }
+    }
+    if (id >= 0 && id < kSenders) {
+      ++counts[id];
+    }
+  }
+  for (i = 0; i < kSenders; ++i) {
+    void* result = 0;
+
+    pthread_join(threads[i], &result);
+    CHECK(result == 0, "a sender finished");
+    CHECK(counts[i] == kRecords, "every record of each sender arrived");
+  }
+  CHECK(!mixed, "no record mixes bytes of two senders");
+  free(buffer);
+  close(sv[0]);
+  close(sv[1]);
+}
+
+static int run_inherit_child(int fd) {
+  char buffer[16];
+  int type = 0;
+  socklen_t length = sizeof(type);
+  ssize_t got;
+
+  if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &length) != 0 || type != SOCK_SEQPACKET) {
+    return 30;
+  }
+  got = recv(fd, buffer, sizeof(buffer), 0);
+  if (got != 5 || memcmp(buffer, "first", 5) != 0) {
+    return 31;
+  }
+  got = recv(fd, buffer, sizeof(buffer), 0);
+  if (got != 6 || memcmp(buffer, "second", 6) != 0) {
+    return 32; /* the record boundary survived exec */
+  }
+  return send(fd, "ack", 3, 0) == 3 ? 0 : 33;
+}
+
+static void test_descriptor_inherited_across_exec(const char* self) {
+  int sv[2];
+  char number[16];
+  char* const argv[] = {(char*)self, (char*)"inherit", number, 0};
+  pid_t pid;
+  int status = 0;
+  char answer[8];
+
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) == 0, "pair to inherit");
+  if (sv[0] < 0) {
+    return;
+  }
+  snprintf(number, sizeof(number), "%d", sv[1]);
+  CHECK(send(sv[0], "first", 5, 0) == 5 && send(sv[0], "second", 6, 0) == 6, "two records queued");
+  CHECK(posix_spawn(&pid, self, 0, 0, argv, environ) == 0, "start a child that inherits the socket");
+  memset(answer, 0, sizeof(answer));
+  {
+    struct pollfd wait_for_answer;
+
+    wait_for_answer.fd = sv[0];
+    wait_for_answer.events = POLLIN;
+    wait_for_answer.revents = 0;
+    /* A child that did not recognise the socket exits without answering: fail, do not hang. */
+    CHECK(poll(&wait_for_answer, 1, 20000) == 1 &&
+              recv(sv[0], answer, sizeof(answer), 0) == 3 && memcmp(answer, "ack", 3) == 0,
+          "the child answered over the inherited socket");
+  }
+  waitpid(pid, &status, 0);
+  CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0, "the child saw a SOCK_SEQPACKET socket with intact records");
+  close(sv[0]);
+  close(sv[1]);
+}
+
+static void test_high_descriptor_duplication(void) {
+  struct rlimit limit;
+  int sv[2];
+  int type = 0;
+  socklen_t length = sizeof(type);
+
+  if (getrlimit(RLIMIT_NOFILE, &limit) != 0 || limit.rlim_cur < 4200) {
+    limit.rlim_cur = limit.rlim_max < 4200 ? limit.rlim_max : 4200;
+    if (limit.rlim_cur < 4200 || setrlimit(RLIMIT_NOFILE, &limit) != 0) {
+      return; /* cannot reach descriptor 4096 here */
+    }
+  }
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) == 0, "pair for high descriptors");
+  if (sv[0] < 0) {
+    return;
+  }
+  CHECK(dup2(sv[0], 4000) == 4000 && getsockopt(4000, SOL_SOCKET, SO_TYPE, &type, &length) == 0 &&
+            type == SOCK_SEQPACKET,
+        "a duplicate below the table limit is still a seqpacket socket");
+  CHECK(send(4000, "hi", 2, 0) == 2, "the duplicate sends a record");
+  {
+    char buffer[4];
+
+    CHECK(recv(sv[1], buffer, sizeof(buffer), 0) == 2, "and the peer receives a record");
+  }
+  close(4000);
+#if defined(__APPLE__)
+  /* macOS tracks framed descriptors below 4096; a framed duplicate above it must fail, not
+   * silently become a plain stream. */
+  errno = 0;
+  CHECK(dup2(sv[0], 4200) == -1 && errno == EMFILE, "a framed duplicate beyond the table is EMFILE");
+#else
+  close(dup2(sv[0], 4200));
+#endif
+  close(sv[0]);
+  close(sv[1]);
+}
+
+#if defined(__APPLE__)
+extern int __crt_seqpacket_adopt(int fd);
+
+static void write_all(int fd, const void* data, size_t length) {
+  CHECK(write(fd, data, length) == (ssize_t)length, "raw write on the plain end");
+}
+
+static int plain_pair_with_framed_receiver(int pair[2]) {
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) {
+    return -1;
+  }
+  return __crt_seqpacket_adopt(pair[1]);
+}
+
+/* A record arriving in pieces: a non-blocking receiver reports EAGAIN each time and keeps what it has. */
+static void test_framed_partial_records(void) {
+  int pair[2];
+  unsigned char length10[4] = {10, 0, 0, 0};
+  char buffer[32];
+  int flags;
+
+  CHECK(plain_pair_with_framed_receiver(pair) == 0, "plain pair, framed receiver");
+  if (pair[0] < 0) {
+    return;
+  }
+  flags = fcntl(pair[1], F_GETFL);
+  CHECK(fcntl(pair[1], F_SETFL, flags | O_NONBLOCK) == 0, "O_NONBLOCK on the receiver");
+  write_all(pair[0], length10, 2);
+  CHECK(recv(pair[1], buffer, sizeof(buffer), 0) == -1 && errno == EAGAIN, "half a header is EAGAIN");
+  write_all(pair[0], length10 + 2, 2);
+  write_all(pair[0], "abcd", 4);
+  CHECK(recv(pair[1], buffer, sizeof(buffer), 0) == -1 && errno == EAGAIN, "a header and part of the payload is EAGAIN");
+  write_all(pair[0], "efghij", 6);
+  memset(buffer, 0, sizeof(buffer));
+  CHECK(recv(pair[1], buffer, sizeof(buffer), 0) == 10 && memcmp(buffer, "abcdefghij", 10) == 0,
+        "the record completes from the kept state");
+  CHECK(recv(pair[1], buffer, sizeof(buffer), 0) == -1 && errno == EAGAIN, "nothing more: EAGAIN");
+
+  /* MSG_DONTWAIT on a blocking descriptor must not wait for the payload either. */
+  CHECK(fcntl(pair[1], F_SETFL, flags) == 0, "blocking again");
+  alarm(10);
+  write_all(pair[0], length10, 4);
+  CHECK(recv(pair[1], buffer, sizeof(buffer), MSG_DONTWAIT) == -1 && errno == EAGAIN,
+        "MSG_DONTWAIT with only a header returns EAGAIN");
+  write_all(pair[0], "0123456789", 10);
+  CHECK(recv(pair[1], buffer, sizeof(buffer), MSG_DONTWAIT) == 10 && memcmp(buffer, "0123456789", 10) == 0,
+        "and the record is there on the next call");
+  alarm(0);
+  close(pair[0]);
+  close(pair[1]);
+}
+
+static int send_raw_with_descriptor(int fd, const void* data, size_t length, int passed) {
+  char control[CMSG_SPACE(sizeof(int))];
+  struct msghdr msg;
+  struct iovec iov;
+  struct cmsghdr* cmsg;
+
+  memset(&msg, 0, sizeof(msg));
+  memset(control, 0, sizeof(control));
+  iov.iov_base = (void*)data;
+  iov.iov_len = length;
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
+  msg.msg_control = control;
+  msg.msg_controllen = sizeof(control);
+  cmsg = CMSG_FIRSTHDR(&msg);
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  memcpy(CMSG_DATA(cmsg), &passed, sizeof(int));
+  return (int)sendmsg(fd, &msg, 0);
+}
+
+/* A record that fails after its descriptor arrived must not leave that descriptor open. */
+static void test_framed_descriptor_cleanup(void) {
+  int pair[2];
+  int null_fd = open("/dev/null", O_RDONLY);
+  unsigned char oversize[4] = {0xff, 0xff, 0xff, 0xff};
+  unsigned char length100[4] = {100, 0, 0, 0};
+  char buffer[16];
+  int before;
+  int after;
+
+  CHECK(null_fd >= 0, "open /dev/null");
+  CHECK(plain_pair_with_framed_receiver(pair) == 0, "plain pair, framed receiver");
+  if (pair[0] < 0 || null_fd < 0) {
+    return;
+  }
+  before = count_open_descriptors();
+  CHECK(send_raw_with_descriptor(pair[0], oversize, 4, null_fd) == 4, "an oversize length with a descriptor");
+  CHECK(recv(pair[1], buffer, sizeof(buffer), 0) == -1 && errno == EPROTO, "an oversize record is EPROTO");
+  after = count_open_descriptors();
+  CHECK(after == before, "the descriptor that arrived with the bad record was closed");
+  CHECK(recv(pair[1], buffer, sizeof(buffer), 0) == -1 && errno == EPROTO, "the connection stays broken");
+  close(pair[0]);
+  close(pair[1]);
+
+  CHECK(plain_pair_with_framed_receiver(pair) == 0, "a second plain pair");
+  before = count_open_descriptors();
+  CHECK(send_raw_with_descriptor(pair[0], length100, 4, null_fd) == 4, "a header and descriptor");
+  write_all(pair[0], "short", 5);
+  close(pair[0]);
+  CHECK(recv(pair[1], buffer, sizeof(buffer), 0) == -1 && errno == ECONNRESET,
+        "the peer closing mid-record is ECONNRESET");
+  CHECK(count_open_descriptors() == before - 1,
+        "no descriptor of the broken record leaked (only the closed peer end is gone)");
+  close(pair[1]);
+  close(null_fd);
+}
+#endif
+
 int main(int argc, char** argv) {
+  alarm(240); /* a broken record layer must fail this test, not hang it */
   if (argc > 2 && strcmp(argv[1], "child") == 0) {
     return run_child(argv[2]);
+  }
+  if (argc > 2 && strcmp(argv[1], "inherit") == 0) {
+    return run_inherit_child(atoi(argv[2]));
   }
   test_stream_path();
   test_stream_nonblocking_and_poll();
@@ -631,6 +972,18 @@ int main(int argc, char** argv) {
     test_seqpacket_path();
     test_fd_passing_in_process();
     test_fd_passing_between_processes(argv[0]);
+#if !defined(_WIN32) && !defined(__MINGW32__)
+    /* Linux (native) and macOS (CRT framing); the Windows layer has its own coverage above and
+     * its descriptor inheritance goes through the fd snapshot, not the environment. */
+    test_readv_writev_records();
+    test_concurrent_senders();
+    test_descriptor_inherited_across_exec(argv[0]);
+    test_high_descriptor_duplication();
+#endif
+#if defined(__APPLE__)
+    test_framed_partial_records();
+    test_framed_descriptor_cleanup();
+#endif
   } else {
     printf("unix_socket_test: SOCK_SEQPACKET is not available on this host (skipped)\n");
   }

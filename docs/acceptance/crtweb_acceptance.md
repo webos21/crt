@@ -1373,7 +1373,8 @@ the product port's own process model (B4) replaces them. What the replay found, 
    (`HISTORY.md`, `docs/porting/bionic_libc_gaps.md`): a `SOCK_STREAM` socket carrying a 4-byte length per record,
    with `SCM_RIGHTS` sent in the same `sendmsg()` as the length so Darwin delivers the descriptors with the first byte
    of the record. `socket()`, `socketpair()` and `accept()` mark a descriptor framed (an in-process table, copied by
-   `dup`, dropped by `close`, inherited by `fork`; **not** across `exec`), `SO_TYPE` reports `SOCK_SEQPACKET`,
+   `dup`, dropped by `close`, inherited by `fork`, and handed across `exec` in `CRT_SEQPACKET_FDS`, see the review
+   follow-up below), `SO_TYPE` reports `SOCK_SEQPACKET`,
    `read`/`write`/`send`/`recv`/`sendmsg`/`recvmsg` keep record semantics, over-long records are truncated with
    `MSG_TRUNC`, zero-length records are zero-length reads, `MSG_PEEK` is `EOPNOTSUPP`. Both ends must be CRT. The gate
    is `unix_socket_test` Gate B, which now runs on macOS instead of skipping (file, memfd mapping, TCP socket, three
@@ -1388,6 +1389,21 @@ the product port's own process model (B4) replaces them. What the replay found, 
    inlined from the SDK's differently laid out `std::string`. The target now takes the imported libc++ headers (the
    same decision Windows already has for Skia code); `crtweb_surface_wire.h` is unchanged. Other in-tree macOS C++
    tests that pass `std::string` across that boundary are at the same risk and should move to the same headers.
+
+*Review follow-up on the macOS `SOCK_SEQPACKET` layer (2026-10-13).* A code review of the first version
+(`6152300`) found real gaps, all confirmed against the source and fixed before B4 builds on it:
+(1) a non-blocking or `MSG_DONTWAIT` receive read the payload with blocking reads and kept no progress, so a half
+record could hang or be lost; the receiver now keeps the partly received record per socket and returns `EAGAIN`;
+(2) descriptors received with a header leaked when the record then failed (oversize length, peer closed mid-record);
+they are owned by the state until delivery and closed on failure, and extra ones are closed with `MSG_CTRUNC`;
+(3) the framing flag was lost across `exec`: the spawn/exec paths now carry it in `CRT_SEQPACKET_FDS` and the new
+image restores it, which is also the B4 answer for a launcher that passes a `socketpair()` end to a child (a child
+that connects its own socket works as before); (4) `readv`/`writev` made one record per vector; they are one record
+now; (5) senders were not serialized, and descriptors made with `dup` did not share state; a send lock and a shared
+state object fix both; (6) a framed `dup` at or above the 4096 table limit became a plain stream; it is `EMFILE`.
+Not changed, by decision: a sender that already wrote part of a record completes it by waiting for `POLLOUT` (a half
+record would corrupt the stream; a sender that wrote nothing gets `EAGAIN`), and the record cap, `MSG_PEEK`
+and the `fontconfig` `-D__linux__=1` (below, with its removal condition).
 
 **B3:** `tools/build_webkit_crt_port.py --run-tests` was Linux-only; it now takes the macOS persona of
 `build_webkit_jsc.py` (named CRT compilers, `CMAKE_PROJECT_INCLUDE`, `__linux__`/`__unix__`, Apple Silicon W^X

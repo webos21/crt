@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -557,6 +558,9 @@ int __crt_fd_set_status_flags(int fd, int flags) {
 }
 
 void __crt_fd_after_fork_child(void) {
+#if defined(CRT_TARGET_OS_MACOS)
+  __crt_seqpacket_after_fork_child();
+#endif
 }
 #endif
 
@@ -1663,6 +1667,21 @@ ssize_t readv(int fd, const struct iovec* iov, int iovcnt) {
   ssize_t total = 0;
   int i;
 
+#if defined(CRT_TARGET_OS_MACOS)
+  if (__crt_seqpacket_fd(fd)) {
+    /* One record spread over the vectors, not one record per vector. */
+    struct msghdr msg;
+
+    if (iovcnt < 0 || iovcnt > IOV_MAX || (iovcnt > 0 && iov == 0)) {
+      return (ssize_t)__set_errno(iovcnt > 0 && iov == 0 ? EFAULT : EINVAL);
+    }
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = (struct iovec*)iov;
+    msg.msg_iovlen = iovcnt;
+    return recvmsg(fd, &msg, 0);
+  }
+#endif
+
   if (iovcnt < 0 || iovcnt > IOV_MAX) {
     return (ssize_t)__set_errno(EINVAL);
   }
@@ -1700,6 +1719,20 @@ ssize_t readv(int fd, const struct iovec* iov, int iovcnt) {
 ssize_t writev(int fd, const struct iovec* iov, int iovcnt) {
   ssize_t total = 0;
   int i;
+
+#if defined(CRT_TARGET_OS_MACOS)
+  if (__crt_seqpacket_fd(fd)) {
+    struct msghdr msg;
+
+    if (iovcnt < 0 || iovcnt > IOV_MAX || (iovcnt > 0 && iov == 0)) {
+      return (ssize_t)__set_errno(iovcnt > 0 && iov == 0 ? EFAULT : EINVAL);
+    }
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = (struct iovec*)iov;
+    msg.msg_iovlen = iovcnt;
+    return sendmsg(fd, &msg, 0);
+  }
+#endif
 
   if (iovcnt < 0 || iovcnt > IOV_MAX) {
     return (ssize_t)__set_errno(EINVAL);
@@ -2431,8 +2464,9 @@ int dup(int oldfd) {
   int result = (int)normalize_syscall_result(__crt_sys_dup(oldfd));
 
 #if defined(CRT_TARGET_OS_MACOS)
-  if (result >= 0) {
-    __crt_seqpacket_dup(oldfd, result);
+  if (result >= 0 && __crt_seqpacket_dup(oldfd, result) != 0) {
+    (void)__crt_sys_close(result); /* a framed socket beyond the table would look like a plain stream */
+    return (int)__set_errno(EMFILE);
   }
 #endif
   return result;
@@ -2446,8 +2480,9 @@ int dup2(int oldfd, int newfd) {
     int result = (int)normalize_syscall_result(__crt_sys_dup2(oldfd, newfd));
 
 #if defined(CRT_TARGET_OS_MACOS)
-    if (result >= 0) {
-      __crt_seqpacket_dup(oldfd, result);
+    if (result >= 0 && __crt_seqpacket_dup(oldfd, result) != 0) {
+      (void)__crt_sys_close(result);
+      return (int)__set_errno(EMFILE);
     }
 #endif
     return result;

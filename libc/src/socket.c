@@ -8,11 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include <private/crt_atomic.h>
 #include <private/crt_fd_table.h>
 #include <private/crt_seqpacket.h>
 #include <private/crt_tls.h>
@@ -816,37 +818,143 @@ static void cloexec_received_descriptors(struct msghdr* msg) {
  * surface protocol (libcrtweb/platform/crtweb_surface_wire.h) needs record boundaries with
  * SCM_RIGHTS. So, as on Windows, the CRT provides it: a SOCK_STREAM socket whose records are a
  * 4-byte length followed by the payload; SCM_RIGHTS travels in the same sendmsg() as the length, so
- * Darwin delivers the descriptors with the first bytes of the record. Both ends must be CRT: the
- * framing is this libc's, not the kernel's.
+ * Darwin delivers the descriptors with the first bytes of the record. Both ends must be CRT.
  *
- * Which descriptors are framed is process state (a flag per fd, copied by dup, forgotten by close,
- * inherited by fork). It is not carried across exec: a program that inherits such a socket must
- * receive it by connect/accept or SCM_RIGHTS-free means and create its own, which is how the wire
- * protocol uses it. One thread should read a socket at a time (a record is not atomic against
- * another reader) and a non-blocking socket waits for the rest of a record once it started it.
- * MSG_PEEK is not provided. */
+ * A framed socket has one state object (struct seq_socket) shared by every descriptor made from it
+ * with dup()/fcntl(F_DUPFD): it serializes senders (a record is written by one thread at a time),
+ * serializes receivers, and keeps a partly received record -- header bytes, payload, and the
+ * descriptors that arrived with it -- across calls, so a non-blocking receiver (O_NONBLOCK or
+ * MSG_DONTWAIT) can come back to a record it started instead of waiting for the rest of it.
+ * Received descriptors are owned by that state until the whole record is delivered; a record that
+ * fails (oversize length, peer gone mid-record) closes them.
+ *
+ * Which descriptors are framed is process state: forked children inherit it, and across exec the
+ * CRT spawn/exec paths hand it on in CRT_SEQPACKET_FDS (see __crt_seqpacket_export_env), which the
+ * new image's startup reads back. Limits: MSG_PEEK is EOPNOTSUPP; records are at most 64 MiB, 64
+ * iovecs and 64 descriptors; the table covers descriptors below 4096. A *sender* that has already
+ * put part of a record on the wire completes it, waiting for POLLOUT, whatever the socket's mode
+ * (a half record would corrupt the stream); a sender that could not write a single byte gets EAGAIN
+ * with nothing sent, so the whole-record retry that message-oriented callers use works. */
 #define CRT_SEQPACKET_FD_MAX 4096
 #define CRT_SEQPACKET_MAX_RECORD (64u * 1024u * 1024u)
 #define CRT_SEQPACKET_MAX_IOV 64
+#define CRT_SEQPACKET_MAX_FDS 64
+#define CRT_SEQPACKET_ENV "CRT_SEQPACKET_FDS"
 
-static unsigned char seqpacket_flags[CRT_SEQPACKET_FD_MAX];
+struct seq_socket {
+  int refs;
+  crt_spinlock tx_lock;
+  crt_spinlock rx_lock;
+  /* A record being received. */
+  unsigned char header[4];
+  size_t header_have;
+  uint32_t length;
+  size_t body_have;
+  unsigned char* body;
+  int fds[CRT_SEQPACKET_MAX_FDS];
+  int fd_count;
+  int fds_dropped; /* the kernel or this state had no room for every descriptor */
+  int broken;      /* a protocol violation: the stream cannot be resynchronized */
+};
 
-int __crt_seqpacket_fd(int fd) {
-  return fd >= 0 && fd < CRT_SEQPACKET_FD_MAX && __atomic_load_n(&seqpacket_flags[fd], __ATOMIC_RELAXED) != 0;
+static struct seq_socket* seq_table[CRT_SEQPACKET_FD_MAX];
+static crt_spinlock seq_table_lock = CRT_SPINLOCK_INIT;
+
+static struct seq_socket* seq_lookup(int fd) {
+  if (fd < 0 || fd >= CRT_SEQPACKET_FD_MAX) {
+    return 0;
+  }
+  return __atomic_load_n(&seq_table[fd], __ATOMIC_ACQUIRE);
 }
 
-static void seqpacket_set(int fd, int on) {
-  if (fd >= 0 && fd < CRT_SEQPACKET_FD_MAX) {
-    __atomic_store_n(&seqpacket_flags[fd], (unsigned char)(on != 0), __ATOMIC_RELAXED);
+int __crt_seqpacket_fd(int fd) {
+  return seq_lookup(fd) != 0;
+}
+
+static void seq_discard_record(struct seq_socket* s) {
+  int i;
+
+  for (i = 0; i < s->fd_count; ++i) {
+    (void)__crt_sys_close(s->fds[i]);
   }
+  s->fd_count = 0;
+  s->fds_dropped = 0;
+  free(s->body);
+  s->body = 0;
+  s->header_have = 0;
+  s->length = 0;
+  s->body_have = 0;
+}
+
+static void seq_release(struct seq_socket* s) {
+  if (s != 0 && --s->refs == 0) {
+    seq_discard_record(s);
+    free(s);
+  }
+}
+
+/* Makes `fd` framed (a fresh state) or plain; a previous mark on it is dropped first. */
+static void seqpacket_set(int fd, int on) {
+  struct seq_socket* fresh = 0;
+
+  if (fd < 0 || fd >= CRT_SEQPACKET_FD_MAX) {
+    return;
+  }
+  if (on) {
+    fresh = (struct seq_socket*)calloc(1, sizeof(*fresh));
+    if (fresh == 0) {
+      return;
+    }
+    fresh->refs = 1;
+  }
+  crt_spin_lock(&seq_table_lock);
+  seq_release(seq_table[fd]);
+  __atomic_store_n(&seq_table[fd], fresh, __ATOMIC_RELEASE);
+  crt_spin_unlock(&seq_table_lock);
 }
 
 void __crt_seqpacket_close(int fd) {
   seqpacket_set(fd, 0);
 }
 
-void __crt_seqpacket_dup(int oldfd, int newfd) {
-  seqpacket_set(newfd, __crt_seqpacket_fd(oldfd));
+/* dup()/dup2(): the new descriptor shares the old one's state object. Returns -1 when the new
+ * descriptor is beyond the table (the caller closes it and reports EMFILE) rather than leaving a
+ * framed socket that looks like a plain stream. */
+int __crt_seqpacket_dup(int oldfd, int newfd) {
+  struct seq_socket* s;
+
+  if (newfd < 0) {
+    return 0;
+  }
+  crt_spin_lock(&seq_table_lock);
+  s = seq_lookup(oldfd);
+  if (newfd >= CRT_SEQPACKET_FD_MAX) {
+    crt_spin_unlock(&seq_table_lock);
+    return s != 0 ? -1 : 0;
+  }
+  if (s != 0) {
+    ++s->refs;
+  }
+  seq_release(seq_table[newfd]);
+  __atomic_store_n(&seq_table[newfd], s, __ATOMIC_RELEASE);
+  crt_spin_unlock(&seq_table_lock);
+  return 0;
+}
+
+/* A forked child has its own copy of every state object; locks another thread of the parent held
+ * at fork time are released. */
+void __crt_seqpacket_after_fork_child(void) {
+  int i;
+
+  seq_table_lock.state.value = 0;
+  for (i = 0; i < CRT_SEQPACKET_FD_MAX; ++i) {
+    struct seq_socket* s = seq_table[i];
+
+    if (s != 0) {
+      s->tx_lock.state.value = 0;
+      s->rx_lock.state.value = 0;
+    }
+  }
 }
 
 static void seqpacket_wait(int fd, short events) {
@@ -862,15 +970,21 @@ static void seqpacket_wait(int fd, short events) {
  * Returns the payload length or -1 with errno. */
 static ssize_t seqpacket_send(int fd, const struct iovec* iov, int iovcnt, void* control,
                               unsigned int controllen, int bionic_flags) {
+  struct seq_socket* state = seq_lookup(fd);
   struct iovec vec[CRT_SEQPACKET_MAX_IOV + 1];
   uint32_t length = 0;
   uint32_t header;
   size_t total;
   size_t sent = 0;
   struct msghdr msg;
+  ssize_t result;
   int i;
   int dflags = to_darwin_msg_flags(bionic_flags) | CRT_DARWIN_MSG_NOSIGNAL;
 
+  if (state == 0) {
+    errno = EBADF;
+    return -1;
+  }
   if (iovcnt < 0 || iovcnt > CRT_SEQPACKET_MAX_IOV) {
     errno = EMSGSIZE;
     return -1;
@@ -895,199 +1009,278 @@ static ssize_t seqpacket_send(int fd, const struct iovec* iov, int iovcnt, void*
   msg.msg_iovlen = iovcnt + 1;
   msg.msg_control = control;
   msg.msg_controllen = controllen;
+
+  crt_spin_lock(&state->tx_lock);
   for (;;) {
     long r = __crt_sys_sendmsg(fd, &msg, dflags);
     size_t advance;
+    int index = 0;
 
     if (r < 0) {
-      if (r == -EAGAIN && sent != 0) {
-        /* Half a record is on the wire: it has to be completed, whatever the socket's mode. */
-        seqpacket_wait(fd, POLLOUT);
+      if ((r == -EAGAIN || r == -EINTR) && sent != 0) {
+        /* Part of the record is on the wire: it has to be completed, whatever the socket's mode. */
+        if (r == -EAGAIN) {
+          seqpacket_wait(fd, POLLOUT);
+        }
         continue;
       }
-      if (r == -EINTR && sent != 0) {
-        continue;
-      }
-      return (ssize_t)__set_errno((int)-r);
+      result = (ssize_t)__set_errno((int)-r);
+      break;
     }
     sent += (size_t)r;
     if (sent >= total) {
-      return (ssize_t)length;
+      result = (ssize_t)length;
+      break;
     }
     /* Partial: drop what went out and carry on without the control data (it left with the first
      * byte). */
     advance = (size_t)r;
-    {
-      int index = 0;
-
-      while (index < msg.msg_iovlen && advance >= msg.msg_iov[index].iov_len) {
-        advance -= msg.msg_iov[index].iov_len;
-        ++index;
-      }
-      msg.msg_iov = &msg.msg_iov[index];
-      msg.msg_iovlen -= index;
-      if (advance != 0 && msg.msg_iovlen != 0) {
-        msg.msg_iov[0].iov_base = (char*)msg.msg_iov[0].iov_base + advance;
-        msg.msg_iov[0].iov_len -= advance;
-      }
+    while (index < msg.msg_iovlen && advance >= msg.msg_iov[index].iov_len) {
+      advance -= msg.msg_iov[index].iov_len;
+      ++index;
+    }
+    msg.msg_iov = &msg.msg_iov[index];
+    msg.msg_iovlen -= index;
+    if (advance != 0 && msg.msg_iovlen != 0) {
+      msg.msg_iov[0].iov_base = (char*)msg.msg_iov[0].iov_base + advance;
+      msg.msg_iov[0].iov_len -= advance;
     }
     msg.msg_control = 0;
     msg.msg_controllen = 0;
   }
+  crt_spin_unlock(&state->tx_lock);
+  return result;
 }
 
-/* Reads exactly `count` bytes into `buffer` (or discards them when buffer is 0). Returns 1 done,
- * 0 end of stream before any byte, -1 error (EOF mid-record is ECONNRESET). */
-static int seqpacket_read_exact(int fd, void* buffer, size_t count, int first_call_nonblocking,
-                                int* got_any) {
-  size_t done = 0;
-  char scratch[1024];
+/* Collects the descriptors of an SCM_RIGHTS message just received (Darwin level numbers) into the
+ * state; descriptors beyond its capacity are closed and noted as dropped. */
+static void seq_collect_fds(struct seq_socket* s, struct msghdr* received) {
+  struct cmsghdr* cmsg;
 
-  while (done < count) {
-    size_t want = count - done;
-    void* target = buffer != 0 ? (char*)buffer + done : scratch;
-    long r;
+  for (cmsg = CMSG_FIRSTHDR(received); cmsg != 0; cmsg = CMSG_NXTHDR(received, cmsg)) {
+    if (cmsg->cmsg_level == CRT_DARWIN_SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS &&
+        cmsg->cmsg_len >= CMSG_LEN(0)) {
+      const size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+      const int* fds = (const int*)CMSG_DATA(cmsg);
+      size_t i;
 
-    if (buffer == 0 && want > sizeof(scratch)) {
-      want = sizeof(scratch);
-    }
-    r = __crt_sys_read(fd, target, (unsigned long)want);
-    if (r == 0) {
-      if (done == 0 && !*got_any) {
-        return 0;
-      }
-      errno = ECONNRESET;
-      return -1;
-    }
-    if (r < 0) {
-      if (r == -EINTR) {
-        continue;
-      }
-      if (r == -EAGAIN) {
-        if (first_call_nonblocking && done == 0 && !*got_any) {
-          errno = EAGAIN;
-          return -1;
+      for (i = 0; i < count; ++i) {
+        if (s->fd_count < CRT_SEQPACKET_MAX_FDS) {
+          s->fds[s->fd_count++] = fds[i];
+        } else {
+          (void)__crt_sys_close(fds[i]);
+          s->fds_dropped = 1;
         }
-        seqpacket_wait(fd, POLLIN);
-        continue;
       }
-      errno = (int)-r;
-      return -1;
     }
-    done += (size_t)r;
-    *got_any = 1;
   }
-  return 1;
+  if ((received->msg_flags & CRT_DARWIN_MSG_CTRUNC) != 0) {
+    s->fds_dropped = 1;
+  }
+}
+
+/* One receive step on the raw stream, never blocking in the kernel: the caller decides whether to
+ * wait. Returns bytes, 0 at end of stream, -EAGAIN when nothing is there, or -errno. */
+static long seq_read_step(int fd, void* buffer, size_t count, void* control, size_t control_size,
+                          struct msghdr* out) {
+  struct iovec iov;
+  long r;
+
+  iov.iov_base = buffer;
+  iov.iov_len = count;
+  memset(out, 0, sizeof(*out));
+  out->msg_iov = &iov;
+  out->msg_iovlen = 1;
+  out->msg_control = control;
+  out->msg_controllen = (socklen_t)control_size;
+  r = __crt_sys_recvmsg(fd, out, CRT_DARWIN_MSG_DONTWAIT);
+  return r;
 }
 
 static ssize_t seqpacket_recvmsg(int fd, struct msghdr* msg, int bionic_flags) {
-  uint32_t length = 0;
-  size_t have = 0;
+  struct seq_socket* s = seq_lookup(fd);
+  unsigned char control[CMSG_SPACE(sizeof(int) * CRT_SEQPACKET_MAX_FDS)];
+  const size_t caller_control = msg->msg_control != 0 ? msg->msg_controllen : 0;
   size_t capacity = 0;
   size_t copied = 0;
+  size_t offset;
+  int nonblocking;
   int i;
-  int got_any = 0;
-  int truncated = 0;
-  int dflags = to_darwin_msg_flags(bionic_flags & ~MSG_TRUNC);
-  const size_t control_capacity = msg->msg_controllen;
-  struct msghdr header_msg;
-  struct iovec header_iov;
+  int out_flags = 0;
+  int delivered_fds;
+  ssize_t result;
 
+  if (s == 0) {
+    errno = EBADF;
+    return -1;
+  }
   if ((bionic_flags & MSG_PEEK) != 0) {
     errno = EOPNOTSUPP;
     return -1;
+  }
+  {
+    const int status_flags = __crt_fd_get_status_flags(fd);
+
+    nonblocking = (bionic_flags & MSG_DONTWAIT) != 0 || (status_flags >= 0 && (status_flags & O_NONBLOCK) != 0);
   }
   for (i = 0; i < msg->msg_iovlen; ++i) {
     capacity += msg->msg_iov[i].iov_len;
   }
 
-  /* The length, with the ancillary data that came with its first byte. */
-  while (have < sizeof(length)) {
-    long r;
-
-    memset(&header_msg, 0, sizeof(header_msg));
-    header_iov.iov_base = (char*)&length + have;
-    header_iov.iov_len = sizeof(length) - have;
-    header_msg.msg_iov = &header_iov;
-    header_msg.msg_iovlen = 1;
-    if (have == 0) {
-      header_msg.msg_control = msg->msg_control;
-      header_msg.msg_controllen = msg->msg_controllen;
-    }
-    r = __crt_sys_recvmsg(fd, &header_msg, have == 0 ? dflags : 0);
-    if (r == -EINTR) {
-      continue;
-    }
-    if (r == -EAGAIN && have != 0) {
-      seqpacket_wait(fd, POLLIN);
-      continue;
-    }
-    if (r < 0) {
-      return (ssize_t)__set_errno((int)-r);
-    }
-    if (r == 0) {
-      if (have == 0) {
-        msg->msg_controllen = 0;
-        msg->msg_flags = 0;
-        return 0;
-      }
-      errno = ECONNRESET;
-      return -1;
-    }
-    if (have == 0) {
-      msg->msg_controllen = header_msg.msg_controllen;
-      msg->msg_flags = from_darwin_msg_flags(header_msg.msg_flags);
-      clamp_truncated_control(msg, control_capacity);
-      if (msg->msg_control != 0 && msg->msg_controllen > 0) {
-        translate_cmsg_levels(msg->msg_control, msg->msg_controllen, 0);
-        if ((bionic_flags & MSG_CMSG_CLOEXEC) != 0) {
-          struct msghdr view;
-
-          memset(&view, 0, sizeof(view));
-          view.msg_control = msg->msg_control;
-          view.msg_controllen = msg->msg_controllen;
-          cloexec_received_descriptors(&view);
-        }
-      }
-    }
-    have += (size_t)r;
-    got_any = 1;
-  }
-  if (length > CRT_SEQPACKET_MAX_RECORD) {
+  crt_spin_lock(&s->rx_lock);
+  if (s->broken) {
+    crt_spin_unlock(&s->rx_lock);
     errno = EPROTO;
     return -1;
   }
+  for (;;) {
+    struct msghdr received;
+    long r;
 
-  for (i = 0; i < msg->msg_iovlen && copied < length; ++i) {
-    size_t want = msg->msg_iov[i].iov_len;
-    int status;
-
-    if (want > length - copied) {
-      want = length - copied;
-    }
-    status = seqpacket_read_exact(fd, msg->msg_iov[i].iov_base, want, 0, &got_any);
-    if (status != 1) {
-      if (status == 0) {
-        errno = ECONNRESET;
+    if (s->header_have < sizeof(s->header)) {
+      /* The length; the descriptors of the record come with its first byte. */
+      r = seq_read_step(fd, s->header + s->header_have, sizeof(s->header) - s->header_have,
+                        s->header_have == 0 ? control : 0, s->header_have == 0 ? sizeof(control) : 0,
+                        &received);
+      if (r > 0) {
+        if (s->header_have == 0) {
+          seq_collect_fds(s, &received);
+        }
+        s->header_have += (size_t)r;
+        if (s->header_have == sizeof(s->header)) {
+          memcpy(&s->length, s->header, sizeof(s->length));
+          if (s->length > CRT_SEQPACKET_MAX_RECORD) {
+            seq_discard_record(s);
+            s->broken = 1;
+            crt_spin_unlock(&s->rx_lock);
+            errno = EPROTO;
+            return -1;
+          }
+          s->body = s->length != 0 ? (unsigned char*)malloc(s->length) : 0;
+          if (s->length != 0 && s->body == 0) {
+            seq_discard_record(s);
+            s->broken = 1;
+            crt_spin_unlock(&s->rx_lock);
+            errno = ENOMEM;
+            return -1;
+          }
+          s->body_have = 0;
+        }
+        continue;
       }
-      return -1;
+    } else if (s->body_have < s->length) {
+      r = seq_read_step(fd, s->body + s->body_have, s->length - s->body_have, 0, 0, &received);
+      if (r > 0) {
+        s->body_have += (size_t)r;
+        continue;
+      }
+    } else {
+      break; /* the record is complete */
     }
-    copied += want;
-  }
-  if (copied < length) {
-    int status = seqpacket_read_exact(fd, 0, length - copied, 0, &got_any);
 
-    truncated = 1;
-    if (status != 1) {
+    if (r == 0) {
+      if (s->header_have == 0 && s->fd_count == 0) {
+        crt_spin_unlock(&s->rx_lock);
+        msg->msg_controllen = 0;
+        msg->msg_flags = 0;
+        return 0; /* end of stream between records */
+      }
+      seq_discard_record(s);
+      s->broken = 1;
+      crt_spin_unlock(&s->rx_lock);
       errno = ECONNRESET;
       return -1;
     }
+    if (r == -EINTR) {
+      continue;
+    }
+    if (r == -EAGAIN) {
+      if (nonblocking) {
+        crt_spin_unlock(&s->rx_lock);
+        errno = EAGAIN;
+        return -1; /* the partly received record stays in the state */
+      }
+      seqpacket_wait(fd, POLLIN);
+      continue;
+    }
+    seq_discard_record(s);
+    s->broken = 1;
+    crt_spin_unlock(&s->rx_lock);
+    errno = (int)-r;
+    return -1;
   }
-  if (truncated || length > capacity) {
-    msg->msg_flags |= MSG_TRUNC;
+
+  /* Deliver: payload into the caller's vectors, descriptors into its control buffer. */
+  offset = 0;
+  for (i = 0; i < msg->msg_iovlen && offset < s->length; ++i) {
+    size_t want = msg->msg_iov[i].iov_len;
+
+    if (want > s->length - offset) {
+      want = s->length - offset;
+    }
+    memcpy(msg->msg_iov[i].iov_base, s->body + offset, want);
+    offset += want;
+    copied += want;
   }
-  /* Linux: with MSG_TRUNC among the call's flags the return value is the record's real length. */
-  return (bionic_flags & MSG_TRUNC) != 0 ? (ssize_t)length : (ssize_t)copied;
+  if (s->length > capacity) {
+    out_flags |= MSG_TRUNC;
+  }
+
+  delivered_fds = 0;
+  msg->msg_controllen = 0;
+  if (s->fd_count > 0) {
+    size_t fit = 0;
+
+    if (caller_control >= CMSG_LEN(0)) {
+      fit = (caller_control - CMSG_LEN(0)) / sizeof(int);
+    }
+    if (fit > (size_t)s->fd_count) {
+      fit = (size_t)s->fd_count;
+    }
+    if (fit > 0) {
+      struct cmsghdr* cmsg = (struct cmsghdr*)msg->msg_control;
+
+      cmsg->cmsg_level = SOL_SOCKET;
+      cmsg->cmsg_type = SCM_RIGHTS;
+      cmsg->cmsg_len = (socklen_t)CMSG_LEN(fit * sizeof(int));
+      memcpy(CMSG_DATA(cmsg), s->fds, fit * sizeof(int));
+      msg->msg_controllen = (socklen_t)CMSG_SPACE(fit * sizeof(int));
+      if (msg->msg_controllen > caller_control) {
+        msg->msg_controllen = (socklen_t)caller_control;
+      }
+      delivered_fds = (int)fit;
+      if ((bionic_flags & MSG_CMSG_CLOEXEC) != 0) {
+        for (i = 0; i < delivered_fds; ++i) {
+          (void)__crt_fd_set_cloexec(s->fds[i], 1);
+        }
+      }
+    }
+    for (i = delivered_fds; i < s->fd_count; ++i) {
+      (void)__crt_sys_close(s->fds[i]); /* no room for it: closed, as the kernel does on Linux */
+    }
+    if (delivered_fds < s->fd_count) {
+      out_flags |= MSG_CTRUNC;
+    }
+  }
+  if (s->fds_dropped) {
+    out_flags |= MSG_CTRUNC;
+  }
+  msg->msg_flags = out_flags;
+  {
+    /* Linux: with MSG_TRUNC among the call's flags the return value is the record's real length. */
+    const uint32_t real_length = s->length;
+
+    result = (bionic_flags & MSG_TRUNC) != 0 ? (ssize_t)real_length : (ssize_t)copied;
+  }
+  s->fd_count = 0; /* ownership went to the caller (or the descriptors were closed above) */
+  s->fds_dropped = 0;
+  free(s->body);
+  s->body = 0;
+  s->header_have = 0;
+  s->length = 0;
+  s->body_have = 0;
+  crt_spin_unlock(&s->rx_lock);
+  return result;
 }
 
 ssize_t __crt_seqpacket_read(int fd, void* buf, size_t count) {
@@ -1108,6 +1301,124 @@ ssize_t __crt_seqpacket_write(int fd, const void* buf, size_t count) {
   iov.iov_base = (void*)buf;
   iov.iov_len = count;
   return seqpacket_send(fd, &iov, 1, 0, 0, 0);
+}
+
+/* ---- Handing framed descriptors across exec -----------------------------------------------------
+ * The framing flag is in this process's memory; an exec'd image starts without it. So whoever execs
+ * (posix_spawn, execve) lists the framed descriptors that are still sockets in CRT_SEQPACKET_FDS
+ * ("3,5,9") and the new image's startup (__crt_seqpacket_import_env) marks them again. A program
+ * that is not CRT ignores the variable; an inherited descriptor that was closed or reused for a
+ * non-socket is skipped by the importer's fstat. */
+/* Test hook (libc/tests/unix_socket_test.c): treat an ordinary connected stream descriptor as the
+ * receiving end of a framed socket, so a test can put raw, deliberately incomplete or malformed
+ * records on the wire from its plain peer. */
+int __crt_seqpacket_adopt(int fd) {
+  if (fd < 0 || fd >= CRT_SEQPACKET_FD_MAX) {
+    return -1;
+  }
+  seqpacket_set(fd, 1);
+  return 0;
+}
+
+char** __crt_seqpacket_export_env(char* const* envp) {
+  char listing[CRT_SEQPACKET_FD_MAX * 5 + 1];
+  size_t used = 0;
+  size_t count = 0;
+  size_t i;
+  char** copy;
+  size_t out = 0;
+  const size_t prefix = sizeof(CRT_SEQPACKET_ENV);
+
+  for (i = 0; i < CRT_SEQPACKET_FD_MAX && used < sizeof(listing) - 6; ++i) {
+    struct stat info;
+    char digits[8];
+    int n = 0;
+    unsigned value = (unsigned)i;
+
+    if (seq_lookup((int)i) == 0 || fstat((int)i, &info) != 0 || !S_ISSOCK(info.st_mode)) {
+      continue;
+    }
+    do {
+      digits[n++] = (char)('0' + value % 10U);
+      value /= 10U;
+    } while (value != 0);
+    if (used != 0) {
+      listing[used++] = ',';
+    }
+    while (n > 0) {
+      listing[used++] = digits[--n];
+    }
+    ++count;
+  }
+  listing[used] = 0;
+
+  for (i = 0; envp != 0 && envp[i] != 0; ++i) {
+  }
+  copy = (char**)malloc((i + 2) * sizeof(char*));
+  if (copy == 0) {
+    return 0;
+  }
+  for (i = 0; envp != 0 && envp[i] != 0; ++i) {
+    if (strncmp(envp[i], CRT_SEQPACKET_ENV "=", prefix) == 0) {
+      continue; /* a stale list from an ancestor: replaced below or dropped */
+    }
+    copy[out++] = envp[i];
+  }
+  if (count != 0) {
+    char* entry = (char*)malloc(prefix + used + 1);
+
+    if (entry == 0) {
+      free(copy);
+      return 0;
+    }
+    memcpy(entry, CRT_SEQPACKET_ENV "=", prefix);
+    memcpy(entry + prefix, listing, used + 1);
+    copy[out++] = entry;
+  }
+  copy[out] = 0;
+  return copy;
+}
+
+void __crt_seqpacket_import_env(char** envp) {
+  size_t i;
+
+  for (i = 0; envp != 0 && envp[i] != 0; ++i) {
+    const char* value;
+
+    if (strncmp(envp[i], CRT_SEQPACKET_ENV "=", sizeof(CRT_SEQPACKET_ENV)) != 0) {
+      continue;
+    }
+    value = envp[i] + sizeof(CRT_SEQPACKET_ENV);
+    while (*value != 0) {
+      long fd = 0;
+      struct stat info;
+
+      while (*value >= '0' && *value <= '9') {
+        fd = fd * 10 + (*value++ - '0');
+        if (fd >= CRT_SEQPACKET_FD_MAX) {
+          break;
+        }
+      }
+      if (fd < CRT_SEQPACKET_FD_MAX && fstat((int)fd, &info) == 0 && S_ISSOCK(info.st_mode)) {
+        seqpacket_set((int)fd, 1);
+      }
+      while (*value != 0 && *value != ',') {
+        ++value;
+      }
+      if (*value == ',') {
+        ++value;
+      }
+    }
+    /* Not for grandchildren: each exec writes its own list. */
+    {
+      size_t k;
+
+      for (k = i; envp[k] != 0; ++k) {
+        envp[k] = envp[k + 1];
+      }
+    }
+    return;
+  }
 }
 #endif
 
