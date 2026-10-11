@@ -1347,6 +1347,15 @@ The 3A wire contract passes `crtweb_wire_layout_test` unchanged on Windows. Not 
 Linux/macOS-only and this tree has no Skia; the transport for Windows (an AF_UNIX stream with length framing and a
 named shared mapping in place of descriptor passing is the obvious shape) is still the open decision.
 
+*Windows AF_UNIX for the 3A transport (2026-10-12).* The transport decision for Windows is made in CRT libc, not in
+`libcrtweb`: Winsock's AF_UNIX stream sockets plus a CRT-owned SOCK_SEQPACKET (framing) and SCM_RIGHTS (handle and
+socket duplication into the peer process), see `HISTORY.md` and `docs/porting/bionic_libc_gaps.md`. The frozen wire v1
+is unchanged: `crtweb_wire_transport_test` runs `crtweb_wire_send/recv` over it between two Windows processes
+(CONFIG, a BUFFER_ADD carrying a memfd that the consumer maps and reads, FRAME, TITLE, FRAME_ACK, BUFFER_RELEASE, and a
+size-mismatch EPROTO). Gate C, the `SurfaceClient` consumer test (`crtweb_web_surface_test`) on Windows, still needs a
+Skia build of the Windows tree (`CRTGFX_ENABLE_SKIA` is off in `windows-host-ninja-debug`) and is gated to Linux in
+`libcrtweb/CMakeLists.txt`; the WPE `crt` module stays Linux-only (WPE does not build on Windows).
+
 *Not covered by the macOS replay:* the CA bundle, SIMD/asm paths (still off), Linux/aarch64 and Windows for B2, and
 promoting the web group into the automated all-ports set (it waits for Windows).
 

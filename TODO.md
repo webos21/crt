@@ -311,6 +311,11 @@ or host investigation supplies the required evidence.
   TCP fallback, search domains, caching, and Windows `AF_INET6` sockets, when a
   consumer needs them. IPv6 literals, sockets and `getaddrinfo()` lists are
   there on Linux, macOS (2026-10-11) and Windows (2026-10-12), `socket_ipv6_test`.
+- Windows AF_UNIX follow-ups (Gates A/B closed 2026-10-12): `SOCK_DGRAM`, abstract names, `MSG_PEEK` on
+  `SOCK_SEQPACKET`, `SCM_RIGHTS` and `SCM_CREDENTIALS` on a stream socket (needs a CRT-to-CRT framed stream), file
+  descriptor kinds other than files/pipes/memfds/sockets (eventfd, epoll), `dup()` of a socket fd, and reporting
+  socket addresses back with CRT paths instead of host paths. Gate C (Windows `SurfaceClient` consumer replay) needs a
+  Skia build of this tree.
 - Revisit a CRT-owned ELF loader/Android-linker boundary only after a real
   upper-runtime consumer requires behavior the host loader adapter cannot
   provide.

@@ -11,6 +11,40 @@ substantive update.
 
 ## 2026-10-12
 
+### Windows/x64: AF_UNIX streams, socketpair(), SOCK_SEQPACKET and SCM_RIGHTS in the CRT PAL (Gates A and B)
+
+The Tranche 3A transport (one `AF_UNIX`/`SOCK_SEQPACKET` connection per view, a memfd descriptor per buffer) needs three
+things Windows' own AF_UNIX (stream sockets bound to a path, Windows 10 1803+) does not have. They are now CRT library
+functionality, not a WebKit adapter (`libc/src/arch/windows/common/syscall.c`, "AF_UNIX on Windows"):
+
+- **Stream sockets.** `sockaddr_un` is rebuilt for Winsock with its path mapped onto the host (`translate_path_for_host`);
+  a name that does not fit 108 bytes after the mapping is `ENAMETOOLONG`, an abstract name is `ENOTSUP`. A stream socket
+  is never framed or altered: a native AF_UNIX peer sees exactly the bytes written.
+- **`socketpair()`** (AF_UNIX, stream or seqpacket, `SOCK_CLOEXEC`): a throw-away path in the temp directory, one
+  connect, one accept, and the path is removed before the call returns; both fds know their peer is this process.
+- **`SOCK_SEQPACKET`**: a Winsock stream socket the CRT frames (16-byte header with magic, payload length and
+  descriptor count; descriptor records; payload). `send`/`recv`/`write`/`read`/`sendmsg`/`recvmsg` keep record
+  boundaries, a short buffer truncates and sets `MSG_TRUNC` (and `MSG_TRUNC` in `flags` returns the real length), a
+  zero-length record is a record, end of stream is 0, `MSG_DONTWAIT` and `O_NONBLOCK` work, `SO_TYPE` answers
+  `SOCK_SEQPACKET`, an accepted socket inherits the type and a spawned child keeps it (snapshot flag). Both ends must be
+  CRT programs. `MSG_PEEK` is `EOPNOTSUPP` (the receive path never reads ahead, so `poll()` stays truthful).
+- **`SCM_RIGHTS`** (SOCK_SEQPACKET only; on a stream socket it stays `ENOTSUP`): the sender asks the stream for the
+  peer's process id (`SIO_AF_UNIX_GETPEERPID`; the pair's own id for a `socketpair()`), then makes the object available
+  to that process the way a kernel would: `DuplicateHandle` into it for files, pipes and memfds, `WSADuplicateSocket` for
+  sockets, and the record carries the receiver-side handle (or the protocol info). The receiver builds a new CRT fd per
+  record (`MSG_CMSG_CLOEXEC` honoured, a control buffer that is too small drops and closes the rest and sets
+  `MSG_CTRUNC`). A message is delivered whole or not at all; on a failed send the duplicates are closed again.
+
+Evidence: `unix_socket_test` (new; Gate A stream path/half-close/EOF/EADDRINUSE/non-blocking/poll/socketpair, Gate B
+records/truncation/SO_TYPE/path listen-accept, and descriptor passing of a file, a memfd mapping and a TCP socket in one
+process, three at once with CLOEXEC, a small control buffer, and a file plus a memfd between two processes with the
+child's write visible in the parent's mapping); `socketpair_test` now runs its Linux body on Windows (it asserted
+`ENOSYS`); `crtweb_wire_transport_test` (new; the frozen 3A wire helpers `crtweb_wire_send/recv` over the real
+transport, HELLO/CONFIG/BUFFER_ADD with a memfd/FRAME/TITLE/ACK/RELEASE between a consumer and a producer process, plus
+the EPROTO case). Two mutations (the `MSG_TRUNC` flag, the handle duplication) fail the tests. Full CTest 170/170, the AF_UNIX
+and IPv6 socket tests 25 consecutive runs.
+
+
 ### Windows/x64: IPv6 sockets, socket option numbering, and the Tranche 3A replay
 
 Asked whether the macOS IPv6 finding also holds on Windows: it did. The Windows socket layer handed Winsock the Bionic

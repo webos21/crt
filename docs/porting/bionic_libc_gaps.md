@@ -411,6 +411,15 @@ numbers, `inet_pton`/`inet_ntop` for IPv6 on every host, `in6addr_any`/`in6addr_
 returns IPv6 results as a list are now provided; details and tests in `docs/acceptance/crtweb_acceptance.md` (B2 on
 macOS). Still missing: interface-name zone ids, `IPV6_JOIN_GROUP`/packet-info options, AAAA in the built-in resolver.
 
+## AF_UNIX on Windows (2026-10-12)
+
+Native (Winsock, Windows 10 1803+): stream sockets bound to a file system path. CRT-provided on top of it
+(`libc/src/arch/windows/common/syscall.c`): `sockaddr_un` path mapping, `socketpair()`, `SOCK_SEQPACKET` (a framed
+stream socket, CRT-to-CRT) and `SCM_RIGHTS` on it (files, pipes, memfds through `DuplicateHandle`, sockets through
+`WSADuplicateSocket`, addressed by the peer's process id). Not provided: `SOCK_DGRAM`, abstract names, ancillary data
+on a stream socket (`ENOTSUP`), `MSG_PEEK` on `SOCK_SEQPACKET`, other descriptor kinds. Tests: `unix_socket_test`,
+`socketpair_test`, `crtweb_wire_transport_test`; design notes in `docs/acceptance/crtweb_acceptance.md`.
+
 ## IPv6 and socket option numbering on Windows (2026-10-12)
 
 The Windows PAL passed Bionic numbers to Winsock: `AF_INET6` (10 here, 23 there) failed, and so did the
