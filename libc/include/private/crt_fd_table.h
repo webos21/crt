@@ -26,6 +26,9 @@
  * `echo`, so it always goes through this snapshot) losing every write
  * but the last. */
 #define CRT_FD_SNAPSHOT_FLAG_APPEND 0x00000008U
+/* A SOCK_SEQPACKET AF_UNIX socket (Windows frames it over a stream socket; the child must keep
+ * treating it that way). */
+#define CRT_FD_SNAPSHOT_FLAG_SEQPACKET 0x00000010U
 
 #define CRT_FD_SNAPSHOT_ENV "CRT_FD_SNAPSHOT"
 #define CRT_FD_SNAPSHOT_PIPE_ENV "CRT_FD_SNAPSHOT_PIPE"

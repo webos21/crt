@@ -1,6 +1,7 @@
 /* socketpair(): AF_UNIX stream and (Linux) sequenced-packet pairs, the SOCK_CLOEXEC type flag,
  * record boundaries and MSG_TRUNC. The web surface protocol (libcrtweb/platform/
- * crtweb_surface_wire.h) needs SOCK_SEQPACKET with SCM_RIGHTS; Windows has no socketpair. */
+ * crtweb_surface_wire.h) needs SOCK_SEQPACKET with SCM_RIGHTS; on Windows both are the CRT's own layer
+ * over Winsock's AF_UNIX stream sockets (see unix_socket_test for the descriptor passing). */
 #define _GNU_SOURCE 1
 #include <errno.h>
 #include <fcntl.h>
@@ -19,10 +20,6 @@ static int failures;
   } while (0)
 
 int main(void) {
-#if defined(_WIN32) || defined(__MINGW32__)
-  int sv[2];
-  CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == -1 && errno == ENOSYS, "Windows reports ENOSYS");
-#else
   int sv[2] = {-1, -1};
   char buffer[32];
 
@@ -45,7 +42,7 @@ int main(void) {
   }
   CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, NULL) == -1 && errno == EFAULT, "NULL vector is EFAULT");
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(_WIN32) || defined(__MINGW32__)
   CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sv) == 0, "seqpacket pair");
   if (sv[0] >= 0) {
     char big[16];
@@ -67,7 +64,6 @@ int main(void) {
     close(sv[0]);
     close(sv[1]);
   }
-#endif
 #endif
   if (failures != 0) {
     return 1;

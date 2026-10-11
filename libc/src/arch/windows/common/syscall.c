@@ -410,6 +410,7 @@ __declspec(dllimport) BOOL CRT_WINAPI WriteFile(
     void* lpOverlapped);
 __declspec(dllimport) BOOL CRT_WINAPI CloseHandle(HANDLE hObject);
 __declspec(dllimport) BOOL CRT_WINAPI DeleteFileA(const char* lpFileName);
+__declspec(dllimport) DWORD CRT_WINAPI GetTempPathA(DWORD nBufferLength, char* lpBuffer);
 __declspec(dllimport) BOOL CRT_WINAPI MoveFileExA(
     const char* lpExistingFileName,
     const char* lpNewFileName,
@@ -509,6 +510,7 @@ __declspec(dllimport) BOOL CRT_WINAPI K32GetProcessMemoryInfo(
     HANDLE hProcess,
     struct crt_win_process_memory_counters* counters,
     DWORD cb);
+__declspec(dllimport) HANDLE CRT_WINAPI OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId);
 __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(
     HANDLE hSourceProcessHandle,
     HANDLE hSourceHandle,
@@ -667,6 +669,11 @@ static int fd_flags[CRT_FD_TABLE_SIZE];
  * __crt_fd_set_status_flags below for the real implementation this
  * backs. */
 static int fd_nonblock[CRT_FD_TABLE_SIZE];
+/* AF_UNIX SOCK_SEQPACKET (see the "AF_UNIX on Windows" block): a Winsock stream socket this PAL frames. */
+struct crt_seq_rx;
+static unsigned char fd_socket_seqpacket[CRT_FD_TABLE_SIZE];
+static struct crt_seq_rx* fd_seq_rx[CRT_FD_TABLE_SIZE];
+static DWORD fd_seq_peer_pid[CRT_FD_TABLE_SIZE];
 /* Set only for the write end of an anonymous pipe (see __crt_sys_pipe()
  * below). Windows' own PeekNamedPipe() -- what poll_handle() otherwise
  * calls unconditionally on any FILE_TYPE_PIPE handle to answer POLLIN --
@@ -763,6 +770,10 @@ static DWORD private_wait_pid;
 long __crt_sys_geteuid(void);
 static HANDLE get_fd_handle(int fd);
 static SOCKET get_fd_socket(int fd);
+static long crt_seq_send_buffer(int fd, const void* buf, unsigned long len, int flags);
+static long crt_seq_recv_buffer(int fd, void* buf, unsigned long len, int flags);
+static void crt_seq_forget(int fd);
+static int crt_seq_is_seqpacket(int fd);
 static void init_fd_table(void);
 static long init_winsock(void);
 #if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
@@ -825,6 +836,8 @@ struct winsock_api {
   int (CRT_WINAPI* closesocket)(SOCKET s);
   int (CRT_WINAPI* ioctlsocket)(SOCKET s, long cmd, unsigned long* argp);
   int (CRT_WINAPI* WSADuplicateSocketA)(SOCKET s, DWORD dwProcessId, void* lpProtocolInfo);
+  int (CRT_WINAPI* WSAIoctl)(SOCKET s, DWORD code, void* in, DWORD in_size, void* out, DWORD out_size,
+                             DWORD* returned, void* overlapped, void* completion);
   SOCKET (CRT_WINAPI* WSASocketA)(
       int af,
       int type,
@@ -2063,7 +2076,8 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
     snapshot->entries[count].kind = snapshot_kind_from_fd_kind(fd_kind[fd]);
     snapshot->entries[count].flags =
         ((fd_flags[fd] & FD_CLOEXEC) == 0 ? CRT_FD_SNAPSHOT_FLAG_INHERITABLE : 0) |
-        ((fd_flags[fd] & O_APPEND) != 0 ? CRT_FD_SNAPSHOT_FLAG_APPEND : 0);
+        ((fd_flags[fd] & O_APPEND) != 0 ? CRT_FD_SNAPSHOT_FLAG_APPEND : 0) |
+        (fd_kind[fd] == CRT_FD_KIND_SOCKET && fd_socket_seqpacket[fd] != 0 ? CRT_FD_SNAPSHOT_FLAG_SEQPACKET : 0);
     snapshot->entries[count].handle = (uintptr_t)duplicate;
     ++count;
   }
@@ -2134,6 +2148,9 @@ int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
     fd_table[entry->fd] = duplicate;
     fd_kind[entry->fd] = kind;
     fd_flags[entry->fd] = (entry->flags & CRT_FD_SNAPSHOT_FLAG_APPEND) != 0 ? O_APPEND : 0;
+    fd_socket_seqpacket[entry->fd] =
+        kind == CRT_FD_KIND_SOCKET && (entry->flags & CRT_FD_SNAPSHOT_FLAG_SEQPACKET) != 0;
+    fd_seq_peer_pid[entry->fd] = 0;
   }
   return 0;
 }
@@ -3204,6 +3221,8 @@ static long init_winsock(void) {
       (int (CRT_WINAPI*)(SOCKET, long, unsigned long*))GetProcAddress(module, "ioctlsocket");
   winsock.WSADuplicateSocketA =
       (int (CRT_WINAPI*)(SOCKET, DWORD, void*))GetProcAddress(module, "WSADuplicateSocketA");
+  winsock.WSAIoctl = (int (CRT_WINAPI*)(SOCKET, DWORD, void*, DWORD, void*, DWORD, DWORD*, void*, void*))
+      GetProcAddress(module, "WSAIoctl");
   winsock.WSASocketA =
       (SOCKET(CRT_WINAPI*)(int, int, int, void*, unsigned int, DWORD))GetProcAddress(
           module, "WSASocketA");
@@ -3328,6 +3347,8 @@ static int alloc_fd(HANDLE handle) {
       fd_kind[fd] = CRT_FD_KIND_FILE;
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
+      fd_socket_seqpacket[fd] = 0;
+      fd_seq_peer_pid[fd] = 0;
       fd_pipe_write_only[fd] = 0;
       fd_termios_shadow_valid[fd] = 0;
       return fd;
@@ -3346,6 +3367,8 @@ static int alloc_socket_fd(SOCKET socket_handle) {
       fd_kind[fd] = CRT_FD_KIND_SOCKET;
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
+      fd_socket_seqpacket[fd] = 0;
+      fd_seq_peer_pid[fd] = 0;
       fd_pipe_write_only[fd] = 0;
       fd_termios_shadow_valid[fd] = 0;
       return fd;
@@ -3563,6 +3586,9 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_EVENTFD) {
     return eventfd_do_read(fd, buf, count);
   }
+  if (crt_seq_is_seqpacket(fd)) {
+    return crt_seq_recv_buffer(fd, buf, count, 0);
+  }
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     int result = winsock.recv((SOCKET)(uintptr_t)fd_table[fd], (char*)buf, (int)count, 0);
     return result == SOCKET_ERROR ? -map_wsa_send_recv_error(fd, winsock.WSAGetLastError()) : result;
@@ -3613,6 +3639,9 @@ long __crt_sys_write(int fd, const void* buf, unsigned long count) {
 
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_EVENTFD) {
     return eventfd_do_write(fd, buf, count);
+  }
+  if (crt_seq_is_seqpacket(fd)) {
+    return crt_seq_send_buffer(fd, buf, count, 0);
   }
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     int result = winsock.send((SOCKET)(uintptr_t)fd_table[fd], (const char*)buf, (int)count, 0);
@@ -3891,6 +3920,7 @@ static long close_fd_slot(int fd) {
   crt_debug_spawn_trace("close_fd", (unsigned long long)(unsigned int)fd);
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     SOCKET socket_handle = (SOCKET)(uintptr_t)fd_table[fd];
+    crt_seq_forget(fd);
     fd_table[fd] = 0;
     fd_kind[fd] = CRT_FD_KIND_NONE;
     fd_flags[fd] = 0;
@@ -4385,6 +4415,7 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   }
   if (fd_table[newfd] != 0 && fd_table[newfd] != INVALID_HANDLE_VALUE) {
     if (fd_kind[newfd] == CRT_FD_KIND_SOCKET) {
+      crt_seq_forget(newfd);
       winsock.closesocket((SOCKET)(uintptr_t)fd_table[newfd]);
     } else {
       CloseHandle(fd_table[newfd]);
@@ -4687,23 +4718,6 @@ static int translate_address_family(int domain) {
 
 #define CRT_SOCKADDR_STORAGE_SIZE 128
 
-/* Returns addr untouched unless it needs its family rewritten, in which case it is copied to storage. */
-static const void* sockaddr_to_winsock(const void* addr, unsigned int addrlen, unsigned char* storage) {
-  uint16_t family;
-
-  if (addr == 0 || addrlen < 2 || addrlen > CRT_SOCKADDR_STORAGE_SIZE) {
-    return addr;
-  }
-  memcpy(&family, addr, sizeof(family));
-  if (family != CRT_PUBLIC_AF_INET6) {
-    return addr;
-  }
-  memcpy(storage, addr, addrlen);
-  family = CRT_WS_AF_INET6;
-  memcpy(storage, &family, sizeof(family));
-  return storage;
-}
-
 static void sockaddr_from_winsock(void* addr, int addrlen) {
   uint16_t family;
 
@@ -4755,12 +4769,715 @@ static int is_linger_option(int level, int optname) {
 /* Winsock has no socketpair(): ENOSYS, as for the other POSIX facilities with no Windows
  * equivalent. An emulation over a loopback listener is possible and deferred until a consumer
  * needs it (the web surface protocol's Windows transport is its own decision). */
+/* ---- AF_UNIX on Windows ----------------------------------------------------------------------------
+ *
+ * What Windows has natively: AF_UNIX SOCK_STREAM sockets bound to a file system path (Windows 10 1803 and
+ * later). What it does not have, and this layer provides for CRT programs: socketpair(), SOCK_SEQPACKET, and
+ * descriptor passing with SCM_RIGHTS.
+ *
+ * SOCK_SEQPACKET is a Winsock SOCK_STREAM socket that this layer frames: every message is a 16-byte header
+ * (magic, payload length, descriptor count), then the descriptor records, then the payload. The fd table marks
+ * the fd (fd_socket_seqpacket[]), so both ends must be CRT programs; a native AF_UNIX program talking to a
+ * SOCK_SEQPACKET endpoint would see the framing. SOCK_STREAM sockets are never framed and carry no ancillary
+ * data (SCM_RIGHTS on a stream socket is still ENOTSUP): a native peer sees exactly the bytes written.
+ *
+ * Descriptors are passed the way a kernel would pass them to a process it knows: the sender asks the stream
+ * for the peer's process id (SIO_AF_UNIX_GETPEERPID; for a socketpair() made here it is this process) and
+ * duplicates the object into that process -- DuplicateHandle for files, pipes and memfds, WSADuplicateSocket
+ * for sockets -- then writes the receiver-side handle value (or the protocol info) into the descriptor
+ * record. The receiver turns each record into a new CRT fd. A message is received whole or not at all.
+ *
+ * Limits, all explicit failures rather than silent gaps: no abstract-namespace names, no SOCK_DGRAM,
+ * MSG_PEEK on a SOCK_SEQPACKET socket is EOPNOTSUPP, a bound path must fit sockaddr_un's 108 bytes after the
+ * rootfs mapping, and addresses reported back (getsockname/getpeername/accept) carry the host path. */
+#define CRT_PUBLIC_AF_UNIX 1
+#define CRT_PUBLIC_SOCK_STREAM 1
+#define CRT_PUBLIC_SOCK_SEQPACKET 5
+#define CRT_SEQ_MAGIC 0x51455343U
+#define CRT_SEQ_MAX_FDS 16U
+#define CRT_SEQ_MAX_PAYLOAD (16U * 1024U * 1024U)
+#define CRT_SEQ_FD_FILE 1U
+#define CRT_SEQ_FD_SOCKET 2U
+#define CRT_SEQ_FLAG_APPEND 1U
+#define CRT_SEQ_FLAG_SEQPACKET 2U
+#define CRT_SIO_AF_UNIX_GETPEERPID 0x58000100UL
+#define CRT_PROCESS_DUP_HANDLE 0x0040UL
+#define CRT_DUPLICATE_CLOSE_SOURCE 0x00000001UL
+#define CRT_WSA_FROM_PROTOCOL_INFO ((int)-1)
+
+struct crt_sockaddr_un_ws {
+  uint16_t family;
+  char path[108];
+};
+
+struct crt_seq_header {
+  uint32_t magic;
+  uint32_t payload_length;
+  uint32_t fd_count;
+  uint32_t reserved;
+};
+
+struct crt_seq_fd_record {
+  uint32_t kind;
+  uint32_t flags;
+  uint64_t handle;
+  uint32_t info_size;
+  unsigned char info[CRT_FD_SOCKET_PROTOCOL_INFO_SIZE];
+  uint32_t reserved;
+};
+
+struct crt_seq_rx {
+  struct crt_seq_header header;
+  size_t header_have;
+  unsigned char* body;
+  size_t body_size;
+  size_t body_have;
+};
+
+/* One address a CRT program may hand to Winsock: IPv6 families are rewritten, a sockaddr_un is rebuilt with
+ * its path mapped onto the host. Returns 0, or -errno. */
+static long sockaddr_prepare(const void* addr, unsigned int addrlen, unsigned char* storage,
+                             const void** native, int* native_len) {
+  uint16_t family;
+
+  *native = addr;
+  *native_len = (int)addrlen;
+  if (addr == 0 || addrlen < 2) {
+    return 0;
+  }
+  memcpy(&family, addr, sizeof(family));
+  if (family == CRT_PUBLIC_AF_UNIX) {
+    struct crt_sockaddr_un_ws* un = (struct crt_sockaddr_un_ws*)storage;
+    char local[109];
+    char translated[4096];
+    const char* host;
+    const char* given = (const char*)addr + 2;
+    size_t max = addrlen - 2;
+    size_t length = 0;
+    size_t host_length;
+
+    if (max > 108) {
+      max = 108;
+    }
+    if (max == 0) {
+      return -EINVAL;
+    }
+    if (given[0] == 0) {
+      return -ENOTSUP; /* the Linux abstract namespace has no Windows counterpart */
+    }
+    while (length < max && given[length] != 0) {
+      ++length;
+    }
+    memcpy(local, given, length);
+    local[length] = 0;
+    host = translate_path_for_host(local, translated);
+    host_length = host != 0 ? strlen(host) : 0;
+    if (host_length == 0) {
+      return -EINVAL;
+    }
+    if (host_length >= sizeof(un->path)) {
+      return -ENAMETOOLONG;
+    }
+    memset(un, 0, sizeof(*un));
+    un->family = CRT_PUBLIC_AF_UNIX;
+    memcpy(un->path, host, host_length + 1);
+    *native = un;
+    *native_len = (int)(2 + host_length + 1);
+    return 0;
+  }
+  if (family == CRT_PUBLIC_AF_INET6 && addrlen <= CRT_SOCKADDR_STORAGE_SIZE) {
+    memcpy(storage, addr, addrlen);
+    family = CRT_WS_AF_INET6;
+    memcpy(storage, &family, sizeof(family));
+    *native = storage;
+  }
+  return 0;
+}
+
+static int crt_seq_is_seqpacket(int fd) {
+  return fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET && fd_socket_seqpacket[fd] != 0;
+}
+
+static void crt_seq_forget(int fd) {
+  struct crt_seq_rx* rx = fd_seq_rx[fd];
+
+  fd_seq_rx[fd] = 0;
+  fd_socket_seqpacket[fd] = 0;
+  fd_seq_peer_pid[fd] = 0;
+  if (rx != 0) {
+    free(rx->body);
+    free(rx);
+  }
+}
+
+static long crt_seq_peer_pid(int fd, DWORD* pid) {
+  SOCKET s = (SOCKET)(uintptr_t)fd_table[fd];
+  DWORD out = 0;
+  DWORD returned = 0;
+
+  if (fd_seq_peer_pid[fd] != 0) {
+    *pid = fd_seq_peer_pid[fd];
+    return 0;
+  }
+  if (winsock.WSAIoctl != 0 &&
+      winsock.WSAIoctl(s, CRT_SIO_AF_UNIX_GETPEERPID, 0, 0, &out, sizeof(out), &returned, 0, 0) == 0 && out != 0) {
+    fd_seq_peer_pid[fd] = out;
+    *pid = out;
+    return 0;
+  }
+  return -ENOTSUP;
+}
+
+/* The object behind `fd`, made available to process `target` (the peer). Returns 0 and fills `record`. */
+static long crt_seq_export_fd(int fd, DWORD target_pid, HANDLE target_process, struct crt_seq_fd_record* record) {
+  memset(record, 0, sizeof(*record));
+  if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_table[fd] == 0 || fd_table[fd] == INVALID_HANDLE_VALUE) {
+    return -EBADF;
+  }
+  if (fd_kind[fd] == CRT_FD_KIND_FILE) {
+    HANDLE remote = 0;
+
+    if (!DuplicateHandle(GetCurrentProcess(), fd_table[fd], target_process, &remote, 0, 0, DUPLICATE_SAME_ACCESS)) {
+      return -map_windows_error(GetLastError());
+    }
+    record->kind = CRT_SEQ_FD_FILE;
+    record->handle = (uint64_t)(uintptr_t)remote;
+    record->flags = (fd_flags[fd] & O_APPEND) != 0 ? CRT_SEQ_FLAG_APPEND : 0;
+    return 0;
+  }
+  if (fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    if (winsock.WSADuplicateSocketA((SOCKET)(uintptr_t)fd_table[fd], target_pid, record->info) != 0) {
+      return -map_wsa_error(winsock.WSAGetLastError());
+    }
+    record->kind = CRT_SEQ_FD_SOCKET;
+    record->info_size = CRT_FD_SOCKET_PROTOCOL_INFO_SIZE;
+    record->flags = fd_socket_seqpacket[fd] != 0 ? CRT_SEQ_FLAG_SEQPACKET : 0;
+    return 0;
+  }
+  return -ENOTSUP;
+}
+
+static void crt_seq_unexport(HANDLE target_process, const struct crt_seq_fd_record* record) {
+  if (record->kind == CRT_SEQ_FD_FILE && record->handle != 0 && target_process != 0) {
+    DuplicateHandle(target_process, (HANDLE)(uintptr_t)record->handle, 0, 0, 0, 0, CRT_DUPLICATE_CLOSE_SOURCE);
+  }
+}
+
+/* Makes a CRT fd of a received record. Returns the new fd or -errno. */
+static long crt_seq_import_fd(const struct crt_seq_fd_record* record, int cloexec) {
+  int fd;
+
+  if (record->kind == CRT_SEQ_FD_FILE) {
+    fd = alloc_fd((HANDLE)(uintptr_t)record->handle);
+    if (fd < 0) {
+      CloseHandle((HANDLE)(uintptr_t)record->handle);
+      return -EMFILE;
+    }
+    if ((record->flags & CRT_SEQ_FLAG_APPEND) != 0) {
+      fd_flags[fd] |= O_APPEND;
+    }
+  } else if (record->kind == CRT_SEQ_FD_SOCKET) {
+    SOCKET s;
+
+    if (record->info_size == 0 || record->info_size > CRT_FD_SOCKET_PROTOCOL_INFO_SIZE) {
+      return -EINVAL;
+    }
+    s = winsock.WSASocketA(CRT_WSA_FROM_PROTOCOL_INFO, CRT_WSA_FROM_PROTOCOL_INFO, CRT_WSA_FROM_PROTOCOL_INFO,
+                           (void*)record->info, 0, 0);
+    if (s == INVALID_SOCKET) {
+      return -map_wsa_error(winsock.WSAGetLastError());
+    }
+    fd = alloc_socket_fd(s);
+    if (fd < 0) {
+      winsock.closesocket(s);
+      return -EMFILE;
+    }
+    fd_socket_seqpacket[fd] = (record->flags & CRT_SEQ_FLAG_SEQPACKET) != 0;
+  } else {
+    return -EINVAL;
+  }
+  if (cloexec) {
+    fd_flags[fd] |= FD_CLOEXEC;
+  }
+  return fd;
+}
+
+static long crt_seq_wait_writable(SOCKET s) {
+  int spins;
+
+  for (spins = 0; spins < 30000; ++spins) {
+    if ((poll_socket(s, POLLOUT) & (POLLOUT | POLLERR)) != 0) {
+      return 0;
+    }
+    Sleep(1);
+  }
+  return -ETIMEDOUT;
+}
+
+/* Sends one record (header, descriptor records, payload) on a SOCK_SEQPACKET fd. */
+static long crt_seq_send_message(int fd, const struct iovec* iov, size_t iovlen, const int* fds, size_t fd_count,
+                                 int flags) {
+  SOCKET s = (SOCKET)(uintptr_t)fd_table[fd];
+  struct crt_seq_header header;
+  struct crt_seq_fd_record* records = 0;
+  unsigned char* buffer;
+  size_t payload = 0;
+  size_t records_size = fd_count * sizeof(struct crt_seq_fd_record);
+  size_t total;
+  size_t offset;
+  size_t sent = 0;
+  size_t exported = 0;
+  HANDLE target_process = 0;
+  DWORD target_pid = 0;
+  long result = 0;
+  size_t i;
+
+  for (i = 0; i < iovlen; ++i) {
+    payload += iov[i].iov_len;
+  }
+  if (payload > CRT_SEQ_MAX_PAYLOAD || fd_count > CRT_SEQ_MAX_FDS) {
+    return -EMSGSIZE;
+  }
+  total = sizeof(header) + records_size + payload;
+  buffer = (unsigned char*)malloc(total);
+  if (buffer == 0) {
+    return -ENOMEM;
+  }
+  records = (struct crt_seq_fd_record*)(buffer + sizeof(header));
+
+  if (fd_count != 0) {
+    result = crt_seq_peer_pid(fd, &target_pid);
+    if (result == 0) {
+      target_process = target_pid == GetCurrentProcessId()
+                           ? GetCurrentProcess()
+                           : OpenProcess(CRT_PROCESS_DUP_HANDLE, 0, target_pid);
+      if (target_process == 0) {
+        result = -EPERM;
+      }
+    }
+    for (i = 0; result == 0 && i < fd_count; ++i) {
+      result = crt_seq_export_fd(fds[i], target_pid, target_process, &records[i]);
+      if (result == 0) {
+        ++exported;
+      }
+    }
+    if (result != 0) {
+      goto fail;
+    }
+  }
+
+  header.magic = CRT_SEQ_MAGIC;
+  header.payload_length = (uint32_t)payload;
+  header.fd_count = (uint32_t)fd_count;
+  header.reserved = 0;
+  memcpy(buffer, &header, sizeof(header));
+  offset = sizeof(header) + records_size;
+  for (i = 0; i < iovlen; ++i) {
+    if (iov[i].iov_len != 0) {
+      memcpy(buffer + offset, iov[i].iov_base, iov[i].iov_len);
+      offset += iov[i].iov_len;
+    }
+  }
+
+  while (sent < total) {
+    size_t chunk = total - sent;
+    int r;
+
+    if (chunk > (1U << 20)) {
+      chunk = 1U << 20;
+    }
+    r = winsock.send(s, (const char*)buffer + sent, (int)chunk, 0);
+    if (r == SOCKET_ERROR) {
+      int error = winsock.WSAGetLastError();
+
+      if (error == CRT_WSAEWOULDBLOCK) {
+        if (sent == 0 && ((flags & MSG_DONTWAIT) != 0 || fd_nonblock[fd])) {
+          result = -EAGAIN;
+          goto fail;
+        }
+        result = crt_seq_wait_writable(s);
+        if (result != 0) {
+          goto fail;
+        }
+        continue;
+      }
+      result = -map_wsa_send_recv_error(fd, error);
+      goto fail;
+    }
+    sent += (size_t)r;
+  }
+  if (target_process != 0 && target_process != GetCurrentProcess()) {
+    CloseHandle(target_process);
+  }
+  free(buffer);
+  return (long)payload;
+
+fail:
+  if (sent == 0) {
+    for (i = 0; i < exported; ++i) {
+      crt_seq_unexport(target_process, &records[i]);
+    }
+  }
+  if (target_process != 0 && target_process != GetCurrentProcess()) {
+    CloseHandle(target_process);
+  }
+  free(buffer);
+  return result;
+}
+
+/* Reads until the whole record is in `rx`. 1: complete, 0: end of stream before a record, <0: -errno (state
+ * is kept: a non-blocking caller resumes where it was). */
+static long crt_seq_fill(int fd, struct crt_seq_rx* rx, int flags) {
+  SOCKET s = (SOCKET)(uintptr_t)fd_table[fd];
+
+  if (rx->header_have == 0 && (flags & MSG_DONTWAIT) != 0 && !fd_nonblock[fd] &&
+      (poll_socket(s, POLLIN) & (POLLIN | POLLERR | POLLHUP)) == 0) {
+    return -EAGAIN;
+  }
+  while (rx->header_have < sizeof(rx->header)) {
+    int r = winsock.recv(s, (char*)&rx->header + rx->header_have, (int)(sizeof(rx->header) - rx->header_have), 0);
+
+    if (r == SOCKET_ERROR) {
+      return -map_wsa_send_recv_error(fd, winsock.WSAGetLastError());
+    }
+    if (r == 0) {
+      return rx->header_have == 0 ? 0 : -ECONNRESET;
+    }
+    rx->header_have += (size_t)r;
+    if (rx->header_have == sizeof(rx->header)) {
+      if (rx->header.magic != CRT_SEQ_MAGIC || rx->header.payload_length > CRT_SEQ_MAX_PAYLOAD ||
+          rx->header.fd_count > CRT_SEQ_MAX_FDS) {
+        return -EPROTO;
+      }
+      rx->body_size = (size_t)rx->header.fd_count * sizeof(struct crt_seq_fd_record) + rx->header.payload_length;
+      rx->body_have = 0;
+      if (rx->body_size != 0) {
+        rx->body = (unsigned char*)malloc(rx->body_size);
+        if (rx->body == 0) {
+          return -ENOMEM;
+        }
+      }
+    }
+  }
+  while (rx->body_have < rx->body_size) {
+    size_t want = rx->body_size - rx->body_have;
+    int r;
+
+    if (want > (1U << 20)) {
+      want = 1U << 20;
+    }
+    r = winsock.recv(s, (char*)rx->body + rx->body_have, (int)want, 0);
+    if (r == SOCKET_ERROR) {
+      return -map_wsa_send_recv_error(fd, winsock.WSAGetLastError());
+    }
+    if (r == 0) {
+      return -ECONNRESET;
+    }
+    rx->body_have += (size_t)r;
+  }
+  return 1;
+}
+
+/* Receives one record into the caller's iovec. `out_fds`/`out_count` get the new descriptors (count 0 when
+ * none). Returns the length (the record's real length with MSG_TRUNC in flags), 0 at end of stream, or -errno;
+ * *out_flags carries MSG_TRUNC when the record was longer than the buffers. */
+static long crt_seq_receive_message(int fd, const struct iovec* iov, size_t iovlen, int flags, int* out_fds,
+                                    size_t fd_capacity, size_t* out_count, int* out_flags, int* out_dropped) {
+  struct crt_seq_rx* rx;
+  long filled;
+  size_t capacity = 0;
+  size_t copied = 0;
+  size_t payload;
+  const unsigned char* data;
+  size_t i;
+  size_t imported = 0;
+
+  *out_count = 0;
+  *out_flags = 0;
+  *out_dropped = 0;
+  if ((flags & MSG_PEEK) != 0) {
+    return -EOPNOTSUPP;
+  }
+  rx = fd_seq_rx[fd];
+  if (rx == 0) {
+    rx = (struct crt_seq_rx*)calloc(1, sizeof(*rx));
+    if (rx == 0) {
+      return -ENOMEM;
+    }
+    fd_seq_rx[fd] = rx;
+  }
+  filled = crt_seq_fill(fd, rx, flags);
+  if (filled <= 0) {
+    if (filled < 0 && filled != -EAGAIN) {
+      /* A broken or malformed stream stays broken: drop the partial record, keep nothing. */
+      free(rx->body);
+      free(rx);
+      fd_seq_rx[fd] = 0;
+    }
+    return filled;
+  }
+  payload = rx->header.payload_length;
+  data = rx->body + (size_t)rx->header.fd_count * sizeof(struct crt_seq_fd_record);
+  for (i = 0; i < iovlen; ++i) {
+    capacity += iov[i].iov_len;
+  }
+  for (i = 0; i < iovlen && copied < payload; ++i) {
+    size_t chunk = iov[i].iov_len < payload - copied ? iov[i].iov_len : payload - copied;
+
+    if (chunk != 0) {
+      memcpy(iov[i].iov_base, data + copied, chunk);
+      copied += chunk;
+    }
+  }
+  if (payload > capacity) {
+    *out_flags |= MSG_TRUNC;
+  }
+  for (i = 0; i < rx->header.fd_count; ++i) {
+    const struct crt_seq_fd_record* record =
+        (const struct crt_seq_fd_record*)(rx->body + i * sizeof(struct crt_seq_fd_record));
+
+    if (out_fds != 0 && imported < fd_capacity) {
+      long made = crt_seq_import_fd(record, (flags & MSG_CMSG_CLOEXEC) != 0);
+
+      if (made >= 0) {
+        out_fds[imported++] = (int)made;
+      } else {
+        ++*out_dropped;
+      }
+    } else {
+      /* No room for it in the caller's control buffer (MSG_CTRUNC): the object is not leaked. */
+      struct crt_seq_fd_record copy = *record;
+
+      if (copy.kind == CRT_SEQ_FD_FILE && copy.handle != 0) {
+        CloseHandle((HANDLE)(uintptr_t)copy.handle);
+      }
+      ++*out_dropped;
+    }
+  }
+  *out_count = imported;
+  free(rx->body);
+  free(rx);
+  fd_seq_rx[fd] = 0;
+  return (flags & MSG_TRUNC) != 0 ? (long)payload : (long)copied;
+}
+
+static long crt_seq_sendmsg(int fd, const struct msghdr* msg, int flags) {
+  int fds[CRT_SEQ_MAX_FDS];
+  size_t fd_count = 0;
+  struct msghdr scan;
+  struct cmsghdr* cmsg;
+
+  if (msg->msg_control != 0 && msg->msg_controllen >= sizeof(struct cmsghdr)) {
+    scan = *msg;
+    for (cmsg = CMSG_FIRSTHDR(&scan); cmsg != 0; cmsg = CMSG_NXTHDR(&scan, cmsg)) {
+      if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+        size_t bytes = cmsg->cmsg_len - CMSG_LEN(0);
+        size_t n = bytes / sizeof(int);
+        size_t k;
+
+        if (fd_count + n > CRT_SEQ_MAX_FDS) {
+          return -EINVAL;
+        }
+        for (k = 0; k < n; ++k) {
+          memcpy(&fds[fd_count++], CMSG_DATA(cmsg) + k * sizeof(int), sizeof(int));
+        }
+      } else {
+        return -EINVAL;
+      }
+    }
+  }
+  return crt_seq_send_message(fd, msg->msg_iov, (size_t)msg->msg_iovlen, fds, fd_count, flags);
+}
+
+static long crt_seq_recvmsg(int fd, struct msghdr* msg, int flags) {
+  int fds[CRT_SEQ_MAX_FDS];
+  size_t capacity_fds = 0;
+  size_t count = 0;
+  int out_flags = 0;
+  int dropped = 0;
+  long result;
+
+  if (msg->msg_control != 0) {
+    while (capacity_fds < CRT_SEQ_MAX_FDS && CMSG_SPACE((capacity_fds + 1) * sizeof(int)) <= msg->msg_controllen) {
+      ++capacity_fds;
+    }
+  }
+  result = crt_seq_receive_message(fd, msg->msg_iov, (size_t)msg->msg_iovlen, flags, fds, capacity_fds, &count,
+                                   &out_flags, &dropped);
+  if (result < 0) {
+    return result;
+  }
+  msg->msg_flags = out_flags;
+  msg->msg_namelen = 0;
+  if (count != 0) {
+    struct cmsghdr* cmsg = CMSG_FIRSTHDR(msg);
+
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(count * sizeof(int));
+    memcpy(CMSG_DATA(cmsg), fds, count * sizeof(int));
+    msg->msg_controllen = CMSG_SPACE(count * sizeof(int));
+  } else {
+    msg->msg_controllen = 0;
+  }
+  if (dropped != 0) {
+    msg->msg_flags |= MSG_CTRUNC;
+  }
+  return result;
+}
+
+/* A plain buffer in, as send()/write()/sendto(). */
+static long crt_seq_send_buffer(int fd, const void* buf, unsigned long len, int flags) {
+  struct iovec iov;
+
+  iov.iov_base = (void*)buf;
+  iov.iov_len = len;
+  return crt_seq_send_message(fd, &iov, 1, 0, 0, flags);
+}
+
+static long crt_seq_recv_buffer(int fd, void* buf, unsigned long len, int flags) {
+  struct iovec iov;
+  size_t count = 0;
+  int out_flags = 0;
+  int dropped = 0;
+
+  iov.iov_base = buf;
+  iov.iov_len = len;
+  return crt_seq_receive_message(fd, &iov, 1, flags, 0, 0, &count, &out_flags, &dropped);
+}
+
 long __crt_sys_socketpair(int domain, int type, int protocol, int* sv) {
-  (void)domain;
-  (void)type;
-  (void)protocol;
-  (void)sv;
-  return -ENOSYS;
+  static volatile long counter;
+  int cloexec_requested = (type & SOCK_CLOEXEC) != 0;
+  int native_type = type & ~SOCK_CLOEXEC;
+  int seqpacket = native_type == CRT_PUBLIC_SOCK_SEQPACKET;
+  char path[300];
+  char root[260];
+  DWORD length;
+  struct crt_sockaddr_un_ws address;
+  SOCKET listener;
+  SOCKET client;
+  SOCKET server;
+  int fd_a;
+  int fd_b;
+  int error_code;
+  long init_result;
+
+  if (sv == 0) {
+    return -EFAULT;
+  }
+  if (domain != CRT_PUBLIC_AF_UNIX) {
+    return -EOPNOTSUPP;
+  }
+  if (native_type != CRT_PUBLIC_SOCK_STREAM && !seqpacket) {
+    return -EPROTOTYPE;
+  }
+  if (protocol != 0) {
+    return -EPROTONOSUPPORT;
+  }
+  init_result = init_winsock();
+  if (init_result != 0) {
+    return init_result;
+  }
+  /* Winsock has no unnamed AF_UNIX pair: a listener on a throw-away path in the temp directory, one
+   * connect, one accept, and the path is gone before this returns. */
+  length = GetTempPathA((DWORD)sizeof(root), root);
+  if (length == 0 || length >= sizeof(root)) {
+    return -ENOENT;
+  }
+  {
+    long long ticks = 0;
+    unsigned long long parts[3];
+    char* out = path;
+    int k;
+
+    QueryPerformanceCounter(&ticks);
+    parts[0] = GetCurrentProcessId();
+    parts[1] = (unsigned long long)ticks;
+    parts[2] = (unsigned long long)__atomic_add_fetch(&counter, 1, __ATOMIC_SEQ_CST);
+    memcpy(out, root, length);
+    out += length;
+    memcpy(out, "crt-sp-", 7);
+    out += 7;
+    for (k = 0; k < 3; ++k) {
+      char digits[24];
+      int n = 0;
+      unsigned long long value = parts[k];
+
+      do {
+        digits[n++] = (char)('0' + (int)(value % 10ULL));
+        value /= 10ULL;
+      } while (value != 0 && n < 24);
+      while (n > 0) {
+        *out++ = digits[--n];
+      }
+      *out++ = k < 2 ? '-' : '.';
+    }
+    memcpy(out, "sock", 5);
+  }
+  if (strlen(path) >= sizeof(address.path)) {
+    return -ENAMETOOLONG;
+  }
+  memset(&address, 0, sizeof(address));
+  address.family = CRT_PUBLIC_AF_UNIX;
+  memcpy(address.path, path, strlen(path) + 1);
+
+  listener = winsock.socket(CRT_PUBLIC_AF_UNIX, CRT_PUBLIC_SOCK_STREAM, 0);
+  if (listener == INVALID_SOCKET) {
+    return -map_wsa_error(winsock.WSAGetLastError());
+  }
+  if (winsock.bind(listener, (const struct sockaddr*)&address, (int)(2 + strlen(path) + 1)) == SOCKET_ERROR ||
+      winsock.listen(listener, 1) == SOCKET_ERROR) {
+    error_code = map_wsa_error(winsock.WSAGetLastError());
+    winsock.closesocket(listener);
+    DeleteFileA(path);
+    return -error_code;
+  }
+  client = winsock.socket(CRT_PUBLIC_AF_UNIX, CRT_PUBLIC_SOCK_STREAM, 0);
+  if (client == INVALID_SOCKET) {
+    error_code = map_wsa_error(winsock.WSAGetLastError());
+    winsock.closesocket(listener);
+    DeleteFileA(path);
+    return -error_code;
+  }
+  if (winsock.connect(client, (const struct sockaddr*)&address, (int)(2 + strlen(path) + 1)) == SOCKET_ERROR) {
+    error_code = map_wsa_error(winsock.WSAGetLastError());
+    winsock.closesocket(client);
+    winsock.closesocket(listener);
+    DeleteFileA(path);
+    return -error_code;
+  }
+  server = winsock.accept(listener, 0, 0);
+  error_code = server == INVALID_SOCKET ? map_wsa_error(winsock.WSAGetLastError()) : 0;
+  winsock.closesocket(listener);
+  DeleteFileA(path);
+  if (server == INVALID_SOCKET) {
+    winsock.closesocket(client);
+    return -error_code;
+  }
+  fd_a = alloc_socket_fd(client);
+  if (fd_a < 0) {
+    winsock.closesocket(client);
+    winsock.closesocket(server);
+    return -EMFILE;
+  }
+  fd_b = alloc_socket_fd(server);
+  if (fd_b < 0) {
+    close_fd_slot(fd_a);
+    winsock.closesocket(server);
+    return -EMFILE;
+  }
+  fd_socket_seqpacket[fd_a] = (unsigned char)seqpacket;
+  fd_socket_seqpacket[fd_b] = (unsigned char)seqpacket;
+  fd_seq_peer_pid[fd_a] = GetCurrentProcessId();
+  fd_seq_peer_pid[fd_b] = GetCurrentProcessId();
+  if (cloexec_requested) {
+    fd_flags[fd_a] |= FD_CLOEXEC;
+    fd_flags[fd_b] |= FD_CLOEXEC;
+  }
+  sv[0] = fd_a;
+  sv[1] = fd_b;
+  return 0;
 }
 
 long __crt_sys_socket(int domain, int type, int protocol) {
@@ -4783,10 +5500,14 @@ long __crt_sys_socket(int domain, int type, int protocol) {
    * dropping the caller's request. */
   int cloexec_requested = (type & SOCK_CLOEXEC) != 0;
   int native_type = type & ~SOCK_CLOEXEC;
+  int want_seqpacket = domain == CRT_PUBLIC_AF_UNIX && native_type == CRT_PUBLIC_SOCK_SEQPACKET;
   long init_result = init_winsock();
 
   if (init_result != 0) {
     return init_result;
+  }
+  if (want_seqpacket) {
+    native_type = CRT_PUBLIC_SOCK_STREAM; /* framed by this layer, see the AF_UNIX block */
   }
   socket_handle = winsock.socket(translate_address_family(domain), native_type, protocol);
   if (socket_handle == INVALID_SOCKET) {
@@ -4797,6 +5518,7 @@ long __crt_sys_socket(int domain, int type, int protocol) {
     winsock.closesocket(socket_handle);
     return -EMFILE;
   }
+  fd_socket_seqpacket[fd] = (unsigned char)want_seqpacket;
   if (cloexec_requested) {
     fd_flags[fd] |= FD_CLOEXEC;
   }
@@ -4811,9 +5533,14 @@ long __crt_sys_bind(int sockfd, const void* addr, unsigned int addrlen) {
   }
   {
     unsigned char storage[CRT_SOCKADDR_STORAGE_SIZE];
-    const void* native = sockaddr_to_winsock(addr, addrlen, storage);
+    const void* native;
+    int native_len;
+    long prepared = sockaddr_prepare(addr, addrlen, storage, &native, &native_len);
 
-    return winsock.bind(socket_handle, (const struct sockaddr*)native, (int)addrlen) == SOCKET_ERROR
+    if (prepared < 0) {
+      return prepared;
+    }
+    return winsock.bind(socket_handle, (const struct sockaddr*)native, native_len) == SOCKET_ERROR
                ? -map_wsa_error(winsock.WSAGetLastError())
                : 0;
   }
@@ -4848,6 +5575,7 @@ long __crt_sys_accept(int sockfd, void* addr, unsigned int* addrlen) {
     winsock.closesocket(accepted);
     return -EMFILE;
   }
+  fd_socket_seqpacket[fd] = fd_socket_seqpacket[sockfd];
   if (addrlen != 0) {
     *addrlen = (unsigned int)len;
     sockaddr_from_winsock(addr, len);
@@ -4864,9 +5592,14 @@ long __crt_sys_connect(int sockfd, const void* addr, unsigned int addrlen) {
   }
   {
     unsigned char storage[CRT_SOCKADDR_STORAGE_SIZE];
-    const void* native = sockaddr_to_winsock(addr, addrlen, storage);
+    const void* native;
+    int native_len;
+    long prepared = sockaddr_prepare(addr, addrlen, storage, &native, &native_len);
 
-    if (winsock.connect(socket_handle, (const struct sockaddr*)native, (int)addrlen) != SOCKET_ERROR) {
+    if (prepared < 0) {
+      return prepared;
+    }
+    if (winsock.connect(socket_handle, (const struct sockaddr*)native, native_len) != SOCKET_ERROR) {
       return 0;
     }
   }
@@ -4929,6 +5662,9 @@ long __crt_sys_sendto(
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
   }
+  if (crt_seq_is_seqpacket(sockfd)) {
+    return crt_seq_send_buffer(sockfd, buf, len, flags);
+  }
   if (dest_addr == 0) {
     /* libc/src/socket.c's send() calls this with dest_addr=0/addrlen=0
      * (POSIX send(fd, buf, len, flags) == sendto(fd, buf, len, flags,
@@ -4949,15 +5685,20 @@ long __crt_sys_sendto(
     result = winsock.send(socket_handle, (const char*)buf, (int)len, flags);
   } else {
     unsigned char storage[CRT_SOCKADDR_STORAGE_SIZE];
-    const void* native = sockaddr_to_winsock(dest_addr, addrlen, storage);
+    const void* native;
+    int native_len;
+    long prepared = sockaddr_prepare(dest_addr, addrlen, storage, &native, &native_len);
 
+    if (prepared < 0) {
+      return prepared;
+    }
     result = winsock.sendto(
         socket_handle,
         (const char*)buf,
         (int)len,
         flags,
         (const struct sockaddr*)native,
-        (int)addrlen);
+        native_len);
   }
   return result == SOCKET_ERROR ? -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError()) : result;
 }
@@ -4975,6 +5716,14 @@ long __crt_sys_recvfrom(
 
   if (socket_handle == INVALID_SOCKET) {
     return -EBADF;
+  }
+  if (crt_seq_is_seqpacket(sockfd)) {
+    long received = crt_seq_recv_buffer(sockfd, buf, len, flags);
+
+    if (received >= 0 && addrlen != 0) {
+      *addrlen = 0;
+    }
+    return received;
   }
   if (src_addr == 0) {
     /* Same NULL-target hygiene fix as __crt_sys_sendto() above,
@@ -5029,6 +5778,8 @@ static int windows_msg_control_has_scm_rights(const struct msghdr* msg) {
 long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags) {
   SOCKET socket_handle = get_fd_socket(sockfd);
   unsigned char name_storage[CRT_SOCKADDR_STORAGE_SIZE];
+  const void* name_native = 0;
+  int name_native_len = 0;
   size_t total = 0;
   size_t i;
   char* buffer;
@@ -5041,8 +5792,18 @@ long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags) {
   if (msg == 0) {
     return -EFAULT;
   }
+  if (crt_seq_is_seqpacket(sockfd)) {
+    return crt_seq_sendmsg(sockfd, msg, flags);
+  }
   if (windows_msg_control_has_scm_rights(msg)) {
     return -ENOTSUP;
+  }
+  if (msg->msg_name != 0) {
+    long prepared = sockaddr_prepare(msg->msg_name, msg->msg_namelen, name_storage, &name_native, &name_native_len);
+
+    if (prepared < 0) {
+      return prepared;
+    }
   }
 
   /* Winsock has no plain sendmsg(); gather every iovec segment into one
@@ -5056,9 +5817,7 @@ long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags) {
   if (total == 0) {
     result = msg->msg_name != 0
                  ? winsock.sendto(
-                       socket_handle, "", 0, flags,
-                       (const struct sockaddr*)sockaddr_to_winsock(msg->msg_name, msg->msg_namelen, name_storage),
-                       (int)msg->msg_namelen)
+                       socket_handle, "", 0, flags, (const struct sockaddr*)name_native, name_native_len)
                  : winsock.send(socket_handle, "", 0, flags);
     return result == SOCKET_ERROR ? -map_wsa_send_recv_error(sockfd, winsock.WSAGetLastError())
                                    : result;
@@ -5076,9 +5835,8 @@ long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags) {
 
   result = msg->msg_name != 0
                ? winsock.sendto(
-                     socket_handle, buffer, (int)total, flags,
-                     (const struct sockaddr*)sockaddr_to_winsock(msg->msg_name, msg->msg_namelen, name_storage),
-                     (int)msg->msg_namelen)
+                     socket_handle, buffer, (int)total, flags, (const struct sockaddr*)name_native,
+                     name_native_len)
                : winsock.send(socket_handle, buffer, (int)total, flags);
   free(buffer);
 
@@ -5100,6 +5858,9 @@ long __crt_sys_recvmsg(int sockfd, struct msghdr* msg, int flags) {
   }
   if (msg == 0) {
     return -EFAULT;
+  }
+  if (crt_seq_is_seqpacket(sockfd)) {
+    return crt_seq_recvmsg(sockfd, msg, flags);
   }
   if (windows_msg_control_has_scm_rights(msg)) {
     return -ENOTSUP;
@@ -5234,6 +5995,14 @@ long __crt_sys_getsockopt(int sockfd, int level, int optname, void* optval, unsi
   native_option = translate_socket_option(level, optname);
   if (native_option < 0) {
     return -ENOPROTOOPT;
+  }
+  if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_TYPE && crt_seq_is_seqpacket(sockfd)) {
+    if (optval == 0 || *optlen < sizeof(int)) {
+      return -EINVAL;
+    }
+    *(int*)optval = CRT_PUBLIC_SOCK_SEQPACKET;
+    *optlen = sizeof(int);
+    return 0;
   }
   if (is_linger_option(level, optname)) {
     int* out = (int*)optval;

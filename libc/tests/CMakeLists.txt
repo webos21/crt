@@ -585,6 +585,12 @@ if(CRT_TARGET_OS STREQUAL "windows")
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS
     emutls_multi_module_test_runs)
 endif()
+# AF_UNIX: stream sockets, socketpair(), SOCK_SEQPACKET records and SCM_RIGHTS descriptor passing, in one
+# process and between two. On Windows the stream part is Winsock's and the rest is the CRT's own layer.
+add_crt_test(unix_socket_test unix_socket_test.c)
+set_tests_properties(unix_socket_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "unix_socket_test: ok"
+  TIMEOUT 120)
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"
