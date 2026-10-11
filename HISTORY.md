@@ -35,6 +35,11 @@ functionality, not a WebKit adapter (`libc/src/arch/windows/common/syscall.c`, "
   record (`MSG_CMSG_CLOEXEC` honoured, a control buffer that is too small drops and closes the rest and sets
   `MSG_CTRUNC`). A message is delivered whole or not at all; on a failed send the duplicates are closed again.
 
+Gate C (same day): Skia m148 built for Windows (`crtgfx-skia-fetch/configure/build`, `CRTGFX_ENABLE_SKIA=ON`) and
+`crtweb_web_surface_test` enabled for Windows in `libcrtweb/CMakeLists.txt`; it prints `ok` and passes 8/8 runs, with
+`crtgfx_skia_raster_smoke` and `crtgfx_skia_cpu_coverage` also passing. The `SurfaceClient` consumer path now has a
+Windows replay, over the CRT's own AF_UNIX transport, with the wire v1 unchanged.
+
 Evidence: `unix_socket_test` (new; Gate A stream path/half-close/EOF/EADDRINUSE/non-blocking/poll/socketpair, Gate B
 records/truncation/SO_TYPE/path listen-accept, and descriptor passing of a file, a memfd mapping and a TCP socket in one
 process, three at once with CLOEXEC, a small control buffer, and a file plus a memfd between two processes with the

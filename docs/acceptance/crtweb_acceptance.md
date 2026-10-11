@@ -1352,9 +1352,12 @@ named shared mapping in place of descriptor passing is the obvious shape) is sti
 socket duplication into the peer process), see `HISTORY.md` and `docs/porting/bionic_libc_gaps.md`. The frozen wire v1
 is unchanged: `crtweb_wire_transport_test` runs `crtweb_wire_send/recv` over it between two Windows processes
 (CONFIG, a BUFFER_ADD carrying a memfd that the consumer maps and reads, FRAME, TITLE, FRAME_ACK, BUFFER_RELEASE, and a
-size-mismatch EPROTO). Gate C, the `SurfaceClient` consumer test (`crtweb_web_surface_test`) on Windows, still needs a
-Skia build of the Windows tree (`CRTGFX_ENABLE_SKIA` is off in `windows-host-ninja-debug`) and is gated to Linux in
-`libcrtweb/CMakeLists.txt`; the WPE `crt` module stays Linux-only (WPE does not build on Windows).
+size-mismatch EPROTO). Gate C, the `SurfaceClient` consumer test (`crtweb_web_surface_test`), now runs on Windows/x64 too
+(2026-10-12): the Windows tree was built with `CRTGFX_ENABLE_SKIA=ON` (pinned Skia m148 through
+`crtgfx-skia-build` against the CRT libc++, GPU backend on) and the test is registered for `linux` and `windows` in
+`libcrtweb/CMakeLists.txt`. It prints `ok` (not `skipped`) and passed 8 of 8 consecutive runs: handshake, memfd buffers
+imported as a Skia image behind a `SurfaceView`, scene order, ack/release, damage and serials, resize and input
+translation over the CRT AF_UNIX/SEQPACKET layer. The WPE `crt` module stays Linux-only (WPE does not build on Windows).
 
 *Not covered by the macOS replay:* the CA bundle, SIMD/asm paths (still off), Linux/aarch64 and Windows for B2, and
 promoting the web group into the automated all-ports set (it waits for Windows).
