@@ -16,7 +16,7 @@ set_tests_properties(crtweb_wire_transport_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wire_transport_test: ok"
   TIMEOUT 120)
 
-if(TARGET crtui_skia AND TARGET crtgfx_skia AND CRT_TARGET_OS STREQUAL "linux")
+if(TARGET crtui_skia AND TARGET crtgfx_skia AND (CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "windows"))
   add_executable(crtweb_web_surface_test
     ${CRT_STARTUP_OBJECTS}
     tests/platform-crt/web_surface_test.cc
