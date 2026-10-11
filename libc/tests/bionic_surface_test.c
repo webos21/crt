@@ -80,8 +80,18 @@ static void test_getrusage(void) {
   volatile unsigned long sink = 0;
   unsigned long i;
 
-  for (i = 0; i < 30000000UL; ++i) {
-    sink += i;
+  /* Spin until the process's user CPU clock moves (it ticks every ~15.6 ms on Windows, so a fixed
+   * amount of work can finish inside one tick on a fast runner), for at most ~100M iterations. */
+  int round;
+
+  memset(&usage, 0, sizeof(usage));
+  for (round = 0; round < 40; ++round) {
+    for (i = 0; i < 2500000UL; ++i) {
+      sink += i;
+    }
+    if (getrusage(RUSAGE_SELF, &usage) == 0 && (usage.ru_utime.tv_sec > 0 || usage.ru_utime.tv_usec > 0)) {
+      break;
+    }
   }
   CHECK(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage(RUSAGE_SELF)");
   CHECK(usage.ru_maxrss > 512 && usage.ru_maxrss < 64L * 1024 * 1024, "ru_maxrss is a plausible number of KiB");
