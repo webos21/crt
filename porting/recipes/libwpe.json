@@ -25,8 +25,19 @@
     ],
     "env": {
       "CFLAGS": "-O2",
-      "CXXFLAGS": "-O2",
-      "LDFLAGS": "-Wl,--allow-shlib-undefined"
+      "CXXFLAGS": "-O2"
+    },
+    "target_overrides": {
+      "linux": {
+        "env": {
+          "LDFLAGS": "-Wl,--allow-shlib-undefined"
+        }
+      },
+      "macos": {
+        "env": {
+          "CFLAGS": "-D__unix__=1"
+        }
+      }
     }
   },
   "tests": [
@@ -38,12 +49,22 @@
         "-I@PORT_PREFIX@/include/wpe-1.0",
         "-I@PORT_PREFIX@/include"
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libwpe.a",
-        "-Wl,--allow-shlib-undefined"
-      ],
+      "link_args": [],
       "expect_stdout": "libwpe_input_test: ok",
-      "language": "c++"
+      "language": "c++",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libwpe.a",
+            "-Wl,--allow-shlib-undefined"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libwpe.a"
+          ]
+        }
+      }
     }
   ],
   "status": {},
@@ -52,6 +73,8 @@
     "WPE_ENABLE_XKB=OFF: the xkbcommon helpers (wpe/input-xkb.h) are not needed; the 3A input contract carries XKB keysyms and keycodes already converted by the platform.",
     "The shared library only dlopen()s the view backend (WPE_BACKEND / libWPEBackend-default.so) when a view backend is created; PlatformCRT provides it in B4.",
     "-DHAVE_ANDROID_LOG_H=0 declares a toolchain capability: CRT's sysroot has <android/log.h> and the __android_log_* functions in libc, but no separate liblog to link, and libwpe would otherwise add -llog (its check_function_exists is vacuous under CRT's static-library try-compile). libwpe then logs with fprintf to stderr. Found while porting: the header declared __android_log_buf_write with no definition; libc now implements the Bionic liblog entry points (libc/src/android_api.c, libc/tests/android_log_test.c).",
-    "Built static (BUILD_SHARED_LIBS=OFF), as the PlayStation port uses it: the shared build finds its view backend and pasteboard with dlopen(), which the CRT Linux libdl does not implement (docs/design/dynamic_loading.md), and a static libwpe has the embedder define _wpe_loader_interface instead (PlatformCRT's backend in B4)."
+    "Built static (BUILD_SHARED_LIBS=OFF), as the PlayStation port uses it: the shared build finds its view backend and pasteboard with dlopen(), which the CRT Linux libdl does not implement (docs/design/dynamic_loading.md), and a static libwpe has the embedder define _wpe_loader_interface instead (PlatformCRT's backend in B4).",
+    "macOS (2026-10-12 replay): ELF-only link flags are per-host overrides, test link lines name .dylib, and tests of shared libraries use the shared C runtime.",
+    "macOS (2026-10-12 replay): -D__unix__=1: the Khronos eglplatform.h picks its native types from __unix__ (or __APPLE__, which the CRT wrapper hides), and clang for Darwin defines neither __unix__ nor, here, __APPLE__, so libwpe's renderer-backend-egl.h stopped at 'Platform not recognized'."
   ]
 }

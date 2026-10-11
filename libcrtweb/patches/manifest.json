@@ -267,6 +267,29 @@
       ],
       "reason": "Page::filterRenderingModes() calls Settings::hardwareAccelerationEnabled() for every Skia platform except Windows and WPE-without-WPEPlatform, but the HardwareAccelerationEnabled preference exists only for PLATFORM(GTK) || ENABLE(WPE_PLATFORM) (Source/WTF/Scripts/Preferences/UnifiedWebPreferences.yaml). A Skia port that is neither (Skia is upstream's only 2D renderer at this commit, but only GTK/WPE build with it) fails to compile. The CRT port paints on the CPU and has no hardware-acceleration setting, so it takes the software branch.",
       "remove_when": "Upstream makes the call conditional on the preference's own condition, or the preference's condition includes the other Skia ports."
+    },
+    {
+      "id": "0009-wtf-persistence-darwin-size-types",
+      "patch": "0009-wtf-persistence-darwin-size-types.patch",
+      "targets": [
+        "macos"
+      ],
+      "files": [
+        {
+          "file": "Source/WTF/wtf/persistence/PersistentEncoder.h",
+          "sha256_before": "37eaf59fcefbaad59b132bdc6751fa7959e22e01a85621f317a2e7211f5c8d28",
+          "sha256_after": "fc18987c6fa387c4b18f4c663b922dab647d5a9570cbbb8c3c3aeb8f8d3e23fd",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WTF/wtf/persistence/PersistentDecoder.h",
+          "sha256_before": "48d0d760dd1a12bb9abc29bce356450bd7cc130edb01c54a5b167041f49808c4",
+          "sha256_after": "98e966240ce3810cbf431ec9f48ea31498f1a9b960243ded0d8fb02fb367d02a",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "WTF::Persistence::Encoder/Decoder give the fixed-width integers their own overloads and send every other arithmetic type to the Coder<T> template, which has no coder for it. The WebKit tree assumes size_t is uint64_t (true for Linux/Bionic LP64); under the CRT macOS persona the integer typedefs stay Darwin's (uint64_t is unsigned long long, size_t is unsigned long; see 0001), so WebCore's generic KeyedEncoder/KeyedDecoder (the PlayStation/CRT keyed coders: size_t counts) stopped at 'implicit instantiation of undefined template Coder<unsigned long>'. The patch adds unsigned long and long overloads that forward to the fixed-width ones, selected by -DWTF_CRT_INT64_IS_LONG_LONG which the harness already passes on macOS.",
+      "remove_when": "WTF selects the persistence overloads by type identity (std::is_same_v<size_t, uint64_t>) or has coders for size_t on every platform, or CRT presents macOS as OS(DARWIN) without Apple SDK code."
     }
   ],
   "license_policy": {

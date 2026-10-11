@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -875,6 +876,12 @@ def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_b
 
     for name, value in build.get("env", {}).items():
         env[name] = subst(value)
+    # path_prepend: directories (usually @PORT_PREFIX@/bin) put at the front of PATH for this port's
+    # configure and build, so a probe that runs a bare tool name finds the CRT-built one (gperf for
+    # fontconfig) and not whichever version the build host ships.
+    path_prepend = [subst(item) for item in build.get("path_prepend", [])]
+    if path_prepend:
+        env["PATH"] = os.pathsep.join(path_prepend + [env.get("PATH", "")])
     for name, value in build.get("target_overrides", {}).get(target_os, {}).get("env", {}).items():
         value = subst(value)
         if name in _ENV_FLAG_ACCUMULATOR_VARS and env.get(name):
@@ -1923,7 +1930,7 @@ def port_sysroot_for(recipe, sysroot, preset_build_dir):
     return candidate
 
 
-def build_headers_port(root, work, port_prefix, recipe, env):
+def build_headers_port(root, work, port_prefix, recipe, env, target_os=None):
     """build.system "headers": install header trees from the extracted source into the prefix, for
     API definitions that ship no build system (build.headers: [{"from": dir, "to": dir-in-prefix}])."""
     for item in recipe["build"]["headers"]:
@@ -1939,10 +1946,17 @@ def build_headers_port(root, work, port_prefix, recipe, env):
     for item in recipe["build"].get("crt_shared_libraries", []):
         library_dir = Path(port_prefix) / "lib"
         library_dir.mkdir(parents=True, exist_ok=True)
-        command = shlex.split(env["CC"]) + ["-shared", "-fPIC", "-O2", str(root / item["source"]),
-                                            f"-Wl,-soname,{item['output']}",
-                                            "-o", str(library_dir / item["output"])]
-        run(command, work, env, f"{recipe['name']}: build {item['output']}")
+        output_name = item["output"]
+        if target_os == "macos":
+            # The recipe names the ELF file (libEGL.so); a Mach-O host gets libEGL.dylib with an
+            # absolute install name, so a consumer links it by path and dyld finds it again.
+            output_name = re.sub(r"\.so$", ".dylib", output_name)
+            naming = ["-dynamiclib", "-fPIC", "-O2", str(root / item["source"]),
+                      "-install_name", str(library_dir / output_name)]
+        else:
+            naming = ["-shared", "-fPIC", "-O2", str(root / item["source"]), f"-Wl,-soname,{output_name}"]
+        command = shlex.split(env["CC"]) + naming + ["-o", str(library_dir / output_name)]
+        run(command, work, env, f"{recipe['name']}: build {output_name}")
 
 
 def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, port_prefix, recipes, port, target_os, mingw_triple, use_crt_shell=False, configure_only=False, built=None, jobs=None):
@@ -1992,7 +2006,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
     elif build["system"] == "cmake":
         build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, jobs)
     elif build["system"] == "headers":
-        build_headers_port(root, work, port_prefix, recipe, env)
+        build_headers_port(root, work, port_prefix, recipe, env, target_os)
     if configure_only:
         # A configure probe has not installed the port. Writing the ordinary
         # completion stamp here made the next real build silently skip it.

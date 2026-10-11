@@ -41,16 +41,35 @@
       "cflags": [
         "-I@PORT_PREFIX@/include"
       ],
-      "link_args": [
-        "@PORT_PREFIX@/lib/libEGL.so",
-        "@PORT_PREFIX@/lib/libGLESv2.so",
-        "-Wl,--allow-shlib-undefined"
-      ],
-      "expect_stdout": "egl_headers_test: ok"
+      "link_args": [],
+      "expect_stdout": "egl_headers_test: ok",
+      "target_overrides": {
+        "linux": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libEGL.so",
+            "@PORT_PREFIX@/lib/libGLESv2.so",
+            "-Wl,--allow-shlib-undefined"
+          ]
+        },
+        "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libEGL.dylib",
+            "@PORT_PREFIX@/lib/libGLESv2.dylib"
+          ],
+          "env": {
+            "CRT_CXX_RUNTIME_LINKAGE": "shared"
+          },
+          "cflags": [
+            "-D__unix__=1"
+          ]
+        }
+      }
     }
   ],
   "status": {},
   "notes": [
-    "Added 2026-10-11 for Web Tranche 3B milestone B3. The Khronos EGL-Registry headers (EGL, KHR; Apache-2.0/MIT per file; a pinned main-branch commit because the registry publishes no releases, archive checksum of the GitHub-generated tarball not independently verified) plus the CRT-owned 'no GPU' libEGL.so and libGLESv2.so (libcrtweb/platform/gles-stub). WebCore links OpenGL::GLES and EGL unconditionally and libwpe's CMake requires an EGL library, but the CRT port paints on the CPU until Tranche 9; the libraries answer every call with failure, so a context is never created. Not a host library: it is built from CRT source with the CRT toolchain."
+    "Added 2026-10-11 for Web Tranche 3B milestone B3. The Khronos EGL-Registry headers (EGL, KHR; Apache-2.0/MIT per file; a pinned main-branch commit because the registry publishes no releases, archive checksum of the GitHub-generated tarball not independently verified) plus the CRT-owned 'no GPU' libEGL.so and libGLESv2.so (libcrtweb/platform/gles-stub). WebCore links OpenGL::GLES and EGL unconditionally and libwpe's CMake requires an EGL library, but the CRT port paints on the CPU until Tranche 9; the libraries answer every call with failure, so a context is never created. Not a host library: it is built from CRT source with the CRT toolchain.",
+    "macOS (2026-10-12 replay): ELF-only link flags are per-host overrides, test link lines name .dylib, and tests of shared libraries use the shared C runtime.",
+    "macOS: the test (and any consumer of eglplatform.h) defines __unix__: eglplatform.h selects native types from __unix__/__APPLE__, and the CRT macOS persona (-U__APPLE__, -D__linux__=1 for ports) defines neither. Real Linux clang defines both __linux__ and __unix__."
   ]
 }

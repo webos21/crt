@@ -3,15 +3,18 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
 #include <private/crt_fd_table.h>
+#include <private/crt_seqpacket.h>
 #include <private/crt_tls.h>
 
 #if defined(CRT_TARGET_OS_MACOS)
@@ -100,6 +103,7 @@ long __crt_sys_socket(int domain, int type, int protocol);
 long __crt_sys_socketpair(int domain, int type, int protocol, int* sv);
 #if defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_close(int fd);
+long __crt_sys_read(int fd, void* buf, unsigned long count);
 #endif
 long __crt_sys_bind(int sockfd, const void* addr, unsigned int addrlen);
 long __crt_sys_listen(int sockfd, int backlog);
@@ -723,6 +727,390 @@ static void from_darwin_sockaddr(
 }
 #endif
 
+#if defined(CRT_TARGET_OS_MACOS)
+/* ---- Darwin message flags ---------------------------------------------------------------------
+ * recv/send/recvmsg/sendmsg flags use Bionic's (Linux) numbers in this libc's headers; Darwin
+ * numbers MSG_EOR, MSG_TRUNC, MSG_CTRUNC, MSG_WAITALL and MSG_DONTWAIT differently, so passing them
+ * through meant MSG_DONTWAIT (0x40) reached the kernel as MSG_WAITALL. MSG_CMSG_CLOEXEC has no
+ * Darwin equivalent and is applied to the received descriptors afterwards. */
+#define CRT_DARWIN_MSG_OOB 0x1
+#define CRT_DARWIN_MSG_PEEK 0x2
+#define CRT_DARWIN_MSG_DONTROUTE 0x4
+#define CRT_DARWIN_MSG_EOR 0x8
+#define CRT_DARWIN_MSG_TRUNC 0x10
+#define CRT_DARWIN_MSG_CTRUNC 0x20
+#define CRT_DARWIN_MSG_WAITALL 0x40
+#define CRT_DARWIN_MSG_DONTWAIT 0x80
+#define CRT_DARWIN_MSG_NOSIGNAL 0x80000
+
+static int to_darwin_msg_flags(int flags) {
+  int out = 0;
+
+  if (flags & MSG_OOB) out |= CRT_DARWIN_MSG_OOB;
+  if (flags & MSG_PEEK) out |= CRT_DARWIN_MSG_PEEK;
+  if (flags & MSG_DONTROUTE) out |= CRT_DARWIN_MSG_DONTROUTE;
+  if (flags & MSG_EOR) out |= CRT_DARWIN_MSG_EOR;
+  if (flags & MSG_TRUNC) out |= CRT_DARWIN_MSG_TRUNC;
+  if (flags & MSG_WAITALL) out |= CRT_DARWIN_MSG_WAITALL;
+  if (flags & MSG_DONTWAIT) out |= CRT_DARWIN_MSG_DONTWAIT;
+  if (flags & MSG_NOSIGNAL) out |= CRT_DARWIN_MSG_NOSIGNAL;
+  return out;
+}
+
+static int from_darwin_msg_flags(int flags) {
+  int out = 0;
+
+  if (flags & CRT_DARWIN_MSG_OOB) out |= MSG_OOB;
+  if (flags & CRT_DARWIN_MSG_EOR) out |= MSG_EOR;
+  if (flags & CRT_DARWIN_MSG_TRUNC) out |= MSG_TRUNC;
+  if (flags & CRT_DARWIN_MSG_CTRUNC) out |= MSG_CTRUNC;
+  return out;
+}
+
+/* Darwin sets MSG_CTRUNC when the control buffer was too small but leaves the cmsg_len of the
+ * (single, truncated) SCM_RIGHTS message at the size it *would* have had; Linux reports what was
+ * delivered. Clamp it so a receiver that counts descriptors from cmsg_len never reads past the
+ * buffer it gave, and keep msg_controllen within that buffer. */
+static void clamp_truncated_control(struct msghdr* msg, size_t capacity) {
+  struct cmsghdr* first;
+
+  if ((msg->msg_flags & MSG_CTRUNC) == 0 || msg->msg_control == 0) {
+    return;
+  }
+  if (capacity < CMSG_LEN(0)) {
+    msg->msg_controllen = 0;
+    return;
+  }
+  if (msg->msg_controllen > capacity) {
+    msg->msg_controllen = (socklen_t)capacity;
+  }
+  first = (struct cmsghdr*)msg->msg_control;
+  if (first->cmsg_len > capacity) {
+    if (first->cmsg_level == CRT_DARWIN_SOL_SOCKET && first->cmsg_type == SCM_RIGHTS) {
+      first->cmsg_len = (socklen_t)CMSG_LEN(((capacity - CMSG_LEN(0)) / sizeof(int)) * sizeof(int));
+    } else {
+      first->cmsg_len = (socklen_t)capacity;
+    }
+  }
+}
+
+/* Marks every descriptor in an SCM_RIGHTS message close-on-exec (MSG_CMSG_CLOEXEC emulation). */
+static void cloexec_received_descriptors(struct msghdr* msg) {
+  struct cmsghdr* cmsg;
+
+  for (cmsg = CMSG_FIRSTHDR(msg); cmsg != 0; cmsg = CMSG_NXTHDR(msg, cmsg)) {
+    if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS && cmsg->cmsg_len >= CMSG_LEN(0)) {
+      const size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+      const int* fds = (const int*)CMSG_DATA(cmsg);
+      size_t i;
+
+      for (i = 0; i < count; ++i) {
+        (void)__crt_fd_set_cloexec(fds[i], 1);
+      }
+    }
+  }
+}
+
+/* ---- AF_UNIX SOCK_SEQPACKET -------------------------------------------------------------------
+ * Darwin's AF_UNIX has no sequenced-packet type (socket(2) says EPROTONOSUPPORT), and the CRT web
+ * surface protocol (libcrtweb/platform/crtweb_surface_wire.h) needs record boundaries with
+ * SCM_RIGHTS. So, as on Windows, the CRT provides it: a SOCK_STREAM socket whose records are a
+ * 4-byte length followed by the payload; SCM_RIGHTS travels in the same sendmsg() as the length, so
+ * Darwin delivers the descriptors with the first bytes of the record. Both ends must be CRT: the
+ * framing is this libc's, not the kernel's.
+ *
+ * Which descriptors are framed is process state (a flag per fd, copied by dup, forgotten by close,
+ * inherited by fork). It is not carried across exec: a program that inherits such a socket must
+ * receive it by connect/accept or SCM_RIGHTS-free means and create its own, which is how the wire
+ * protocol uses it. One thread should read a socket at a time (a record is not atomic against
+ * another reader) and a non-blocking socket waits for the rest of a record once it started it.
+ * MSG_PEEK is not provided. */
+#define CRT_SEQPACKET_FD_MAX 4096
+#define CRT_SEQPACKET_MAX_RECORD (64u * 1024u * 1024u)
+#define CRT_SEQPACKET_MAX_IOV 64
+
+static unsigned char seqpacket_flags[CRT_SEQPACKET_FD_MAX];
+
+int __crt_seqpacket_fd(int fd) {
+  return fd >= 0 && fd < CRT_SEQPACKET_FD_MAX && __atomic_load_n(&seqpacket_flags[fd], __ATOMIC_RELAXED) != 0;
+}
+
+static void seqpacket_set(int fd, int on) {
+  if (fd >= 0 && fd < CRT_SEQPACKET_FD_MAX) {
+    __atomic_store_n(&seqpacket_flags[fd], (unsigned char)(on != 0), __ATOMIC_RELAXED);
+  }
+}
+
+void __crt_seqpacket_close(int fd) {
+  seqpacket_set(fd, 0);
+}
+
+void __crt_seqpacket_dup(int oldfd, int newfd) {
+  seqpacket_set(newfd, __crt_seqpacket_fd(oldfd));
+}
+
+static void seqpacket_wait(int fd, short events) {
+  struct pollfd entry;
+
+  entry.fd = fd;
+  entry.events = events;
+  entry.revents = 0;
+  (void)poll(&entry, 1, -1);
+}
+
+/* Sends one record: `iov` is the caller's payload, `control` (may be 0) rides with the first byte.
+ * Returns the payload length or -1 with errno. */
+static ssize_t seqpacket_send(int fd, const struct iovec* iov, int iovcnt, void* control,
+                              unsigned int controllen, int bionic_flags) {
+  struct iovec vec[CRT_SEQPACKET_MAX_IOV + 1];
+  uint32_t length = 0;
+  uint32_t header;
+  size_t total;
+  size_t sent = 0;
+  struct msghdr msg;
+  int i;
+  int dflags = to_darwin_msg_flags(bionic_flags) | CRT_DARWIN_MSG_NOSIGNAL;
+
+  if (iovcnt < 0 || iovcnt > CRT_SEQPACKET_MAX_IOV) {
+    errno = EMSGSIZE;
+    return -1;
+  }
+  for (i = 0; i < iovcnt; ++i) {
+    if (iov[i].iov_len > CRT_SEQPACKET_MAX_RECORD - length) {
+      errno = EMSGSIZE;
+      return -1;
+    }
+    length += (uint32_t)iov[i].iov_len;
+  }
+  header = length;
+  vec[0].iov_base = &header;
+  vec[0].iov_len = sizeof(header);
+  for (i = 0; i < iovcnt; ++i) {
+    vec[i + 1] = iov[i];
+  }
+  total = sizeof(header) + length;
+
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_iov = vec;
+  msg.msg_iovlen = iovcnt + 1;
+  msg.msg_control = control;
+  msg.msg_controllen = controllen;
+  for (;;) {
+    long r = __crt_sys_sendmsg(fd, &msg, dflags);
+    size_t advance;
+
+    if (r < 0) {
+      if (r == -EAGAIN && sent != 0) {
+        /* Half a record is on the wire: it has to be completed, whatever the socket's mode. */
+        seqpacket_wait(fd, POLLOUT);
+        continue;
+      }
+      if (r == -EINTR && sent != 0) {
+        continue;
+      }
+      return (ssize_t)__set_errno((int)-r);
+    }
+    sent += (size_t)r;
+    if (sent >= total) {
+      return (ssize_t)length;
+    }
+    /* Partial: drop what went out and carry on without the control data (it left with the first
+     * byte). */
+    advance = (size_t)r;
+    {
+      int index = 0;
+
+      while (index < msg.msg_iovlen && advance >= msg.msg_iov[index].iov_len) {
+        advance -= msg.msg_iov[index].iov_len;
+        ++index;
+      }
+      msg.msg_iov = &msg.msg_iov[index];
+      msg.msg_iovlen -= index;
+      if (advance != 0 && msg.msg_iovlen != 0) {
+        msg.msg_iov[0].iov_base = (char*)msg.msg_iov[0].iov_base + advance;
+        msg.msg_iov[0].iov_len -= advance;
+      }
+    }
+    msg.msg_control = 0;
+    msg.msg_controllen = 0;
+  }
+}
+
+/* Reads exactly `count` bytes into `buffer` (or discards them when buffer is 0). Returns 1 done,
+ * 0 end of stream before any byte, -1 error (EOF mid-record is ECONNRESET). */
+static int seqpacket_read_exact(int fd, void* buffer, size_t count, int first_call_nonblocking,
+                                int* got_any) {
+  size_t done = 0;
+  char scratch[1024];
+
+  while (done < count) {
+    size_t want = count - done;
+    void* target = buffer != 0 ? (char*)buffer + done : scratch;
+    long r;
+
+    if (buffer == 0 && want > sizeof(scratch)) {
+      want = sizeof(scratch);
+    }
+    r = __crt_sys_read(fd, target, (unsigned long)want);
+    if (r == 0) {
+      if (done == 0 && !*got_any) {
+        return 0;
+      }
+      errno = ECONNRESET;
+      return -1;
+    }
+    if (r < 0) {
+      if (r == -EINTR) {
+        continue;
+      }
+      if (r == -EAGAIN) {
+        if (first_call_nonblocking && done == 0 && !*got_any) {
+          errno = EAGAIN;
+          return -1;
+        }
+        seqpacket_wait(fd, POLLIN);
+        continue;
+      }
+      errno = (int)-r;
+      return -1;
+    }
+    done += (size_t)r;
+    *got_any = 1;
+  }
+  return 1;
+}
+
+static ssize_t seqpacket_recvmsg(int fd, struct msghdr* msg, int bionic_flags) {
+  uint32_t length = 0;
+  size_t have = 0;
+  size_t capacity = 0;
+  size_t copied = 0;
+  int i;
+  int got_any = 0;
+  int truncated = 0;
+  int dflags = to_darwin_msg_flags(bionic_flags & ~MSG_TRUNC);
+  const size_t control_capacity = msg->msg_controllen;
+  struct msghdr header_msg;
+  struct iovec header_iov;
+
+  if ((bionic_flags & MSG_PEEK) != 0) {
+    errno = EOPNOTSUPP;
+    return -1;
+  }
+  for (i = 0; i < msg->msg_iovlen; ++i) {
+    capacity += msg->msg_iov[i].iov_len;
+  }
+
+  /* The length, with the ancillary data that came with its first byte. */
+  while (have < sizeof(length)) {
+    long r;
+
+    memset(&header_msg, 0, sizeof(header_msg));
+    header_iov.iov_base = (char*)&length + have;
+    header_iov.iov_len = sizeof(length) - have;
+    header_msg.msg_iov = &header_iov;
+    header_msg.msg_iovlen = 1;
+    if (have == 0) {
+      header_msg.msg_control = msg->msg_control;
+      header_msg.msg_controllen = msg->msg_controllen;
+    }
+    r = __crt_sys_recvmsg(fd, &header_msg, have == 0 ? dflags : 0);
+    if (r == -EINTR) {
+      continue;
+    }
+    if (r == -EAGAIN && have != 0) {
+      seqpacket_wait(fd, POLLIN);
+      continue;
+    }
+    if (r < 0) {
+      return (ssize_t)__set_errno((int)-r);
+    }
+    if (r == 0) {
+      if (have == 0) {
+        msg->msg_controllen = 0;
+        msg->msg_flags = 0;
+        return 0;
+      }
+      errno = ECONNRESET;
+      return -1;
+    }
+    if (have == 0) {
+      msg->msg_controllen = header_msg.msg_controllen;
+      msg->msg_flags = from_darwin_msg_flags(header_msg.msg_flags);
+      clamp_truncated_control(msg, control_capacity);
+      if (msg->msg_control != 0 && msg->msg_controllen > 0) {
+        translate_cmsg_levels(msg->msg_control, msg->msg_controllen, 0);
+        if ((bionic_flags & MSG_CMSG_CLOEXEC) != 0) {
+          struct msghdr view;
+
+          memset(&view, 0, sizeof(view));
+          view.msg_control = msg->msg_control;
+          view.msg_controllen = msg->msg_controllen;
+          cloexec_received_descriptors(&view);
+        }
+      }
+    }
+    have += (size_t)r;
+    got_any = 1;
+  }
+  if (length > CRT_SEQPACKET_MAX_RECORD) {
+    errno = EPROTO;
+    return -1;
+  }
+
+  for (i = 0; i < msg->msg_iovlen && copied < length; ++i) {
+    size_t want = msg->msg_iov[i].iov_len;
+    int status;
+
+    if (want > length - copied) {
+      want = length - copied;
+    }
+    status = seqpacket_read_exact(fd, msg->msg_iov[i].iov_base, want, 0, &got_any);
+    if (status != 1) {
+      if (status == 0) {
+        errno = ECONNRESET;
+      }
+      return -1;
+    }
+    copied += want;
+  }
+  if (copied < length) {
+    int status = seqpacket_read_exact(fd, 0, length - copied, 0, &got_any);
+
+    truncated = 1;
+    if (status != 1) {
+      errno = ECONNRESET;
+      return -1;
+    }
+  }
+  if (truncated || length > capacity) {
+    msg->msg_flags |= MSG_TRUNC;
+  }
+  /* Linux: with MSG_TRUNC among the call's flags the return value is the record's real length. */
+  return (bionic_flags & MSG_TRUNC) != 0 ? (ssize_t)length : (ssize_t)copied;
+}
+
+ssize_t __crt_seqpacket_read(int fd, void* buf, size_t count) {
+  struct iovec iov;
+  struct msghdr msg;
+
+  iov.iov_base = buf;
+  iov.iov_len = count;
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
+  return seqpacket_recvmsg(fd, &msg, 0);
+}
+
+ssize_t __crt_seqpacket_write(int fd, const void* buf, size_t count) {
+  struct iovec iov;
+
+  iov.iov_base = (void*)buf;
+  iov.iov_len = count;
+  return seqpacket_send(fd, &iov, 1, 0, 0, 0);
+}
+#endif
+
 int socket(int domain, int type, int protocol) {
 #if defined(CRT_TARGET_OS_MACOS)
   /* Darwin's real socket(2) has no SOCK_CLOEXEC/SOCK_NONBLOCK bits in
@@ -741,13 +1129,21 @@ int socket(int domain, int type, int protocol) {
    * already used for pipe()'s own missing pipe2() on this OS (see
    * __crt_sys_eventfd2() above, and pipe() below). */
   int cloexec = (type & SOCK_CLOEXEC) != 0;
+  int framed = domain == AF_UNIX && (type & ~SOCK_CLOEXEC) == SOCK_SEQPACKET;
   long result = __crt_sys_socket(domain == AF_INET6 ? CRT_DARWIN_AF_INET6 : domain,
-                                 type & ~SOCK_CLOEXEC, protocol);
+                                 framed ? SOCK_STREAM : (type & ~SOCK_CLOEXEC), protocol);
   int fd = (int)normalize_socket_result(result);
+  if (fd >= CRT_SEQPACKET_FD_MAX && framed) {
+    __crt_sys_close(fd);
+    return (int)__set_errno(EMFILE);
+  }
   if (fd >= 0 && cloexec && __crt_fd_set_cloexec(fd, 1) != 0) {
     int saved_errno = errno;
     __crt_sys_close(fd);
     return (int)__set_errno(saved_errno);
+  }
+  if (fd >= 0) {
+    seqpacket_set(fd, framed);
   }
   return fd;
 #else
@@ -766,11 +1162,17 @@ int socketpair(int domain, int type, int protocol, int sv[2]) {
 #if defined(CRT_TARGET_OS_MACOS)
   {
     int cloexec = (type & SOCK_CLOEXEC) != 0;
+    int framed = domain == AF_UNIX && (type & ~SOCK_CLOEXEC) == SOCK_SEQPACKET;
     int pair[2] = {-1, -1};
-    long result = __crt_sys_socketpair(domain, type & ~SOCK_CLOEXEC, protocol, pair);
+    long result = __crt_sys_socketpair(domain, framed ? SOCK_STREAM : (type & ~SOCK_CLOEXEC), protocol, pair);
     int status = (int)normalize_socket_result(result);
     if (status != 0) {
       return status;
+    }
+    if (framed && (pair[0] >= CRT_SEQPACKET_FD_MAX || pair[1] >= CRT_SEQPACKET_FD_MAX)) {
+      __crt_sys_close(pair[0]);
+      __crt_sys_close(pair[1]);
+      return (int)__set_errno(EMFILE);
     }
     if (cloexec && (__crt_fd_set_cloexec(pair[0], 1) != 0 || __crt_fd_set_cloexec(pair[1], 1) != 0)) {
       int saved_errno = errno;
@@ -778,6 +1180,8 @@ int socketpair(int domain, int type, int protocol, int sv[2]) {
       __crt_sys_close(pair[1]);
       return (int)__set_errno(saved_errno);
     }
+    seqpacket_set(pair[0], framed);
+    seqpacket_set(pair[1], framed);
     sv[0] = pair[0];
     sv[1] = pair[1];
     return 0;
@@ -813,6 +1217,15 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
   result = __crt_sys_accept(sockfd, addr != 0 ? &darwin_addr : 0, addrlen != 0 ? &darwin_len : 0);
   if (result < 0 && result >= -4095) {
     return (int)__set_errno((int)-result);
+  }
+  if (__crt_seqpacket_fd(sockfd)) {
+    if (result >= CRT_SEQPACKET_FD_MAX) {
+      __crt_sys_close((int)result);
+      return (int)__set_errno(EMFILE);
+    }
+    seqpacket_set((int)result, 1);
+  } else {
+    seqpacket_set((int)result, 0);
   }
   if (addr != 0 && addrlen != 0) {
     from_darwin_sockaddr(&darwin_addr, addr, addrlen);
@@ -856,14 +1269,25 @@ ssize_t sendto(
   unsigned int darwin_len = 0;
   const void* out_addr = 0;
 
+  if (__crt_seqpacket_fd(sockfd)) {
+    struct iovec iov;
+
+    if (dest_addr != 0) {
+      errno = EISCONN;
+      return -1;
+    }
+    iov.iov_base = (void*)buf;
+    iov.iov_len = len;
+    return seqpacket_send(sockfd, &iov, 1, 0, 0, flags);
+  }
   if (dest_addr != 0) {
     if (to_darwin_sockaddr(dest_addr, addrlen, &darwin_addr, &darwin_len) != 0) {
       return -1;
     }
     out_addr = &darwin_addr;
   }
-  return (ssize_t)normalize_socket_result(
-      __crt_sys_sendto(sockfd, buf, (unsigned long)len, flags, out_addr, darwin_len));
+  return (ssize_t)normalize_socket_result(__crt_sys_sendto(
+      sockfd, buf, (unsigned long)len, to_darwin_msg_flags(flags), out_addr, darwin_len));
 #else
   return (ssize_t)normalize_socket_result(
       __crt_sys_sendto(sockfd, buf, (unsigned long)len, flags, dest_addr, (unsigned int)addrlen));
@@ -884,11 +1308,27 @@ ssize_t recvfrom(
 #if defined(CRT_TARGET_OS_MACOS)
   union crt_darwin_sockaddr_storage darwin_addr;
   unsigned int darwin_len = sizeof(darwin_addr);
-  long result = __crt_sys_recvfrom(
+  long result;
+
+  if (__crt_seqpacket_fd(sockfd)) {
+    struct iovec iov;
+    struct msghdr msg;
+
+    iov.iov_base = buf;
+    iov.iov_len = len;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    if (addrlen != 0) {
+      *addrlen = 0; /* a connected, nameless AF_UNIX peer */
+    }
+    return seqpacket_recvmsg(sockfd, &msg, flags);
+  }
+  result = __crt_sys_recvfrom(
       sockfd,
       buf,
       (unsigned long)len,
-      flags,
+      to_darwin_msg_flags(flags),
       src_addr != 0 ? &darwin_addr : 0,
       addrlen != 0 ? &darwin_len : 0);
 
@@ -944,6 +1384,25 @@ ssize_t sendmsg(int sockfd, const struct msghdr* msg, int flags) {
     unsigned char control_buf[512];
     struct msghdr translated = *msg;
 
+    if (__crt_seqpacket_fd(sockfd)) {
+      unsigned int controllen = 0;
+
+      if (msg->msg_name != 0) {
+        errno = EISCONN;
+        return -1;
+      }
+      if (msg->msg_control != 0 && msg->msg_controllen > 0) {
+        if (msg->msg_controllen > sizeof(control_buf)) {
+          errno = ENOMEM;
+          return -1;
+        }
+        memcpy(control_buf, msg->msg_control, msg->msg_controllen);
+        translate_cmsg_levels(control_buf, (unsigned int)msg->msg_controllen, 1);
+        controllen = (unsigned int)msg->msg_controllen;
+      }
+      return seqpacket_send(sockfd, msg->msg_iov, (int)msg->msg_iovlen,
+                            controllen != 0 ? control_buf : 0, controllen, flags);
+    }
     if (msg->msg_name != 0) {
       unsigned int darwin_len = 0;
 
@@ -964,7 +1423,8 @@ ssize_t sendmsg(int sockfd, const struct msghdr* msg, int flags) {
       translated.msg_control = control_buf;
       translated.msg_controllen = msg->msg_controllen;
     }
-    return (ssize_t)normalize_socket_result(__crt_sys_sendmsg(sockfd, &translated, flags));
+    return (ssize_t)normalize_socket_result(
+        __crt_sys_sendmsg(sockfd, &translated, to_darwin_msg_flags(flags)));
   }
 #endif
   return (ssize_t)normalize_socket_result(__crt_sys_sendmsg(sockfd, msg, flags));
@@ -981,6 +1441,12 @@ ssize_t recvmsg(int sockfd, struct msghdr* msg, int flags) {
     struct msghdr translated = *msg;
     long result;
 
+    if (__crt_seqpacket_fd(sockfd)) {
+      if (msg->msg_name != 0) {
+        msg->msg_namelen = 0; /* a connected, nameless AF_UNIX peer */
+      }
+      return seqpacket_recvmsg(sockfd, msg, flags);
+    }
     if (msg->msg_name != 0) {
       translated.msg_name = &darwin_addr;
       translated.msg_namelen = sizeof(darwin_addr);
@@ -989,17 +1455,25 @@ ssize_t recvmsg(int sockfd, struct msghdr* msg, int flags) {
      * shallow *msg copy above didn't redirect it, unlike msg_name), so the
      * kernel fills it in place -- no separate copy-back needed here, just
      * an in-place Darwin->Bionic cmsg_level translation below. */
-    result = __crt_sys_recvmsg(sockfd, &translated, flags);
+    result = __crt_sys_recvmsg(sockfd, &translated, to_darwin_msg_flags(flags));
     if (result < 0 && result >= -4095) {
       return (ssize_t)__set_errno((int)-result);
     }
     if (msg->msg_name != 0) {
       from_darwin_sockaddr(&darwin_addr, (struct sockaddr*)msg->msg_name, &msg->msg_namelen);
     }
-    msg->msg_controllen = translated.msg_controllen;
-    msg->msg_flags = translated.msg_flags;
+    {
+      const size_t control_capacity = msg->msg_controllen;
+
+      msg->msg_controllen = translated.msg_controllen;
+      msg->msg_flags = from_darwin_msg_flags(translated.msg_flags);
+      clamp_truncated_control(msg, control_capacity);
+    }
     if (msg->msg_control != 0 && msg->msg_controllen > 0) {
       translate_cmsg_levels(msg->msg_control, msg->msg_controllen, 0);
+      if ((flags & MSG_CMSG_CLOEXEC) != 0) {
+        cloexec_received_descriptors(msg);
+      }
     }
     return (ssize_t)result;
   }
@@ -1153,6 +1627,14 @@ int getsockopt(int sockfd, int level, int optname, void* optval, socklen_t* optl
 #if defined(CRT_TARGET_OS_MACOS)
   if (darwin_socket_option(&level, &optname) != 0) {
     return -1;
+  }
+#endif
+#if defined(CRT_TARGET_OS_MACOS)
+  if (level == CRT_DARWIN_SOL_SOCKET && optname == CRT_DARWIN_SO_TYPE && __crt_seqpacket_fd(sockfd) &&
+      optval != 0 && len >= sizeof(int)) {
+    *(int*)optval = SOCK_SEQPACKET;
+    *optlen = (socklen_t)sizeof(int);
+    return 0;
   }
 #endif
   result = __crt_sys_getsockopt(sockfd, level, optname, optval, &len);

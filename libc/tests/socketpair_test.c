@@ -42,7 +42,7 @@ int main(void) {
   }
   CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, NULL) == -1 && errno == EFAULT, "NULL vector is EFAULT");
 
-#if defined(__linux__) || defined(_WIN32) || defined(__MINGW32__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(__MINGW32__)
   CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sv) == 0, "seqpacket pair");
   if (sv[0] >= 0) {
     char big[16];

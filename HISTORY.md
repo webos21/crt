@@ -11,6 +11,19 @@ substantive update.
 
 ## 2026-10-12
 
+### Tranche 3 replayed on macOS/arm64: 3A contracts and B3 (WebCore, PAL, Skia)
+
+`crtweb_wire_layout_test`, `crtweb_wire_transport_test` and `crtweb_web_surface_test` pass on macOS, and
+`build_webkit_crt_port.py --run-tests` (now macOS-aware) builds WebCore, PAL and the bundled Skia from an empty work
+root and passes the B3 gate with the Linux numbers (text width 86.70, 216 dark pixels, no GLib symbol, only CRT
+libraries and `libSystem`). Found and fixed: Darwin has no AF_UNIX `SOCK_SEQPACKET` (CRT-framed stream sockets with
+`SCM_RIGHTS` in libc; this settles the macOS transport decision); `MSG_*` flags were Linux numbers on Darwin
+(`MSG_DONTWAIT` arrived as `MSG_WAITALL`) and `cmsg_len` after `MSG_CTRUNC` was not clamped; the in-tree macOS C++ test
+saw `std::string` size 0 through SDK libc++ headers over the imported libc++ archive; fontconfig/libwpe/crt-egl
+ELF-isms (gperf probe on `PATH`, `statfs` branch, `eglplatform.h`, `.so` stub libraries); patch 0009 (WTF persistence
+coders for `size_t` under Darwin integer types); and two `libcurl` images in one program through `PKG_CONFIG_PATH`
+order. The WPE `crt` module stays Linux-only. Linux/aarch64 and Windows B3 remain open.
+
 ### Windows/x64: AF_UNIX streams, socketpair(), SOCK_SEQPACKET and SCM_RIGHTS in the CRT PAL (Gates A and B)
 
 The Tranche 3A transport (one `AF_UNIX`/`SOCK_SEQPACKET` connection per view, a memfd descriptor per buffer) needs three

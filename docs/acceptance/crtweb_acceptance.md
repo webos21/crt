@@ -1183,7 +1183,7 @@ and record truncation.
 *Honest limits.* The producer copies each frame (one memcpy of the buffer per commit; fine for
 software output, replaced by buffer import in the GPU tranche); the prototype transport is
 Linux-only (`SOCK_SEQPACKET`; Windows and macOS need their own transport decision, e.g. a
-named-pipe/stream framing, before Tranches 6 and 7); keys other than US-layout Latin text have no
+named-pipe/stream framing, before Tranches 6 and 7; both were then made in CRT libc, below); keys other than US-layout Latin text have no
 IME path; the consumer test runs without a window or GPU (raster target), so live crtgfx
 presentation of a web SurfaceView is not shown yet. The two host-side gates below (full-commit pin,
 per-file license scan and patch manifest) are closed (see above); 3B itself -- the `PlatformCRT` port -- has not started.
@@ -1358,6 +1358,52 @@ size-mismatch EPROTO). Gate C, the `SurfaceClient` consumer test (`crtweb_web_su
 `libcrtweb/CMakeLists.txt`. It prints `ok` (not `skipped`) and passed 8 of 8 consecutive runs: handshake, memfd buffers
 imported as a Skia image behind a `SurfaceView`, scene order, ack/release, damage and serials, resize and input
 translation over the CRT AF_UNIX/SEQPACKET layer. The WPE `crt` module stays Linux-only (WPE does not build on Windows).
+
+*Tranche 3 on macOS/arm64 (3A contracts and B3, 2026-10-12).* Replayed on the in-tree SDK. **3A:** the frozen wire
+layout (`crtweb_wire_layout_test`), the wire contract over its real transport (`crtweb_wire_transport_test`: CONFIG,
+a BUFFER_ADD carrying a memfd that the consumer maps, FRAME, TITLE, ack, release, a lying header as `EPROTO`, between
+two processes) and the `SurfaceClient` consumer (`crtweb_web_surface_test`, hermetic, CRT-built with Skia: composition
+between UI layers, acknowledgement, release on drop, latest-frame-wins, damage serial, title, input translation,
+resize) pass. The WPE `crt` display module and the native end-to-end run (`tools/build_webkit_wpe_crt.py`) are **not
+replayable**: WPE needs GLib/GIO and does not build for the CRT target on macOS; they remain the Linux reference, and
+the product port's own process model (B4) replaces them. What the replay found, fixed in CRT libc and the tests:
+
+1. *No `SOCK_SEQPACKET` on Darwin.* `socketpair(AF_UNIX, SOCK_SEQPACKET)` and the listener model both failed with
+   `EPROTONOSUPPORT`; this was the open "macOS transport decision". It is made in CRT libc, as for Windows
+   (`HISTORY.md`, `docs/porting/bionic_libc_gaps.md`): a `SOCK_STREAM` socket carrying a 4-byte length per record,
+   with `SCM_RIGHTS` sent in the same `sendmsg()` as the length so Darwin delivers the descriptors with the first byte
+   of the record. `socket()`, `socketpair()` and `accept()` mark a descriptor framed (an in-process table, copied by
+   `dup`, dropped by `close`, inherited by `fork`; **not** across `exec`), `SO_TYPE` reports `SOCK_SEQPACKET`,
+   `read`/`write`/`send`/`recv`/`sendmsg`/`recvmsg` keep record semantics, over-long records are truncated with
+   `MSG_TRUNC`, zero-length records are zero-length reads, `MSG_PEEK` is `EOPNOTSUPP`. Both ends must be CRT. The gate
+   is `unix_socket_test` Gate B, which now runs on macOS instead of skipping (file, memfd mapping, TCP socket, three
+   descriptors, `MSG_CMSG_CLOEXEC`, a small control buffer with `MSG_CTRUNC`, and a second process) and
+   `socketpair_test`.
+2. *Message flags were Linux numbers.* `MSG_DONTWAIT` (0x40) reached Darwin as `MSG_WAITALL`; `MSG_EOR`, `MSG_TRUNC`,
+   `MSG_CTRUNC` and `MSG_NOSIGNAL` differ too. They are translated in both directions for every socket call;
+   `MSG_CMSG_CLOEXEC` (no Darwin equivalent) is applied to the received descriptors, and Darwin's untruncated
+   `cmsg_len` after `MSG_CTRUNC` is clamped to what was delivered, as Linux reports it.
+3. *`crtweb_web_surface_test` read `std::string` size 0.* In-tree C++ compiles on macOS use the host SDK's libc++
+   headers while the program links the imported libc++ archive: `title_.assign()` ran in the archive and `size()` was
+   inlined from the SDK's differently laid out `std::string`. The target now takes the imported libc++ headers (the
+   same decision Windows already has for Skia code); `crtweb_surface_wire.h` is unchanged. Other in-tree macOS C++
+   tests that pass `std::string` across that boundary are at the same risk and should move to the same headers.
+
+**B3:** `tools/build_webkit_crt_port.py --run-tests` was Linux-only; it now takes the macOS persona of
+`build_webkit_jsc.py` (named CRT compilers, `CMAKE_PROJECT_INCLUDE`, `__linux__`/`__unix__`, Apple Silicon W^X
+header, a Mach-O audit). From an empty work root it composes the tree, applies patches 0001-0009 and builds WTF,
+bmalloc, JavaScriptCore (all tiers), the bundled Skia m154, PAL and WebCore into `crtweb_webcore_graph_test`, which
+reports the same numbers as Linux: element `<div/>`, text width 86.70 px, 216 dark pixels. The audit: no GLib/GIO/
+GObject symbol, and every load command is a CRT SDK library, a port library or `libSystem` (26 images). The macOS
+replay also needed: three web ports made portable (`fontconfig`: the CRT gperf ahead of Xcode's 3.0.3 on `PATH`,
+because configure's length-type probe runs bare `gperf`, and `__linux__` for its `statfs` branch; `libwpe`: `__unix__`
+for `eglplatform.h`; `crt-egl`: `libEGL.dylib`/`libGLESv2.dylib` with install names, via `crt_shared_libraries`) and
+one more carried patch, `0009-wtf-persistence-darwin-size-types`: WTF's persistence coders give only the fixed-width
+integers their own overloads, so `size_t` (unsigned long, distinct from Darwin's `uint64_t`) in WebCore's generic
+`KeyedEncoder`/`KeyedDecoder` hit an undefined `Coder<unsigned long>` (3 translation units); the patch adds
+`unsigned long`/`long` forwarding overloads under `WTF_CRT_INT64_IS_LONG_LONG`. One more finding: FindCURL found the
+mbedTLS curl's `libcurl.pc` through `PKG_CONFIG_PATH` and linked it next to the OpenSSL one (Linux merges them by
+soname; Mach-O loaded two `libcurl.4.dylib`), so the driver now puts `curl-openssl/lib/pkgconfig` first.
 
 *Not covered by the macOS replay:* the CA bundle, SIMD/asm paths (still off), Linux/aarch64 and Windows for B2, and
 promoting the web group into the automated all-ports set (it waits for Windows).

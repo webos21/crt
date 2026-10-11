@@ -772,6 +772,12 @@ the Apple-framework probe of upstream's configure is made to fail by `porting/sh
 `libc.dylib` is two libcs in one process; the wrappers drop `-lpthread`/`-lrt` on macOS. Details and the
 four findings: `docs/acceptance/crtweb_acceptance.md`, B1/B2 on macOS.
 
+The B3 ports (`fontconfig`, `libwpe`, `crt-egl`; group `web`) are also `shared-pass` on macOS/arm64 (2026-10-12):
+`fontconfig` needs `path_prepend` (the CRT gperf ahead of Xcode's, new recipe field) and `-D__linux__=1` for its
+`statfs` branch, `libwpe` and the `crt-egl` test need `-D__unix__=1` for `eglplatform.h`, and `crt-egl`'s
+`crt_shared_libraries` produce `.dylib` files with absolute install names on macOS. Details:
+`docs/acceptance/crtweb_acceptance.md`, Tranche 3 on macOS.
+
 Not verified by anything in this table: that these libraries work *inside* WebKit (B3 and later),
 SIMD paths (libjpeg-turbo built without them; OpenSSL with `no-asm`), and the OpenSSL CA bundle
 (deliberately unset).

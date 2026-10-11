@@ -17,6 +17,7 @@
 
 #include <private/crt_atomic.h>
 #include <private/crt_fd_table.h>
+#include <private/crt_seqpacket.h>
 
 #ifndef TMP_MAX
 #define TMP_MAX 308915776
@@ -1639,6 +1640,9 @@ ssize_t read(int fd, void* buf, size_t count) {
   if (macos_is_eventfd(fd)) {
     return (ssize_t)macos_eventfd_read(fd, buf, (unsigned long)count);
   }
+  if (__crt_seqpacket_fd(fd)) {
+    return __crt_seqpacket_read(fd, buf, count);
+  }
 #endif
   return (ssize_t)normalize_syscall_result(__crt_sys_read(fd, buf, (unsigned long)count));
 }
@@ -1647,6 +1651,9 @@ ssize_t write(int fd, const void* buf, size_t count) {
 #if defined(CRT_TARGET_OS_MACOS)
   if (macos_is_eventfd(fd)) {
     return (ssize_t)macos_eventfd_write(fd, buf, (unsigned long)count);
+  }
+  if (__crt_seqpacket_fd(fd)) {
+    return __crt_seqpacket_write(fd, buf, count);
   }
 #endif
   return (ssize_t)normalize_syscall_result(__crt_sys_write(fd, buf, (unsigned long)count));
@@ -2044,6 +2051,7 @@ int close(int fd) {
   }
 #if defined(CRT_TARGET_OS_MACOS)
   macos_eventfd_close(fd);
+  __crt_seqpacket_close(fd);
 #endif
   return (int)normalize_syscall_result(__crt_sys_close(fd));
 }
@@ -2420,14 +2428,30 @@ int symlink(const char* target, const char* linkpath) {
 }
 
 int dup(int oldfd) {
-  return (int)normalize_syscall_result(__crt_sys_dup(oldfd));
+  int result = (int)normalize_syscall_result(__crt_sys_dup(oldfd));
+
+#if defined(CRT_TARGET_OS_MACOS)
+  if (result >= 0) {
+    __crt_seqpacket_dup(oldfd, result);
+  }
+#endif
+  return result;
 }
 
 int dup2(int oldfd, int newfd) {
   if (newfd < 0) {
     return (int)__set_errno(EBADF);
   }
-  return (int)normalize_syscall_result(__crt_sys_dup2(oldfd, newfd));
+  {
+    int result = (int)normalize_syscall_result(__crt_sys_dup2(oldfd, newfd));
+
+#if defined(CRT_TARGET_OS_MACOS)
+    if (result >= 0) {
+      __crt_seqpacket_dup(oldfd, result);
+    }
+#endif
+    return result;
+  }
 }
 
 int pipe(int pipefd[2]) {

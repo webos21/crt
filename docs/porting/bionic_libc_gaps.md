@@ -403,6 +403,20 @@ completeness against this same sweep:
   (`libc/src/pthread.c`), matching `docs/guides/import_bionic.md`'s "Cancellation
   and robust mutexes are still deferred."
 
+## AF_UNIX SOCK_SEQPACKET and message flags on macOS (2026-10-12)
+
+Darwin has no sequenced-packet AF_UNIX sockets (`EPROTONOSUPPORT`). CRT-provided, in `libc/src/socket.c` (macOS
+block) and hooks in `libc/src/fd.c`: a `SOCK_STREAM` socket with 4-byte length-prefixed records, `SCM_RIGHTS` sent in
+the same `sendmsg()` as the length; `socket()`/`socketpair()`/`accept()` mark a descriptor framed (`dup` copies the
+mark, `close` drops it, `fork` inherits it, `exec` does not), `SO_TYPE` answers `SOCK_SEQPACKET`, `MSG_TRUNC` follows
+Linux (return value is the real length when the flag is passed), `MSG_PEEK` is `EOPNOTSUPP`, records are capped at
+64 MiB, 64 iovecs. Both peers must be CRT; one thread should read a socket at a time; a non-blocking socket waits for
+the rest of a record once it began it. Separately, `recv`/`send`/`recvmsg`/`sendmsg` flags were passed to Darwin with
+Linux numbers (`MSG_DONTWAIT` arrived as `MSG_WAITALL`); `MSG_EOR`, `MSG_TRUNC`, `MSG_CTRUNC`, `MSG_NOSIGNAL` are
+translated, `MSG_CMSG_CLOEXEC` is applied to received descriptors, and Darwin's un-clamped `cmsg_len` after
+`MSG_CTRUNC` is clamped. Tests: `unix_socket_test` (Gate B runs on macOS), `socketpair_test`,
+`crtweb_wire_transport_test`.
+
 ## IPv6 on macOS (2026-10-11)
 
 Found by turning IPv6 back on in libcurl: the macOS socket layer translated only `AF_INET` and `AF_UNIX`.

@@ -1,0 +1,42 @@
+--- a/Source/WTF/wtf/persistence/PersistentEncoder.h
++++ b/Source/WTF/wtf/persistence/PersistentEncoder.h
+@@ -66,6 +66,13 @@
+     WTF_EXPORT_PRIVATE Encoder& operator<<(uint16_t);
+     WTF_EXPORT_PRIVATE Encoder& operator<<(uint32_t);
+     WTF_EXPORT_PRIVATE Encoder& operator<<(uint64_t);
++#if defined(WTF_CRT_INT64_IS_LONG_LONG)
++    // CRT presents macOS to WebKit as a Linux-shaped platform but keeps Darwin's integer types:
++    // uint64_t is unsigned long long, so size_t (unsigned long) and ssize_t (long) are not any of
++    // the fixed-width overloads and would fall into the Coder<T> template, which has no such coder.
++    Encoder& operator<<(unsigned long value) { return *this << static_cast<uint64_t>(value); }
++    Encoder& operator<<(long value) { return *this << static_cast<int64_t>(value); }
++#endif
+     WTF_EXPORT_PRIVATE Encoder& operator<<(int16_t);
+     WTF_EXPORT_PRIVATE Encoder& operator<<(int32_t);
+     WTF_EXPORT_PRIVATE Encoder& operator<<(int64_t);
+--- a/Source/WTF/wtf/persistence/PersistentDecoder.h
++++ b/Source/WTF/wtf/persistence/PersistentDecoder.h
+@@ -54,6 +54,23 @@
+     WTF_EXPORT_PRIVATE Decoder& operator>>(std::optional<uint16_t>&);
+     WTF_EXPORT_PRIVATE Decoder& operator>>(std::optional<uint32_t>&);
+     WTF_EXPORT_PRIVATE Decoder& operator>>(std::optional<uint64_t>&);
++#if defined(WTF_CRT_INT64_IS_LONG_LONG)
++    // See Encoder: size_t/ssize_t are distinct from uint64_t/int64_t under Darwin's integer types.
++    Decoder& operator>>(std::optional<unsigned long>& result)
++    {
++        std::optional<uint64_t> value;
++        *this >> value;
++        result = value ? std::optional<unsigned long>(static_cast<unsigned long>(*value)) : std::nullopt;
++        return *this;
++    }
++    Decoder& operator>>(std::optional<long>& result)
++    {
++        std::optional<int64_t> value;
++        *this >> value;
++        result = value ? std::optional<long>(static_cast<long>(*value)) : std::nullopt;
++        return *this;
++    }
++#endif
+     WTF_EXPORT_PRIVATE Decoder& operator>>(std::optional<int16_t>&);
+     WTF_EXPORT_PRIVATE Decoder& operator>>(std::optional<int32_t>&);
+     WTF_EXPORT_PRIVATE Decoder& operator>>(std::optional<int64_t>&);

@@ -16,7 +16,10 @@ set_tests_properties(crtweb_wire_transport_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wire_transport_test: ok"
   TIMEOUT 120)
 
-if(TARGET crtui_skia AND TARGET crtgfx_skia AND (CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "windows"))
+# Linux, macOS and Windows: the transport is SOCK_SEQPACKET (native on Linux, CRT-framed on macOS and
+# on Windows), and each host builds the consumer against its own Skia tree.
+if(TARGET crtui_skia AND TARGET crtgfx_skia AND
+   (CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows"))
   add_executable(crtweb_web_surface_test
     ${CRT_STARTUP_OBJECTS}
     tests/platform-crt/web_surface_test.cc
@@ -27,6 +30,17 @@ if(TARGET crtui_skia AND TARGET crtgfx_skia AND (CRT_TARGET_OS STREQUAL "linux" 
     crt_cxx_build_flags crtui_skia crtgfx_skia crtmedia)
   target_compile_definitions(crtweb_web_surface_test PRIVATE
     CRTGFX_HAVE_VULKAN=1 SK_USE_INTERNAL_VULKAN_HEADERS)
+  if(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
+    # The host SDK's libc++ headers are what in-tree C++ compiles see by default, but this test links
+    # the imported libc++.a: with the SDK headers `std::string` is laid out differently in the
+    # inline accessors than in the archive's out-of-line members (assign() then size() read 0).
+    # Use the imported headers, as Windows does for Skia code.
+    target_compile_options(crtweb_web_surface_test PRIVATE
+      "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
+      "-isystem${CMAKE_SOURCE_DIR}/libc/include"
+      "-isystem${CMAKE_SOURCE_DIR}/include")
+    add_dependencies(crtweb_web_surface_test crt-libcxx-sysroot)
+  endif()
   crt_wire_skia_executable(crtweb_web_surface_test SKIP_MACOS_DEAD_STRIP)
   crt_link_startup_end_objects(crtweb_web_surface_test)
   add_dependencies(crtweb_web_surface_test cxx c crt1 crtui_skia crtgfx_skia)
