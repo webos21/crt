@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "name": "openssl",
+  "version": "3.5.9",
+  "group": "web",
+  "source": {
+    "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
+    "archive": "openssl-3.5.9.tar.gz",
+    "source_dir": "openssl-3.5.9",
+    "sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
+  },
+  "dependencies": [
+    "make"
+  ],
+  "build": {
+    "system": "configure",
+    "configure_script": "./Configure",
+    "configure_args": [
+      "linux-@CRT_ARCH@",
+      "--libdir=lib",
+      "--openssldir=@PORT_PREFIX@/ssl",
+      "no-docs",
+      "no-tests",
+      "no-asm",
+      "no-afalgeng",
+      "no-ktls",
+      "shared",
+      "threads"
+    ],
+    "env": {
+      "CFLAGS": "-O2 -D__ANDROID__=1"
+    },
+    "make_args": [],
+    "make_targets": [
+      "build_libs"
+    ],
+    "install_targets": [
+      "install_dev",
+      "install_runtime_libs"
+    ]
+  },
+  "tests": [
+    {
+      "name": "tls-static",
+      "type": "compile-run",
+      "source": "porting/tests/openssl_tls_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libssl.a",
+        "@PORT_PREFIX@/lib/libcrypto.a",
+        "-lpthread",
+        "-ldl"
+      ],
+      "expect_stdout": "openssl_tls_test: ok"
+    },
+    {
+      "name": "tls-shared",
+      "type": "compile-run",
+      "source": "porting/tests/openssl_tls_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libssl.so",
+        "@PORT_PREFIX@/lib/libcrypto.so"
+      ],
+      "expect_stdout": "openssl_tls_test: ok"
+    }
+  ],
+  "status": {
+    "linux": "shared-pass"
+  },
+  "notes": [
+    "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's curl backend (OpenSSLHelper, CurlSSLVerifier, CertificateInfoCurl) and WebCrypto (crypto/openssl) use the OpenSSL API; Source/cmake/OptionsWin.cmake and OptionsPlayStation.cmake find_package(OpenSSL REQUIRED).",
+    "3.5 is the current long-term-support series (3.0 and 3.5 are the LTS lines); 3.6 and 4.0 are non-LTS or remove interfaces WebKit 2.54 was written against. The tarball's SHA-256 matches the one the OpenSSL project publishes beside it.",
+    "build.configure_script ./Configure with the target linux-@CRT_ARCH@ (tools/crt-port-build.py substitutes the CRT architecture). no-asm keeps the build portable across the CRT hosts and avoids the perl-generated assembler; it is a performance item, not a correctness one.",
+    "CFLAGS -D__ANDROID__=1: OpenSSL treats `__linux && !__ANDROID__` as the glibc-specific branch (SysV shared memory in rand_unix.c, ucontext-based async, /dev/random select), none of which a Bionic-compatible libc provides (Bionic has no <sys/shm.h>); the Android branch is the one that matches the CRT surface. Scoped to this port's own compile; it is not installed in any header.",
+    "make_targets build_libs / install_targets install_dev install_runtime_libs: the libraries and headers only. The `openssl` command-line tool and its apps (speed, s_time) are not a web-stage need and use SysV shm, fd_set and getservbyname surface the CRT libc does not carry."
+  ]
+}

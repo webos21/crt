@@ -77,6 +77,7 @@ void* dlsym(void* handle, const char* symbol);
 #define CRT_DARWIN_SOL_SOCKET 0xffff
 #define CRT_DARWIN_SO_REUSEADDR 0x0004
 #define CRT_DARWIN_SO_ERROR 0x1007
+#define CRT_DARWIN_SO_TYPE 0x1008
 #define CRT_DARWIN_AI_NUMERICSERV 0x00001000
 #endif
 
@@ -106,6 +107,7 @@ long __crt_sys_recvfrom(
 long __crt_sys_sendmsg(int sockfd, const struct msghdr* msg, int flags);
 long __crt_sys_recvmsg(int sockfd, struct msghdr* msg, int flags);
 long __crt_sys_getsockname(int sockfd, void* addr, unsigned int* addrlen);
+long __crt_sys_getpeername(int sockfd, void* addr, unsigned int* addrlen);
 long __crt_sys_setsockopt(int sockfd, int level, int optname, const void* optval, unsigned int optlen);
 long __crt_sys_getsockopt(int sockfd, int level, int optname, void* optval, unsigned int* optlen);
 long __crt_sys_shutdown(int sockfd, int how);
@@ -761,7 +763,10 @@ ssize_t recvmsg(int sockfd, struct msghdr* msg, int flags) {
   }
 }
 
-int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
+/* getsockname()/getpeername(): the same shape (an address of the socket's own side or of its
+ * peer), so one body over the raw call. Darwin returns its own sockaddr layout. */
+static int socket_name_query(long (*query)(int, void*, unsigned int*), int sockfd, struct sockaddr* addr,
+                             socklen_t* addrlen) {
 #if defined(CRT_TARGET_OS_MACOS)
   union crt_darwin_sockaddr_storage darwin_addr;
   unsigned int darwin_len = sizeof(darwin_addr);
@@ -771,7 +776,7 @@ int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     errno = EINVAL;
     return -1;
   }
-  result = __crt_sys_getsockname(sockfd, &darwin_addr, &darwin_len);
+  result = query(sockfd, &darwin_addr, &darwin_len);
   if (result < 0 && result >= -4095) {
     return (int)__set_errno((int)-result);
   }
@@ -785,13 +790,21 @@ int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     errno = EINVAL;
     return -1;
   }
-  result = __crt_sys_getsockname(sockfd, addr, &len);
+  result = query(sockfd, addr, &len);
   if (result < 0 && result >= -4095) {
     return (int)__set_errno((int)-result);
   }
   *addrlen = (socklen_t)len;
   return (int)result;
 #endif
+}
+
+int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
+  return socket_name_query(__crt_sys_getsockname, sockfd, addr, addrlen);
+}
+
+int getpeername(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
+  return socket_name_query(__crt_sys_getpeername, sockfd, addr, addrlen);
 }
 
 int setsockopt(int sockfd, int level, int optname, const void* optval, socklen_t optlen) {
@@ -823,6 +836,8 @@ int getsockopt(int sockfd, int level, int optname, void* optval, socklen_t* optl
       optname = CRT_DARWIN_SO_REUSEADDR;
     } else if (optname == SO_ERROR) {
       optname = CRT_DARWIN_SO_ERROR;
+    } else if (optname == SO_TYPE) {
+      optname = CRT_DARWIN_SO_TYPE;
     }
   }
 #endif

@@ -402,3 +402,16 @@ completeness against this same sweep:
 - **`pthread_cancel`** -- declared, but a real `ENOTSUP` stub
   (`libc/src/pthread.c`), matching `docs/guides/import_bionic.md`'s "Cancellation
   and robust mutexes are still deferred."
+
+## Found by the web-stage ports (2026-10-10)
+
+OpenSSL 3.5's `BIO_ADDR`, `bio_sock2` and `bss_dgram` (Web Tranche 3B, milestone B2) needed the
+following Bionic surface, all added: `getpeername()` (Linux and macOS syscalls, Winsock), `SO_TYPE`
+and `struct linger` in `<sys/socket.h>`, `getnameinfo()` with `NI_*`, `struct servent` with
+`getservbyname()`/`getservbyport()` (a built-in table: no `/etc/services` on Windows) and
+`inet_ntoa()`. `getnameinfo()` has no reverse-DNS client: the host is always numeric, and
+`NI_NAMEREQD` fails with `EAI_NONAME`. `<sys/shm.h>` (SysV shared memory) is *not* provided, as in
+Bionic: the OpenSSL recipe compiles with `-D__ANDROID__=1` so OpenSSL takes its Android branch
+(no SysV shm, no ucontext async), which is the branch that matches a Bionic-compatible libc.
+Earlier the same day the web surface protocol had added `SOCK_SEQPACKET`, `MSG_TRUNC`, `MSG_CTRUNC`
+and `socketpair()`. Covered by the OpenSSL and curl-openssl port tests and `socketpair_test`.

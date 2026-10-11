@@ -469,6 +469,21 @@ ___crt_sys_accept:
   neg x0, x0
   ret
 
+.globl ___crt_sys_getpeername
+.p2align 2
+___crt_sys_getpeername:
+  mov x16, #31
+  svc #0x80
+  b.cs 1f
+  ret
+1:
+  stp x29, x30, [sp, #-16]!
+  mov x29, sp
+  bl ___crt_macos_to_bionic_errno
+  ldp x29, x30, [sp], #16
+  neg x0, x0
+  ret
+
 .globl ___crt_sys_getsockname
 .p2align 2
 ___crt_sys_getsockname:

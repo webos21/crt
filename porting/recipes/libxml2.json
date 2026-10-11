@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "name": "libxml2",
+  "version": "2.15.4",
+  "group": "web",
+  "source": {
+    "url": "https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.4.tar.xz",
+    "archive": "libxml2-2.15.4.tar.xz",
+    "source_dir": "libxml2-2.15.4",
+    "sha256": "98087fd181d9070724f3fbc65c7377db03038eb92bd882374daff44940138821"
+  },
+  "dependencies": [
+    "make",
+    "zlib"
+  ],
+  "build": {
+    "system": "configure",
+    "configure_args": [
+      "--without-python",
+      "--without-lzma",
+      "--without-iconv",
+      "--without-icu",
+      "--with-zlib=@PORT_PREFIX@",
+      "--without-readline",
+      "--without-history",
+      "--without-http",
+      "--without-modules",
+      "--without-docbook",
+      "--enable-static",
+      "--enable-shared"
+    ],
+    "env": {
+      "CFLAGS": "-O2"
+    },
+    "make_args": []
+  },
+  "tests": [
+    {
+      "name": "parse-static",
+      "type": "compile-run",
+      "source": "porting/tests/libxml2_parse_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include/libxml2"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libxml2.a",
+        "@PORT_PREFIX@/lib/libz.a"
+      ],
+      "expect_stdout": "libxml2_parse_test: ok"
+    },
+    {
+      "name": "parse-shared",
+      "type": "compile-run",
+      "source": "porting/tests/libxml2_parse_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include/libxml2"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libxml2.so",
+        "@PORT_PREFIX@/lib/libz.so"
+      ],
+      "expect_stdout": "libxml2_parse_test: ok"
+    }
+  ],
+  "status": {
+    "linux": "shared-pass"
+  },
+  "notes": [
+    "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's WebCore XML parser (XMLDocumentParserLibxml2) and XSLT use libxml2; FindLibXml2 requires >= 2.9.7.",
+    "iconv and ICU are off: WebKit decodes through its own TextCodec layer before handing UTF-8/UTF-16 to libxml2. HTTP, modules, Python, lzma and readline are off. Linux/x86_64 only until the macOS and Windows replays."
+  ]
+}

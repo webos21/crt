@@ -63,9 +63,16 @@ struct sockaddr_storage {
 #define SO_KEEPALIVE 9
 #define SO_BROADCAST 6
 #define SO_LINGER 13
+
+/* SO_LINGER option value (Bionic <linux/socket.h>). */
+struct linger {
+  int l_onoff;
+  int l_linger;
+};
 #define SO_RCVBUF 8
 #define SO_SNDBUF 7
 #define SO_ERROR 4
+#define SO_TYPE 3
 
 /* SO_PEERCRED/struct ucred: real Linux UAPI values (asm-generic/socket.h),
  * added 2026-08-24 for the Wayland core external build (src/wayland-os.c's
@@ -187,6 +194,7 @@ ssize_t recvfrom(
     struct sockaddr* src_addr,
     socklen_t* addrlen);
 int getsockname(int sockfd, struct sockaddr* addr, socklen_t* addrlen);
+int getpeername(int sockfd, struct sockaddr* addr, socklen_t* addrlen);
 int setsockopt(int sockfd, int level, int optname, const void* optval, socklen_t optlen);
 int getsockopt(int sockfd, int level, int optname, void* optval, socklen_t* optlen);
 int shutdown(int sockfd, int how);

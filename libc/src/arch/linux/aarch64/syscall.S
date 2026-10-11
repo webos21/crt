@@ -353,6 +353,15 @@ __crt_sys_listen:
   ret
 .size __crt_sys_listen, . - __crt_sys_listen
 
+.globl __crt_sys_getpeername
+.type __crt_sys_getpeername, %function
+.p2align 2
+__crt_sys_getpeername:
+  mov x8, #205
+  svc #0
+  ret
+.size __crt_sys_getpeername, . - __crt_sys_getpeername
+
 .globl __crt_sys_getsockname
 .type __crt_sys_getsockname, %function
 .p2align 2

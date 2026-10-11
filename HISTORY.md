@@ -11,6 +11,33 @@ substantive update.
 
 ## 2026-10-10
 
+### Web Tranche 3B milestone B2: the WebCore dependency ports
+
+Seven ports on Linux/x86_64, all run-tested, in a new `group: web` that gets `port-build-<name>`,
+`port-test-<name>`, `port-build-web` and `port-test-web` but stays out of the automated all-ports sets
+(Windows and macOS replays are open): libjpeg-turbo 3.2.0 and HarfBuzz 14.6.0 (the first `cmake` recipes),
+libwebp 1.6.0 (with demux), libxml2 2.15.4, libpsl 0.23.3 (IDNA through the ICU port), OpenSSL 3.5.9
+(LTS; libraries only) and `curl-openssl` (curl 8.21.0 with the OpenSSL backend, installed to
+`<prefix>/curl-openssl` because it shares `libcurl.so.4` with the mbedTLS curl). Tests exercise the
+parts WebKit uses: the BGRA JPEG extension, WebP demux, XPath, `psl_registrable_domain` with an IDNA
+suffix, HarfBuzz shaping through FreeType and ICU, a TLS 1.3 handshake over a BIO pair, and HTTPS from
+an in-process server with `CURLOPT_SSL_CTX_FUNCTION` called with a real `SSL_CTX`.
+`tools/check_web_dependencies.py` then runs WebKit's own `find_package()` calls (the Win and
+PlayStation ports' eleven) against the prefix: all resolve under it. Fetching and checksums: the
+libxml2 and OpenSSL archives were compared with the SHA-256 their projects publish beside them; the
+others carry the digest of the HTTPS download (no signature check done here).
+
+Found and fixed in the loop: `tools/crt-port-build.py` gained `build.system cmake` (generated cross
+toolchain file with find roots limited to prefix and sysroot; cmake/ninja run without the prefix on
+`LD_LIBRARY_PATH`, which had made the host cmake load the CRT's libcurl), `configure_script`,
+`install_subdir`, `make_targets`/`install_targets`, `@CRT_ARCH@` and per-test `library_dirs`. In CRT
+libc, from OpenSSL's socket code: `getpeername()`, `SO_TYPE`, `struct linger`, `getnameinfo()` with
+`NI_*` (numeric host only), `getservbyname()`/`getservbyport()`, `inet_ntoa()`; the macOS x86_64
+`socketpair` stub had its error sign wrong (fixed before it ran anywhere). OpenSSL is built with
+`-D__ANDROID__=1`: its `__linux && !__ANDROID__` branch is the glibc one (SysV shm, ucontext async).
+Verified: full serial `ctest`, tooling unit tests (120), the seven recipe tests, the dependency check.
+Open: macOS, Linux/aarch64, Windows for each port; SIMD (libjpeg-turbo, OpenSSL asm); a CA bundle.
+
 ### Web Tranche 3B plan and milestone B1: `-DPORT=CRT` builds JavaScriptCore from the pinned commit
 
 Plan (`docs/acceptance/crtweb_acceptance.md`, "3B plan"). Reading the pinned tree settled the shape

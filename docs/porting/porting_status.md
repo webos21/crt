@@ -733,3 +733,33 @@ the final link. Verified for real on a physical Intel UHD Graphics 630
 native Linux desktop: `crtmedia_hw_decode_test` reports
 `hw_frame_observed=yes cpu_transfer=pass fallback=no`; flush/reuse and
 15/15 hardware lifecycle pass; full `ctest` 132/132.
+
+## Web-stage ports (Web Tranche 3B, milestone B2; Linux/x86_64, 2026-10-10)
+
+The dependencies WebKit's non-GLib ports require (`Source/cmake/OptionsWin.cmake`,
+`OptionsPlayStation.cmake`). They carry `"group": "web"`: `port-build-web`/`port-test-web` build and
+test them as a set, they are not part of the automated all-ports targets, and Windows hosts do not
+get build targets for them yet. `tools/check_web_dependencies.py` runs WebKit's own `find_package()`
+calls against the prefix and fails on any host-path resolution.
+
+| Recipe | Version | Build system | Tests (Linux/x86_64) | WebKit requirement |
+| --- | --- | --- | --- | --- |
+| `libjpeg-turbo` | 3.2.0 | `cmake` (new), SIMD off | encode/decode with the BGRA extension, static + shared | JPEG >= 1.5.2; Skia's SkJpegCodec needs the turbo API |
+| `libwebp` | 1.6.0 | configure | lossless round trip + demux, static + shared | WebP with `demux` |
+| `libxml2` | 2.15.4 | configure | parse, XPath, serialise, static + shared | LibXml2 >= 2.9.7 |
+| `libpsl` | 0.23.3 | configure, runtime/builtin IDNA through the ICU port | public suffixes, registrable domain, IDNA | LibPSL >= 0.20.2 |
+| `harfbuzz` | 14.6.0 | `cmake`, with FreeType and ICU | shaping through FreeType, ICU Unicode funcs | HarfBuzz >= 1.4.2, ICU component |
+| `openssl` | 3.5.9 (LTS) | configure (`./Configure`), libraries only | SHA-256, HMAC, AES-GCM, ECDSA, a full TLS 1.3 handshake and data exchange, static + shared | OpenSSL (curl backend, WebCrypto) |
+| `curl-openssl` | 8.21.0 | configure, installs to `<prefix>/curl-openssl` | HTTPS against an in-process TLS server, backend `OpenSSL/3.5.9`, `CURLOPT_SSL_CTX_FUNCTION` called with an `SSL_CTX` | CURL >= 7.87 with the OpenSSL backend |
+
+All eleven `find_package()` calls (the seven above plus ICU, PNG, SQLite3 and ZLIB from the existing
+ports) resolve under the CRT prefix with WebKit's own Find modules. Only Linux/x86_64 is verified;
+macOS, Linux/aarch64 and Windows are open for every row. The first non-`configure` recipes came with
+a `cmake` build system in `tools/crt-port-build.py` (generated cross toolchain file, find roots
+limited to the prefix and the sysroot, host build tools run without the prefix on the loader path),
+`configure_script`, `install_subdir`, `make_targets`/`install_targets`, `@CRT_ARCH@` and per-test
+`library_dirs`.
+
+Not verified by anything in this table: that these libraries work *inside* WebKit (B3 and later),
+SIMD paths (libjpeg-turbo built without them; OpenSSL with `no-asm`), and the OpenSSL CA bundle
+(deliberately unset).

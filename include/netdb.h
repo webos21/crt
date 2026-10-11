@@ -47,6 +47,21 @@ int* __get_h_errno(void);
 #define AI_MASK \
   (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV | AI_ADDRCONFIG)
 
+#define NI_MAXHOST 1025
+#define NI_MAXSERV 32
+#define NI_NOFQDN 0x00000001
+#define NI_NUMERICHOST 0x00000002
+#define NI_NAMEREQD 0x00000004
+#define NI_NUMERICSERV 0x00000008
+#define NI_DGRAM 0x00000010
+
+struct servent {
+  char* s_name;
+  char** s_aliases;
+  int s_port; /* network byte order */
+  char* s_proto;
+};
+
 #define EAI_ADDRFAMILY 1
 #define EAI_AGAIN 2
 #define EAI_BADFLAGS 3
@@ -73,6 +88,10 @@ int getaddrinfo(
 void freeaddrinfo(struct addrinfo* res);
 const char* gai_strerror(int errcode);
 struct hostent* gethostbyname(const char* name);
+int getnameinfo(const struct sockaddr* addr, socklen_t addrlen, char* host, socklen_t hostlen, char* serv,
+                socklen_t servlen, int flags);
+struct servent* getservbyname(const char* name, const char* proto);
+struct servent* getservbyport(int port, const char* proto);
 const char* hstrerror(int err);
 
 #ifdef __cplusplus

@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "name": "harfbuzz",
+  "version": "14.6.0",
+  "group": "web",
+  "source": {
+    "url": "https://github.com/harfbuzz/harfbuzz/releases/download/14.6.0/harfbuzz-14.6.0.tar.xz",
+    "archive": "harfbuzz-14.6.0.tar.xz",
+    "source_dir": "harfbuzz-14.6.0",
+    "sha256": "d07a007327277708a2a73ae437887cdbaf282937f6d03ca5467723e9099af586"
+  },
+  "dependencies": [
+    "freetype",
+    "icu"
+  ],
+  "build": {
+    "system": "cmake",
+    "sysroot_stage": "02-cxx",
+    "cmake_args": [
+      "-DBUILD_SHARED_LIBS=ON",
+      "-DHB_HAVE_FREETYPE=ON",
+      "-DHB_HAVE_ICU=ON",
+      "-DHB_HAVE_GLIB=OFF",
+      "-DHB_HAVE_GOBJECT=OFF",
+      "-DHB_HAVE_GRAPHITE2=OFF",
+      "-DHB_HAVE_CORETEXT=OFF",
+      "-DHB_BUILD_UTILS=OFF",
+      "-DHB_BUILD_TESTS=OFF",
+      "-DHB_BUILD_SUBSET=ON",
+      "-DHB_HAVE_INTROSPECTION=OFF"
+    ],
+    "env": {
+      "CFLAGS": "-O2",
+      "CXXFLAGS": "-O2",
+      "LDFLAGS": "-Wl,--allow-shlib-undefined"
+    }
+  },
+  "tests": [
+    {
+      "name": "shape-shared",
+      "type": "compile-run",
+      "language": "c++",
+      "source": "porting/tests/harfbuzz_shape_test.cc",
+      "cflags": [
+        "-I@PORT_PREFIX@/include",
+        "-I@PORT_PREFIX@/include/freetype2",
+        "-I@PORT_PREFIX@/include/harfbuzz",
+        "-DCRT_TEST_FONT_PATH=\"@ROOT@/libcrtgfx/assets/fonts/DejaVuSansMono.ttf\""
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libharfbuzz-icu.so",
+        "@PORT_PREFIX@/lib/libharfbuzz.so",
+        "@PORT_PREFIX@/lib/libfreetype.so",
+        "@PORT_PREFIX@/lib/libicuuc.so",
+        "@PORT_PREFIX@/lib/libicudata.so",
+        "-Wl,--allow-shlib-undefined"
+      ],
+      "expect_stdout": "harfbuzz_shape_test: ok"
+    }
+  ],
+  "status": {
+    "linux": "shared-pass"
+  },
+  "notes": [
+    "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's FindHarfBuzz requires >= 1.4.2 with the ICU component (WebCore's Skia font path is HarfBuzz + FreeType; harfbuzz-icu supplies the Unicode functions).",
+    "CMake build (the Meson build is not usable: Meson is not a CRT build tool). Shared libraries only; FreeType and ICU are the CRT ports. GLib, GObject, Graphite2, CoreText and the command-line utilities are off (the web port has no GLib)."
+  ]
+}

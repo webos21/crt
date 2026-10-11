@@ -1096,7 +1096,8 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     configure_cwd_rel = os_overrides.get("configure_cwd", build.get("configure_cwd"))
     configure_cwd = work / configure_cwd_rel if configure_cwd_rel else work
     if not build.get("skip_configure", False):
-        configure = ["./configure"]
+        # configure_script: not every upstream names it ./configure (OpenSSL: ./Configure).
+        configure = [build.get("configure_script", "./configure")]
         configure.extend(build["configure_args"])
         configure.extend(build.get("target_overrides", {}).get(target_os, {}).get("configure_args", []))
         # @CRT_MINGW_TRIPLE@: e.g. libpng/libffi's --build=@CRT_MINGW_TRIPLE@
@@ -1106,6 +1107,10 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # both Windows aarch64 and x86_64 -- mingw_triple is resolved once in
         # main() via detect_target_arch()/mingw_triple_for_arch().
         configure = [arg.replace("@CRT_MINGW_TRIPLE@", mingw_triple) for arg in configure]
+        # @CRT_ARCH@: x86_64 or aarch64, for upstream target names that spell the
+        # architecture (OpenSSL's linux-x86_64 / linux-aarch64).
+        crt_arch = env.get("CRT_TARGET_ARCH") or ("aarch64" if platform.machine().lower() in ("aarch64", "arm64") else "x86_64")
+        configure = [arg.replace("@CRT_ARCH@", crt_arch) for arg in configure]
         # @ROOT@: the same gap this function's own @PORT_PREFIX@ comment
         # above already documents finding once (curl's --with-X= flags) --
         # confirmed for real again (2026-08-31, ffmpeg.json's own
@@ -1301,6 +1306,12 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
             prefix = str(short_prefix)
         else:
             prefix = str(port_prefix)
+        # install_subdir: a port that would collide with another in the shared prefix (the
+        # OpenSSL-backed libcurl beside the mbedTLS one) installs into <prefix>/<subdir>.
+        install_subdir = build.get("install_subdir")
+        if install_subdir:
+            prefix = str(Path(prefix) / install_subdir)
+            Path(prefix).mkdir(parents=True, exist_ok=True)
         configure.append(f"--prefix={prefix}")
         if use_crt_shell:
             shell = str(shell)
@@ -1458,7 +1469,10 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         arg.replace("@PORT_PREFIX@", port_prefix_text)
         for arg in build.get("target_overrides", {}).get(target_os, {}).get("build_make_args", [])
     ]
-    make_args = [make, "-j", str(jobs)] + build["make_args"] + override_make_args + build_only_make_args
+    # make_targets / install_targets: upstream trees whose default target builds more than the
+    # port needs (OpenSSL's `all` builds the command-line apps, which want SysV shm and fd_set).
+    make_args = ([make, "-j", str(jobs)] + list(build.get("make_targets", [])) + build["make_args"] +
+                 override_make_args + build_only_make_args)
     # install_args gets the same VAR=value overrides as make_args (but not
     # the base build["make_args"]/-jN, which are build-target-specific
     # flags like parallelism that don't apply to `make install`): a
@@ -1477,7 +1491,7 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
     base_install_args = [
         arg.replace("@PORT_PREFIX@", port_prefix_text) for arg in build.get("install_args", [])
     ]
-    install_args = [make, "install"] + base_install_args + override_make_args
+    install_args = [make] + list(build.get("install_targets", ["install"])) + base_install_args + override_make_args
     if target_os == "windows" and use_crt_shell:
         make_args.append("SHELL=/system/bin/mksh")
         install_args.append("SHELL=/system/bin/mksh")
@@ -1729,15 +1743,18 @@ def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, en
     run(command_value_argv(env["CC"], preset_build_dir, target_os) + [str(obj) for obj in objects] + ldflags + libs + ["-o", str(binary)], work, env, f"{port_name}: link {binary.name}")
 
 
-def port_test_env(env, port_prefix, target_os):
+def port_test_env(env, port_prefix, target_os, extra_dirs=()):
+    """extra_dirs go first: a port installed in its own subdirectory (curl-openssl) whose
+    sonames collide with another port's in <prefix>/lib must win the loader search."""
     test_env = env.copy()
     lib_dir = port_prefix / "lib"
+    extra = [Path(d) for d in extra_dirs]
     if target_os == "linux":
         name = "LD_LIBRARY_PATH"
-        search_dirs = [lib_dir]
+        search_dirs = extra + [lib_dir]
     elif target_os == "macos":
         name = "DYLD_LIBRARY_PATH"
-        search_dirs = [lib_dir]
+        search_dirs = extra + [lib_dir]
     elif target_os == "windows":
         name = "PATH"
         search_dirs = [lib_dir, port_prefix / "bin"]
@@ -1794,8 +1811,89 @@ def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix,
         compiler_argv = cxx_argv if test.get("language") == "c++" else cc_argv
         compile_cmd = compiler_argv + cflags + [str(source)] + link_args + ["-o", str(binary)]
         run(compile_cmd, test_root, env, f"{port_name}: test build {test_name}")
-        run_checked_output([str(binary)], test_root, port_test_env(env, port_prefix, target_os),
+        extra_dirs = [str(d).replace("@PORT_PREFIX@", str(port_prefix)) for d in test.get("library_dirs", [])]
+        run_checked_output([str(binary)], test_root, port_test_env(env, port_prefix, target_os, extra_dirs),
                            test.get("expect_stdout"), f"{port_name}: test run {test_name}")
+
+
+def build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, jobs=None):
+    """build.system "cmake": configure, build and install an upstream CMake project against the
+    CRT sysroot (Web Tranche 3B, milestone B2: libjpeg-turbo, HarfBuzz, libwebp, libxml2 ship
+    CMake builds, libjpeg-turbo only that).
+
+    The project is configured with a generated toolchain file that names the CRT wrappers
+    (env CC/CXX/AR/RANLIB, as make_env() resolved them) and presents a cross-compilation: the find
+    roots are the port prefix and the sysroot only, so a project cannot silently pick up a host
+    library (/usr/lib), and try_compile builds static libraries because CRT executables need the
+    wrapper's startup files. Linux and macOS only until replayed on Windows (the wrappers are shell
+    scripts there and need the --use-crt-shell route).
+
+    Recipe fields: build.cmake_args, build.target_overrides.<os>.cmake_args (@PORT_PREFIX@, @ROOT@,
+    @SYSROOT@ substituted), build.cmake_source_subdir, build.cmake_build_targets, build.cmake_install_targets."""
+    port_name = recipe["name"]
+    build = recipe["build"]
+    if target_os not in ("linux", "macos"):
+        raise SystemExit(f"{port_name}: build system 'cmake' is implemented for Linux and macOS hosts only")
+    sysroot = Path(env["CRT_SYSROOT"])
+    overrides = build.get("target_overrides", {}).get(target_os, {})
+    source_dir = work / build.get("cmake_source_subdir", ".")
+    build_dir = work / "crt-cmake-build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    system_name = "Darwin" if target_os == "macos" else "Linux"
+    machine = (env.get("CRT_TARGET_ARCH") or platform.machine()).lower()
+    processor = "aarch64" if machine in ("aarch64", "arm64") else "x86_64"
+    # cmake and ninja are host tools: the port prefix's libraries (libcurl, ...) must not be
+    # picked up by their dynamic loader through LD_LIBRARY_PATH.
+    env = {key: value for key, value in env.items()
+           if key not in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH")}
+    toolchain = work / "crt-port-toolchain.cmake"
+    toolchain.write_text(
+        "# generated by tools/crt-port-build.py (build.system cmake)\n"
+        f"set(CMAKE_SYSTEM_NAME {system_name})\n"
+        f"set(CMAKE_SYSTEM_PROCESSOR {processor})\n"
+        f'set(CMAKE_C_COMPILER "{env["CC"]}")\n'
+        f'set(CMAKE_CXX_COMPILER "{env["CXX"]}")\n'
+        f'set(CMAKE_AR "{env["AR"]}" CACHE FILEPATH "")\n'
+        f'set(CMAKE_RANLIB "{env["RANLIB"]}" CACHE FILEPATH "")\n'
+        "set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)\n"
+        'set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)\n'
+        'set(CMAKE_CXX_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)\n'
+        f'set(CMAKE_FIND_ROOT_PATH "{port_prefix};{sysroot}")\n'
+        "set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\n"
+        "set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)\n"
+        "set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)\n"
+        "set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)\n"
+        "set(CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH OFF)\n"
+        "set(CMAKE_FIND_USE_CMAKE_SYSTEM_PATH OFF)\n"
+        "set(CMAKE_FIND_USE_PACKAGE_REGISTRY OFF)\n"
+        "set(CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY OFF)\n",
+        encoding="utf-8")
+
+    def substitute(value):
+        return (str(value).replace("@PORT_PREFIX@", str(port_prefix)).replace("@ROOT@", str(root))
+                .replace("@SYSROOT@", str(sysroot)))
+
+    # make_env() narrows PATH to the sysroot's tools; the build programs are host tools.
+    cmake_exe = shutil.which("cmake") or "cmake"
+    ninja_exe = shutil.which("ninja")
+    if not ninja_exe:
+        raise SystemExit(f"{port_name}: build system 'cmake' needs ninja on the build host")
+    command = [cmake_exe, "-S", str(source_dir), "-B", str(build_dir), "-G", "Ninja",
+               f"-DCMAKE_MAKE_PROGRAM={ninja_exe}", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", f"-DCMAKE_INSTALL_PREFIX={port_prefix}",
+               "-DCMAKE_INSTALL_LIBDIR=lib", "-DCMAKE_BUILD_TYPE=Release",
+               f"-DCMAKE_PREFIX_PATH={port_prefix}", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
+    command += [substitute(arg) for arg in build.get("cmake_args", []) + overrides.get("cmake_args", [])]
+    run(command, work, env, f"{port_name}: cmake configure")
+    build_command = [cmake_exe, "--build", str(build_dir)]
+    if jobs:
+        build_command += ["-j", str(jobs)]
+    targets = build.get("cmake_build_targets")
+    if targets:
+        build_command += ["--target", *targets]
+    run(build_command, work, env, f"{port_name}: cmake build")
+    install_command = [cmake_exe, "--install", str(build_dir)]
+    run(install_command, work, env, f"{port_name}: cmake install")
 
 
 def port_sysroot_for(recipe, sysroot, preset_build_dir):
@@ -1825,7 +1923,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
 
     recipe = recipes[port]
     build = recipe["build"]
-    if build["system"] not in ("configure", "amalgamation", "android_host_tool"):
+    if build["system"] not in ("configure", "amalgamation", "android_host_tool", "cmake"):
         raise SystemExit(f"{port}: build system '{build['system']}' is not supported by crt-port-build.py yet")
 
     if build["system"] == "configure" and port != "make" and not configure_only and "make" in recipes:
@@ -1858,6 +1956,8 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
         build_amalgamation_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
     elif build["system"] == "android_host_tool":
         build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, env, target_os)
+    elif build["system"] == "cmake":
+        build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, jobs)
     if configure_only:
         # A configure probe has not installed the port. Writing the ordinary
         # completion stamp here made the next real build silently skip it.

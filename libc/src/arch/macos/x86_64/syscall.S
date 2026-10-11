@@ -423,7 +423,8 @@ ___crt_sys_socketpair:
   subq $8, %rsp
   call ___crt_macos_to_bionic_errno
   addq $8, %rsp
-  ret
+  negq %rax
+  retq
 
 .globl ___crt_sys_socket
 .p2align 4, 0x90
@@ -459,6 +460,21 @@ ___crt_sys_connect:
 .p2align 4, 0x90
 ___crt_sys_accept:
   movq $0x200001e, %rax
+  syscall
+  jc 1f
+  retq
+1:
+  movq %rax, %rdi
+  subq $8, %rsp
+  call ___crt_macos_to_bionic_errno
+  addq $8, %rsp
+  negq %rax
+  retq
+
+.globl ___crt_sys_getpeername
+.p2align 4, 0x90
+___crt_sys_getpeername:
+  movq $0x200001f, %rax
   syscall
   jc 1f
   retq

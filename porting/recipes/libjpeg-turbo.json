@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "name": "libjpeg-turbo",
+  "version": "3.2.0",
+  "group": "web",
+  "source": {
+    "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz",
+    "archive": "libjpeg-turbo-3.2.0.tar.gz",
+    "source_dir": "libjpeg-turbo-3.2.0",
+    "sha256": "6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "cmake",
+    "cmake_args": [
+      "-DENABLE_SHARED=ON",
+      "-DENABLE_STATIC=ON",
+      "-DWITH_SIMD=0",
+      "-DWITH_TURBOJPEG=0",
+      "-DWITH_JAVA=0",
+      "-DWITH_TOOLS=0",
+      "-DWITH_TESTS=0",
+      "-DWITH_FUZZ=0"
+    ],
+    "env": {
+      "CFLAGS": "-O2"
+    }
+  },
+  "tests": [
+    {
+      "name": "roundtrip-static",
+      "type": "compile-run",
+      "source": "porting/tests/libjpeg_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libjpeg.a"
+      ],
+      "expect_stdout": "libjpeg_roundtrip_test: ok"
+    },
+    {
+      "name": "roundtrip-shared",
+      "type": "compile-run",
+      "source": "porting/tests/libjpeg_roundtrip.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libjpeg.so"
+      ],
+      "expect_stdout": "libjpeg_roundtrip_test: ok"
+    }
+  ],
+  "status": {
+    "linux": "shared-pass"
+  },
+  "notes": [
+    "Added 2026-10-10 for Web Tranche 3B milestone B2: WebCore's JPEG decoder and the bundled Skia (SkJpegCodec uses jpeg_crop_scanline/jpeg_skip_scanlines) need libjpeg-turbo, not IJG libjpeg; WebKit's FindJPEG requires >= 1.5.2.",
+    "First recipe with build.system cmake (tools/crt-port-build.py build_cmake_port: generated toolchain file naming the CRT wrappers, find roots limited to the port prefix and the sysroot, Linux and macOS hosts).",
+    "WITH_SIMD=0: the SIMD code needs NASM on the build host; the portable C paths are used until a SIMD build is wanted (a performance item, not a correctness one). TurboJPEG, tools and tests are off: the WebKit consumers use the libjpeg API only."
+  ]
+}

@@ -1243,12 +1243,30 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 |---|---|---|
 | B0 | Source and licensing gates | closed above |
 | **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10**: the 1B/1C JSC acceptance passes through `--port CRT` |
-| B2 | Dependency ports (D8): HarfBuzz, libjpeg, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | each recipe configures, builds, installs and passes a link/run smoke against the CRT sysroot |
+| **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
 | B3 | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link |
 | B4 | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | the UI process launches the Web and Network processes and a message round-trips; killing a child is detected |
 | B5 | First render | `reference.html` loads and the Tranche 2 proof holds (DOM/canvas string, 640x480, >= 4 colours), delivered through the 3A frame contract to `surface_probe`; the frame is diffed against the WPE reference and the difference is reported |
 | B6 | Input | the 3A input checks (pointer click -> page report and pixel change, key code/modifiers, wheel, text, resize, stalled consumer) pass against the CRT port instead of the WPE module |
 | B7 | Close | 100x create/destroy without growth, host-ABI audit clean, patch manifest and license scan re-run, docs and `HISTORY.md` updated |
+
+*B2 result (Linux/x86_64, 2026-10-10).* Seven recipes with `"group": "web"` (`libjpeg-turbo` 3.2.0,
+`libwebp` 1.6.0, `libxml2` 2.15.4, `libpsl` 0.23.3, `harfbuzz` 14.6.0, `openssl` 3.5.9,
+`curl-openssl` 8.21.0), each with a run test (details in `docs/porting/porting_status.md`). The
+`openssl` test completes a TLS 1.3 handshake in process and the `curl-openssl` test fetches HTTPS from
+an in-process TLS server and checks the `CURLOPT_SSL_CTX_FUNCTION` hook WebKit's curl backend relies
+on. `tools/check_web_dependencies.py` runs WebKit's own Find modules (from the pinned product source)
+for all eleven requirements of the Win/PlayStation ports against the prefix with a cross toolchain
+file and pkg-config limited to the prefix: all resolve, none to a host path. What the loop found and
+fixed in CRT: `getpeername`, `SO_TYPE`, `struct linger`, `getnameinfo`/`NI_*`,
+`getservbyname`/`getservbyport`, `inet_ntoa` (`docs/porting/bionic_libc_gaps.md`); in the port tooling:
+a `cmake` build system, `configure_script`, `install_subdir`, `make_targets`/`install_targets`,
+`@CRT_ARCH@`, per-test `library_dirs`. Decisions worth keeping: libjpeg-turbo, not IJG libjpeg
+(Skia's JPEG codec uses the turbo API); OpenSSL 3.5 LTS, not 3.6 or 4.0; the OpenSSL-backed libcurl is
+a second install (`<prefix>/curl-openssl`) because both curls share the soname `libcurl.so.4`, so a
+consumer must put its directory first (tests do) and the web stage should not put `<prefix>/lib` on
+`LD_LIBRARY_PATH` ahead of it. *Open:* macOS, Linux/aarch64 and Windows for every row (the `cmake`
+system is Linux/macOS only until replayed), SIMD (`WITH_SIMD=0`, `no-asm`), the CA bundle.
 
 *Risks, named so they are watched rather than discovered.* (1) The bundled Skia m154 must build with
 CRT's clang and libc++ (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about

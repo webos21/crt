@@ -45,6 +45,7 @@ set(CRT_LIBC_SOURCES
   src/shadow.c
   src/signal.c
   src/socket.c
+  src/netdb_names.c
   src/stack_protector.c
   src/stdio.c
   src/syslog.c

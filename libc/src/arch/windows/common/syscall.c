@@ -172,11 +172,13 @@ struct crt_memory_status_ex {
 #define CRT_PUBLIC_SOL_SOCKET 1
 #define CRT_PUBLIC_SO_REUSEADDR 2
 #define CRT_PUBLIC_SO_ERROR 4
+#define CRT_PUBLIC_SO_TYPE 3
 #define CRT_PUBLIC_SHUT_RD 0
 #define CRT_PUBLIC_SHUT_WR 1
 #define CRT_WS_SOL_SOCKET 0xffff
 #define CRT_WS_SO_REUSEADDR 0x0004
 #define CRT_WS_SO_ERROR 0x1007
+#define CRT_WS_SO_TYPE 0x1008
 #define CRT_WS_FIONREAD 0x4004667fUL
 #define CRT_WS_FIONBIO 0x8004667eUL
 #define CRT_WSAEWOULDBLOCK 10035
@@ -803,6 +805,7 @@ struct winsock_api {
       struct sockaddr* from,
       int* fromlen);
   int (CRT_WINAPI* getsockname)(SOCKET s, struct sockaddr* name, int* namelen);
+  int (CRT_WINAPI* getpeername)(SOCKET s, struct sockaddr* name, int* namelen);
   int (CRT_WINAPI* setsockopt)(
       SOCKET s,
       int level,
@@ -3178,6 +3181,8 @@ static long init_winsock(void) {
       int*))GetProcAddress(module, "recvfrom");
   winsock.getsockname =
       (int (CRT_WINAPI*)(SOCKET, struct sockaddr*, int*))GetProcAddress(module, "getsockname");
+  winsock.getpeername =
+      (int (CRT_WINAPI*)(SOCKET, struct sockaddr*, int*))GetProcAddress(module, "getpeername");
   winsock.setsockopt = (int (CRT_WINAPI*)(
       SOCKET,
       int,
@@ -4676,6 +4681,9 @@ static int translate_socket_option(int level, int optname) {
   if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_ERROR) {
     return CRT_WS_SO_ERROR;
   }
+  if (level == CRT_PUBLIC_SOL_SOCKET && optname == CRT_PUBLIC_SO_TYPE) {
+    return CRT_WS_SO_TYPE;
+  }
   return optname;
 }
 
@@ -5065,6 +5073,25 @@ long __crt_sys_getsockname(int sockfd, void* addr, unsigned int* addrlen) {
     return -EBADF;
   }
   if (winsock.getsockname(socket_handle, (struct sockaddr*)addr, &len) == SOCKET_ERROR) {
+    return -map_wsa_error(winsock.WSAGetLastError());
+  }
+  if (addrlen != 0) {
+    *addrlen = (unsigned int)len;
+  }
+  return 0;
+}
+
+long __crt_sys_getpeername(int sockfd, void* addr, unsigned int* addrlen) {
+  SOCKET socket_handle = get_fd_socket(sockfd);
+  int len = addrlen != 0 ? (int)*addrlen : 0;
+
+  if (socket_handle == INVALID_SOCKET) {
+    return -EBADF;
+  }
+  if (winsock.getpeername == 0) {
+    return -ENOSYS;
+  }
+  if (winsock.getpeername(socket_handle, (struct sockaddr*)addr, &len) == SOCKET_ERROR) {
     return -map_wsa_error(winsock.WSAGetLastError());
   }
   if (addrlen != 0) {

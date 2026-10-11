@@ -1278,7 +1278,21 @@ if(Python3_Interpreter_FOUND)
     if(NOT CRT_PORT_RECIPE_AUTOMATED_ERROR STREQUAL "NOTFOUND")
       set(CRT_PORT_RECIPE_AUTOMATED_VALUE "true")
     endif()
-    if((CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "configure" OR
+    # group "web": the 06-web dependency ports (Web Tranche 3B, milestone B2). They get the
+    # same port-build/port-test targets but are not part of the automated all-ports sets
+    # (the Windows and macOS replays of these recipes are open), and are built as a set with
+    # port-build-web / port-test-web.
+    string(JSON CRT_PORT_RECIPE_GROUP ERROR_VARIABLE CRT_PORT_RECIPE_GROUP_ERROR
+      GET "${CRT_PORT_RECIPE_JSON}" group)
+    if(NOT CRT_PORT_RECIPE_GROUP_ERROR STREQUAL "NOTFOUND")
+      set(CRT_PORT_RECIPE_GROUP "")
+    endif()
+    if(CRT_PORT_RECIPE_GROUP STREQUAL "web" AND NOT CRT_TARGET_OS STREQUAL "windows" AND
+       (CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "configure" OR CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "cmake"))
+      crt_add_build_port_target(${CRT_PORT_RECIPE_NAME} ${CRT_PORT_RECIPE_BUILD_SYSTEM})
+      list(APPEND CRT_WEB_PORT_TARGETS port-build-${CRT_PORT_RECIPE_NAME})
+      list(APPEND CRT_WEB_PORT_TEST_TARGETS port-test-${CRT_PORT_RECIPE_NAME})
+    elseif((CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "configure" OR
         CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "amalgamation" OR
         CRT_PORT_RECIPE_BUILD_SYSTEM STREQUAL "android_host_tool") AND
        CRT_PORT_RECIPE_AUTOMATED_VALUE)
@@ -1299,6 +1313,10 @@ if(Python3_Interpreter_FOUND)
       crt_add_port_recipe_target(${CRT_PORT_RECIPE_NAME})
     endif()
   endforeach()
+  if(CRT_WEB_PORT_TARGETS)
+    add_custom_target(port-build-web DEPENDS ${CRT_WEB_PORT_TARGETS})
+    add_custom_target(port-test-web DEPENDS ${CRT_WEB_PORT_TEST_TARGETS})
+  endif()
 
   add_custom_target(port-build-configure
     DEPENDS ${CRT_CONFIGURE_PORT_TARGETS}

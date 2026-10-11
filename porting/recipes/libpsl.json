@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "name": "libpsl",
+  "version": "0.23.3",
+  "group": "web",
+  "source": {
+    "url": "https://github.com/rockdaboot/libpsl/releases/download/0.23.3/libpsl-0.23.3.tar.gz",
+    "archive": "libpsl-0.23.3.tar.gz",
+    "source_dir": "libpsl-0.23.3",
+    "sha256": "93941f85a1e7bd593fa94f299233cb5dfc91cd144fd9a78a6ceb75001c5b03be"
+  },
+  "dependencies": [
+    "make",
+    "icu"
+  ],
+  "build": {
+    "system": "configure",
+    "sysroot_stage": "02-cxx",
+    "configure_args": [
+      "--disable-man",
+      "--disable-gtk-doc",
+      "--disable-tests",
+      "--enable-runtime=libicu",
+      "--enable-builtin=libicu"
+    ],
+    "env": {
+      "CFLAGS": "-O2",
+      "PKG_CONFIG_LIBDIR": "@PORT_PREFIX@/lib/pkgconfig",
+      "PKG_CONFIG_PATH": "@PORT_PREFIX@/lib/pkgconfig",
+      "LDFLAGS": "-Wl,--allow-shlib-undefined"
+    },
+    "make_args": []
+  },
+  "tests": [
+    {
+      "name": "suffix-shared",
+      "type": "compile-run",
+      "source": "porting/tests/libpsl_suffix_test.c",
+      "cflags": [
+        "-I@PORT_PREFIX@/include"
+      ],
+      "link_args": [
+        "@PORT_PREFIX@/lib/libpsl.so",
+        "-Wl,--allow-shlib-undefined"
+      ],
+      "expect_stdout": "libpsl_suffix_test: ok"
+    }
+  ],
+  "status": {
+    "linux": "shared-pass"
+  },
+  "notes": [
+    "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's curl backend (PublicSuffixStoreCurl, platform/Curl.cmake links LibPSL::LibPSL) needs libpsl >= 0.20.2.",
+    "runtime and builtin IDNA use ICU (the CRT icu port, found through its pkg-config files; PKG_CONFIG_LIBDIR is limited to the port prefix so a host ICU is never picked up). The built-in list is generated from list/public_suffix_list.dat in the tarball by libpsl's own tool (python3 on the build host).",
+    "LDFLAGS=-Wl,--allow-shlib-undefined: the CRT ICU shared libraries reference the loader-provided __tls_get_addr (global-dynamic TLS in ICU and libc++abi; the accepted loader boundary documented in docs/acceptance/crtweb_acceptance.md), which the link of a configure probe cannot resolve at link time."
+  ]
+}
