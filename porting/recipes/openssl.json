@@ -47,8 +47,22 @@
         "configure_args": [
           "darwin64-@CRT_ARCH_DARWIN@-cc"
         ]
+      },
+      "windows": {
+        "configure_args": [
+          "--config=@ROOT@/porting/shims/win32/openssl-crt-windows.conf",
+          "crt-windows-@CRT_ARCH@",
+          "no-shared"
+        ],
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN64 -U__WIN32__ -UWIN32 -U__MINGW32__ -U__MINGW64__ -U__NT__ -U_MSC_VER"
+        },
+        "make_args": [
+          "PERL=@HOST_PERL@"
+        ]
       }
-    }
+    },
+    "configure_interpreter": "perl"
   },
   "tests": [
     {
@@ -64,7 +78,21 @@
         "-lpthread",
         "-ldl"
       ],
-      "expect_stdout": "openssl_tls_test: ok"
+      "expect_stdout": "openssl_tls_test: ok",
+      "target_overrides": {
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ]
+        }
+      }
     },
     {
       "name": "tls-shared",
@@ -90,6 +118,19 @@
           "env": {
             "CRT_CXX_RUNTIME_LINKAGE": "shared"
           }
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ],
+          "skip": "the Windows build is static only (no-shared): an ELF version script and soname have no PE counterpart in OpenSSL's Unix target"
         }
       }
     }

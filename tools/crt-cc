@@ -232,7 +232,10 @@ fi
 # from libSystem (100 imports), got Apple's pthread_once with Bionic's `int` once control and
 # died with SIGBUS (Web Tranche 3B B2 macOS replay). Bionic merged both libraries into libc,
 # as tools/crt-c++ already assumes for every host.
-if [ "$target_os" = macos ] && [ "$compile_only" -eq 0 ]; then
+# Windows: there is no libpthread or librt to find at all (the CRT libc carries both, and
+# `-lpthread` is a plain "unable to find library" for lld), while upstream build systems name
+# them on every Unix-shaped target.
+if { [ "$target_os" = macos ] || [ "$target_os" = windows ]; } && [ "$compile_only" -eq 0 ]; then
   mac_lib_argc=$#
   mac_lib_i=0
   while [ "$mac_lib_i" -lt "$mac_lib_argc" ]; do

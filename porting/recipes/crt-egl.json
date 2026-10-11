@@ -62,6 +62,21 @@
           "cflags": [
             "-D__unix__=1"
           ]
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-D__unix__=1"
+          ],
+          "link_args": [
+            "@PORT_PREFIX@/lib/libEGL.dll.a",
+            "@PORT_PREFIX@/lib/libGLESv2.dll.a"
+          ]
         }
       }
     }

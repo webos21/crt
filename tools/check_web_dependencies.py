@@ -41,12 +41,17 @@ def main() -> int:
     work = args.keep.resolve() if args.keep else Path(tempfile.mkdtemp(prefix="crt-web-deps-"))
     work.mkdir(parents=True, exist_ok=True)
     toolchain = work / "toolchain.cmake"
+    windows = sys.platform == "win32"
+    suffix = ".cmd" if windows else ""
+    # Windows is left as CMake detects it, like the SDK's crt-toolchain.cmake; the wrappers are
+    # the .cmd files and every path in a CMake file uses forward slashes.
+    system_line = "" if windows else f"set(CMAKE_SYSTEM_NAME {'Darwin' if sys.platform == 'darwin' else 'Linux'})\n"
     toolchain.write_text(
-        f"set(CMAKE_SYSTEM_NAME {'Darwin' if sys.platform == 'darwin' else 'Linux'})\n"
-        f'set(CMAKE_C_COMPILER "{sdk / "tools" / "crt-cc"}")\n'
-        f'set(CMAKE_CXX_COMPILER "{sdk / "tools" / "crt-c++"}")\n'
+        system_line +
+        f'set(CMAKE_C_COMPILER "{(sdk / "tools" / ("crt-cc" + suffix)).as_posix()}")\n'
+        f'set(CMAKE_CXX_COMPILER "{(sdk / "tools" / ("crt-c++" + suffix)).as_posix()}")\n'
         "set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)\n"
-        f'set(CMAKE_FIND_ROOT_PATH "{";".join(str(r) for r in roots)}")\n'
+        f'set(CMAKE_FIND_ROOT_PATH "{";".join(r.as_posix() for r in roots)}")\n'
         "set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\n"
         "set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)\n"
         "set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)\n"
@@ -57,11 +62,26 @@ def main() -> int:
     archiver = shutil.which("llvm-ar") or shutil.which("llvm-ar-21") or shutil.which("ar")
     ranlib = shutil.which("llvm-ranlib") or shutil.which("llvm-ranlib-21") or shutil.which("ranlib")
     with toolchain.open("a", encoding="utf-8") as handle:
-        handle.write(f'set(CMAKE_AR "{archiver}" CACHE FILEPATH "")\n'
-                     f'set(CMAKE_RANLIB "{ranlib}" CACHE FILEPATH "")\n')
+        handle.write(f'set(CMAKE_AR "{Path(archiver).as_posix()}" CACHE FILEPATH "")\n'
+                     f'set(CMAKE_RANLIB "{Path(ranlib).as_posix()}" CACHE FILEPATH "")\n')
     env = dict(os.environ)
-    env["CRT_SYSROOT"] = str(sdk)
-    env["CRT_TARGET_OS"] = "macos" if sys.platform == "darwin" else "linux"
+    env["CRT_SYSROOT"] = sdk.as_posix() if windows else str(sdk)
+    env["CRT_TARGET_OS"] = "windows" if windows else ("macos" if sys.platform == "darwin" else "linux")
+    if windows:
+        # What the SDK's activate script sets for a consumer (see tools/build_webkit_jsc.py).
+        env["CRT_ROOTFS"] = sdk.as_posix()
+        env["CRT_MKSH_EXE"] = f"{sdk.as_posix()}/system/bin/mksh.exe"
+        env["PATH"] = os.pathsep.join([str(sdk / "tools"), str(sdk / "system" / "bin"), str(sdk / "bin"),
+                                       env.get("PATH", "")])
+        for variable, command in (("CRT_HOST_CC", "clang"), ("CRT_HOST_CXX", "clang++")):
+            found = shutil.which(command)
+            if found and not env.get(variable):
+                env[variable] = found.replace("\\", "/")
+        sys.path.insert(0, str(ROOT / "tools"))
+        import build_webkit_jsc as jsc  # noqa: E402
+        libpath = jsc.windows_sdk_libpath(env)
+        if libpath:
+            env["CRT_WINDOWS_SDK_LIBPATH"] = libpath
     env["PKG_CONFIG_PATH"] = os.pathsep.join(str(d) for d in pkg_dirs)
     env["PKG_CONFIG_LIBDIR"] = env["PKG_CONFIG_PATH"]
     env.pop("LD_LIBRARY_PATH", None)
@@ -69,8 +89,9 @@ def main() -> int:
     if build.exists():
         shutil.rmtree(build)
     command = ["cmake", "-S", str(PROJECT), "-B", str(build), "-G", "Ninja",
-               f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", f"-DWEBKIT_SOURCE_DIR={source}",
-               f"-DCMAKE_PREFIX_PATH={prefix}", f"-DCURL_ROOT={prefix / 'curl-openssl'}", f"-DICU_ROOT={prefix}",
+               f"-DCMAKE_TOOLCHAIN_FILE={toolchain.as_posix()}", f"-DWEBKIT_SOURCE_DIR={source.as_posix()}",
+               f"-DCMAKE_PREFIX_PATH={prefix.as_posix()}", f"-DCURL_ROOT={(prefix / 'curl-openssl').as_posix()}",
+               f"-DICU_ROOT={prefix.as_posix()}",
                f"-DCMAKE_MAKE_PROGRAM={shutil.which('ninja')}"]
     completed = subprocess.run(command, env=env, text=True, capture_output=True)
     print(completed.stdout, end="")

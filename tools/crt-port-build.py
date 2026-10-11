@@ -220,6 +220,13 @@ def find_windows_host_tool(names):
     for candidate in candidates:
         if candidate.exists():
             return path_for_crt_shell(windows_short_path(candidate))
+    # Installers that do not add themselves to the PATH of an already-running process (winget's
+    # pkgconf): their default directory under Program Files.
+    for root in (program_files, program_files_x86):
+        if root:
+            for name in names:
+                for candidate in sorted(Path(root).glob(f"pkgconf*/{name}")):
+                    return path_for_crt_shell(windows_short_path(candidate))
     return None
 
 
@@ -541,6 +548,15 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
             found_rc = env.get("RC") or find_windows_host_tool(("llvm-rc.exe", "llvm-rc"))
             if found_rc:
                 env["RC"] = found_rc
+            # Same reasoning again for pkg-config: configure scripts that probe it search the
+            # restricted PATH above, which has no host tool. $PKG_CONFIG (autoconf's
+            # PKG_PROG_PKG_CONFIG honours it) names the host's pkgconf/pkg-config directly.
+            found_pkg_config = env.get("PKG_CONFIG") or find_windows_host_tool(("pkg-config.exe", "pkgconf.exe"))
+            if found_pkg_config:
+                env["PKG_CONFIG"] = found_pkg_config
+            # And Python (fontconfig's configure runs AM_PATH_PYTHON for its build helpers): the
+            # interpreter that runs this script, by its space-free short name.
+            env.setdefault("PYTHON", path_for_crt_shell(windows_short_path(sys.executable)))
             # Generalized from the libpng-era investigation (see
             # porting/recipes/libpng.json's own notes): libtool's
             # deplibs_check_method for cygwin*/mingw* hosts is
@@ -661,7 +677,7 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     # keeps working exactly as before this fix.
     env["NM"] = env.get("NM") or find_llvm_tool("llvm-nm") or shutil.which("nm") or "nm"
     if target_os == "windows" and use_crt_shell:
-        for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP", "NM", "RC"):
+        for tool_var in ("AR", "RANLIB", "STRIP", "LD", "DLLTOOL", "OBJDUMP", "NM", "RC", "PKG_CONFIG", "PYTHON"):
             if not env.get(tool_var):
                 continue
             tool_path = Path(env[tool_var])
@@ -1001,6 +1017,9 @@ def substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysro
         else str(port_prefix)
     )
     result = result.replace("@PORT_PREFIX_POSIX@", prefix_for_posix_shell)
+    # The CRT sees a Windows drive path as /c/Users/...; a program that tests for an absolute
+    # path itself (fontconfig) needs that spelling of a repository file.
+    result = result.replace("@ROOT_POSIX@", path_for_msys_shell(root) if target_os == "windows" else str(root))
     result = result.replace(
         "@PORT_PREFIX_MAKE@", prefix_for_posix_shell.replace(" ", "\\ "))
     result = result.replace(
@@ -1321,7 +1340,8 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # OpenSSL-backed libcurl beside the mbedTLS one) installs into <prefix>/<subdir>.
         install_subdir = build.get("install_subdir")
         if install_subdir:
-            prefix = str(Path(prefix) / install_subdir)
+            # as_posix(): on Windows the path reaches a POSIX shell, which eats backslashes.
+            prefix = (Path(prefix) / install_subdir).as_posix()
             Path(prefix).mkdir(parents=True, exist_ok=True)
         configure.append(f"--prefix={prefix}")
         if use_crt_shell:
@@ -1334,10 +1354,21 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
             # Remove once the Windows aarch64 zlib configure investigation is
             # resolved.
             shell_argv = [shell, "-x"] if os.environ.get("CRT_PORT_SHELL_XTRACE") else [shell]
+            interpreter = build.get("configure_interpreter")
+            if interpreter:
+                # A configure step that is a script of another language (OpenSSL's ./Configure is
+                # Perl) runs under that host interpreter; the compilers it records are still the
+                # CRT wrappers named in the environment.
+                found = shutil.which(interpreter)
+                if not found:
+                    raise SystemExit(f"{port_name}: configure needs {interpreter} on the build host")
+                shell_argv = [found]
             run(shell_argv + configure, configure_cwd, env, f"{port_name}: configure")
         elif is_native_windows_configure(target_os):
             shell = find_posix_shell(env)
-            env["CONFIG_SHELL"] = path_for_msys_shell(shell)
+            # configure re-executes itself as `exec $CONFIG_SHELL` (unquoted), so a shell under
+            # "Program Files" (Git for Windows) must be given by its space-free short name.
+            env["CONFIG_SHELL"] = path_for_msys_shell(windows_short_path(shell))
             configure = [shell] + configure
             run(configure, configure_cwd, env, f"{port_name}: configure")
         else:
@@ -1456,8 +1487,19 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         root_for_make_args = ""
     else:
         root_for_make_args = path_for_crt_shell(root) if target_os == "windows" else str(root)
+    # @HOST_PERL@: the build host's perl, for a Makefile that runs its own generators with it
+    # (OpenSSL records the configure-time /usr/bin/perl, which the CRT rootfs does not have).
+    host_perl_found = shutil.which("perl")
+    host_perl = path_for_crt_shell(windows_short_path(host_perl_found)) if host_perl_found else "perl"
+    if host_perl_found and target_os == "windows":
+        # A native (non-CRT) Windows program gets its standard handles only from a spawn in
+        # "native" mode, which the CRT PAL selects through this variable; without it the shell's
+        # `> file` redirection of the generator's output is silently lost. The assignment prefix
+        # applies to this one command (make substitutes the text before the shell parses it).
+        host_perl = f"CRT_SPAWN_NATIVE_WINDOWS=1 {host_perl}"
     override_make_args = [
         arg.replace("@PORT_PREFIX@", port_prefix_text).replace("@ROOT@", root_for_make_args)
+        .replace("@HOST_PERL@", host_perl)
         for arg in build.get("target_overrides", {}).get(target_os, {}).get("make_args", [])
     ]
     # build_make_args (new: target_overrides.<os>.build_make_args, distinct
@@ -1806,6 +1848,10 @@ def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix,
             raise SystemExit(f"{port_name}: unsupported test type {test_type!r} in {test_name}")
 
         target = test.get("target_overrides", {}).get(target_os, {})
+        if target.get("skip"):
+            # e.g. the shared-library test of a port that builds no shared library on this host
+            progress(f"{port_name}: test {test_name} skipped on {target_os}: {target['skip']}")
+            continue
         source_value = target.get("source", test["source"])
         source = Path(substitute_recipe_value(source_value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os))
         if not source.is_absolute():
@@ -1843,15 +1889,18 @@ def build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, tar
     (env CC/CXX/AR/RANLIB, as make_env() resolved them) and presents a cross-compilation: the find
     roots are the port prefix and the sysroot only, so a project cannot silently pick up a host
     library (/usr/lib), and try_compile builds static libraries because CRT executables need the
-    wrapper's startup files. Linux and macOS only until replayed on Windows (the wrappers are shell
-    scripts there and need the --use-crt-shell route).
+    wrapper's startup files. On Windows the compilers are the repository's crt-cc.cmd/crt-c++.cmd/
+    crt-ar.cmd (a CMake compiler must be one executable, so not the mksh-prefixed command the
+    configure route uses), the system presents as Linux with the _WIN32 family undefined (the persona
+    the autotools recipes select with their CFLAGS), and shared libraries are PE files named .so, as
+    zlib's already are.
 
     Recipe fields: build.cmake_args, build.target_overrides.<os>.cmake_args (@PORT_PREFIX@, @ROOT@,
     @SYSROOT@ substituted), build.cmake_source_subdir, build.cmake_build_targets, build.cmake_install_targets."""
     port_name = recipe["name"]
     build = recipe["build"]
-    if target_os not in ("linux", "macos"):
-        raise SystemExit(f"{port_name}: build system 'cmake' is implemented for Linux and macOS hosts only")
+    if target_os not in ("linux", "macos", "windows"):
+        raise SystemExit(f"{port_name}: build system 'cmake' is not implemented for {target_os}")
     sysroot = Path(env["CRT_SYSROOT"])
     overrides = build.get("target_overrides", {}).get(target_os, {})
     source_dir = work / build.get("cmake_source_subdir", ".")
@@ -1859,7 +1908,45 @@ def build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, tar
     if build_dir.exists():
         shutil.rmtree(build_dir)
     system_name = "Darwin" if target_os == "macos" else "Linux"
-    machine = (env.get("CRT_TARGET_ARCH") or platform.machine()).lower()
+    persona_flags = ""
+    if target_os == "windows":
+        # A CMake compiler is a single executable; the configure route's `mksh crt-cc` command is not
+        # one. The wrappers read the same CRT_* variables the SDK's activate script sets.
+        sysroot_text = str(sysroot).replace("\\", "/")
+        recipe_env = env
+        env = dict(os.environ)
+        # The recipe's own compile and discovery variables (apply_recipe_env) are kept; the
+        # command-valued ones (CC, AR, PATH, ...) are the configure route's mksh forms.
+        for name in ("CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR"):
+            if name in recipe_env:
+                env[name] = recipe_env[name]
+        env.update({
+            "CRT_SYSROOT": sysroot_text, "CRT_ROOTFS": sysroot_text, "CRT_TARGET_OS": "windows",
+            "CRT_MKSH_EXE": f"{sysroot_text}/system/bin/mksh.exe",
+            "CRT_HOST_CC": find_windows_host_tool(("clang.exe", "clang")),
+            "CRT_HOST_CXX": find_windows_host_tool(("clang++.exe", "clang++")),
+            "CRT_CXX_RUNTIME_LINKAGE": "shared",
+            "CRT_CXX_HOSTED": "1",
+        })
+        kernel32 = read_cmake_cache(preset_build_dir / "CMakeCache.txt").get("CRT_WINDOWS_KERNEL32_LIB")
+        if kernel32:
+            env["CRT_WINDOWS_SDK_LIBPATH"] = path_for_crt_shell(Path(kernel32).parent)
+        env["PATH"] = os.pathsep.join([str(sysroot / "tools"), str(sysroot / "system" / "bin"),
+                                       str(sysroot / "bin"), env.get("PATH", "")])
+        tools = root / "tools"
+        env["CC"] = path_for_crt_shell(tools / "crt-cc.cmd")
+        env["CXX"] = path_for_crt_shell(tools / "crt-c++.cmd")
+        env["AR"] = path_for_crt_shell(tools / "crt-ar.cmd")
+        env.setdefault("CRT_HOST_PYTHON", sys.executable)
+        env["RANLIB"] = find_windows_host_tool(("llvm-ranlib.exe", "llvm-ranlib"))
+        port_prefix = Path(path_for_crt_shell(port_prefix))
+        persona_flags = " ".join(f"-U{name}" for name in (
+            "WIN32", "WIN64", "WINNT", "_WIN32", "_WIN64", "__WIN32", "__WIN32__", "__WIN64", "__WIN64__",
+            "__WINNT", "__WINNT__", "__MINGW32__", "__MINGW64__", "__NT__", "_MSC_VER"))
+        # CMake drops -I for a directory the compiler reports as implicit (the CRT wrappers list
+        # the port prefix there) although they do not search it for headers unless asked.
+        persona_flags += f" -I{port_prefix.as_posix()}/include"
+    machine =(env.get("CRT_TARGET_ARCH") or platform.machine()).lower()
     processor = "aarch64" if machine in ("aarch64", "arm64") else "x86_64"
     # cmake and ninja are host tools: the port prefix's libraries (libcurl, ...) must not be
     # picked up by their dynamic loader through LD_LIBRARY_PATH.
@@ -1868,16 +1955,18 @@ def build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, tar
     toolchain = work / "crt-port-toolchain.cmake"
     toolchain.write_text(
         "# generated by tools/crt-port-build.py (build.system cmake)\n"
-        f"set(CMAKE_SYSTEM_NAME {system_name})\n"
-        f"set(CMAKE_SYSTEM_PROCESSOR {processor})\n"
-        f'set(CMAKE_C_COMPILER "{env["CC"]}")\n'
+        # Windows is left as CMake detects it (like the SDK's crt-toolchain.cmake): WIN32 is true, DLLs
+        # and import libraries are the native shape.
+        + (f"set(CMAKE_SYSTEM_NAME {system_name})\n" f"set(CMAKE_SYSTEM_PROCESSOR {processor})\n"
+           if target_os != "windows" else "")
+        + f'set(CMAKE_C_COMPILER "{env["CC"]}")\n'
         f'set(CMAKE_CXX_COMPILER "{env["CXX"]}")\n'
         f'set(CMAKE_AR "{env["AR"]}" CACHE FILEPATH "")\n'
         f'set(CMAKE_RANLIB "{env["RANLIB"]}" CACHE FILEPATH "")\n'
         "set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)\n"
         'set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)\n'
         'set(CMAKE_CXX_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)\n'
-        f'set(CMAKE_FIND_ROOT_PATH "{port_prefix};{sysroot}")\n'
+        f'set(CMAKE_FIND_ROOT_PATH "{Path(port_prefix).as_posix()};{Path(sysroot).as_posix()}")\n'
         "set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\n"
         "set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)\n"
         "set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)\n"
@@ -1885,7 +1974,9 @@ def build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, tar
         "set(CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH OFF)\n"
         "set(CMAKE_FIND_USE_CMAKE_SYSTEM_PATH OFF)\n"
         "set(CMAKE_FIND_USE_PACKAGE_REGISTRY OFF)\n"
-        "set(CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY OFF)\n",
+        "set(CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY OFF)\n"
+        + (f'set(CMAKE_C_FLAGS_INIT "{persona_flags}")\nset(CMAKE_CXX_FLAGS_INIT "{persona_flags}")\n'
+           if persona_flags else ""),
         encoding="utf-8")
 
     def substitute(value):
@@ -1930,7 +2021,7 @@ def port_sysroot_for(recipe, sysroot, preset_build_dir):
     return candidate
 
 
-def build_headers_port(root, work, port_prefix, recipe, env, target_os=None):
+def build_headers_port(root, work, port_prefix, recipe, env, target_os=None, preset_build_dir=None):
     """build.system "headers": install header trees from the extracted source into the prefix, for
     API definitions that ship no build system (build.headers: [{"from": dir, "to": dir-in-prefix}])."""
     for item in recipe["build"]["headers"]:
@@ -1953,9 +2044,19 @@ def build_headers_port(root, work, port_prefix, recipe, env, target_os=None):
             output_name = re.sub(r"\.so$", ".dylib", output_name)
             naming = ["-dynamiclib", "-fPIC", "-O2", str(root / item["source"]),
                       "-install_name", str(library_dir / output_name)]
+        elif target_os == "windows":
+            # A PE DLL with its import library, named the way CMake's find_library() looks for a
+            # MinGW-style library (libEGL.dll, libEGL.dll.a). No soname: lld has no such option.
+            output_name = re.sub(r"\.so$", ".dll", output_name)
+            naming = ["-shared", "-O2", str(root / item["source"]),
+                      f"-Wl,--out-implib,{library_dir / (output_name + '.a')}"]
         else:
             naming = ["-shared", "-fPIC", "-O2", str(root / item["source"]), f"-Wl,-soname,{output_name}"]
-        command = shlex.split(env["CC"]) + naming + ["-o", str(library_dir / output_name)]
+        if target_os == "windows" and preset_build_dir is not None:
+            command = command_value_argv(env["CC"], preset_build_dir, target_os)
+        else:
+            command = shlex.split(env["CC"])
+        command = command + naming + ["-o", str(library_dir / output_name)]
         run(command, work, env, f"{recipe['name']}: build {output_name}")
 
 
@@ -2006,7 +2107,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
     elif build["system"] == "cmake":
         build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, jobs)
     elif build["system"] == "headers":
-        build_headers_port(root, work, port_prefix, recipe, env, target_os)
+        build_headers_port(root, work, port_prefix, recipe, env, target_os, preset_build_dir)
     if configure_only:
         # A configure probe has not installed the port. Writing the ordinary
         # completion stamp here made the next real build silently skip it.

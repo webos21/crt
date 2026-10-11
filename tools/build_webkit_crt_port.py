@@ -40,6 +40,24 @@ def port_environment(sdk: Path, prefix: Path, gperf: Path | None, target_os: str
     env["PKG_CONFIG_LIBDIR"] = env["PKG_CONFIG_PATH"]
     if gperf is not None:
         env["PATH"] = str(gperf.parent) + os.pathsep + env.get("PATH", "")
+    if target_os == "windows":
+        # WebKit's generators are Python and Perl programs that read their input with the process's
+        # default encoding (cp949 here), not the UTF-8 the sources are in.
+        env["PYTHONUTF8"] = "1"
+        # A native Windows Perl: the bindings generator compares paths the build hands it with paths
+        # it computes, which MSYS's Perl (Git for Windows) spells /c/... against C:/...
+        for candidate in (Path("C:/Strawberry/perl/bin"),):
+            if (candidate / "perl.exe").exists():
+                env["PATH"] = str(candidate) + os.pathsep + env.get("PATH", "")
+        # The pkg-config of the build host (pkgconf, which winget installs outside the PATH of a
+        # running session), for WebKit's Find modules and the ports' .pc files.
+        for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if base:
+                for candidate in sorted(Path(base).glob("pkgconf*")):
+                    if (candidate / "pkg-config.exe").exists() or (candidate / "pkgconf.exe").exists():
+                        env["PATH"] = env.get("PATH", "") + os.pathsep + str(candidate)
+        env["PKG_CONFIG_PATH"] = os.pathsep.join(d.as_posix() for d in dirs)
+        env["PKG_CONFIG_LIBDIR"] = env["PKG_CONFIG_PATH"]
     return env
 
 
@@ -49,6 +67,19 @@ def configure_command(tree: Path, build: Path, sdk: Path, prefix: Path, arch: st
     cxx_flags = list(flags)
     link_flags = ["-Wl,--allow-shlib-undefined"] if target_os == "linux" else []
     platform_options = []
+    if target_os == "windows":
+        # As in build_webkit_jsc.configure() for Windows: the CRT wrappers come from the SDK's
+        # toolchain file; the Linux-shaped presentation (flags above) selects WebKit's portable
+        # source surface. __unix__ completes the persona for eglplatform.h (real Linux defines both).
+        flags = flags + ["-D__unix__=1"]
+        cxx_flags = list(flags)
+        link_flags = ["-Wl,--enable-auto-import"]
+        platform_options = [f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}",
+                            # A WebCore compile line (several hundred -I and -D, and the precompiled-header
+                            # one) is longer than the 8,191 characters cmd.exe passes to the .cmd compiler
+                            # wrappers: defines, includes and flags go through a response file. Some
+                            # WebCore sources rely on the precompiled header for their includes, so it stays on.
+                            "-DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON"]
     if target_os == "macos":
         # The Linux-shaped presentation of macOS to WebKit, as in build_webkit_jsc.configure():
         # the CRT compilers are named (WebKitXcodeSDK.cmake would otherwise pin Xcode's), APPLE is
@@ -87,15 +118,18 @@ ALLOWED_NEEDED_PREFIXES = ("lib", "ld-linux")
 HOST_LOADER_SONAMES = {"ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1"}
 
 
-def audit_program_macos(program: Path, sdk: Path, prefix: Path, build: Path) -> dict:
-    """Mach-O B3 audit: no GLib/GIO/GObject symbol is referenced, and every load command is a CRT
-    SDK library, a port-prefix library, this build tree or libSystem (the same `otool -L` closure
-    the JavaScriptCore audit uses)."""
-    nm = shutil.which("nm") or "nm"
+def audit_program_native(program: Path, sdk: Path, prefix: Path, build: Path, target_os: str) -> dict:
+    """Mach-O / PE B3 audit: no GLib/GIO/GObject symbol is referenced, and every load command (or
+    import) is a CRT SDK library, a port-prefix library, this build tree or the host's own system
+    library (the same closure the JavaScriptCore audit uses)."""
+    if target_os == "windows":
+        nm = shutil.which("llvm-nm") or shutil.which("nm") or "nm"
+    else:
+        nm = shutil.which("nm") or "nm"
     symbols = jsc.run([nm, "-u", str(program)], capture=True).stdout.split()
     glib = sorted({s for s in symbols if s.lstrip("_").startswith(("g_", "G_", "gdk_", "gio_", "gobject_"))
                    or "glib" in s.lower()})
-    audit = jsc.host_abi_audit(sdk, prefix, build, [program], {}, "macos")
+    audit = jsc.host_abi_audit(sdk, prefix, build, [program], {}, target_os)
     return {"glib_symbols": glib, "needed": sorted(audit.get("libraries", {}).get(program.name, [])),
             "host_objects": audit.get("violations", []), "ok": not glib and audit.get("ok", False)}
 
@@ -128,24 +162,39 @@ def audit_program(program: Path, sdk: Path, prefix: Path, env: dict) -> dict:
 def run_graph_test(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
     """Run libcrtweb/tests/webcore/crtweb_webcore_graph_test with a fontconfig file that scans only
     the bundled fonts, and audit the program."""
-    program = build / "bin" / "crtweb_webcore_graph_test"
+    program = build / "bin" / ("crtweb_webcore_graph_test" + (".exe" if target_os == "windows" else ""))
     fonts = ROOT / "libcrtgfx" / "assets" / "fonts"
+    cache = work / "fontcache"
+    if target_os == "windows":
+        # The CRT spells a drive path /c/Users/...: fontconfig only treats a leading '/' as absolute.
+        def crt_path(path: Path) -> str:
+            text = path.as_posix()
+            return f"/{text[0].lower()}{text[2:]}" if len(text) > 2 and text[1] == ":" else text
+        fonts_text, cache_text = crt_path(fonts), crt_path(cache)
+    else:
+        fonts_text, cache_text = str(fonts), str(cache)
     conf = work / "fonts.conf"
     conf.write_text(
         '<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n'
-        f'<fontconfig><dir>{fonts}</dir><cachedir>{work / "fontcache"}</cachedir></fontconfig>\n',
+        f'<fontconfig><dir>{fonts_text}</dir><cachedir>{cache_text}</cachedir></fontconfig>\n',
         encoding="utf-8")
     run_env = dict(env)
-    run_env["FONTCONFIG_FILE"] = str(conf)
+    run_env["FONTCONFIG_FILE"] = crt_path(conf) if target_os == "windows" else str(conf)
     # The curl-openssl install first: both curls share the soname libcurl.so.4 (porting_status.md).
-    variable = "DYLD_LIBRARY_PATH" if target_os == "macos" else "LD_LIBRARY_PATH"
-    run_env[variable] = os.pathsep.join(
-        [str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
+    if target_os == "windows":
+        # DLLs are found through PATH: the SDK's runtime DLLs and the ports' (ICU, ...).
+        run_env["PATH"] = os.pathsep.join(
+            [str(sdk / "bin"), str(prefix / "bin"), str(prefix / "lib"), str(build / "bin"),
+             run_env.get("PATH", "")])
+    else:
+        variable = "DYLD_LIBRARY_PATH" if target_os == "macos" else "LD_LIBRARY_PATH"
+        run_env[variable] = os.pathsep.join(
+            [str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
     completed = jsc.run([str(program)], env=run_env, check=False, capture=True)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
-    audit = (audit_program_macos(program, sdk, prefix, build) if target_os == "macos"
-             else audit_program(program, sdk, prefix, env))
+    audit = (audit_program_native(program, sdk, prefix, build, target_os)
+             if target_os in ("macos", "windows") else audit_program(program, sdk, prefix, env))
     ok = completed.returncode == 0 and "crtweb_webcore_graph_test: ok" in completed.stdout and audit["ok"]
     return {"passed": ok, "returncode": completed.returncode, "audit": audit,
             "output": completed.stdout.splitlines()}
@@ -171,8 +220,8 @@ def main() -> int:
     sdk, prefix, work = args.sdk_root.resolve(), args.deps_prefix.resolve(), args.work_root.resolve()
     work.mkdir(parents=True, exist_ok=True)
     target_os, arch = jsc.sdk_target(sdk)
-    if target_os not in ("linux", "macos"):
-        raise SystemExit("B3 is replayed on Linux and macOS; Windows is open (docs/acceptance/crtweb_acceptance.md)")
+    if target_os not in ("linux", "macos", "windows"):
+        raise SystemExit(f"B3 is not replayed on {target_os} (docs/acceptance/crtweb_acceptance.md)")
     candidate = prefix / "bin" / "gperf"
     gperf = args.gperf or (candidate if candidate.exists() else
                            Path(shutil.which("gperf")) if shutil.which("gperf") else None)

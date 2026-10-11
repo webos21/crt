@@ -34,6 +34,18 @@
         "env": {
           "LDFLAGS": "-Wl,--allow-shlib-undefined"
         }
+      },
+      "windows": {
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@"
+        ],
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER",
+          "lt_cv_deplibs_check_method": "pass_all"
+        },
+        "force_include": [
+          "porting/shims/win32/libtool_wrapper_compat.h"
+        ]
       }
     }
   },
@@ -61,6 +73,21 @@
           "env": {
             "CRT_CXX_RUNTIME_LINKAGE": "shared"
           }
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ],
+          "link_args": [
+            "@PORT_PREFIX@/lib/libpsl.dll.a",
+            "@PORT_PREFIX@/lib/libicuuc.dll.a",
+            "@PORT_PREFIX@/lib/libicudt.dll.a"
+          ]
         }
       }
     }

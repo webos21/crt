@@ -48,6 +48,18 @@
         "env": {
           "CFLAGS": "-D__linux__=1"
         }
+      },
+      "windows": {
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@"
+        ],
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN64 -U__WIN32__ -UWIN32 -U__MINGW32__ -U__MINGW64__ -U__NT__ -U_MSC_VER -D__linux__=1",
+          "lt_cv_deplibs_check_method": "pass_all"
+        },
+        "force_include": [
+          "porting/shims/win32/libtool_wrapper_compat.h"
+        ]
       }
     },
     "path_prepend": [
@@ -62,7 +74,7 @@
       "cflags": [
         "-I@PORT_PREFIX@/include",
         "-I@PORT_PREFIX@/include/freetype2",
-        "-DCRT_TEST_FONT_DIR=\"@ROOT@/libcrtgfx/assets/fonts\""
+        "-DCRT_TEST_FONT_DIR=\"@ROOT_POSIX@/libcrtgfx/assets/fonts\""
       ],
       "link_args": [],
       "expect_stdout": "fontconfig_match_test: ok",
@@ -84,6 +96,24 @@
           "env": {
             "CRT_CXX_RUNTIME_LINKAGE": "shared"
           }
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-U__NT__",
+            "-U_MSC_VER",
+            "-D__linux__=1"
+          ],
+          "link_args": [
+            "@PORT_PREFIX@/lib/libfontconfig.dll.a",
+            "@PORT_PREFIX@/lib/libfreetype.dll.a",
+            "@PORT_PREFIX@/lib/libexpat.dll.a"
+          ]
         }
       }
     }

@@ -32,7 +32,21 @@
     "env": {
       "CFLAGS": "-O2"
     },
-    "make_args": []
+    "make_args": [],
+    "target_overrides": {
+      "windows": {
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@"
+        ],
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN32_WCE -U__WIN32__ -UWIN32 -U__NT__ -U_MSC_VER",
+          "lt_cv_deplibs_check_method": "pass_all"
+        },
+        "force_include": [
+          "porting/shims/win32/libtool_wrapper_compat.h"
+        ]
+      }
+    }
   },
   "tests": [
     {
@@ -46,7 +60,19 @@
         "@PORT_PREFIX@/lib/libxml2.a",
         "@PORT_PREFIX@/lib/libz.a"
       ],
-      "expect_stdout": "libxml2_parse_test: ok"
+      "expect_stdout": "libxml2_parse_test: ok",
+      "target_overrides": {
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ]
+        }
+      }
     },
     {
       "name": "parse-shared",
@@ -72,6 +98,20 @@
           "env": {
             "CRT_CXX_RUNTIME_LINKAGE": "shared"
           }
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ],
+          "link_args": [
+            "@PORT_PREFIX@/lib/libxml2.dll.a",
+            "@PORT_PREFIX@/lib/libz.so"
+          ]
         }
       }
     }

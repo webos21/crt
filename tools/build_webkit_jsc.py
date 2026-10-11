@@ -231,6 +231,21 @@ def apply_patches(tree: Path, target_os: str, extra_targets: tuple = ()) -> list
     return applied
 
 
+def windows_sdk_libpath(env: dict) -> str | None:
+    """The directory holding kernel32.lib: an entry of LIB, else the newest installed Windows Kit."""
+    for entry in (env.get("LIB") or env.get("lib") or "").split(os.pathsep):
+        if entry and (Path(entry) / "kernel32.lib").exists():
+            return entry.replace("\\", "/")
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles")):
+        if not base:
+            continue
+        for version in sorted((Path(base) / "Windows Kits" / "10" / "Lib").glob("10.*"), reverse=True):
+            candidate = version / "um" / "x64"
+            if (candidate / "kernel32.lib").exists():
+                return str(candidate).replace("\\", "/")
+    return None
+
+
 def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
     env = dict(os.environ)
     # Shared runtime linkage: ONE libc/libc++ in the process. The shared libraries
@@ -256,6 +271,12 @@ def build_environment(sdk: Path, deps: Path, target_os: str) -> dict:
                     env[variable] = found.replace("\\", "/")
         env["PATH"] = os.pathsep.join(
             [str(sdk / "tools"), str(sdk / "system" / "bin"), str(sdk / "bin"), env.get("PATH", "")])
+        # The wrappers link the Windows system import libraries by bare name (kernel32.lib,
+        # synchronization.lib); lld finds them only through CRT_WINDOWS_SDK_LIBPATH.
+        if not env.get("CRT_WINDOWS_SDK_LIBPATH"):
+            libpath = windows_sdk_libpath(env)
+            if libpath:
+                env["CRT_WINDOWS_SDK_LIBPATH"] = libpath
     if target_os == "macos":
         # Read by patched offlineasm/asm.rb (libcrtweb/patches, 0002): no ELF .size/.type debug
         # directives although CMake is told the system is Linux.

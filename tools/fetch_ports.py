@@ -200,6 +200,25 @@ def replace_with_retry(src, dst):
             time.sleep(0.1 * (attempt + 1))
 
 
+def windows_path_limit_filter(tf, root):
+    """Members of the archive that can be created on this host. A classic Windows path is limited to
+    259 characters and neither Python nor the CRT wrappers use the extended form, so members whose
+    extracted path would be longer are skipped and counted (HarfBuzz's test/subset/data/expected has
+    names longer than that; none of them is a build input)."""
+    limit = 259 if os.name == "nt" else None
+    skipped = []
+    selected = []
+    for member in tf.getmembers():
+        if limit is not None and len(os.path.join(root, member.name)) > limit:
+            skipped.append(member.name)
+            continue
+        selected.append(member)
+    if skipped:
+        print(f"  skipped {len(skipped)} archive member(s) with paths over {limit} characters"
+              f" (e.g. {skipped[0][-60:]})", flush=True)
+    return selected
+
+
 def extract(archive_path, dest):
     if os.path.exists(dest):
         return
@@ -212,7 +231,7 @@ def extract(archive_path, dest):
             zf.extractall(tmp_dest)
     else:
         with tarfile.open(archive_path) as tf:
-            tf.extractall(tmp_dest)
+            tf.extractall(tmp_dest, members=windows_path_limit_filter(tf, tmp_dest))
         fix_windows_symlink_targets(tmp_dest)
     entries = [os.path.join(tmp_dest, entry) for entry in os.listdir(tmp_dest)]
     dirs = [entry for entry in entries if os.path.isdir(entry)]

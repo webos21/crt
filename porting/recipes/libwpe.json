@@ -37,6 +37,11 @@
         "env": {
           "CFLAGS": "-D__unix__=1"
         }
+      },
+      "windows": {
+        "env": {
+          "CFLAGS": "-D__unix__=1"
+        }
       }
     }
   },
@@ -60,6 +65,20 @@
           ]
         },
         "macos": {
+          "link_args": [
+            "@PORT_PREFIX@/lib/libwpe.a"
+          ]
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-D__unix__=1"
+          ],
           "link_args": [
             "@PORT_PREFIX@/lib/libwpe.a"
           ]

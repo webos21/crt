@@ -78,6 +78,7 @@ list(APPEND WebCore_SOURCES
     platform/graphics/egl/GLFenceEGL.cpp
     platform/graphics/egl/GLFenceGL.cpp
 
+    platform/network/crt/CurlSSLHandleCRT.cpp
     platform/network/playstation/NetworkStateNotifierPlayStation.cpp
 
     platform/playstation/MIMETypeRegistryPlayStation.cpp
@@ -93,6 +94,13 @@ list(APPEND WebCore_SOURCES
 
     rendering/playstation/RenderThemePlayStation.cpp
 )
+
+# WebKit's CMake list of the bundled Skia (Source/ThirdParty/skia/CMakeLists.txt) lacks
+# src/core/SkStrikeRef.cpp, which Skia's own gn list has and SkFont::makeStrikeRef() needs. ELF links
+# drop the unreferenced method with --gc-sections; a COFF link reports the undefined symbol.
+if (TARGET Skia)
+    target_sources(Skia PRIVATE "${THIRDPARTY_DIR}/skia/src/core/SkStrikeRef.cpp")
+endif ()
 
 list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
     rendering/playstation/RenderThemePlayStation.h

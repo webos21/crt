@@ -26,3 +26,10 @@
 # PlatformCRT: B1 reuses the JSCOnly file lists unchanged; the CRT-specific lists start with the
 # WebCore milestone. (WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS includes Platform${PORT}.cmake.)
 include(${CMAKE_CURRENT_LIST_DIR}/PlatformJSCOnly.cmake)
+
+# valgrind.h selects its inline-assembly client request for the x86_64 "Linux" the CRT presents,
+# and casts pointers to `unsigned long`, which is 32 bits in the Windows ABI the CRT keeps. There is
+# no Valgrind on Windows, so its client requests are compiled out (a documented upstream switch).
+if (CMAKE_HOST_WIN32)
+    target_compile_definitions(bmalloc PRIVATE NVALGRIND=1)
+endif ()

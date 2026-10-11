@@ -46,15 +46,40 @@
       "--without-libpsl"
     ],
     "env": {
-      "CFLAGS": "-O2",
-      "LDFLAGS": "-Wl,-rpath,@PORT_PREFIX@/lib"
+      "CFLAGS": "-O2"
     },
     "make_args": [],
     "target_overrides": {
       "macos": {
         "include_dirs": [
           "porting/shims/macos/curl-no-apple-frameworks"
+        ],
+        "env": {
+          "LDFLAGS": "-Wl,-rpath,@PORT_PREFIX@/lib"
+        }
+      },
+      "windows": {
+        "configure_args": [
+          "--build=@CRT_MINGW_TRIPLE@",
+          "ac_cv_header_sys_eventfd_h=no",
+          "ac_cv_func_eventfd=no",
+          "--disable-shared",
+          "--with-openssl"
+        ],
+        "env": {
+          "CFLAGS": "-U_WIN32 -U_WIN64 -U_WIN32_WCE -U__WIN32__ -U__WIN64__ -UWIN32 -UWIN64 -U__MINGW32__ -U__MINGW64__",
+          "CPPFLAGS": "-U_WIN32 -U_WIN64 -U_WIN32_WCE -U__WIN32__ -U__WIN64__ -UWIN32 -UWIN64 -U__MINGW32__ -U__MINGW64__",
+          "PKG_CONFIG_PATH": "@PORT_PREFIX@/lib/pkgconfig",
+          "PKG_CONFIG_LIBDIR": "@PORT_PREFIX@/lib/pkgconfig"
+        },
+        "force_include": [
+          "porting/shims/win32/libtool_wrapper_compat.h"
         ]
+      },
+      "linux": {
+        "env": {
+          "LDFLAGS": "-Wl,-rpath,@PORT_PREFIX@/lib"
+        }
       }
     }
   },
@@ -78,7 +103,24 @@
       "expect_stdout": "curl_openssl_https_test: ok",
       "library_dirs": [
         "@PORT_PREFIX@/curl-openssl/lib"
-      ]
+      ],
+      "target_overrides": {
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-U__WIN64__",
+            "-UWIN32",
+            "-UWIN64",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ]
+        }
+      }
     },
     {
       "name": "https-shared",
@@ -112,6 +154,22 @@
           "env": {
             "CRT_CXX_RUNTIME_LINKAGE": "shared"
           }
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-U__WIN64__",
+            "-UWIN32",
+            "-UWIN64",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ],
+          "skip": "the Windows build is static only (OpenSSL is built no-shared, and the test shares its SSL_CTX with libcurl)"
         }
       }
     },
@@ -147,6 +205,22 @@
           "env": {
             "CRT_CXX_RUNTIME_LINKAGE": "shared"
           }
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-U__WIN64__",
+            "-UWIN32",
+            "-UWIN64",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ],
+          "skip": "the Windows build is static only (OpenSSL is built no-shared, and the test shares its SSL_CTX with libcurl)"
         }
       }
     },
@@ -169,7 +243,24 @@
       "expect_stdout": "curl_openssl_https_ipv6_test: ok",
       "library_dirs": [
         "@PORT_PREFIX@/curl-openssl/lib"
-      ]
+      ],
+      "target_overrides": {
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN64",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-U__WIN64__",
+            "-UWIN32",
+            "-UWIN64",
+            "-U__MINGW32__",
+            "-U__MINGW64__",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ]
+        }
+      }
     }
   ],
   "status": {

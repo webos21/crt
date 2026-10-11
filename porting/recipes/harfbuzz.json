@@ -79,6 +79,23 @@
             "@PORT_PREFIX@/lib/libicuuc.dylib",
             "@PORT_PREFIX@/lib/libicudata.dylib"
           ]
+        },
+        "windows": {
+          "cflags": [
+            "-U_WIN32",
+            "-U_WIN32_WCE",
+            "-U__WIN32__",
+            "-UWIN32",
+            "-U__NT__",
+            "-U_MSC_VER"
+          ],
+          "link_args": [
+            "@PORT_PREFIX@/lib/libharfbuzz-icu.dll.a",
+            "@PORT_PREFIX@/lib/libharfbuzz.dll.a",
+            "@PORT_PREFIX@/lib/libfreetype.dll.a",
+            "@PORT_PREFIX@/lib/libicuuc.dll.a",
+            "@PORT_PREFIX@/lib/libicudt.dll.a"
+          ]
         }
       }
     }
