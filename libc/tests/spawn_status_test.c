@@ -13,6 +13,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#if defined(_WIN32) || defined(__MINGW32__)
+int main(void) {
+  printf("spawn_status_test: ok\n");
+  return 0;
+}
+#else
 extern char** environ;
 
 static int fail(const char* what) {
@@ -21,12 +27,6 @@ static int fail(const char* what) {
 }
 
 int main(int argc, char** argv) {
-#if defined(_WIN32) || defined(__MINGW32__)
-  (void)argc;
-  (void)argv;
-  printf("spawn_status_test: ok\n");
-  return 0;
-#else
   char path[4096];
   struct stat st;
   ssize_t length;
@@ -85,5 +85,5 @@ int main(int argc, char** argv) {
 
   printf("spawn_status_test: ok\n");
   return 0;
-#endif
 }
+#endif
