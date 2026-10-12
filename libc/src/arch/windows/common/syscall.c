@@ -4862,6 +4862,9 @@ static int is_linger_option(int level, int optname) {
 #define CRT_SEQ_FD_SOCKET 2U
 #define CRT_SEQ_FLAG_APPEND 1U
 #define CRT_SEQ_FLAG_SEQPACKET 2U
+/* The handle lives in the process named by record->reserved (the sender), not in the receiver: see
+ * crt_seq_export_fd(). */
+#define CRT_SEQ_FLAG_SOURCE_PROCESS 4U
 #define CRT_SIO_AF_UNIX_GETPEERPID 0x58000100UL
 #define CRT_PROCESS_DUP_HANDLE 0x0040UL
 #define CRT_DUPLICATE_CLOSE_SOURCE 0x00000001UL
@@ -4990,6 +4993,45 @@ static long crt_seq_peer_pid(int fd, DWORD* pid) {
   return -ENOTSUP;
 }
 
+/* A descriptor sent to "the peer" is duplicated into the peer's process, whose pid the socket reports. The
+ * socket's peer is this very process when it made both ends of a socketpair() and handed one of them to a
+ * child: Windows then names the creator, not the child that holds the end. The handle is then duplicated
+ * into this process and the record names it, so the receiver (any process) can take it from here. */
+static void crt_seq_mark_source(HANDLE target_process, struct crt_seq_fd_record* record) {
+  if (target_process == GetCurrentProcess()) {
+    record->flags |= CRT_SEQ_FLAG_SOURCE_PROCESS;
+    record->reserved = GetCurrentProcessId();
+  }
+}
+
+/* The handle of a received record as a handle of this process; with `release_only` it is closed instead.
+ * Returns 0 when there is none (the source process is gone). */
+static HANDLE crt_seq_claim_handle(const struct crt_seq_fd_record* record, int release_only) {
+  HANDLE handle = (HANDLE)(uintptr_t)record->handle;
+  HANDLE source;
+  HANDLE mine = 0;
+
+  if ((record->flags & CRT_SEQ_FLAG_SOURCE_PROCESS) == 0 || record->reserved == GetCurrentProcessId()) {
+    if (release_only) {
+      CloseHandle(handle);
+      return 0;
+    }
+    return handle;
+  }
+  source = OpenProcess(CRT_PROCESS_DUP_HANDLE, 0, record->reserved);
+  if (source == 0) {
+    return 0;
+  }
+  if (release_only) {
+    DuplicateHandle(source, handle, 0, 0, 0, 0, CRT_DUPLICATE_CLOSE_SOURCE);
+  } else if (!DuplicateHandle(source, handle, GetCurrentProcess(), &mine, 0, 0,
+                              DUPLICATE_SAME_ACCESS | CRT_DUPLICATE_CLOSE_SOURCE)) {
+    mine = 0;
+  }
+  CloseHandle(source);
+  return mine;
+}
+
 /* The object behind `fd`, made available to process `target` (the peer). Returns 0 and fills `record`. */
 static long crt_seq_export_fd(int fd, DWORD target_pid, HANDLE target_process, struct crt_seq_fd_record* record) {
   memset(record, 0, sizeof(*record));
@@ -5005,6 +5047,7 @@ static long crt_seq_export_fd(int fd, DWORD target_pid, HANDLE target_process, s
     record->kind = CRT_SEQ_FD_FILE;
     record->handle = (uint64_t)(uintptr_t)remote;
     record->flags = (fd_flags[fd] & O_APPEND) != 0 ? CRT_SEQ_FLAG_APPEND : 0;
+    crt_seq_mark_source(target_process, record);
     return 0;
   }
   if (fd_kind[fd] == CRT_FD_KIND_SOCKET) {
@@ -5021,6 +5064,7 @@ static long crt_seq_export_fd(int fd, DWORD target_pid, HANDLE target_process, s
       record->handle = (uint64_t)(uintptr_t)remote;
       record->info_size = 0;
       record->flags = fd_socket_seqpacket[fd] != 0 ? CRT_SEQ_FLAG_SEQPACKET : 0;
+      crt_seq_mark_source(target_process, record);
       return 0;
     }
     if (winsock.WSADuplicateSocketA((SOCKET)(uintptr_t)fd_table[fd], target_pid, record->info) != 0) {
@@ -5042,9 +5086,22 @@ static void crt_seq_unexport(HANDLE target_process, const struct crt_seq_fd_reco
 }
 
 /* Makes a CRT fd of a received record. Returns the new fd or -errno. */
-static long crt_seq_import_fd(const struct crt_seq_fd_record* record, int cloexec) {
+static long crt_seq_import_fd(const struct crt_seq_fd_record* received, int cloexec) {
+  struct crt_seq_fd_record local;
+  const struct crt_seq_fd_record* record = received;
   int fd;
 
+  if ((received->flags & CRT_SEQ_FLAG_SOURCE_PROCESS) != 0 && received->handle != 0) {
+    HANDLE claimed = crt_seq_claim_handle(received, 0);
+
+    if (claimed == 0) {
+      return -EBADF; /* the sender is gone and took the descriptor with it */
+    }
+    local = *received;
+    local.handle = (uint64_t)(uintptr_t)claimed;
+    local.flags &= ~CRT_SEQ_FLAG_SOURCE_PROCESS;
+    record = &local;
+  }
   if (record->kind == CRT_SEQ_FD_FILE) {
     fd = alloc_fd((HANDLE)(uintptr_t)record->handle);
     if (fd < 0) {
@@ -5334,8 +5391,9 @@ static long crt_seq_receive_message(int fd, const struct iovec* iov, size_t iovl
       /* No room for it in the caller's control buffer (MSG_CTRUNC): the object is not leaked. */
       struct crt_seq_fd_record copy = *record;
 
-      if (copy.kind == CRT_SEQ_FD_FILE && copy.handle != 0) {
-        CloseHandle((HANDLE)(uintptr_t)copy.handle);
+      if ((copy.kind == CRT_SEQ_FD_FILE || (copy.kind == CRT_SEQ_FD_SOCKET && copy.info_size == 0)) &&
+          copy.handle != 0) {
+        (void)crt_seq_claim_handle(&copy, 1);
       }
       ++*out_dropped;
     }

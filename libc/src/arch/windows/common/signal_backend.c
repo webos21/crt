@@ -335,6 +335,32 @@ void __crt_windows_signal_detach_current(void) {
   registry_remove(state);
 #endif
   __atomic_store_n(&state->alive, 0, __ATOMIC_RELEASE);
+  /* The handle of the thread and its sigsuspend() event were duplicated/created per thread by attach: a
+   * program that creates threads for its life (WebKit: a few per page) leaked two kernel handles for
+   * every thread that ended. Close them once no sender can be using them: a sender that passed the
+   * `alive` test above may still be inside inject_locked() (it holds `injecting`), and one that comes
+   * after finds a null handle. */
+#if defined(CRT_SIGNAL_INJECT)
+  while (__atomic_exchange_n(&state->injecting, 1, __ATOMIC_SEQ_CST) != 0) {
+    SwitchToThread();
+  }
+#endif
+  {
+    HANDLE thread_handle = state->thread_handle;
+    HANDLE wake_event = state->wake_event;
+
+    state->thread_handle = 0;
+    state->wake_event = 0;
+    if (thread_handle != 0) {
+      CloseHandle(thread_handle);
+    }
+    if (wake_event != 0) {
+      CloseHandle(wake_event);
+    }
+  }
+#if defined(CRT_SIGNAL_INJECT)
+  __atomic_store_n(&state->injecting, 0, __ATOMIC_SEQ_CST);
+#endif
 }
 
 void __crt_windows_signal_attach_initial(void) {

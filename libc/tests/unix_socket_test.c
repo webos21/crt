@@ -623,6 +623,89 @@ static void test_fd_passing_between_processes(const char* self) {
 }
 
 
+/* The receiver of test_descriptor_sent_to_inheriting_child(): takes a descriptor from `channel` and answers
+ * over it. */
+static int run_forward_child(int channel) {
+  char byte;
+  char control[CMSG_SPACE(sizeof(int))];
+  struct iovec iov;
+  struct msghdr msg;
+  struct cmsghdr* cmsg;
+  int received = -1;
+
+  iov.iov_base = &byte;
+  iov.iov_len = 1;
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
+  msg.msg_control = control;
+  msg.msg_controllen = sizeof(control);
+  if (recvmsg(channel, &msg, 0) != 1) {
+    return 40;
+  }
+  cmsg = CMSG_FIRSTHDR(&msg);
+  if (cmsg == 0 || cmsg->cmsg_type != SCM_RIGHTS) {
+    return 41;
+  }
+  memcpy(&received, CMSG_DATA(cmsg), sizeof(received));
+  return send(received, "fwd", 3, 0) == 3 ? 0 : 42;
+}
+
+/* A process that made both ends of a socketpair() and handed one to a child sends a descriptor over its own
+ * end: the child, not the sender, is the peer. (Windows reports the creator of a socketpair as the peer
+ * process of both ends, so the descriptor was once duplicated into the sender itself, leaked there and was
+ * not a descriptor in the child: WebKit's UI process forwards the Network process's sockets this way.) */
+static void test_descriptor_sent_to_inheriting_child(const char* self) {
+  int channel[2];
+  int payload[2];
+  char number[16];
+  char* const argv[] = {(char*)self, (char*)"forward", number, 0};
+  char byte = 'x';
+  char control[CMSG_SPACE(sizeof(int))];
+  struct iovec iov;
+  struct msghdr msg;
+  struct cmsghdr* cmsg;
+  pid_t pid;
+  int status = 0;
+  char answer[8];
+
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, channel) == 0, "channel pair");
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, payload) == 0, "payload pair");
+  snprintf(number, sizeof(number), "%d", channel[1]);
+  CHECK(posix_spawn(&pid, self, 0, 0, argv, environ) == 0, "start the receiving child");
+  close(channel[1]);
+  iov.iov_base = &byte;
+  iov.iov_len = 1;
+  memset(&msg, 0, sizeof(msg));
+  memset(control, 0, sizeof(control));
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
+  msg.msg_control = control;
+  msg.msg_controllen = sizeof(control);
+  cmsg = CMSG_FIRSTHDR(&msg);
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  memcpy(CMSG_DATA(cmsg), &payload[0], sizeof(int));
+  CHECK(sendmsg(channel[0], &msg, 0) == 1, "send a descriptor to the child");
+  close(payload[0]); /* the sender lets go of it at once, as WebKit does */
+  memset(answer, 0, sizeof(answer));
+  {
+    struct pollfd wait_for_answer;
+
+    wait_for_answer.fd = payload[1];
+    wait_for_answer.events = POLLIN;
+    wait_for_answer.revents = 0;
+    CHECK(poll(&wait_for_answer, 1, 20000) == 1 && recv(payload[1], answer, sizeof(answer), 0) == 3 &&
+              memcmp(answer, "fwd", 3) == 0,
+          "the child used the descriptor it was sent");
+  }
+  waitpid(pid, &status, 0);
+  CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0, "the child received a working descriptor");
+  close(channel[0]);
+  close(payload[1]);
+}
+
 /* ---- Record semantics beyond the happy path (macOS framing, native on Linux, CRT layer on Windows) ---- */
 
 #if !defined(_WIN32) && !defined(__MINGW32__)
@@ -1008,10 +1091,14 @@ int main(int argc, char** argv) {
   if (argc > 2 && strcmp(argv[1], "child") == 0) {
     return run_child(argv[2]);
   }
+  if (argc > 2 && strcmp(argv[1], "forward") == 0) {
+    return run_forward_child(atoi(argv[2]));
+  }
 #if !defined(_WIN32) && !defined(__MINGW32__)
   if (argc > 2 && strcmp(argv[1], "inherit") == 0) {
     return run_inherit_child(atoi(argv[2]));
   }
+
 #endif
   test_stream_path();
   test_stream_nonblocking_and_poll();
@@ -1021,6 +1108,7 @@ int main(int argc, char** argv) {
     test_seqpacket_path();
     test_fd_passing_in_process();
     test_fd_passing_between_processes(argv[0]);
+    test_descriptor_sent_to_inheriting_child(argv[0]);
 #if !defined(_WIN32) && !defined(__MINGW32__)
     /* Linux (native) and macOS (CRT framing); the Windows layer has its own coverage above and
      * its descriptor inheritance goes through the fd snapshot, not the environment. */
