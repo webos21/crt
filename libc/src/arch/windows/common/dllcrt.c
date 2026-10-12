@@ -39,6 +39,11 @@ void _crt_install_dwarf_unwind_safety_net(void);
 __attribute__((weak)) int _fltused = 0;
 #endif
 
+/* This DLL's __dso_handle, as crt1.c's for an executable: the identity a C++ object's registration
+ * of its destructor names (__cxa_thread_atexit's third argument). Weak, so libc++abi.a's shim wins
+ * where that archive is linked statically. libWebKit.dll was the first DLL to need it. */
+__attribute__((weak)) void* __dso_handle = &__dso_handle;
+
 int crtDllMainCRTStartup(void* module, unsigned long reason, void* reserved) {
   (void)module;
   (void)reserved;

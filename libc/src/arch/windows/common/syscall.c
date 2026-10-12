@@ -2132,6 +2132,9 @@ int __crt_fd_snapshot_import(const struct crt_fd_snapshot* snapshot) {
       }
       duplicate = (HANDLE)(uintptr_t)socket_handle;
     } else {
+      if (kind == CRT_FD_KIND_SOCKET && init_winsock() < 0) {
+        return ENOSYS; /* closing the socket later goes through the Winsock table */
+      }
       if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)entry->handle, GetCurrentProcess(),
                            &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
         return map_windows_error(GetLastError());
@@ -2271,6 +2274,24 @@ static long fd_snapshot_prepare_child_duplicates(
     }
     if (entry->kind != CRT_FD_SNAPSHOT_KIND_SOCKET) {
       continue;
+    }
+    {
+      /* A handle duplicated into the child, as for a file. WSADuplicateSocket's protocol
+       * information names the parent's socket: once the parent closes its copy (every spawner does)
+       * the child's duplicate no longer closes gracefully -- data it sent just before exiting was
+       * reset away at the peer. A Microsoft-provider socket is an IFS handle and duplicates like a
+       * file; the protocol-information path stays for providers that refuse. */
+      HANDLE child_socket = 0;
+
+      if (entry->handle != 0 && entry->handle != (uintptr_t)INVALID_HANDLE_VALUE &&
+          DuplicateHandle(GetCurrentProcess(), (HANDLE)entry->handle, child_process, &child_socket, 0, 0,
+                          DUPLICATE_SAME_ACCESS)) {
+        CloseHandle((HANDLE)entry->handle); /* the snapshot's own copy: a handle, not a closesocket() */
+        entry->handle = (uintptr_t)child_socket;
+        entry->flags &= ~CRT_FD_SNAPSHOT_FLAG_INHERITABLE;
+        entry->flags |= CRT_FD_SNAPSHOT_FLAG_REMOTE_PROCESS_HANDLE;
+        continue;
+      }
     }
     memset(entry->socket_protocol_info, 0, sizeof(entry->socket_protocol_info));
     if (winsock.WSADuplicateSocketA(
@@ -3361,6 +3382,11 @@ static int alloc_socket_fd(SOCKET socket_handle) {
   int fd;
 
   init_fd_table();
+  /* Not inheritable: a descriptor reaches a child through the fd snapshot (a handle duplicated
+   * into it) or not at all. CreateProcess(bInheritHandles=TRUE) would otherwise give every child
+   * every socket of its parent, close-on-exec ones included, and a connection's peer end held by
+   * a process that never uses it keeps the connection from ever reporting EOF. */
+  (void)SetHandleInformation((HANDLE)(uintptr_t)socket_handle, 1 /* HANDLE_FLAG_INHERIT */, 0);
   for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
     if (fd_kind[fd] == CRT_FD_KIND_NONE) {
       fd_table[fd] = (HANDLE)(uintptr_t)socket_handle;
@@ -3913,6 +3939,41 @@ long __crt_sys_open(const char* path, int flags, unsigned int mode) {
   return fd;
 }
 
+/* Whether `handle` is the only handle to its object in the whole system (NtQueryObject's
+ * HandleCount). A Windows AF_UNIX stream socket discards what its peer has not read yet when its
+ * last handle is closed without a prior shutdown(): a program that sends a reply and exits (every
+ * child of a spawner) lost it ("connection reset" at the peer). Linux delivers it, so the last
+ * close of a socket is made graceful; a handle some other process or descriptor still holds is
+ * closed plainly, since a shutdown would end the connection for its holder. */
+static int crt_socket_is_sole_handle(HANDLE handle) {
+  typedef long(CRT_WINAPI * query_object_t)(HANDLE, int, void*, unsigned long, unsigned long*);
+  static query_object_t query;
+  static int resolved;
+  unsigned long info[16];
+  unsigned long returned = 0;
+
+  if (!resolved) {
+    HANDLE ntdll = LoadLibraryA("ntdll.dll");
+
+    query = ntdll != 0 ? (query_object_t)GetProcAddress(ntdll, "NtQueryObject") : 0;
+    resolved = 1;
+  }
+  if (query == 0) {
+    return 0;
+  }
+  memset(info, 0, sizeof(info));
+  if (query(handle, 0 /* ObjectBasicInformation */, info, 56 /* its exact size */, &returned) < 0) {
+    return 0;
+  }
+  return info[2] == 1; /* Attributes, GrantedAccess, HandleCount */
+}
+
+static void crt_socket_graceful_if_last(SOCKET s) {
+  if (winsock.shutdown != 0 && crt_socket_is_sole_handle((HANDLE)(uintptr_t)s)) {
+    (void)winsock.shutdown(s, 1 /* SD_SEND */);
+  }
+}
+
 static long close_fd_slot(int fd) {
   HANDLE handle;
 
@@ -3924,6 +3985,7 @@ static long close_fd_slot(int fd) {
     fd_table[fd] = 0;
     fd_kind[fd] = CRT_FD_KIND_NONE;
     fd_flags[fd] = 0;
+    crt_socket_graceful_if_last(socket_handle);
     return winsock.closesocket(socket_handle) == SOCKET_ERROR
                ? -map_wsa_error(winsock.WSAGetLastError())
                : 0;
@@ -4946,6 +5008,21 @@ static long crt_seq_export_fd(int fd, DWORD target_pid, HANDLE target_process, s
     return 0;
   }
   if (fd_kind[fd] == CRT_FD_KIND_SOCKET) {
+    HANDLE remote = 0;
+
+    /* A duplicated handle, not WSADuplicateSocket(): the latter yields protocol information that
+     * names the *sender's* socket, which stops working when the sender closes it before the
+     * receiver has made its own (Linux keeps an in-flight descriptor alive; WebKit's Network
+     * process closes the end it hands to the UI process at once). A Winsock socket from the
+     * Microsoft providers (TCP, UDP, AF_UNIX) is an IFS handle and can be duplicated like a file. */
+    if (target_process != 0 &&
+        DuplicateHandle(GetCurrentProcess(), fd_table[fd], target_process, &remote, 0, 0, DUPLICATE_SAME_ACCESS)) {
+      record->kind = CRT_SEQ_FD_SOCKET;
+      record->handle = (uint64_t)(uintptr_t)remote;
+      record->info_size = 0;
+      record->flags = fd_socket_seqpacket[fd] != 0 ? CRT_SEQ_FLAG_SEQPACKET : 0;
+      return 0;
+    }
     if (winsock.WSADuplicateSocketA((SOCKET)(uintptr_t)fd_table[fd], target_pid, record->info) != 0) {
       return -map_wsa_error(winsock.WSAGetLastError());
     }
@@ -4958,7 +5035,8 @@ static long crt_seq_export_fd(int fd, DWORD target_pid, HANDLE target_process, s
 }
 
 static void crt_seq_unexport(HANDLE target_process, const struct crt_seq_fd_record* record) {
-  if (record->kind == CRT_SEQ_FD_FILE && record->handle != 0 && target_process != 0) {
+  if ((record->kind == CRT_SEQ_FD_FILE || (record->kind == CRT_SEQ_FD_SOCKET && record->info_size == 0)) &&
+      record->handle != 0 && target_process != 0) {
     DuplicateHandle(target_process, (HANDLE)(uintptr_t)record->handle, 0, 0, 0, 0, CRT_DUPLICATE_CLOSE_SOURCE);
   }
 }
@@ -4979,13 +5057,21 @@ static long crt_seq_import_fd(const struct crt_seq_fd_record* record, int cloexe
   } else if (record->kind == CRT_SEQ_FD_SOCKET) {
     SOCKET s;
 
-    if (record->info_size == 0 || record->info_size > CRT_FD_SOCKET_PROTOCOL_INFO_SIZE) {
-      return -EINVAL;
-    }
-    s = winsock.WSASocketA(CRT_WSA_FROM_PROTOCOL_INFO, CRT_WSA_FROM_PROTOCOL_INFO, CRT_WSA_FROM_PROTOCOL_INFO,
-                           (void*)record->info, 0, 0);
-    if (s == INVALID_SOCKET) {
-      return -map_wsa_error(winsock.WSAGetLastError());
+    if (record->info_size == 0 && record->handle != 0) {
+      if (init_winsock() < 0) {
+        CloseHandle((HANDLE)(uintptr_t)record->handle);
+        return -ENOSYS;
+      }
+      s = (SOCKET)(uintptr_t)record->handle; /* a handle duplicated into this process */
+    } else {
+      if (record->info_size == 0 || record->info_size > CRT_FD_SOCKET_PROTOCOL_INFO_SIZE) {
+        return -EINVAL;
+      }
+      s = winsock.WSASocketA(CRT_WSA_FROM_PROTOCOL_INFO, CRT_WSA_FROM_PROTOCOL_INFO, CRT_WSA_FROM_PROTOCOL_INFO,
+                             (void*)record->info, 0, 0);
+      if (s == INVALID_SOCKET) {
+        return -map_wsa_error(winsock.WSAGetLastError());
+      }
     }
     fd = alloc_socket_fd(s);
     if (fd < 0) {
@@ -6155,6 +6241,28 @@ long __crt_sys_readlink(const char* path, char* buf, unsigned long size) {
 
   if (path == 0 || buf == 0) {
     return -EINVAL;
+  }
+  if (strcmp(path, "/proc/self/exe") == 0) {
+    /* What Linux answers for the link: the running executable's absolute path, truncated to the
+     * buffer and not NUL-terminated. Spelled with forward slashes, as every path a CRT program
+     * handles (and as ProcessLauncher's sibling lookup in WebKit expects). */
+    char exe[4096];
+    DWORD exe_length = GetModuleFileNameA(0, exe, sizeof(exe));
+    DWORD index;
+
+    if (exe_length == 0 || exe_length >= sizeof(exe)) {
+      return -ENOENT;
+    }
+    for (index = 0; index < exe_length; ++index) {
+      if (exe[index] == '\\') {
+        exe[index] = '/';
+      }
+    }
+    if (exe_length > size) {
+      exe_length = (DWORD)size;
+    }
+    memcpy(buf, exe, exe_length);
+    return (long)exe_length;
   }
   host_path = translate_path_for_host(path, translated_path);
   if (host_path == 0) {
@@ -7604,11 +7712,48 @@ long __crt_sys_fchown(int fd, unsigned int owner, unsigned int group) {
   return 0;
 }
 
+/* Exit codes this PAL gives a process it terminates for a signal: 0x4B11 in the high half, the
+ * signal number in the low one. waitpid() reports such a status as "killed by <signal>". */
+#define CRT_EXIT_SIGNAL_TAG 0x4B110000UL
+
+/* kill(pid, sig) for a process other than the caller. Windows has no signals; what is honest to
+ * offer is the existence probe (sig 0) and SIGKILL, which cannot be caught on any system and so is
+ * exactly TerminateProcess(). Other signals and process groups remain ENOSYS (TODO.md, "Windows
+ * process signals"): running a handler in another process needs the injection backend. */
 long __crt_sys_kill(long pid, int sig) {
+  HANDLE process;
+  DWORD error;
+
   if (sig == 0 && pid == (long)GetCurrentProcessId()) {
     return 0;
   }
-  return -ENOSYS;
+  if (pid <= 0 || (sig != 0 && sig != 9 /* SIGKILL */)) {
+    return -ENOSYS;
+  }
+  process = OpenProcess(sig == 0 ? 0x1000UL /* PROCESS_QUERY_LIMITED_INFORMATION */
+                                 : (0x0001UL /* PROCESS_TERMINATE */ | 0x1000UL),
+                        0, (DWORD)pid);
+  if (process == 0) {
+    error = GetLastError();
+    return error == 5 /* ERROR_ACCESS_DENIED */ ? -EPERM : -ESRCH;
+  }
+  if (sig == 0) {
+    DWORD code = 0;
+    BOOL known = GetExitCodeProcess(process, &code);
+
+    CloseHandle(process);
+    /* A process that has exited but whose object is still referenced is gone for this purpose
+     * (a POSIX zombie would answer 0; nothing here depends on that difference). */
+    return known && code != 259 /* STILL_ACTIVE */ ? -ESRCH : 0;
+  }
+  if (!TerminateProcess(process, (unsigned int)(CRT_EXIT_SIGNAL_TAG | (unsigned int)sig))) {
+    long result = fail_last_error();
+
+    CloseHandle(process);
+    return result;
+  }
+  CloseHandle(process);
+  return 0;
 }
 
 /*
@@ -8366,7 +8511,8 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
     private_wait_process = 0;
     private_wait_pid = 0;
     if (status != 0) {
-      *status = ((int)exit_code & 0xff) << 8;
+      *status = (exit_code & 0xFFFF0000UL) == CRT_EXIT_SIGNAL_TAG ? (int)(exit_code & 0x7f)
+                                                                  : ((int)exit_code & 0xff) << 8;
     }
     return (long)child_pid;
   }
@@ -8428,7 +8574,8 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
   CloseHandle(process);
   crt_debug_handle_count("after_waitpid_reap_handles");
   if (status != 0) {
-    *status = ((int)exit_code & 0xff) << 8;
+    *status = (exit_code & 0xFFFF0000UL) == CRT_EXIT_SIGNAL_TAG ? (int)(exit_code & 0x7f)
+                                                                : ((int)exit_code & 0xff) << 8;
   }
   return (long)child_pid;
 }
@@ -8438,5 +8585,21 @@ void __crt_sys_thread_exit(int status) {
 }
 
 void __crt_sys_exit(int status) {
+  /* Process termination closes every handle abortively: end the connections this process alone
+   * holds gracefully first (see crt_socket_is_sole_handle()). */
+  if (winsock.shutdown != 0) {
+    int fd;
+
+    for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
+      if (fd_kind[fd] == CRT_FD_KIND_SOCKET && fd_table[fd] != 0 && fd_table[fd] != INVALID_HANDLE_VALUE) {
+        SOCKET sock = (SOCKET)(uintptr_t)fd_table[fd];
+
+        if (winsock.closesocket != 0 && crt_socket_is_sole_handle((HANDLE)(uintptr_t)sock)) {
+          (void)winsock.shutdown(sock, 1 /* SD_SEND */);
+          (void)winsock.closesocket(sock);
+        }
+      }
+    }
+  }
   ExitProcess((unsigned int)status);
 }

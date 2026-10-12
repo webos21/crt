@@ -607,6 +607,10 @@ add_crt_test(spawn_long_argv_test spawn_long_argv_test.c)
 set_tests_properties(spawn_long_argv_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "spawn_long_argv_test: ok"
   TIMEOUT 120)
+add_crt_test(spawn_kill_test spawn_kill_test.c)
+set_tests_properties(spawn_kill_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "spawn_kill_test: ok"
+  TIMEOUT 60)
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"
