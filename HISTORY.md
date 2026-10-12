@@ -11,6 +11,23 @@ substantive update.
 
 ## 2026-10-12
 
+### Web Tranche 3B milestone B4: the WebKit multi-process model on CRT
+
+`libcrtweb/port/Source/WebKit/PlatformCRT.cmake` builds `libWebKit.so`, `WebProcess` and
+`NetworkProcess` from the pinned commit (patches 0010-0013, five new CRT files). The gate,
+`libcrtweb/tests/webkit/crtweb_process_test`, is a UI process on WebKit's C API: creating a view
+launches a Web and a Network process; a loaded HTML string round-trips (`didFinishNavigation`);
+`kill -9` of the Web process is detected (`webProcessDidCrash`). 20/20 runs, 0.7 s each, no child
+left behind; the driver runs it after the B3 program (`--webkit --run-tests`). Reading the pinned tree
+showed that upstream's PlayStation WebKit list is stale (a mis-cased `WKRunloop.cpp`, a compositor
+that no longer builds, an SDK-only bundle loader, `PLATFORM(PLAYSTATION)` members), and that the
+maintained compositing stack is GLib/EGL: the Web process therefore draws through a CRT
+`DrawingAreaCRT` (a no-op in B4, CPU painting in B5). Clang needed the framework header copies to be
+symlinks (a `#pragma once` is per file). The launcher is `posix_spawn` + a SOCK_SEQPACKET pair
+(argv: process identifier, descriptor), one reaper thread per child. Open: macOS and Windows replays
+(`/proc/self/exe`, the `win` launcher), painting and input (B5, B6), 100x create/destroy and the leak
+audit (B7).
+
 ### Web Tranche 3 replayed on Linux/aarch64: B1, B2, B3 and the 3A consumer contracts are green
 
 Ubuntu 26.04 aarch64 QEMU guest (4 CPUs, 7.4 GB RAM), Clang 21.1.8, at `be9df3a`, the in-tree SDK rebuilt with
@@ -38,9 +55,10 @@ What the replay found:
 
 1. *A repository defect, not a host one.* `dbff12d` added `CurlSSLHandleCRT.cpp` and used it from
    `PlatformCRT.cmake` without declaring it in `libcrtweb/patches/manifest.json`, so
-   `test_webkit_licensing.test_the_committed_manifest_passes` failed on every host. It is declared now (`BSD-2-Clause`,
-   `origin: crt`); tooling is 120/120 and `check_webkit_patch_manifest.py --tree` passes against the composed checkout
-   (9 patches, 31 modified files, 8 CRT-owned new files).
+   `test_webkit_licensing.test_the_committed_manifest_passes` failed on every host at `be9df3a` (119 of 120 tooling
+   tests). The B4 commit on `main` (`d8c6686`) declares the same file, with its purpose updated for the CA bundle, so
+   the merged tree has one entry and the replay's identical one-line fix was dropped in favour of it; with it tooling
+   is 120/120 and `check_webkit_patch_manifest.py --tree` passed against the composed checkout.
 2. *The dependency check needs more than `port-build-web`.* WebKit's `find_package(PNG)` and `find_package(SQLite3)` are
    among its eleven, but libpng and SQLite are not in the `web` group, so a prefix built only with `port-build-web`
    fails `check_web_dependencies.py` with `Could NOT find PNG`; building `port-build-libpng` and

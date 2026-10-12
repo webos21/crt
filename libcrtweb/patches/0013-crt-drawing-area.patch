@@ -1,0 +1,21 @@
+diff -urN a/Source/WebKit/WebProcess/WebPage/DrawingArea.cpp b/Source/WebKit/WebProcess/WebPage/DrawingArea.cpp
+--- a/Source/WebKit/WebProcess/WebPage/DrawingArea.cpp	2026-10-12 09:40:11.770478237 +0900
++++ b/Source/WebKit/WebProcess/WebPage/DrawingArea.cpp	2026-10-12 09:40:11.770551455 +0900
+@@ -44,6 +44,8 @@
+ #if PLATFORM(COCOA)
+ #include "RemoteLayerTreeDrawingAreaMac.h"
+ #include "TiledCoreAnimationDrawingArea.h"
++#elif PLATFORM(CRT)
++#include "DrawingAreaCRT.h"
+ #elif USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)
+ #if PLATFORM(GTK) || PLATFORM(WPE)
+ #include "DrawingAreaCoordinatedGraphicsGLib.h"
+@@ -75,6 +77,8 @@
+     return RemoteLayerTreeDrawingAreaMac::create(webPage, parameters);
+ #elif PLATFORM(IOS_FAMILY)
+     return RemoteLayerTreeDrawingArea::create(webPage, parameters);
++#elif PLATFORM(CRT)
++    return DrawingAreaCRT::create(webPage, parameters);
+ #elif USE(GRAPHICS_LAYER_WC)
+     return DrawingAreaWC::create(webPage, parameters);
+ #elif USE(COORDINATED_GRAPHICS) || USE(TEXTURE_MAPPER)

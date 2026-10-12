@@ -290,6 +290,171 @@
       ],
       "reason": "WTF::Persistence::Encoder/Decoder give the fixed-width integers their own overloads and send every other arithmetic type to the Coder<T> template, which has no coder for it. The WebKit tree assumes size_t is uint64_t (true for Linux/Bionic LP64); under the CRT macOS persona the integer typedefs stay Darwin's (uint64_t is unsigned long long, size_t is unsigned long; see 0001), so WebCore's generic KeyedEncoder/KeyedDecoder (the PlayStation/CRT keyed coders: size_t counts) stopped at 'implicit instantiation of undefined template Coder<unsigned long>'. The patch adds unsigned long and long overloads that forward to the fixed-width ones, selected by -DWTF_CRT_INT64_IS_LONG_LONG which the harness already passes on macOS.",
       "remove_when": "WTF selects the persistence overloads by type identity (std::is_same_v<size_t, uint64_t>) or has coders for size_t on every platform, or CRT presents macOS as OS(DARWIN) without Apple SDK code."
+    },
+    {
+      "id": "0010-webkit-platform-crt-is-playstation-shaped",
+      "patch": "0010-webkit-platform-crt-is-playstation-shaped.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/Platform/IPC/Connection.h",
+          "sha256_before": "752e3a25607443330cc201d1c706b54dce41d040f7827d5fcfd32e52dc49f44f",
+          "sha256_after": "8d6aad305de30f9b5e1d8353de2526f3dbbe778e6a9e17f12e01ff1db32ca249",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp",
+          "sha256_before": "6eb6b3a0058bc01b78d1dada38f4dd13fb551475615bf2d4e5a3bfa9e60dcb0a",
+          "sha256_after": "a24b983a784995b1c272275b543422ba93e433669454d38528b6f017148a7964",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/Shared/NativeWebKeyboardEvent.h",
+          "sha256_before": "c2392155b9ef32960e19807b4d932916d2a0a00a9c6a58501b58dd7e2fa80adc",
+          "sha256_after": "943c11dd7856c36642004d37d664715fa53c9cb14ef3c526f6462396068bdcc2",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/Shared/NativeWebMouseEvent.h",
+          "sha256_before": "b53168113df0a0d733b70b3d7e523c2ce3510045dceabe681b56bfd1181384ea",
+          "sha256_after": "21e317767c6d863982ab9c4abddcd195d90f6067b98cd89de040113347cc3dfa",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/Shared/NativeWebWheelEvent.h",
+          "sha256_before": "491d242550417b93af9567a7b4a4fa317c32180cbeaa7823e3ae2b13ffcd8ee6",
+          "sha256_after": "1082fc8d73b03c28b06833c52ad3ba4032bf64531af4d845937ea9f855438100",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.cpp",
+          "sha256_before": "8bef03e09c3f5cfb36aa0d7fd82474565899224661a054042a26fe2b547b2a09",
+          "sha256_after": "d38dd0954a54fc736742dec058e308f3a3bb8abc75e6199b12faf22682beed3c",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.h",
+          "sha256_before": "70e920c39f52860cd28491252e643f86a6e1e8ce638844bdd90c4e9356138cad",
+          "sha256_after": "c67959b1f8ad8dfba131e689ede4d8bbe9a38f2b1e44f0747a7c9209d4ed1b02",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/UIProcess/Launcher/ProcessLauncher.h",
+          "sha256_before": "fb5d934773d138577438e7aa52ca447199134b243355b87917cab16f66caac03",
+          "sha256_after": "97e8aff36bf2a653c1842d849f544ec58cb9e4f5348386a80143f379d6f6b552",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/UIProcess/WebPreferences.cpp",
+          "sha256_before": "eada57733ca124b0ed1896de6ef48bddf8321f02758fd314e6a79697358e5f11",
+          "sha256_after": "b89d12b6ede26eb7093d6a586e81e07b2bad66850b907ea3e826ecd91f30fce4",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/UIProcess/WebProcessPool.h",
+          "sha256_before": "47f31b8eeaeec692c9efb141436ddfbbe0acdfde01c6f1a5146a573f8b47b603",
+          "sha256_after": "840ba42437e43b283914d89f1f14975cb1c87083b8e212610e30d674aefcbd14",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/UIProcess/WebProcessProxy.cpp",
+          "sha256_before": "e69bdd90291800f11da2ce89b116e6c3e4b1fc7e28b4bf0001b1c5b0137d00fc",
+          "sha256_after": "368717821aea1c9b0844b54276253e8fe8b61d0dfcb1324785766f184816b0db",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/UIProcess/WebsiteData/WebsiteDataStore.cpp",
+          "sha256_before": "13ea096da98e756bd92575e2da8d5d5392ddd248a1104b240ef9c4ceed09d7b3",
+          "sha256_after": "6c3c94085fe4948ebde2b3ee4997afb4d07b9cfd834e2ac0ed36c81b6dfcdae7",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/WebProcess/Inspector/WebInspectorBackendClient.cpp",
+          "sha256_before": "b49bce5f75b5634f29110c2c6d717b528066ab317ecf1db7fee2e9942fcd3285",
+          "sha256_after": "4b62a57c567667d56463000e87448be4c6cc85d132bc7b4a3f13f4f0694b5c13",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.cpp",
+          "sha256_before": "1b89e7ac69f6c7cdca7f3ff5fd3b2936202fe3d2ecfc75bf2a092dcfd6f84784",
+          "sha256_after": "0dc110406036909313820e341073556b703361a41f1bf3338f93d1160fea98e5",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.h",
+          "sha256_before": "ab980b1e4ea9e32d8c92805bc096d3f2ad6aad6be3a03c0b2f8c6b728cabc1d7",
+          "sha256_after": "32d3e74db1a6367a4a2a5ec035545a2b41bf751a4dea12439917feffdc5a51d6",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/WebProcess/WebPage/WebPage.cpp",
+          "sha256_before": "1c37140794243c74afb65bc9a091fd1fab0127c25853e845010b6c33fafb0a9a",
+          "sha256_after": "6efc563ba1b4b96d881d00f5b2bd5211120887470abb567deaabfa7165d97dad",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "Source/WebKit selects the PlayStation port's per-port members, event classes and behaviour with PLATFORM(PLAYSTATION): the Web/Network process paths in ProcessLaunchOptions and WebProcessPool, the libwpe-based NativeWeb*Event classes, the select()-based socket monitor of IPC::Connection (the generic RunLoop has no file-descriptor sources), WebsiteDataStore directories, ChromeClient accessibility notifications. PlatformCRT compiles the PlayStation port's files for the same roles (docs/acceptance/crtweb_acceptance.md, 3B plan), so it must take the same branches. Each hunk only widens PLATFORM(PLAYSTATION) to (PLATFORM(PLAYSTATION) || PLATFORM(CRT)); WTF_PLATFORM_PLAYSTATION itself is not defined (see patch 0007). DrawingAreaCoordinatedGraphics.cpp is deliberately not widened: its PlayStation-only include of LayerTreeHostPlayStation.h belongs to a compositor path upstream no longer builds.",
+      "remove_when": "Upstream adds a CRT (or a generic non-GLib) platform guard, or the guarded code moves to per-port files; rebase by re-running the same textual widening."
+    },
+    {
+      "id": "0011-wkbase-crt-platform-header",
+      "patch": "0011-wkbase-crt-platform-header.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/Shared/API/c/WKBase.h",
+          "sha256_before": "ccb3b5935b77117e9256584fe9b3dc07c4fa09650b0e6f58809f893c3ba66aae",
+          "sha256_after": "e81e5141e1e999745e6b71a862cd31596b12ddc9c47b56906a5d0465577e66ca",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/UIProcess/API/C/WKAPICast.h",
+          "sha256_before": "9718cf72fc99c17c0d5f3ca35b43bc355cd5159b706603148b1758d08257c1c4",
+          "sha256_after": "891cc71d1fc7a96fb0942bbfa4e5f09693fba4633906c33c6eade7e55e4c42e5",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "WKBase.h and WKAPICast.h include the platform-specific base and cast headers by compiler macros (BUILDING_GTK__, BUILDING_WPE__, __APPLE__, _WIN32, __SCE__). The CRT port exposes the PlayStation-shaped C API (WKView, WKRunLoop), whose WKViewRef and its casts are declared in WKBasePlayStation.h and WKAPICastPlayStation.h, so it takes those branches.",
+      "remove_when": "Upstream adds a per-port selection hook, or CRT's C API stops being PlayStation-shaped (the crtweb API of Tranche 4 hides WebKit's headers)."
+    },
+    {
+      "id": "0012-symlink-framework-headers-for-crt",
+      "patch": "0012-symlink-framework-headers-for-crt.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/cmake/WebKitMacros.cmake",
+          "sha256_before": "99042d906792832915d22d1219eb560fa388779d732b5ed64a064999d2a968f1",
+          "sha256_after": "ad882b303e6281ee949ce075a8c19196048a35a553d9ae4876fc6c2511b7d01c",
+          "license": "no-license-header",
+          "license_basis": "no header of its own; the build files around it in Source/cmake carry the Apple BSD-2-Clause notice (47 of the directory's 96 files; none carry another license), and the file belongs to the same Apple-authored CMake build system"
+        }
+      ],
+      "reason": "WEBKIT_COPY_FILES copies framework headers into <build>/<framework>/Headers except on Apple platforms, where it symlinks so that #import deduplicates a header reachable both as <WebKit/X.h> and through the source tree. Clang's #pragma once does the same only for the same file: with copies, a translation unit that gets WKPageUIClient.h from the precompiled prefix header by its source path and again as <WebKit/WKPageUIClient.h> from the build tree redefines every enumerator (26 files at B4). GCC deduplicates by content and time stamp, which is why the Linux ports do not meet it. PlatformCRT builds with clang, so it takes the symlink branch; OptionsCRT sets CRT_SYMLINK_FRAMEWORK_HEADERS only on hosts that can create symlinks.",
+      "remove_when": "Upstream symlinks (or hard-links) framework headers on every platform, or the prefix headers include the framework-style path."
+    },
+    {
+      "id": "0013-crt-drawing-area",
+      "patch": "0013-crt-drawing-area.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/WebProcess/WebPage/DrawingArea.cpp",
+          "sha256_before": "fcc1c05890ae3b91c2013950455d2bb24cf90bfd513889d09c48e64669be3417",
+          "sha256_after": "44e70de20f5991076b2ef5731e0006834401fbadc97cae9fd44fac75d72a5446",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "DrawingArea::create picks the drawing area by platform macro: Cocoa, WC, or one of two Coordinated Graphics flavours (the GLib/GL one for GTK and WPE, a PlayStation-era one for the rest). The second no longer builds against LayerTreeHost, and the first needs GLib, EGL and a GPU. PlatformCRT supplies its own (DrawingAreaCRT, libcrtweb/port) and this patch is the hook that selects it.",
+      "remove_when": "Upstream adds a platform drawing-area registration point, or PlatformCRT paints through a maintained shared drawing area."
     }
   ],
   "license_policy": {
@@ -362,7 +527,56 @@
       "source": "libcrtweb/port/Source/WebCore/platform/network/crt/CurlSSLHandleCRT.cpp",
       "origin": "crt",
       "license": "BSD-2-Clause",
-      "purpose": "CurlSSLHandle::platformInitialize(), the libcurl backend's platform hook (B3): empty, the CA bundle stays unset (the embedder's, Tranche 8); defined because a COFF link reports the reference that an ELF --gc-sections link drops"
+      "purpose": "curl TLS handle: CA bundle from the CRT trust store instead of the PlayStation certificate store"
+    },
+    {
+      "file": "Source/WebKit/PlatformCRT.cmake",
+      "source": "libcrtweb/port/Source/WebKit/PlatformCRT.cmake",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "WebKit platform file list (B4), modelled on PlatformPlayStation.cmake"
+    },
+    {
+      "file": "Source/WebKit/UIProcess/Launcher/crt/ProcessLauncherCRT.cpp",
+      "source": "libcrtweb/port/Source/WebKit/UIProcess/Launcher/crt/ProcessLauncherCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "process launcher (B4): posix_spawn of the Web and Network process executables over a SOCK_SEQPACKET pair"
+    },
+    {
+      "file": "Source/WebKit/WebProcess/InjectedBundle/crt/InjectedBundleCRT.cpp",
+      "source": "libcrtweb/port/Source/WebKit/WebProcess/InjectedBundle/crt/InjectedBundleCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "injected bundle loader (B4): dlopen + WKBundleInitialize"
+    },
+    {
+      "file": "Source/WebKit/WebProcess/WebPage/crt/DrawingAreaCRT.h",
+      "source": "libcrtweb/port/Source/WebKit/WebProcess/WebPage/crt/DrawingAreaCRT.h",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "Web process drawing area for CRT (B4: accepts calls; B5: CPU painting)"
+    },
+    {
+      "file": "Source/WebKit/WebProcess/WebPage/crt/DrawingAreaCRT.cpp",
+      "source": "libcrtweb/port/Source/WebKit/WebProcess/WebPage/crt/DrawingAreaCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "Web process drawing area for CRT (B4: accepts calls; B5: CPU painting)"
+    },
+    {
+      "file": "Source/WebCore/platform/crt/UserAgentCRT.cpp",
+      "source": "libcrtweb/port/Source/WebCore/platform/crt/UserAgentCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "user agent string: 'Mozilla/5.0 (CRT) AppleWebKit/605.1.15 ...'"
+    },
+    {
+      "file": "Source/WebKit/Platform/crt/WPELoaderCRT.cpp",
+      "source": "libcrtweb/port/Source/WebKit/Platform/crt/WPELoaderCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "libwpe loader interface (static libwpe): no backend objects from WebKit"
     }
   ]
 }

@@ -98,6 +98,7 @@ def configure_command(tree: Path, build: Path, sdk: Path, prefix: Path, arch: st
         "-DENABLE_JIT=ON", "-DENABLE_C_LOOP=OFF", "-DENABLE_DFG_JIT=ON", "-DENABLE_FTL_JIT=ON",
         "-DENABLE_WEBASSEMBLY=ON", "-DENABLE_SAMPLING_PROFILER=OFF",
         f"-DCRT_WEBCORE_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webcore'}",
+        f"-DCRT_WEBKIT_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webkit'}",
     ]
     command = ["cmake", "-S", str(tree), "-B", str(build), "-G", "Ninja",
                f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'crt-toolchain.cmake'}",
@@ -134,7 +135,7 @@ def audit_program_native(program: Path, sdk: Path, prefix: Path, build: Path, ta
             "host_objects": audit.get("violations", []), "ok": not glib and audit.get("ok", False)}
 
 
-def audit_program(program: Path, sdk: Path, prefix: Path, env: dict) -> dict:
+def audit_program(program: Path, sdk: Path, prefix: Path, env: dict, build: Path | None = None) -> dict:
     """The B3 link audit: no GLib/GIO/GObject symbol is referenced, and every DT_NEEDED resolves
     under the SDK, the port prefix, or is the loader. Returns a result dictionary."""
     nm = shutil.which("llvm-nm") or shutil.which("nm")
@@ -149,7 +150,10 @@ def audit_program(program: Path, sdk: Path, prefix: Path, env: dict) -> dict:
         if name in HOST_LOADER_SONAMES:
             continue
         found = False
-        for root in (sdk / "lib", prefix / "lib", prefix / "curl-openssl" / "lib"):
+        roots = [sdk / "lib", prefix / "lib", prefix / "curl-openssl" / "lib"]
+        if build is not None:
+            roots.append(build / "lib")  # the port's own libraries (libWebKit)
+        for root in roots:
             if (root / Path(name).name).exists():
                 found = True
                 break
@@ -159,17 +163,21 @@ def audit_program(program: Path, sdk: Path, prefix: Path, env: dict) -> dict:
             "ok": not glib and not unresolved}
 
 
-def run_graph_test(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
-    """Run libcrtweb/tests/webcore/crtweb_webcore_graph_test with a fontconfig file that scans only
-    the bundled fonts, and audit the program."""
-    program = build / "bin" / ("crtweb_webcore_graph_test" + (".exe" if target_os == "windows" else ""))
+def run_program(name: str, build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
+                target_os: str = "linux") -> dict:
+    """Run one gate program from <build>/bin with a fontconfig file that scans only the bundled
+    fonts, the port's library directories on the loader path, then audit it. The program must exit 0
+    and print "<name>: ok"."""
+    program = build / "bin" / (name + (".exe" if target_os == "windows" else ""))
     fonts = ROOT / "libcrtgfx" / "assets" / "fonts"
     cache = work / "fontcache"
-    if target_os == "windows":
+
+    def crt_path(path: Path) -> str:
         # The CRT spells a drive path /c/Users/...: fontconfig only treats a leading '/' as absolute.
-        def crt_path(path: Path) -> str:
-            text = path.as_posix()
-            return f"/{text[0].lower()}{text[2:]}" if len(text) > 2 and text[1] == ":" else text
+        text = path.as_posix()
+        return f"/{text[0].lower()}{text[2:]}" if len(text) > 2 and text[1] == ":" else text
+
+    if target_os == "windows":
         fonts_text, cache_text = crt_path(fonts), crt_path(cache)
     else:
         fonts_text, cache_text = str(fonts), str(cache)
@@ -180,22 +188,24 @@ def run_graph_test(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
         encoding="utf-8")
     run_env = dict(env)
     run_env["FONTCONFIG_FILE"] = crt_path(conf) if target_os == "windows" else str(conf)
-    # The curl-openssl install first: both curls share the soname libcurl.so.4 (porting_status.md).
     if target_os == "windows":
         # DLLs are found through PATH: the SDK's runtime DLLs and the ports' (ICU, ...).
         run_env["PATH"] = os.pathsep.join(
             [str(sdk / "bin"), str(prefix / "bin"), str(prefix / "lib"), str(build / "bin"),
              run_env.get("PATH", "")])
     else:
+        # The port's own libraries (libWebKit) first, then the curl-openssl install: both curls share
+        # the soname libcurl.so.4 (porting_status.md).
         variable = "DYLD_LIBRARY_PATH" if target_os == "macos" else "LD_LIBRARY_PATH"
         run_env[variable] = os.pathsep.join(
-            [str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
-    completed = jsc.run([str(program)], env=run_env, check=False, capture=True)
+            [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
+    # Run in the work directory: the Network process keeps its cookie jar in the current directory.
+    completed = jsc.run([str(program)], env=run_env, cwd=work, check=False, capture=True)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     audit = (audit_program_native(program, sdk, prefix, build, target_os)
-             if target_os in ("macos", "windows") else audit_program(program, sdk, prefix, env))
-    ok = completed.returncode == 0 and "crtweb_webcore_graph_test: ok" in completed.stdout and audit["ok"]
+             if target_os in ("macos", "windows") else audit_program(program, sdk, prefix, env, build))
+    ok = completed.returncode == 0 and f"{name}: ok" in completed.stdout and audit["ok"]
     return {"passed": ok, "returncode": completed.returncode, "audit": audit,
             "output": completed.stdout.splitlines()}
 
@@ -212,6 +222,11 @@ def main() -> int:
     parser.add_argument("--run-tests", action="store_true",
                         help="build and run crtweb_webcore_graph_test, then audit it (the B3 gate)")
     parser.add_argument("--reuse-tree", action="store_true", help="keep the composed tree and build directory")
+    parser.add_argument("--recompose", action="store_true",
+                        help="with --reuse-tree: compose the source tree again (a patch or the pin changed) but keep "
+                             "the build directory, so only files whose content changed are rebuilt")
+    parser.add_argument("--webkit", action="store_true",
+                        help="also build WebKit and its Web/Network process executables (milestone B4)")
     parser.add_argument("--define", action="append", default=[], help="extra -D option for cmake")
     parser.add_argument("-k", "--keep-going", action="store_true", help="ninja -k 0: collect every error")
     parser.add_argument("-j", "--jobs", type=int, default=0)
@@ -230,7 +245,7 @@ def main() -> int:
     build = work / "build"
     tree = work / "src" / "webkit-crt"
     env = port_environment(sdk, prefix, gperf.resolve(), target_os)
-    if args.reuse_tree and (tree / "Source").is_dir():
+    if args.reuse_tree and not args.recompose and (tree / "Source").is_dir():
         # Incremental: keep the composed (and patched) tree, and copy only the CRT-owned overlay
         # files whose content changed, so unchanged files keep their timestamps. A change to the
         # carried patches needs a fresh compose (run without --reuse-tree).
@@ -246,13 +261,22 @@ def main() -> int:
         (work / "carried-patches.json").write_text(json.dumps(applied, indent=2) + "\n", encoding="utf-8")
     if build.exists() and not args.reuse_tree:
         shutil.rmtree(build)
-    if not (build / "build.ninja").exists() or not args.reuse_tree:
+    if args.webkit:
+        args.define.append("CRT_ENABLE_WEBKIT=ON")
+    reconfigure = args.recompose and (build / "build.ninja").exists()
+    if reconfigure:
+        # Re-run cmake in the existing build directory with the (possibly changed) options.
+        defines = [f"-DCRT_WEBCORE_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webcore'}",
+                   f"-DCRT_WEBKIT_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webkit'}"]
+        jsc.run(["cmake"] + defines + [f"-D{d}" for d in args.define] + ["."], cwd=build, env=env)
+    elif not (build / "build.ninja").exists() or not args.reuse_tree:
         jsc.run(configure_command(tree, build, sdk, prefix, arch, [f"-D{d}" for d in args.define], target_os),
                 env=env)
     if args.configure_only:
         return 0
+    tests = ["crtweb_webcore_graph_test"] + (["crtweb_process_test"] if args.webkit else [])
     if args.run_tests and not args.target:
-        args.target = ["crtweb_webcore_graph_test"]
+        args.target = list(tests) + (["WebProcess", "NetworkProcess"] if args.webkit else [])
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -262,10 +286,12 @@ def main() -> int:
     status = jsc.run(command, env=env, check=False).returncode
     if status != 0 or not args.run_tests:
         return status
-    result = run_graph_test(build, sdk, prefix, work, env, target_os)
-    (work / "acceptance-b3.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print("B3 gate:", "PASSED" if result["passed"] else "FAILED")
-    return 0 if result["passed"] else 1
+    results = {name: run_program(name, build, sdk, prefix, work, env, target_os) for name in tests}
+    passed = all(r["passed"] for r in results.values())
+    (work / "acceptance-b3.json").write_text(json.dumps(
+        {"passed": passed, "programs": results}, indent=2) + "\n", encoding="utf-8")
+    print("B3/B4 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

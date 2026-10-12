@@ -1,0 +1,318 @@
+diff -urN a/Source/WebKit/Platform/IPC/Connection.h b/Source/WebKit/Platform/IPC/Connection.h
+--- a/Source/WebKit/Platform/IPC/Connection.h	2026-10-12 09:03:41.549415547 +0900
++++ b/Source/WebKit/Platform/IPC/Connection.h	2026-10-12 09:03:41.549535640 +0900
+@@ -795,7 +795,7 @@
+     Vector<int> m_fileDescriptors;
+     UnixFileDescriptor m_socketDescriptor;
+ #endif
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     RefPtr<WTF::Thread> m_socketMonitor;
+ #endif
+ #elif OS(DARWIN)
+diff -urN a/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp b/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp
+--- a/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp	2026-10-12 09:03:41.550246203 +0900
++++ b/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp	2026-10-12 09:03:41.550296047 +0900
+@@ -114,7 +114,7 @@
+     if (!m_isConnected)
+         return;
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     if (m_socketMonitor) {
+         m_socketMonitor->detach();
+         m_socketMonitor = nullptr;
+@@ -335,7 +335,7 @@
+     RefPtr<Connection> protectedThis(this);
+     m_isConnected = true;
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     m_socketMonitor = Thread::create("SocketMonitor"_s, [protectedThis] {
+         {
+             int fd;
+diff -urN a/Source/WebKit/Shared/NativeWebKeyboardEvent.h b/Source/WebKit/Shared/NativeWebKeyboardEvent.h
+--- a/Source/WebKit/Shared/NativeWebKeyboardEvent.h	2026-10-12 09:03:41.550825291 +0900
++++ b/Source/WebKit/Shared/NativeWebKeyboardEvent.h	2026-10-12 09:03:41.550859448 +0900
+@@ -87,7 +87,7 @@
+     NativeWebKeyboardEvent(WPEEvent*, const String&, bool isAutoRepeat);
+     NativeWebKeyboardEvent(const String&, std::optional<Vector<WebCore::CompositionUnderline>>&&, std::optional<EditingRange>&&);
+ #endif
+-#elif PLATFORM(PLAYSTATION)
++#elif (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     enum class HandledByInputMethod : bool { No, Yes };
+     NativeWebKeyboardEvent(struct wpe_input_keyboard_event*, const String&, bool isAutoRepeat, HandledByInputMethod, std::optional<Vector<WebCore::CompositionUnderline>>&&, std::optional<EditingRange>&&);
+ #elif PLATFORM(WIN)
+diff -urN a/Source/WebKit/Shared/NativeWebMouseEvent.h b/Source/WebKit/Shared/NativeWebMouseEvent.h
+--- a/Source/WebKit/Shared/NativeWebMouseEvent.h	2026-10-12 09:03:41.551258779 +0900
++++ b/Source/WebKit/Shared/NativeWebMouseEvent.h	2026-10-12 09:03:41.551297494 +0900
+@@ -85,7 +85,7 @@
+ #if ENABLE(WPE_PLATFORM)
+     explicit NativeWebMouseEvent(WPEEvent*);
+ #endif
+-#elif PLATFORM(PLAYSTATION)
++#elif (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     NativeWebMouseEvent(struct wpe_input_pointer_event*, float deviceScaleFactor, WebMouseEventSyntheticClickType = WebMouseEventSyntheticClickType::NoTap);
+ #elif PLATFORM(WIN)
+     NativeWebMouseEvent(HWND, UINT message, WPARAM, LPARAM, bool, float deviceScaleFactor);
+diff -urN a/Source/WebKit/Shared/NativeWebWheelEvent.h b/Source/WebKit/Shared/NativeWebWheelEvent.h
+--- a/Source/WebKit/Shared/NativeWebWheelEvent.h	2026-10-12 09:03:41.551664474 +0900
++++ b/Source/WebKit/Shared/NativeWebWheelEvent.h	2026-10-12 09:03:41.551697278 +0900
+@@ -73,7 +73,7 @@
+     explicit NativeWebWheelEvent(WPEEvent*);
+     NativeWebWheelEvent(WPEEvent*, WebWheelEvent::Phase);
+ #endif
+-#elif PLATFORM(PLAYSTATION)
++#elif (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     NativeWebWheelEvent(struct wpe_input_axis_event*, float deviceScaleFactor, WebWheelEvent::Phase, WebWheelEvent::Phase momentumPhase);
+ #elif PLATFORM(WIN)
+     NativeWebWheelEvent(HWND, UINT message, WPARAM, LPARAM, float deviceScaleFactor);
+diff -urN a/Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.cpp b/Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.cpp
+--- a/Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.cpp	2026-10-12 09:03:41.552066449 +0900
++++ b/Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.cpp	2026-10-12 09:03:41.552105720 +0900
+@@ -70,7 +70,7 @@
+     copy->m_usesWebProcessCache = this->m_usesWebProcessCache;
+     copy->m_usesBackForwardCache = this->m_usesBackForwardCache;
+     copy->m_usesSingleWebProcess = m_usesSingleWebProcess;
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     copy->m_webProcessPath = this->m_webProcessPath;
+     copy->m_networkProcessPath = this->m_networkProcessPath;
+     copy->m_userId = this->m_userId;
+diff -urN a/Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.h b/Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.h
+--- a/Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.h	2026-10-12 09:03:41.552590912 +0900
++++ b/Source/WebKit/UIProcess/API/APIProcessPoolConfiguration.h	2026-10-12 09:03:41.552635073 +0900
+@@ -132,7 +132,7 @@
+     bool processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol() const { return m_processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol; }
+     void setProcessSwapsOnNavigationWithinSameNonHTTPFamilyProtocol(bool swaps) { m_processSwapsOnNavigationWithinSameNonHTTPFamilyProtocol = swaps; }
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     const WTF::String& webProcessPath() const LIFETIME_BOUND { return m_webProcessPath; }
+     void setWebProcessPath(const WTF::String& webProcessPath) { m_webProcessPath = webProcessPath; }
+ 
+@@ -192,7 +192,7 @@
+     bool m_shouldConfigureJSCForTesting { false };
+     bool m_isJITEnabled { true };
+     bool m_usesSingleWebProcess { false };
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     WTF::String m_webProcessPath;
+     WTF::String m_networkProcessPath;
+     int32_t m_userId { -1 };
+diff -urN a/Source/WebKit/UIProcess/Launcher/ProcessLauncher.h b/Source/WebKit/UIProcess/Launcher/ProcessLauncher.h
+--- a/Source/WebKit/UIProcess/Launcher/ProcessLauncher.h	2026-10-12 09:03:41.553148526 +0900
++++ b/Source/WebKit/UIProcess/Launcher/ProcessLauncher.h	2026-10-12 09:03:41.553182886 +0900
+@@ -99,7 +99,7 @@
+ #endif
+ #endif
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     String processPath { };
+     int32_t userId { -1 };
+ #endif
+diff -urN a/Source/WebKit/UIProcess/WebPreferences.cpp b/Source/WebKit/UIProcess/WebPreferences.cpp
+--- a/Source/WebKit/UIProcess/WebPreferences.cpp	2026-10-12 09:03:41.553592381 +0900
++++ b/Source/WebKit/UIProcess/WebPreferences.cpp	2026-10-12 09:03:41.553632973 +0900
+@@ -259,7 +259,7 @@
+         m_store.setUInt32ValueForKey(key, userValue);
+ }
+ 
+-#if !PLATFORM(COCOA) && !PLATFORM(GTK) && !PLATFORM(WPE) && !PLATFORM(PLAYSTATION)
++#if !PLATFORM(COCOA) && !PLATFORM(GTK) && !PLATFORM(WPE) && !(PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+ void WebPreferences::platformInitializeStore()
+ {
+     notImplemented();
+diff -urN a/Source/WebKit/UIProcess/WebProcessPool.h b/Source/WebKit/UIProcess/WebProcessPool.h
+--- a/Source/WebKit/UIProcess/WebProcessPool.h	2026-10-12 09:03:41.554129134 +0900
++++ b/Source/WebKit/UIProcess/WebProcessPool.h	2026-10-12 09:03:41.554220054 +0900
+@@ -539,7 +539,7 @@
+     void notifyPreferencesChanged(const String& domain, const String& key, const std::optional<String>& encodedValue);
+ #endif
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     const String& webProcessPath() const LIFETIME_BOUND { return m_resolvedPaths.webProcessPath; }
+     const String& networkProcessPath() const LIFETIME_BOUND { return m_resolvedPaths.networkProcessPath; }
+     int32_t userId() const { return m_userId; }
+@@ -909,7 +909,7 @@
+         String injectedBundlePath;
+         String uiProcessBundleResourcePath;
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+         String webProcessPath;
+         String networkProcessPath;
+ #endif
+@@ -965,7 +965,7 @@
+     WebProcessWithMediaStreamingCounter m_webProcessWithMediaStreamingCounter;
+     bool m_mediaStreamingActivity { false };
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     int32_t m_userId { -1 };
+ #endif
+ 
+diff -urN a/Source/WebKit/UIProcess/WebProcessProxy.cpp b/Source/WebKit/UIProcess/WebProcessProxy.cpp
+--- a/Source/WebKit/UIProcess/WebProcessProxy.cpp	2026-10-12 09:03:41.554949857 +0900
++++ b/Source/WebKit/UIProcess/WebProcessProxy.cpp	2026-10-12 09:03:41.555805909 +0900
+@@ -608,7 +608,7 @@
+     if (isPrewarmed())
+         launchOptions.extraInitializationData.add<HashTranslatorASCIILiteral>("is-prewarmed"_s, "1"_s);
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     launchOptions.processPath = m_processPool->webProcessPath();
+     launchOptions.userId = m_processPool->userId();
+ #endif
+diff -urN a/Source/WebKit/UIProcess/WebsiteData/WebsiteDataStore.cpp b/Source/WebKit/UIProcess/WebsiteData/WebsiteDataStore.cpp
+--- a/Source/WebKit/UIProcess/WebsiteData/WebsiteDataStore.cpp	2026-10-12 09:03:41.556876708 +0900
++++ b/Source/WebKit/UIProcess/WebsiteData/WebsiteDataStore.cpp	2026-10-12 09:03:41.557193753 +0900
+@@ -2366,7 +2366,7 @@
+ 
+ String WebsiteDataStore::defaultGeneralStorageDirectory(const String& baseDataDirectory)
+ {
+-#if PLATFORM(PLAYSTATION) || USE(GLIB)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || USE(GLIB)
+     return websiteDataDirectoryFileSystemRepresentation("storage"_s, baseDataDirectory);
+ #else
+     return websiteDataDirectoryFileSystemRepresentation("Storage"_s, baseDataDirectory);
+@@ -2375,7 +2375,7 @@
+ 
+ String WebsiteDataStore::defaultNetworkCacheDirectory(const String& baseCacheDirectory)
+ {
+-#if PLATFORM(PLAYSTATION) || USE(GLIB)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || USE(GLIB)
+     return cacheDirectoryFileSystemRepresentation("WebKitCache"_s, baseCacheDirectory);
+ #else
+     return cacheDirectoryFileSystemRepresentation("NetworkCache"_s, baseCacheDirectory);
+@@ -2389,7 +2389,7 @@
+ 
+ String WebsiteDataStore::defaultIndexedDBDatabaseDirectory(const String& baseDataDirectory)
+ {
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     return websiteDataDirectoryFileSystemRepresentation("indexeddb"_s, baseDataDirectory);
+ #elif USE(GLIB)
+     return websiteDataDirectoryFileSystemRepresentation(String::fromUTF8("databases" G_DIR_SEPARATOR_S "indexeddb"), baseDataDirectory);
+@@ -2400,7 +2400,7 @@
+ 
+ String WebsiteDataStore::defaultServiceWorkerRegistrationDirectory(const String& baseDataDirectory)
+ {
+-#if PLATFORM(PLAYSTATION) || USE(GLIB)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || USE(GLIB)
+     return websiteDataDirectoryFileSystemRepresentation("serviceworkers"_s, baseDataDirectory);
+ #else
+     return websiteDataDirectoryFileSystemRepresentation("ServiceWorkers"_s, baseDataDirectory);
+@@ -2409,7 +2409,7 @@
+ 
+ String WebsiteDataStore::defaultWebSQLDatabaseDirectory(const String& baseDataDirectory)
+ {
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     return websiteDataDirectoryFileSystemRepresentation("websql"_s, baseDataDirectory);
+ #elif USE(GLIB)
+     return websiteDataDirectoryFileSystemRepresentation("databases"_s, baseDataDirectory);
+@@ -2432,7 +2432,7 @@
+ 
+ String WebsiteDataStore::defaultLocalStorageDirectory(const String& baseDataDirectory)
+ {
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     return websiteDataDirectoryFileSystemRepresentation("local"_s, baseDataDirectory);
+ #elif USE(GLIB)
+     return websiteDataDirectoryFileSystemRepresentation("localstorage"_s, baseDataDirectory);
+@@ -2443,7 +2443,7 @@
+ 
+ String WebsiteDataStore::defaultMediaKeysStorageDirectory(const String& baseDataDirectory)
+ {
+-#if PLATFORM(PLAYSTATION) || USE(GLIB)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || USE(GLIB)
+     return websiteDataDirectoryFileSystemRepresentation("mediakeys"_s, baseDataDirectory);
+ #elif OS(WINDOWS)
+     return websiteDataDirectoryFileSystemRepresentation("MediaKeyStorage"_s, baseDataDirectory);
+@@ -2479,7 +2479,7 @@
+ 
+ String WebsiteDataStore::defaultResourceLoadStatisticsDirectory(const String& baseDataDirectory)
+ {
+-#if PLATFORM(PLAYSTATION) || USE(GLIB)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || USE(GLIB)
+     return websiteDataDirectoryFileSystemRepresentation("itp"_s, baseDataDirectory);
+ #else
+     return websiteDataDirectoryFileSystemRepresentation("ResourceLoadStatistics"_s, baseDataDirectory);
+@@ -2499,7 +2499,7 @@
+ #if ENABLE(CONTENT_EXTENSIONS)
+ String WebsiteDataStore::defaultResourceMonitorThrottlerDirectory(const String& baseDataDirectory)
+ {
+-#if PLATFORM(PLAYSTATION) || USE(GLIB)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || USE(GLIB)
+     return websiteDataDirectoryFileSystemRepresentation("resourcemonitorthrottler"_s, baseDataDirectory);
+ #else
+     return websiteDataDirectoryFileSystemRepresentation("ResourceMonitorThrottler"_s, baseDataDirectory);
+diff -urN a/Source/WebKit/WebProcess/Inspector/WebInspectorBackendClient.cpp b/Source/WebKit/WebProcess/Inspector/WebInspectorBackendClient.cpp
+--- a/Source/WebKit/WebProcess/Inspector/WebInspectorBackendClient.cpp	2026-10-12 09:03:41.558215755 +0900
++++ b/Source/WebKit/WebProcess/Inspector/WebInspectorBackendClient.cpp	2026-10-12 09:03:41.558283757 +0900
+@@ -136,7 +136,7 @@
+         return;
+ 
+     if (!page->corePage()->settings().acceleratedCompositingEnabled()) {
+-#if PLATFORM(GTK) || PLATFORM(WIN) || PLATFORM(PLAYSTATION) || PLATFORM(WPE)
++#if PLATFORM(GTK) || PLATFORM(WIN) || (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || PLATFORM(WPE)
+         // FIXME: It can be optimized by marking only highlighted rect dirty.
+         // setNeedsDisplay always makes whole rect dirty, and could lead to poor performance.
+         // https://bugs.webkit.org/show_bug.cgi?id=195933
+@@ -168,7 +168,7 @@
+     if (!page)
+         return;
+ 
+-#if PLATFORM(GTK) || PLATFORM(WIN) || PLATFORM(PLAYSTATION) || PLATFORM(WPE)
++#if PLATFORM(GTK) || PLATFORM(WIN) || (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || PLATFORM(WPE)
+     if (!page->corePage()->settings().acceleratedCompositingEnabled()) {
+         // FIXME: It can be optimized by marking only highlighted rect dirty.
+         // setNeedsDisplay always makes whole rect dirty, and could lead to poor performance.
+diff -urN a/Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.cpp b/Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.cpp
+--- a/Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.cpp	2026-10-12 09:03:41.558779141 +0900
++++ b/Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.cpp	2026-10-12 09:03:41.558968241 +0900
+@@ -2169,7 +2169,7 @@
+ }
+ #endif
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+ void WebChromeClient::postAccessibilityNotification(WebCore::AccessibilityObject&, WebCore::AXNotification)
+ {
+     notImplemented();
+diff -urN a/Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.h b/Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.h
+--- a/Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.h	2026-10-12 09:03:41.559777552 +0900
++++ b/Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.h	2026-10-12 09:03:41.559842390 +0900
+@@ -262,7 +262,7 @@
+     void AXFinishFrameLoad() final { }
+ #endif
+ 
+-#if PLATFORM(PLAYSTATION)
++#if (PLATFORM(PLAYSTATION) || PLATFORM(CRT))
+     void postAccessibilityNotification(WebCore::AccessibilityObject&, WebCore::AXNotification) final;
+     void postAccessibilityNodeTextChangeNotification(WebCore::AccessibilityObject*, WebCore::AXTextChange, unsigned, const String&) final;
+     void postAccessibilityFrameLoadingEventNotification(WebCore::AccessibilityObject*, WebCore::AXLoadingEvent) final;
+diff -urN a/Source/WebKit/WebProcess/WebPage/WebPage.cpp b/Source/WebKit/WebProcess/WebPage/WebPage.cpp
+--- a/Source/WebKit/WebProcess/WebPage/WebPage.cpp	2026-10-12 09:03:41.560585298 +0900
++++ b/Source/WebKit/WebProcess/WebPage/WebPage.cpp	2026-10-12 09:03:41.563418749 +0900
+@@ -2767,7 +2767,7 @@
+ 
+     protect(m_mainFrame->coreLocalFrame()->view())->paint(graphicsContext, rect);
+ 
+-#if PLATFORM(GTK) || PLATFORM(WIN) || PLATFORM(PLAYSTATION) || PLATFORM(WPE)
++#if PLATFORM(GTK) || PLATFORM(WIN) || (PLATFORM(PLAYSTATION) || PLATFORM(CRT)) || PLATFORM(WPE)
+     if (!m_page->settings().acceleratedCompositingEnabled() && m_page->inspectorController().enabled() && m_page->inspectorController().shouldShowOverlay()) {
+         graphicsContext.beginTransparencyLayer(1);
+         m_page->inspectorController().drawHighlight(graphicsContext);
+@@ -5254,7 +5254,7 @@
+ 
+     updateSettingsGenerated(store, settings);
+ 
+-#if !PLATFORM(GTK) && !PLATFORM(WIN) && !PLATFORM(PLAYSTATION) && !PLATFORM(WPE)
++#if !PLATFORM(GTK) && !PLATFORM(WIN) && !(PLATFORM(PLAYSTATION) || PLATFORM(CRT)) && !PLATFORM(WPE)
+     if (!settings.acceleratedCompositingEnabled()) {
+         WEBPAGE_RELEASE_LOG(Layers, "updatePreferences: acceleratedCompositingEnabled setting was false. WebKit cannot function in this mode; changing setting to true");
+         settings.setAcceleratedCompositingEnabled(true);
