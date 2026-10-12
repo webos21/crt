@@ -1570,4 +1570,8 @@ x86_64-host -> Linux/aarch64-target isolated build.
 ## Host order
 
 Linux first (WPE is the reference), with an early three-host JavaScriptCore
-replay; then Windows/x64; then macOS/arm64.
+replay; then Windows/x64; then macOS/arm64. Linux/aarch64 is not a default
+replay host: it is replayed only when a change has assembly or other
+architecture-specific code (policy and rationale:
+[`runtime_roadmap.md`](../design/runtime_roadmap.md), Host Order), so later
+tranches such as B4-B7 need not include it.

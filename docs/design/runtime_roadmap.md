@@ -119,3 +119,17 @@ benchmark once the lower contracts have stable evidence:
 | `06-web` JavaScriptCore | Linux, replayed on all three hosts early | exposes threads/TLS/executable-memory/signal gaps in the lower runtime |
 | `06-web` WPE reference and `PlatformCRT` | Linux | WPE is the known-good reference to compare against |
 | `06-web` replay | Windows/x64, then macOS/arm64 | proves `PlatformCRT` is OS-neutral rather than a Linux port |
+
+**Linux/aarch64 is replayed only for assembly differences.** Linux/aarch64 builds the same C and C++ sources with the
+same toolchain as Linux/x86_64, so a tranche's C/C++ results there are assumed to carry over and its acceptance
+replays do not include Linux/aarch64 by default. Replay it when a change has code that Linux/x86_64 cannot exercise:
+assembly (`.S`, inline assembly, JIT and offlineasm backends) and what is keyed on the CPU architecture with it, such
+as the TLS variant, signal and `ucontext_t` layouts, syscall numbers, atomics and calling-convention-sensitive code.
+A replay that includes it says which of these made it necessary. Past findings agree: of the Linux/aarch64 replays so
+far (JavaScriptCore 1A-1C, 1D-A, 1D-B/C/D and Web Tranche 3 B1-B3) only the first exposed an architecture-specific
+defect (native thread TLS, 2026-10-05); the others needed no CRT, patch or harness change, and the one defect the
+B1-B3 replay did find (a missing patch-manifest entry) was not host-specific.
+Linux/aarch64's baseline verification is the GitHub CI matrix (the `linux-arm64` leg of
+`.github/workflows/ci.yml`); this policy is about the manual acceptance replays on top of it. The x86_64-host to
+Linux/aarch64-target proof required by `06-web` Tranche 10 stays, because it tests the build-host/target split and not
+C/C++ behavior.
