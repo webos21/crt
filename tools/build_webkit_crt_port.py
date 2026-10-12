@@ -180,6 +180,27 @@ def font_configuration(fonts_dir: str, cache_dir: str) -> str:
             f"<fontconfig><dir>{fonts_dir}</dir><cachedir>{cache_dir}</cachedir>{aliases}</fontconfig>\n")
 
 
+def crt_path(path: Path) -> str:
+    # The CRT spells a drive path /c/Users/...: fontconfig only treats a leading '/' as absolute.
+    text = path.as_posix()
+    return f"/{text[0].lower()}{text[2:]}" if len(text) > 2 and text[1] == ":" else text
+
+
+def gate_environment(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str) -> dict:
+    """The environment of the B5-B7 gates: the port's library directories on the loader path (PATH on
+    Windows) and the fontconfig file run_program wrote into the work directory."""
+    run_env = dict(env)
+    if target_os == "windows":
+        run_env["PATH"] = os.pathsep.join(
+            [str(sdk / "bin"), str(prefix / "bin"), str(prefix / "lib"), str(build / "bin"), run_env.get("PATH", "")])
+        run_env["FONTCONFIG_FILE"] = crt_path(work / "fonts.conf")
+    else:
+        run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+            [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
+        run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+    return run_env
+
+
 def run_program(name: str, build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
                 target_os: str = "linux") -> dict:
     """Run one gate program from <build>/bin with a fontconfig file that scans only the bundled
@@ -188,11 +209,6 @@ def run_program(name: str, build: Path, sdk: Path, prefix: Path, work: Path, env
     program = build / "bin" / (name + (".exe" if target_os == "windows" else ""))
     fonts = ROOT / "libcrtgfx" / "assets" / "fonts"
     cache = work / "fontcache"
-
-    def crt_path(path: Path) -> str:
-        # The CRT spells a drive path /c/Users/...: fontconfig only treats a leading '/' as absolute.
-        text = path.as_posix()
-        return f"/{text[0].lower()}{text[2:]}" if len(text) > 2 and text[1] == ":" else text
 
     if target_os == "windows":
         fonts_text, cache_text = crt_path(fonts), crt_path(cache)
@@ -257,21 +273,20 @@ def compare_frames(frame: Path, reference: Path) -> dict:
     return result
 
 
-def run_render_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+def run_render_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
     """B5: reference.html rendered by the CRT port, delivered through the web surface protocol to
     surface_probe (built here with the CRT toolchain), and diffed against the native WPE reference."""
     import subprocess
     import time
-    probe = work / "surface_probe"
+    exe = ".exe" if target_os == "windows" else ""
+    probe = work / ("surface_probe" + exe)
     source = ROOT / "libcrtweb" / "tests" / "platform-crt" / "surface_probe.c"
-    jsc.run([str(sdk / "tools" / "crt-cc"), "-O1", "-o", str(probe), str(source)], env=env)
-    socket_path = str(work / "surface.sock")
+    jsc.run([str(sdk / "tools" / ("crt-cc.cmd" if target_os == "windows" else "crt-cc")), "-O1", "-o", str(probe),
+             str(source)], env=env)
+    socket_path = crt_path(work / "surface.sock") if target_os == "windows" else str(work / "surface.sock")
     frame_from_consumer = work / "frame-consumer.ppm"
     frame_from_producer = work / "frame-producer.ppm"
-    run_env = dict(env)
-    run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
-        [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
-    run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+    run_env = gate_environment(build, sdk, prefix, work, env, target_os)
     consumer = subprocess.Popen([str(probe), socket_path, "--reference", str(frame_from_consumer)],
                                 stdout=subprocess.PIPE, text=True, env=run_env)
     try:
@@ -279,7 +294,7 @@ def run_render_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict)
         if "SURFACE_PROBE_LISTENING" not in line:
             return {"passed": False, "reason": f"consumer did not listen: {line!r}"}
         producer = subprocess.run(
-            [str(build / "bin" / "crtweb_render_test"),
+            [str(build / "bin" / ("crtweb_render_test" + exe)),
              str(ROOT / "libcrtweb" / "tests" / "wpe-reference" / "reference.html"),
              str(frame_from_producer), socket_path],
             env=run_env, cwd=work, capture_output=True, text=True, timeout=180)
@@ -303,20 +318,18 @@ def run_render_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict)
     return result
 
 
-def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
     """B6: the 3A acceptance consumer (surface_probe, its full scripted run: pointer click -> page report
     and pixel change, key code and modifiers, wheel, committed text, resize, stalled consumer) against
     crtweb_surface_host, the CRT port's frame producer, instead of the native WPE module."""
     import subprocess
-    probe = work / "surface_probe"
+    exe = ".exe" if target_os == "windows" else ""
+    probe = work / ("surface_probe" + exe)
     if not probe.exists():
-        jsc.run([str(sdk / "tools" / "crt-cc"), "-O1", "-o", str(probe),
-                 str(ROOT / "libcrtweb" / "tests" / "platform-crt" / "surface_probe.c")], env=env)
-    socket_path = str(work / "input.sock")
-    run_env = dict(env)
-    run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
-        [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
-    run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+        jsc.run([str(sdk / "tools" / ("crt-cc.cmd" if target_os == "windows" else "crt-cc")), "-O1", "-o",
+                 str(probe), str(ROOT / "libcrtweb" / "tests" / "platform-crt" / "surface_probe.c")], env=env)
+    socket_path = crt_path(work / "input.sock") if target_os == "windows" else str(work / "input.sock")
+    run_env = gate_environment(build, sdk, prefix, work, env, target_os)
     consumer = subprocess.Popen([str(probe), socket_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, env=run_env)
     try:
@@ -324,7 +337,7 @@ def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) 
         if "SURFACE_PROBE_LISTENING" not in line:
             return {"passed": False, "reason": f"consumer did not listen: {line!r}"}
         producer = subprocess.run(
-            [str(build / "bin" / "crtweb_surface_host"),
+            [str(build / "bin" / ("crtweb_surface_host" + exe)),
              str(ROOT / "libcrtweb" / "tests" / "platform-crt" / "crt_surface.html"), socket_path],
             env=run_env, cwd=work, capture_output=True, text=True, timeout=240)
         consumer_output, _ = consumer.communicate(timeout=60)
@@ -339,41 +352,68 @@ def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) 
             "consumer_output": consumer_output.splitlines()}
 
 
-def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
     """B7: crtweb_lifecycle_test (100 create/load/paint/destroy cycles of a view with its Web and
     Network processes; the test itself bounds descriptor, thread and RSS growth), then the Host ABI
     audit twice over: the static one (ldd closure of every binary the port produced) and the runtime
     one, from the MAPPED lines the test prints from /proc/<pid>/maps of each child: every file-backed
     mapping of the UI, Web and Network processes must be the CRT SDK, the port prefix, this build
     tree, the bundled fonts, the fontconfig cache, or the host's dynamic loader."""
-    result = run_program("crtweb_lifecycle_test", build, sdk, prefix, work, env)
+    result = run_program("crtweb_lifecycle_test", build, sdk, prefix, work, env, target_os)
+    windows = target_os == "windows"
     allowed = [sdk.resolve(), prefix.resolve(), build.resolve(), (ROOT / "libcrtgfx" / "assets" / "fonts").resolve(),
                work.resolve()]
+    # Windows: every process also maps the OS's own DLLs (System32): the ones its runtime contract names, and
+    # what those pull in (advapi32 and RPCRT4 import msvcrt.dll and ucrtbase.dll, so every Windows process
+    # maps them whatever it is). They are listed, not judged: a CRT or port binary that imports the host C
+    # runtime itself is caught by the static audit of the import closure, which is the strict half.
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve() if windows else None
+    os_runtime = set()
     mapped, violations = {}, []
     for line in result["output"]:
         if not line.startswith("MAPPED "):
             continue
         _, role, path = line.split(" ", 2)
         mapped.setdefault(role, []).append(path)
+        if windows:
+            resolved = Path(path).resolve()
+            if any(resolved.is_relative_to(root) for root in allowed):
+                continue
+            if resolved.is_relative_to(system_root) and resolved.suffix.lower() == ".dll":
+                os_runtime.add(resolved.name.lower())
+                continue
+            violations.append(f"{role}: maps {path}")
+            continue
         if path.startswith(("[", "/memfd:")) or Path(path).name.startswith("ld-linux"):
             continue
         if not any(Path(path).resolve().is_relative_to(root) for root in allowed):
             violations.append(f"{role}: maps {path}")
-    binaries = sorted(p for p in (build / "bin").iterdir() if p.is_file() and os.access(p, os.X_OK))
-    binaries += sorted((build / "lib").glob("libWebKit.so*"))
-    probe = work / "surface_probe"
-    if probe.exists():
-        binaries.append(probe)
-    # A CRT-linked static executable (surface_probe) has no DT_NEEDED: nothing for ldd to resolve.
-    readelf = shutil.which("llvm-readelf") or shutil.which("readelf")
-    static_binaries = [b for b in binaries
-                       if "(NEEDED)" not in jsc.run([readelf, "-d", str(b)], capture=True, check=False).stdout]
-    binaries = [b for b in binaries if b not in static_binaries]
-    static = jsc.host_abi_audit(sdk, prefix, build, binaries, {
-        "LD_LIBRARY_PATH": os.pathsep.join([str(build / "lib"), str(prefix / "curl-openssl" / "lib"),
-                                             str(sdk / "lib"), str(prefix / "lib")])}, "linux")
+    if windows:
+        binaries = sorted(p for p in (build / "bin").iterdir() if p.suffix.lower() in (".exe", ".dll"))
+        binaries += sorted((build / "lib").glob("libWebKit*.dll"))
+        probe = work / "surface_probe.exe"
+        if probe.exists():
+            binaries.append(probe)
+        static_binaries = []
+        static = jsc.host_abi_audit(sdk, prefix, build, binaries, {}, "windows")
+    else:
+        binaries = sorted(p for p in (build / "bin").iterdir() if p.is_file() and os.access(p, os.X_OK))
+        binaries += sorted((build / "lib").glob("libWebKit.so*"))
+        probe = work / "surface_probe"
+        if probe.exists():
+            binaries.append(probe)
+        # A CRT-linked static executable (surface_probe) has no DT_NEEDED: nothing for ldd to resolve.
+        readelf = shutil.which("llvm-readelf") or shutil.which("readelf")
+        static_binaries = [b for b in binaries
+                           if "(NEEDED)" not in jsc.run([readelf, "-d", str(b)], capture=True, check=False).stdout]
+        binaries = [b for b in binaries if b not in static_binaries]
+        static = jsc.host_abi_audit(sdk, prefix, build, binaries, {
+            "LD_LIBRARY_PATH": os.pathsep.join([str(build / "lib"), str(prefix / "curl-openssl" / "lib"),
+                                                 str(sdk / "lib"), str(prefix / "lib")])}, "linux")
     result["runtime_audit"] = {"roles": sorted(mapped), "mapped_files": sum(len(v) for v in mapped.values()),
                                "violations": violations}
+    if windows:
+        result["runtime_audit"]["os_runtime_dlls"] = sorted(os_runtime)
     result["static_audit"] = {"binaries": [b.name for b in binaries],
                               "statically_linked": [b.name for b in static_binaries], "ok": static["ok"],
                               "violations": static["violations"], "known_host_libraries": static["known_host_libraries"]}
@@ -461,11 +501,11 @@ def main() -> int:
     if status != 0 or not args.run_tests:
         return status
     results = {name: run_program(name, build, sdk, prefix, work, env, target_os) for name in tests}
-    if args.webkit and target_os == "linux":
-        results["render_through_surface_protocol"] = run_render_gate(build, sdk, prefix, work, env)
+    if args.webkit and target_os in ("linux", "windows"):
+        results["render_through_surface_protocol"] = run_render_gate(build, sdk, prefix, work, env, target_os)
         print("B5 diff:", json.dumps(results["render_through_surface_protocol"].get("diff_against_wpe_reference")))
-        results["input_through_surface_protocol"] = run_input_gate(build, sdk, prefix, work, env)
-        results["lifecycle_and_host_abi"] = run_lifecycle_gate(build, sdk, prefix, work, env)
+        results["input_through_surface_protocol"] = run_input_gate(build, sdk, prefix, work, env, target_os)
+        results["lifecycle_and_host_abi"] = run_lifecycle_gate(build, sdk, prefix, work, env, target_os)
     passed = all(r["passed"] for r in results.values())
     (work / "acceptance-b3.json").write_text(json.dumps(
         {"passed": passed, "programs": results}, indent=2) + "\n", encoding="utf-8")

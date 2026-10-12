@@ -33,9 +33,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -78,6 +80,186 @@ static void spin(unsigned milliseconds)
     }
 }
 
+#if defined(WTF_CRT_COFF_ASM)
+// Windows (the persona defines WTF_CRT_COFF_ASM): no /proc. Processes and their modules come from the
+// Toolhelp snapshot, memory and handle counts from kernel32; declared here because a CRT program does not
+// see the Win32 headers.
+extern "C" {
+struct CrtProcessEntry {
+    unsigned int size, usage, processId;
+    uintptr_t defaultHeapId;
+    unsigned int moduleId, threads, parentProcessId;
+    int priorityClassBase;
+    unsigned int flags;
+    char exeFile[260];
+};
+struct CrtModuleEntry {
+    unsigned int size, moduleId, processId, globalUsage, processUsage;
+    unsigned char* baseAddress;
+    unsigned int baseSize;
+    void* module;
+    char name[256];
+    char exePath[260];
+};
+struct CrtMemoryCounters {
+    unsigned int size, pageFaults;
+    uintptr_t peakWorkingSet, workingSet, quotaPeakPaged, quotaPaged, quotaPeakNonPaged, quotaNonPaged, pagefile,
+        peakPagefile;
+};
+void* __stdcall CreateToolhelp32Snapshot(unsigned int flags, unsigned int processId);
+int __stdcall Process32First(void* snapshot, CrtProcessEntry* entry);
+int __stdcall Process32Next(void* snapshot, CrtProcessEntry* entry);
+int __stdcall Module32First(void* snapshot, CrtModuleEntry* entry);
+int __stdcall Module32Next(void* snapshot, CrtModuleEntry* entry);
+int __stdcall CloseHandle(void* handle);
+void* __stdcall OpenProcess(unsigned int access, int inherit, unsigned int processId);
+unsigned int __stdcall WaitForSingleObject(void* handle, unsigned int milliseconds);
+void* __stdcall GetCurrentProcess(void);
+int __stdcall K32GetProcessMemoryInfo(void* process, CrtMemoryCounters* counters, unsigned int size);
+int __stdcall GetProcessHandleCount(void* process, unsigned int* count);
+}
+
+static bool processExited(unsigned int pid)
+{
+    void* process = OpenProcess(0x00100000 /* SYNCHRONIZE */, 0, pid);
+    if (!process)
+        return true;
+    bool exited = WaitForSingleObject(process, 0) == 0 /* WAIT_OBJECT_0 */;
+    CloseHandle(process);
+    return exited;
+}
+
+static long residentKiB()
+{
+    CrtMemoryCounters counters = { };
+    counters.size = sizeof counters;
+    if (!K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof counters))
+        return -1;
+    return static_cast<long>(counters.workingSet / 1024);
+}
+
+static long ownThreads()
+{
+    long result = -1;
+    void* snapshot = CreateToolhelp32Snapshot(0x2 /* TH32CS_SNAPPROCESS */, 0);
+    if (snapshot == reinterpret_cast<void*>(-1))
+        return result;
+    CrtProcessEntry entry;
+    entry.size = sizeof entry;
+    for (int more = Process32First(snapshot, &entry); more; more = Process32Next(snapshot, &entry)) {
+        if (static_cast<pid_t>(entry.processId) == getpid()) {
+            result = entry.threads;
+            break;
+        }
+    }
+    CloseHandle(snapshot);
+    return result;
+}
+
+// Diagnostic (CRTWEB_LIFECYCLE_HANDLES=1): histogram of the kernel object types of this process's handles.
+extern "C" void* __stdcall GetModuleHandleA(const char* name);
+extern "C" void* __stdcall GetProcAddress(void* module, const char* name);
+extern "C" unsigned int __stdcall GetFileType(void*);
+extern "C" unsigned int __stdcall GetFinalPathNameByHandleA(void*, char*, unsigned int, unsigned int);
+extern "C" int __stdcall GetNamedPipeInfo(void*, unsigned int*, unsigned int*, unsigned int*, unsigned int*);
+typedef long(__stdcall* NtQueryObjectFunction)(void*, int, void*, unsigned int, unsigned int*);
+static void dumpHandleTypes(int iteration)
+{
+    if (!getenv("CRTWEB_LIFECYCLE_HANDLES"))
+        return;
+    auto NtQueryObject = reinterpret_cast<NtQueryObjectFunction>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryObject"));
+    if (!NtQueryObject)
+        return;
+    std::map<std::string, int> histogram;
+    for (uintptr_t h = 4; h < 0x8000; h += 4) {
+        alignas(8) unsigned char buffer[512];
+        unsigned int returned = 0;
+        if (NtQueryObject(reinterpret_cast<void*>(h), 2 /* ObjectTypeInformation */, buffer, sizeof buffer, &returned) < 0)
+            continue;
+        unsigned short length = *reinterpret_cast<unsigned short*>(buffer);
+        const unsigned short* text = *reinterpret_cast<unsigned short**>(buffer + 8); // UTF-16: wchar_t is 4 bytes here
+        std::string name;
+        for (unsigned short i = 0; i < length / 2; ++i)
+            name.push_back(static_cast<char>(text[i]));
+        ++histogram[name];
+        if (name == "File") {
+            char path[300] = "";
+            unsigned int type = GetFileType(reinterpret_cast<void*>(h));
+            if (type == 1)
+                GetFinalPathNameByHandleA(reinterpret_cast<void*>(h), path, sizeof path, 0);
+            char detail[200] = "";
+            if (type == 3) {
+                unsigned int flags = 0, outSize = 0, inSize = 0, instances = 0;
+                if (GetNamedPipeInfo(reinterpret_cast<void*>(h), &flags, &outSize, &inSize, &instances))
+                    snprintf(detail, sizeof detail, "pipe flags=%u out=%u in=%u max=%u", flags, outSize, inSize, instances);
+                else {
+                    auto getsockname = reinterpret_cast<int(__stdcall*)(uintptr_t, void*, int*)>(GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getsockname"));
+                    auto getpeername = reinterpret_cast<int(__stdcall*)(uintptr_t, void*, int*)>(GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getpeername"));
+                    char name[128] = { }, peer[128] = { };
+                    int nameLength = sizeof name, peerLength = sizeof peer;
+                    int a = getsockname ? getsockname(h, name, &nameLength) : -9;
+                    int b = getpeername ? getpeername(h, peer, &peerLength) : -9;
+                    snprintf(detail, sizeof detail, "socket? name=%d(%s) peer=%d(%s)", a, name + 2, b, peer + 2);
+                }
+            }
+            printf("  FILE h=%llx type=%u %s %s\n", (unsigned long long)h, type, path, detail);
+        }
+    }
+    printf("HANDLES iteration %d:", iteration);
+    for (auto& entry : histogram)
+        printf(" %s=%d", entry.first.c_str(), entry.second);
+    printf("\n");
+}
+
+static unsigned openHandles()
+{
+    unsigned count = 0;
+    GetProcessHandleCount(GetCurrentProcess(), &count);
+    return count;
+}
+
+// Live children of this process, named without ".exe".
+static std::vector<std::pair<pid_t, std::string>> children()
+{
+    std::vector<std::pair<pid_t, std::string>> result;
+    void* snapshot = CreateToolhelp32Snapshot(0x2 /* TH32CS_SNAPPROCESS */, 0);
+    if (snapshot == reinterpret_cast<void*>(-1))
+        return result;
+    CrtProcessEntry entry;
+    entry.size = sizeof entry;
+    for (int more = Process32First(snapshot, &entry); more; more = Process32Next(snapshot, &entry)) {
+        if (static_cast<pid_t>(entry.parentProcessId) != getpid() || processExited(entry.processId))
+            continue;
+        std::string name = entry.exeFile;
+        if (name.size() > 4 && !strcasecmp(name.c_str() + name.size() - 4, ".exe"))
+            name.resize(name.size() - 4);
+        result.emplace_back(static_cast<pid_t>(entry.processId), name);
+    }
+    CloseHandle(snapshot);
+    return result;
+}
+
+static void printMappedFiles(pid_t pid, const std::string& name)
+{
+    std::set<std::string> files;
+    void* snapshot = CreateToolhelp32Snapshot(0x8 | 0x10 /* TH32CS_SNAPMODULE | SNAPMODULE32 */, pid);
+    if (snapshot != reinterpret_cast<void*>(-1)) {
+        CrtModuleEntry entry;
+        entry.size = sizeof entry;
+        for (int more = Module32First(snapshot, &entry); more; more = Module32Next(snapshot, &entry)) {
+            std::string path = entry.exePath;
+            for (auto& c : path)
+                if (c == '\\')
+                    c = '/';
+            files.insert(path);
+        }
+        CloseHandle(snapshot);
+    }
+    for (auto& file : files)
+        printf("MAPPED %s %s\n", name.c_str(), file.c_str());
+}
+
+#else
 static std::string readLink(const std::string& path)
 {
     char buffer[4096];
@@ -176,6 +358,7 @@ static void printMappedFiles(pid_t pid, const std::string& name)
     for (auto& file : files)
         printf("MAPPED %s %s\n", name.c_str(), file.c_str());
 }
+#endif
 
 struct Sample {
     long rssKiB;
@@ -279,7 +462,12 @@ int main(int argc, char** argv)
             break;
         }
 
+#if defined(WTF_CRT_COFF_ASM)
+        samples.push_back({ residentKiB(), ownThreads(), openHandles() });
+        dumpHandleTypes(i + 1);
+#else
         samples.push_back({ statusValue("VmRSS"), statusValue("Threads"), openFileDescriptors() });
+#endif
         if (i % 10 == 9)
             printf("crtweb_lifecycle_test: iteration %d: rss %ld KiB, %ld threads, %u descriptors\n",
                 i + 1, samples.back().rssKiB, samples.back().threads, samples.back().descriptors);
