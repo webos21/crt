@@ -11,6 +11,39 @@ substantive update.
 
 ## 2026-10-12
 
+### Web Tranche 3B milestone B4 replayed on Windows/x64: process kill, handle lifetime and AF_UNIX close fixed in the PAL
+
+`build_webkit_crt_port.py --webkit --run-tests` (Windows host, persona clang/lld, imported libc++) builds a static
+`libWebKit.a`, `WebProcess`, `NetworkProcess` and `crtweb_process_test`; the gate passes (`crtweb_process_test` 10/10
+consecutive runs, no `WebProcess`/`NetworkProcess` left in the process list, `crtweb_webcore_graph_test` unchanged).
+Nothing in upstream WebKit's IPC changed: the unix backend, `posix_spawn` launcher and generic run loop run over the PAL.
+
+- *Build.* Framework header copies are symlinks when the host can create them (probe in `OptionsCRT.cmake`; needs
+  Developer Mode on Windows). `libWebKit` is static on Windows (a DLL would export 206,769 symbols, the PE limit is
+  65,535); `dllcrt.o` has a weak `__dso_handle` for the DLLs that remain. `-D_LIBCPP_WIN32API` is added to the WebKit
+  flags: without it WebKit's `std::filesystem` calls disagree with the imported libc++ DLL about `path::value_type`
+  (`wchar_t` vs `char`), which was a SIGSEGV in `recursive_directory_iterator`; the resulting `std::string`
+  conversion in `FileSystem.cpp` is carried patch 0015. `--recompose` reconfigure passes every cache define.
+- *`readlink("/proc/self/exe")`* returns the executable path (forward slashes), so the launcher's sibling lookup works.
+- *Cross-process `kill()`.* There are no signals: `kill(pid, 0)` probes with `OpenProcess`, `SIGKILL` is
+  `TerminateProcess` with an exit code tagged `0x4B110000|sig`, which `waitpid` reports as `WIFSIGNALED`; other signals
+  are `ENOSYS` (`spawn_kill_test`).
+- *Descriptors in flight.* A socket passed by `SCM_RIGHTS` or inherited by `posix_spawn` was `WSADuplicateSocket`ed;
+  that copy dies with the sender, and the Web process lost its connection when the UI process's Network-process end
+  closed. Sockets are now `DuplicateHandle`d into the target (`WSAStartup` is run on import) so the connection
+  outlives the sender.
+- *Graceful AF_UNIX close.* An abortive last close discards unread data and the peer sees a reset, not EOF. When a
+  close or process exit drops the last handle of a socket (`NtQueryObject` `HandleCount == 1`) it is `shutdown(SD_SEND)`
+  first, so the peer reads what was sent and then EOF.
+- *Handle inheritance.* CRT sockets are created non-inheritable (`SetHandleInformation`); an inheritable handle in a
+  later-spawned child kept the NetworkProcess's connection alive after the UI process exited.
+- Test: `crtweb_process_test` lists children with Toolhelp32 (no `/proc`) and skips processes that have exited but
+  are still held by a handle, and gives the reaper up to 5 s to retire the killed process (it took ~100 ms).
+
+Dropped: `unix_select_test` and `unix_fd_inflight_test` (their results depended on the fork-capable relaunch hop test
+executables use, not on the behaviour under test). Open: Windows B5 onward; the Linux/macOS hosts have not re-run the
+shared changes (`spawn_kill_test`, `OptionsCRT.cmake`, patch 0015, `crtweb_process_test`).
+
 ### Web Tranche 3B milestone B4 replayed on macOS/arm64: three libc defects found and fixed
 
 `build_webkit_crt_port.py --webkit --run-tests` builds `libWebKit.dylib`, `WebProcess` and `NetworkProcess` on macOS

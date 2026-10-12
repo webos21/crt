@@ -104,6 +104,9 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
 - `0013` selects `DrawingAreaCRT` in `DrawingArea::create`.
 - `0014` spells the definition of `WebPasteboardProxy::readStringFromPasteboard` with the declaration's `uint64_t` (the same
   type as `size_t` on LP64 Linux, a different one on Darwin). Removal: upstream fixes the definition.
+- `0015` converts `std::filesystem::temp_directory_path()` to `std::string` explicitly in `WTF/FileSystem.cpp`: with
+  `-D_LIBCPP_WIN32API` (needed on Windows so WebKit and the imported libc++ agree on `path::value_type`) the path's
+  native string is `std::wstring`. Removal: upstream uses `.string()` or the Windows port is built as `PORT=Win`.
 
 ## WebKit files of PlatformCRT (milestone B4)
 

@@ -1524,6 +1524,15 @@ a mask of the framed descriptors of the record (`docs/porting/bionic_libc_gaps.m
 `ps(1)` (no `/proc`). *Not exercised on macOS:* the same set as Linux (painting, input, any network request, the
 injected bundle).
 
+*B4 replayed on Windows/x64 (2026-10-12).* The same gate passes (`--webkit --run-tests`, `crtweb_process_test` 10/10,
+no leftover child). Upstream's `win` launcher is not used: the `posix_spawn` launcher and the Unix IPC backend run
+over the PAL, as on the other hosts. What differed is PAL and build, not WebKit: a static `libWebKit` (the DLL would
+exceed the PE export limit), `-D_LIBCPP_WIN32API` plus patch 0015 for `std::filesystem`, `readlink("/proc/self/exe")`,
+cross-process `kill(pid, SIGKILL)`, sockets passed to another process with `DuplicateHandle` (a `WSADuplicateSocket`
+copy dies with the sender), a graceful `shutdown` when the last handle of an AF_UNIX socket closes, and non-inheritable
+sockets (details in `docs/porting/bionic_libc_gaps.md`). The test lists children with Toolhelp32 and allows the reaper
+a moment to retire the killed process. *Not exercised on Windows:* the same set as Linux and macOS.
+
 *Risks, named so they are watched rather than discovered.* (1) ~~The bundled Skia m154 must build with
 CRT's clang and libc++~~ *retired by B3 (it does)* (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about
 16,000 files, so build time and the unified-source layout dominate iteration; (3) OpenSSL and an

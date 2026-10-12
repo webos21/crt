@@ -454,6 +454,23 @@ the child and returns the value. On macOS `readlink("/proc/self/exe")` read the 
 (`EINVAL`); it returns the canonical path. `strerror` gained the Bionic messages for `EPROTO`, `EBADMSG`, `ESTALE` and the
 other errno values it lacked. Tests: `spawn_status_test`, `unix_socket_test`.
 
+## Process kill and socket lifetime on Windows (2026-10-12)
+
+Found by the Windows replay of B4 (`libc/src/arch/windows/common/syscall.c`).
+
+- *`kill()`.* Windows has no signals. `kill(pid, 0)` probes the process (`OpenProcess`); `SIGKILL` is
+  `TerminateProcess` with an exit code `0x4B110000|sig`, and `waitpid` maps that tag to `WIFSIGNALED`/`WTERMSIG`.
+  Other signals return `ENOSYS`. A native Windows process killed this way reports the tag too. Test: `spawn_kill_test`.
+- *`readlink("/proc/self/exe")`* returns `GetModuleFileName` with forward slashes, no NUL, truncated to the buffer.
+- *Sockets passed to another process* (`SCM_RIGHTS`, the `posix_spawn` descriptor snapshot) are `DuplicateHandle`d into
+  the target; the receiver runs `WSAStartup` before using the handle. `WSADuplicateSocket` was used before: its copy is
+  destroyed with the sending process, so a descriptor in flight died with the sender.
+- *Close.* An abortive close of the last handle of an AF_UNIX socket discards unread data and resets the peer. The last
+  handle (`NtQueryObject` `HandleCount == 1`), on `close` and at `exit`, is `shutdown(SD_SEND)` first so the peer reads
+  its data and then sees EOF. Limit: a handle held by another process is not counted as "last".
+- *Inheritance.* CRT sockets are non-inheritable; a handle inherited by an unrelated native child kept connections alive
+  past the exit of their owners. Descriptors reach CRT children through the spawn snapshot, not handle inheritance.
+
 ## IPv6 on macOS (2026-10-11)
 
 Found by turning IPv6 back on in libcurl: the macOS socket layer translated only `AF_INET` and `AF_UNIX`.
