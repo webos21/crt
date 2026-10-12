@@ -354,6 +354,11 @@ set_tests_properties(job_control_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "job_control_test: ok"
 )
 
+add_crt_test(spawn_status_test spawn_status_test.c)
+set_tests_properties(spawn_status_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "spawn_status_test: ok"
+  TIMEOUT 60)
+
 add_crt_test(rootfs_process_test rootfs_process_test.c)
 set_tests_properties(rootfs_process_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "rootfs_process_test: ok"

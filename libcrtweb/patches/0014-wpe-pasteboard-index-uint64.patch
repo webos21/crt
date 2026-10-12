@@ -1,0 +1,11 @@
+--- a/Source/WebKit/UIProcess/libwpe/WebPasteboardProxyLibWPE.cpp	2026-10-12 13:10:59
++++ b/Source/WebKit/UIProcess/libwpe/WebPasteboardProxyLibWPE.cpp	2026-10-12 13:10:59
+@@ -40,7 +40,7 @@
+     completionHandler(WTF::move(pasteboardTypes));
+ }
+ 
+-void WebPasteboardProxy::readStringFromPasteboard(IPC::Connection&, size_t index, const String& pasteboardType, const String&, std::optional<WebPageProxyIdentifier>, CompletionHandler<void(String&&)>&& completionHandler)
++void WebPasteboardProxy::readStringFromPasteboard(IPC::Connection&, uint64_t index, const String& pasteboardType, const String&, std::optional<WebPageProxyIdentifier>, CompletionHandler<void(String&&)>&& completionHandler)
+ {
+     completionHandler(PlatformPasteboard().readString(index, pasteboardType));
+ }

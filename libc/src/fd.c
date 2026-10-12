@@ -2431,6 +2431,27 @@ ssize_t readlink(const char* path, char* buf, size_t bufsiz) {
   if (path == 0 || buf == 0) {
     return (ssize_t)__set_errno(EINVAL);
   }
+#if defined(CRT_TARGET_OS_MACOS)
+  if (strcmp(path, "/proc/self/exe") == 0) {
+    /* Linux returns the executable's absolute path as the link target. Mapping the name to the
+     * executable (rootfs_path_for_host) and reading that "link" gave EINVAL, so the path itself is
+     * the answer here (canonical, no terminating NUL). */
+    char raw[PATH_MAX];
+    char canonical[PATH_MAX];
+    const char* exe = macos_resolve_proc_self_exe(raw);
+    size_t length;
+
+    if (exe == 0 || realpath(exe, canonical) == 0) {
+      return (ssize_t)__set_errno(ENOENT);
+    }
+    length = strlen(canonical);
+    if (length > bufsiz) {
+      length = bufsiz;
+    }
+    memcpy(buf, canonical, length);
+    return (ssize_t)length;
+  }
+#endif
 #if !defined(CRT_TARGET_OS_WINDOWS)
   path = rootfs_path_for_host(path, translated_path);
 #endif

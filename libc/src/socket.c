@@ -820,6 +820,13 @@ static void cloexec_received_descriptors(struct msghdr* msg) {
  * 4-byte length followed by the payload; SCM_RIGHTS travels in the same sendmsg() as the length, so
  * Darwin delivers the descriptors with the first bytes of the record. Both ends must be CRT.
  *
+ * Which descriptors are framed is per process, so a framed socket that is itself sent as an
+ * SCM_RIGHTS descriptor would arrive in the receiving process as a plain stream, and the peer
+ * (still framed) would read its raw bytes as a record length. The length word therefore carries a
+ * flag (bit 31): when set, an 8-byte mask follows it with one bit per descriptor of the record that
+ * is a framed socket in the sender, and the receiver frames exactly those descriptors as it
+ * delivers them. A record without framed descriptors keeps the plain 4-byte header.
+ *
  * A framed socket has one state object (struct seq_socket) shared by every descriptor made from it
  * with dup()/fcntl(F_DUPFD): it serializes senders (a record is written by one thread at a time),
  * serializes receivers, and keeps a partly received record -- header bytes, payload, and the
@@ -840,15 +847,17 @@ static void cloexec_received_descriptors(struct msghdr* msg) {
 #define CRT_SEQPACKET_MAX_IOV 64
 #define CRT_SEQPACKET_MAX_FDS 64
 #define CRT_SEQPACKET_ENV "CRT_SEQPACKET_FDS"
+#define CRT_SEQPACKET_FDMASK_FLAG 0x80000000u
 
 struct seq_socket {
   int refs;
   crt_spinlock tx_lock;
   crt_spinlock rx_lock;
   /* A record being received. */
-  unsigned char header[4];
+  unsigned char header[12]; /* length word, then (flag bit) the framed-descriptor mask */
   size_t header_have;
   uint32_t length;
+  uint64_t fd_mask;
   size_t body_have;
   unsigned char* body;
   int fds[CRT_SEQPACKET_MAX_FDS];
@@ -883,6 +892,7 @@ static void seq_discard_record(struct seq_socket* s) {
   s->body = 0;
   s->header_have = 0;
   s->length = 0;
+  s->fd_mask = 0;
   s->body_have = 0;
 }
 
@@ -973,7 +983,10 @@ static ssize_t seqpacket_send(int fd, const struct iovec* iov, int iovcnt, void*
   struct seq_socket* state = seq_lookup(fd);
   struct iovec vec[CRT_SEQPACKET_MAX_IOV + 1];
   uint32_t length = 0;
-  uint32_t header;
+  unsigned char header[12];
+  size_t header_len = sizeof(uint32_t);
+  uint32_t word;
+  uint64_t mask = 0;
   size_t total;
   size_t sent = 0;
   struct msghdr msg;
@@ -996,13 +1009,42 @@ static ssize_t seqpacket_send(int fd, const struct iovec* iov, int iovcnt, void*
     }
     length += (uint32_t)iov[i].iov_len;
   }
-  header = length;
-  vec[0].iov_base = &header;
-  vec[0].iov_len = sizeof(header);
+  word = length;
+  if (control != 0 && controllen >= sizeof(struct cmsghdr)) {
+    struct msghdr scan;
+    struct cmsghdr* cmsg;
+    unsigned int index = 0;
+
+    memset(&scan, 0, sizeof(scan));
+    scan.msg_control = control;
+    scan.msg_controllen = controllen;
+    for (cmsg = CMSG_FIRSTHDR(&scan); cmsg != 0; cmsg = CMSG_NXTHDR(&scan, cmsg)) {
+      if (cmsg->cmsg_level == CRT_DARWIN_SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS &&
+          cmsg->cmsg_len >= CMSG_LEN(0)) {
+        const size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+        const int* fds = (const int*)CMSG_DATA(cmsg);
+        size_t k;
+
+        for (k = 0; k < count; ++k, ++index) {
+          if (index < CRT_SEQPACKET_MAX_FDS && seq_lookup(fds[k]) != 0) {
+            mask |= (uint64_t)1 << index;
+          }
+        }
+      }
+    }
+  }
+  if (mask != 0) {
+    word |= CRT_SEQPACKET_FDMASK_FLAG;
+    header_len = sizeof(header);
+    memcpy(header + sizeof(word), &mask, sizeof(mask));
+  }
+  memcpy(header, &word, sizeof(word));
+  vec[0].iov_base = header;
+  vec[0].iov_len = header_len;
   for (i = 0; i < iovcnt; ++i) {
     vec[i + 1] = iov[i];
   }
-  total = sizeof(header) + length;
+  total = header_len + length;
 
   memset(&msg, 0, sizeof(msg));
   msg.msg_iov = vec;
@@ -1097,6 +1139,21 @@ static long seq_read_step(int fd, void* buffer, size_t count, void* control, siz
   return r;
 }
 
+/* Bytes of header the record in progress has: 4, or 12 once the length word flags a mask. */
+static size_t seq_header_need(const struct seq_socket* s) {
+  uint32_t word;
+
+  if (s->header_have < sizeof(word)) {
+    return sizeof(word);
+  }
+  memcpy(&word, s->header, sizeof(word));
+  /* An oversize length is a violation whatever follows: do not wait for a mask that may never come. */
+  if ((word & CRT_SEQPACKET_FDMASK_FLAG) == 0 || (word & ~CRT_SEQPACKET_FDMASK_FLAG) > CRT_SEQPACKET_MAX_RECORD) {
+    return sizeof(word);
+  }
+  return sizeof(s->header);
+}
+
 static ssize_t seqpacket_recvmsg(int fd, struct msghdr* msg, int bionic_flags) {
   struct seq_socket* s = seq_lookup(fd);
   unsigned char control[CMSG_SPACE(sizeof(int) * CRT_SEQPACKET_MAX_FDS)];
@@ -1137,9 +1194,9 @@ static ssize_t seqpacket_recvmsg(int fd, struct msghdr* msg, int bionic_flags) {
     struct msghdr received;
     long r;
 
-    if (s->header_have < sizeof(s->header)) {
+    if (s->header_have < seq_header_need(s)) {
       /* The length; the descriptors of the record come with its first byte. */
-      r = seq_read_step(fd, s->header + s->header_have, sizeof(s->header) - s->header_have,
+      r = seq_read_step(fd, s->header + s->header_have, seq_header_need(s) - s->header_have,
                         s->header_have == 0 ? control : 0, s->header_have == 0 ? sizeof(control) : 0,
                         &received);
       if (r > 0) {
@@ -1147,8 +1204,15 @@ static ssize_t seqpacket_recvmsg(int fd, struct msghdr* msg, int bionic_flags) {
           seq_collect_fds(s, &received);
         }
         s->header_have += (size_t)r;
-        if (s->header_have == sizeof(s->header)) {
+        if (s->header_have == seq_header_need(s)) {
           memcpy(&s->length, s->header, sizeof(s->length));
+          s->fd_mask = 0;
+          if ((s->length & CRT_SEQPACKET_FDMASK_FLAG) != 0) {
+            if (s->header_have == sizeof(s->header)) {
+              memcpy(&s->fd_mask, s->header + sizeof(s->length), sizeof(s->fd_mask));
+            }
+            s->length &= ~CRT_SEQPACKET_FDMASK_FLAG;
+          }
           if (s->length > CRT_SEQPACKET_MAX_RECORD) {
             seq_discard_record(s);
             s->broken = 1;
@@ -1249,6 +1313,11 @@ static ssize_t seqpacket_recvmsg(int fd, struct msghdr* msg, int bionic_flags) {
         msg->msg_controllen = (socklen_t)caller_control;
       }
       delivered_fds = (int)fit;
+      for (i = 0; i < delivered_fds; ++i) {
+        if ((s->fd_mask >> i) & 1) {
+          seqpacket_set(s->fds[i], 1); /* a framed socket in the sender is one here too */
+        }
+      }
       if ((bionic_flags & MSG_CMSG_CLOEXEC) != 0) {
         for (i = 0; i < delivered_fds; ++i) {
           (void)__crt_fd_set_cloexec(s->fds[i], 1);
@@ -1278,6 +1347,7 @@ static ssize_t seqpacket_recvmsg(int fd, struct msghdr* msg, int bionic_flags) {
   s->body = 0;
   s->header_have = 0;
   s->length = 0;
+  s->fd_mask = 0;
   s->body_have = 0;
   crt_spin_unlock(&s->rx_lock);
   return result;

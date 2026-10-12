@@ -490,6 +490,11 @@ case "$target_os" in
         # headers need this back, and why a later -D always wins over an
         # earlier -U for the same macro on the same command line.
         common_flags="$common_flags -D__APPLE__=1"
+      else
+        # The Bionic-shaped persona has no Blocks runtime (no <Block.h>, no libBlocksRuntime): clang
+        # defines __BLOCKS__ for Darwin targets, which makes upstream code such as WebKit's
+        # WKPage.cpp include <Block.h>. The real Apple SDK compiles keep Blocks.
+        common_flags="$common_flags -fno-blocks"
       fi
     fi
     ;;

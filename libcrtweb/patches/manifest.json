@@ -455,6 +455,23 @@
       ],
       "reason": "DrawingArea::create picks the drawing area by platform macro: Cocoa, WC, or one of two Coordinated Graphics flavours (the GLib/GL one for GTK and WPE, a PlayStation-era one for the rest). The second no longer builds against LayerTreeHost, and the first needs GLib, EGL and a GPU. PlatformCRT supplies its own (DrawingAreaCRT, libcrtweb/port) and this patch is the hook that selects it.",
       "remove_when": "Upstream adds a platform drawing-area registration point, or PlatformCRT paints through a maintained shared drawing area."
+    },
+    {
+      "id": "0014-wpe-pasteboard-index-uint64",
+      "patch": "0014-wpe-pasteboard-index-uint64.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/UIProcess/libwpe/WebPasteboardProxyLibWPE.cpp",
+          "sha256_before": "e4e35212ab2d7453399d512f22f605a1fda2b8dc659e2c4276bcbe0af95ed5f0",
+          "sha256_after": "32a05e68a407ef50bff94478cea2768938877e81d4b1c21568e329954966b8f1",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "WebPasteboardProxy::readStringFromPasteboard is declared with uint64_t (the IPC message's type) but the libwpe file defines it with size_t, which are the same type on LP64 Linux and Windows-LP64-less targets but distinct on Darwin (unsigned long vs unsigned long long): the out-of-line definition matches no declaration there. The declaration is the IPC contract, so the definition follows it.",
+      "remove_when": "Upstream spells the definition with the declaration's type (a WebKit bug fix; no CRT-specific condition)."
     }
   ],
   "license_policy": {

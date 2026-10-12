@@ -429,6 +429,12 @@ records, `SCM_RIGHTS` sent in the same `sendmsg()` as the length. Both peers mus
   what calls it) list the framed descriptors that are still sockets, after the file actions renumbered them, in
   `CRT_SEQPACKET_FDS` of the new environment; `__crt_env_set_initial()` of the new image reads and removes it. A child
   that is not CRT ignores the variable. `fork` copies the table and resets the locks in the child.
+- *Passed sockets.* A framed socket that is itself sent in an `SCM_RIGHTS` message would arrive in the receiving process
+  as a plain stream (the flag is per process), and its framed peer would take the raw bytes for a record length (found by
+  WebKit's Network/Web process connection, B4 on macOS). Bit 31 of the length word announces that an 8-byte mask follows,
+  one bit per descriptor of the record that is framed in the sender; the receiver frames those descriptors as it delivers
+  them. Records without framed descriptors keep the 4-byte header, and an oversize length is rejected before any mask is
+  awaited.
 - *Limits.* 64 MiB per record, 64 iovecs and 64 descriptors per record, descriptors below 4096; `MSG_PEEK` unsupported.
 
 Separately, `recv`/`send`/`recvmsg`/`sendmsg` flags were passed to Darwin with Linux numbers (`MSG_DONTWAIT` arrived
@@ -438,6 +444,15 @@ received descriptors, and Darwin's un-clamped `cmsg_len` after `MSG_CTRUNC` is c
 record and for a peer that closes mid-record, `readv`/`writev` records, four concurrent senders of 70 KB records,
 descriptor inheritance across `posix_spawn`, duplication at the table limit; each fails when the behaviour it covers is
 removed), `socketpair_test`, `crtweb_wire_transport_test`.
+
+## Process spawning and `/proc/self/exe` (2026-10-12)
+
+Found by the macOS replay of B4. `posix_spawn()`/`posix_spawnp()` on Linux and macOS are fork + exec, and a failure after
+the fork (the exec itself, a file action, the attributes) was an `_exit(127)` the caller never heard of; Bionic and glibc
+return the errno. A close-on-exec status pipe, its write end moved above descriptor 192, carries it back; the parent reaps
+the child and returns the value. On macOS `readlink("/proc/self/exe")` read the executable file as if it were a link
+(`EINVAL`); it returns the canonical path. `strerror` gained the Bionic messages for `EPROTO`, `EBADMSG`, `ESTALE` and the
+other errno values it lacked. Tests: `spawn_status_test`, `unix_socket_test`.
 
 ## IPv6 on macOS (2026-10-11)
 

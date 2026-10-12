@@ -102,6 +102,8 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
   (clang's `#pragma once` does not deduplicate copies; GCC does, which is why Linux/GCC ports do not
   meet it).
 - `0013` selects `DrawingAreaCRT` in `DrawingArea::create`.
+- `0014` spells the definition of `WebPasteboardProxy::readStringFromPasteboard` with the declaration's `uint64_t` (the same
+  type as `size_t` on LP64 Linux, a different one on Darwin). Removal: upstream fixes the definition.
 
 ## WebKit files of PlatformCRT (milestone B4)
 

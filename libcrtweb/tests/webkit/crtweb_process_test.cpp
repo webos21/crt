@@ -10,7 +10,7 @@
 //      webProcessDidCrash fires, and the dead pid is no longer a child.
 // It never paints: milestone B5 does.
 //
-// Linux-only as written (it finds the Network process by reading /proc).
+// Children are found by reading /proc on Linux and by asking ps(1) elsewhere (macOS has no /proc).
 
 #define BUILDING_CRT__ 1
 
@@ -52,6 +52,30 @@ static void check(bool condition, const char* what)
     ++failures;
 }
 
+#if defined(CRT_TARGET_OS_MACOS)
+// Children of this process whose executable is named `name`, from `ps -axo pid=,ppid=,comm=`.
+static std::vector<pid_t> childrenNamed(const char* name)
+{
+    std::vector<pid_t> result;
+    FILE* pipe = popen("ps -axo pid=,ppid=,comm=", "r");
+    if (!pipe)
+        return result;
+    char line[4096];
+    while (fgets(line, sizeof line, pipe)) {
+        int pid = 0, ppid = 0, offset = 0;
+        if (sscanf(line, " %d %d %n", &pid, &ppid, &offset) < 2 || ppid != getpid())
+            continue;
+        std::string executable = line + offset;
+        while (!executable.empty() && (executable.back() == '\n' || executable.back() == ' '))
+            executable.pop_back();
+        size_t slash = executable.rfind('/');
+        if (executable.substr(slash == std::string::npos ? 0 : slash + 1) == name)
+            result.push_back(static_cast<pid_t>(pid));
+    }
+    pclose(pipe);
+    return result;
+}
+#else
 static std::string readLink(const std::string& path)
 {
     char buffer[4096];
@@ -100,6 +124,8 @@ static std::vector<pid_t> childrenNamed(const char* name)
     closedir(directory);
     return result;
 }
+
+#endif
 
 static void didFinishNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void*)
 {

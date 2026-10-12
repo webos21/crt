@@ -627,6 +627,49 @@ static void test_fd_passing_between_processes(const char* self) {
 
 #if !defined(_WIN32) && !defined(__MINGW32__)
 /* Linux (native) and macOS (CRT framing); the Windows layer has its own coverage above. */
+/* A SOCK_SEQPACKET socket sent as an SCM_RIGHTS descriptor is still a record socket in the
+ * receiver (WebKit's Network process hands the Web process one end of a pair it made): the record
+ * boundaries hold from the received end to the one that stayed, and back. A plain descriptor sent
+ * in the same message stays plain. */
+static void test_passed_seqpacket_socket(void) {
+  int channel[2];
+  int pair[2];
+  int pipe_fds[2];
+  int sent[2];
+  int got[4];
+  int count = 0;
+  char data[8];
+  char buffer[64];
+
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, channel) == 0 && socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair) == 0 &&
+            pipe(pipe_fds) == 0,
+        "pairs for passing a record socket");
+  sent[0] = pair[1];
+  sent[1] = pipe_fds[0];
+  CHECK(send_fds(channel[0], "R", 1, sent, 2) == 1, "send a record socket and a pipe end together");
+  CHECK(recv_fds(channel[1], data, sizeof(data), got, 4, &count, 0, 0) == 1 && count == 2, "receive both");
+  close(pair[1]);
+  close(pipe_fds[0]);
+  if (count == 2) {
+    CHECK(send(pair[0], "one", 3, 0) == 3 && send(pair[0], "second", 6, 0) == 6, "two records to the passed end");
+    CHECK(recv(got[0], buffer, sizeof(buffer), 0) == 3 && memcmp(buffer, "one", 3) == 0,
+          "the passed end receives the first record alone");
+    CHECK(recv(got[0], buffer, sizeof(buffer), 0) == 6 && memcmp(buffer, "second", 6) == 0,
+          "and the second");
+    CHECK(send(got[0], "back", 4, 0) == 4 && recv(pair[0], buffer, sizeof(buffer), 0) == 4 &&
+              memcmp(buffer, "back", 4) == 0,
+          "a record from the passed end arrives whole");
+    CHECK(write(pipe_fds[1], "pp", 2) == 2 && read(got[1], buffer, sizeof(buffer)) == 2 && memcmp(buffer, "pp", 2) == 0,
+          "the plain descriptor of the same message is still a plain pipe");
+    close(got[0]);
+    close(got[1]);
+  }
+  close(pair[0]);
+  close(pipe_fds[1]);
+  close(channel[0]);
+  close(channel[1]);
+}
+
 static void test_readv_writev_records(void) {
   int sv[2];
   char head[4] = {'H', 'E', 'A', 'D'};
@@ -981,6 +1024,7 @@ int main(int argc, char** argv) {
 #if !defined(_WIN32) && !defined(__MINGW32__)
     /* Linux (native) and macOS (CRT framing); the Windows layer has its own coverage above and
      * its descriptor inheritance goes through the fd snapshot, not the environment. */
+    test_passed_seqpacket_socket();
     test_readv_writev_records();
     test_concurrent_senders();
     test_descriptor_inherited_across_exec(argv[0]);

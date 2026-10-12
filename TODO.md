@@ -103,7 +103,8 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **3B-B3:** build/link WTF, PAL and WebCore with bundled Skia and pass the
     graph/paint/text test on all four acceptance pairs.
   * [x] **3B-B4:** on Linux/x86_64 launch UI/Web/Network processes, round-trip IPC
-    and detect forced child termination.
+    and detect forced child termination. Replayed on macOS/arm64 (2026-10-12);
+    Windows/x64 is open.
   * [ ] **3B-B5, next:** load `reference.html`, paint in `DrawingAreaCRT`, deliver
     the first 640x480 frame through the 3A contract, present it through the CRT
     consumer and report its difference from the Tranche 2 reference.

@@ -11,6 +11,36 @@ substantive update.
 
 ## 2026-10-12
 
+### Web Tranche 3B milestone B4 replayed on macOS/arm64: three libc defects found and fixed
+
+`build_webkit_crt_port.py --webkit --run-tests` builds `libWebKit.dylib`, `WebProcess` and `NetworkProcess` on macOS
+and `crtweb_process_test` passes (10/10 consecutive runs, no child left, no IPC error on stderr, `crtweb_webcore_graph_test`
+unchanged). Two compile errors and three runtime defects stood between the Linux result and that.
+
+- *Compile.* `WebPasteboardProxyLibWPE.cpp` defines `readStringFromPasteboard(..., size_t index, ...)` for a declaration
+  with `uint64_t`: the same type on LP64 Linux, distinct on Darwin (`unsigned long` against `unsigned long long`); carried
+  patch 0014 spells the definition with the declaration's type. `WKPage.cpp` includes `<Block.h>` under `__BLOCKS__`,
+  which clang defines for Darwin targets; `crt-cc`/`crt-c++` pass `-fno-blocks` outside the real-SDK compiles (the persona
+  has no Blocks runtime).
+- *`readlink("/proc/self/exe")`* mapped the name to the executable and then read that regular file as a link (`EINVAL`), so
+  WebKit's launcher fell back to `./WebProcess`. It now returns the canonical executable path, as Linux does.
+- *`posix_spawn` of a missing executable returned 0.* The fork/exec implementation (Linux and macOS) exited 127 in the
+  child without telling the parent; the launcher believed it had a child that never answered. A close-on-exec status pipe now
+  carries the failing `errno` of the file actions, the attributes or the exec back to `posix_spawn()`, which reaps the child
+  and returns it (`spawn_status_test`).
+- *A framed SEQPACKET socket sent as `SCM_RIGHTS` arrived as a plain stream.* The framing flag is per process, so the
+  Web process wrote raw bytes to its end of the pair the Network process made, and the Network process (framed) read
+  `00 00 01 68` as a 1.7 GB record length: `Error receiving IPC message ... Unknown error 71` and a connection that never
+  worked, hidden by the test passing on the UI-process pair alone. The length word now has a flag bit announcing an 8-byte
+  mask of the record's descriptors that are framed in the sender; the receiver frames exactly those on delivery
+  (`unix_socket_test`: `test_passed_seqpacket_socket`; it fails with the delivery step removed).
+- `strerror` had no text for `EPROTO` and 18 other errno values Bionic defines (`Unknown error 71`).
+- `crtweb_process_test` finds children with `ps(1)` on macOS (no `/proc`).
+
+SDK note: the installed `05-ui` wrappers and `libc` were older than the tree; they were refreshed for this replay (the
+`libc.dylib` must be deleted before it is copied: overwriting a signed dylib in place gets the process `SIGKILL`ed).
+Open: Windows B4 (the `win` launcher), Linux/aarch64 only if assembly changes (policy), B5 onward.
+
 ### Web Tranche 3B milestone B4: the WebKit multi-process model on CRT
 
 `libcrtweb/port/Source/WebKit/PlatformCRT.cmake` builds `libWebKit.so`, `WebProcess` and

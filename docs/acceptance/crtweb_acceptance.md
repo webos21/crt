@@ -1513,6 +1513,17 @@ Network process starts and idles), the injected bundle (the CRT Linux libdl cann
 under load, Windows and macOS (the launcher needs a `/proc/self/exe` replacement on macOS; Windows uses
 upstream's `win` launcher at Tranche 6).
 
+*B4 replayed on macOS/arm64 (2026-10-12).* The same gate passes (`--webkit --run-tests`, incremental on the B3 work root;
+`crtweb_process_test` 10/10, no leftover child, no IPC error). Five things differed from Linux and are fixed in CRT:
+patch 0014 (a `uint64_t`/`size_t` definition that is one type only on LP64 Linux), `-fno-blocks` in the wrappers outside
+real-SDK compiles, `readlink("/proc/self/exe")` (the launcher's sibling lookup), `posix_spawn` reporting a failed exec
+(the launcher otherwise had a silent child), and, the only one that needed design, **framed SOCK_SEQPACKET descriptors
+passed with `SCM_RIGHTS`**: the Network process makes the pair that connects it to a Web process and hands one end to the
+UI process to forward, and the framing flag is per process, so the receiving end read raw. The record header now carries
+a mask of the framed descriptors of the record (`docs/porting/bionic_libc_gaps.md`). The test finds its children with
+`ps(1)` (no `/proc`). *Not exercised on macOS:* the same set as Linux (painting, input, any network request, the
+injected bundle).
+
 *Risks, named so they are watched rather than discovered.* (1) ~~The bundled Skia m154 must build with
 CRT's clang and libc++~~ *retired by B3 (it does)* (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about
 16,000 files, so build time and the unified-source layout dominate iteration; (3) OpenSSL and an

@@ -567,6 +567,24 @@ static int spawn_attr_has_effect(const posix_spawnattr_t attr) {
                            POSIX_SPAWN_USEVFORK | POSIX_SPAWN_RESETIDS)) != 0;
 }
 
+/* The child's end of the exec-status pipe (-1 outside a spawn child). A failure between fork()
+ * and a successful exec -- the file actions, the attributes, or execve() itself -- is reported to
+ * posix_spawn()'s caller as an errno value through it, as Bionic/glibc do: without it a missing
+ * executable looked like a successful spawn of a child that exits 127. The write end is close-on-exec,
+ * so a successful exec closes it and the parent reads end-of-file. */
+static int spawn_status_fd = -1;
+
+static void spawn_child_fail(void) {
+  int error = errno != 0 ? errno : ENOEXEC;
+
+  if (spawn_status_fd >= 0) {
+    ssize_t ignored = write(spawn_status_fd, &error, sizeof error);
+
+    (void)ignored;
+  }
+  _exit(127);
+}
+
 static void apply_spawn_attr_or_exit(const posix_spawnattr_t attr) {
   if (attr == 0) {
     return;
@@ -579,7 +597,7 @@ static void apply_spawn_attr_or_exit(const posix_spawnattr_t attr) {
   }
   if ((attr->flags & POSIX_SPAWN_RESETIDS) != 0) {
     if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
-      _exit(127);
+      spawn_child_fail();
     }
   }
 }
@@ -595,11 +613,11 @@ static void apply_spawn_actions_or_exit(const posix_spawn_file_actions_t actions
       int fd = open(action->path, action->flags, action->mode);
 
       if (fd < 0) {
-        _exit(127);
+        spawn_child_fail();
       }
       if (fd != action->new_fd) {
         if (dup2(fd, action->new_fd) < 0) {
-          _exit(127);
+          spawn_child_fail();
         }
         close(fd);
       }
@@ -607,14 +625,14 @@ static void apply_spawn_actions_or_exit(const posix_spawn_file_actions_t actions
       close(action->fd);
     } else if (action->kind == CRT_SPAWN_ACTION_DUP2) {
       if (dup2(action->fd, action->new_fd) < 0) {
-        _exit(127);
+        spawn_child_fail();
       }
     } else if (action->kind == CRT_SPAWN_ACTION_CHDIR) {
       if (chdir(action->path) < 0) {
-        _exit(127);
+        spawn_child_fail();
       }
     } else {
-      _exit(127);
+      spawn_child_fail();
     }
   }
 }
@@ -628,18 +646,39 @@ long __crt_sys_posix_spawn(
     const posix_spawn_file_actions_t actions,
     const posix_spawnattr_t attr) {
   long child;
+  int status_pipe[2];
   (void)search_path;
 
   if (spawn_attr_has_effect(attr)) {
     return -ENOTSUP;
   }
+  if (pipe(status_pipe) != 0) {
+    return -errno;
+  }
+  /* Keep the write end out of the range the file actions renumber into, where one is available. */
+  {
+    int high = fcntl(status_pipe[1], F_DUPFD_CLOEXEC, 192);
+
+    if (high >= 0) {
+      close(status_pipe[1]);
+      status_pipe[1] = high;
+    } else {
+      fcntl(status_pipe[1], F_SETFD, FD_CLOEXEC);
+    }
+    fcntl(status_pipe[0], F_SETFD, FD_CLOEXEC);
+  }
   child = __crt_sys_fork();
   if (child < 0) {
+    close(status_pipe[0]);
+    close(status_pipe[1]);
     return child;
   }
   if (child == 0) {
     char* const* child_env = envp != 0 ? envp : environ;
 
+    close(status_pipe[0]);
+    spawn_status_fd = status_pipe[1];
+    errno = 0;
     apply_spawn_attr_or_exit(attr);
     apply_spawn_actions_or_exit(actions);
 #if defined(CRT_TARGET_OS_MACOS)
@@ -653,8 +692,30 @@ long __crt_sys_posix_spawn(
       }
     }
 #endif
-    __crt_sys_execve(path, argv, child_env);
-    _exit(127);
+    {
+      long exec_result = __crt_sys_execve(path, argv, child_env);
+
+      errno = exec_result < 0 ? (int)-exec_result : errno;
+    }
+    spawn_child_fail();
+  }
+  close(status_pipe[1]);
+  {
+    int error = 0;
+    ssize_t got;
+
+    do {
+      got = read(status_pipe[0], &error, sizeof error);
+    } while (got < 0 && errno == EINTR);
+    close(status_pipe[0]);
+    if (got == (ssize_t)sizeof error) {
+      int status = 0;
+
+      /* The child failed before exec: reap it so it is not left a zombie. */
+      while (__crt_sys_waitpid(child, &status, 0) < 0 && errno == EINTR) {
+      }
+      return -error;
+    }
   }
   if (pid != 0) {
     *pid = child;
