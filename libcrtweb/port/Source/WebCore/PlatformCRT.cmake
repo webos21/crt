@@ -63,6 +63,7 @@ list(APPEND WebCore_SOURCES
     platform/generic/KeyedDecoderGeneric.cpp
     platform/generic/KeyedEncoderGeneric.cpp
 
+    platform/graphics/DMABufBuffer.cpp
     platform/graphics/PlatformDisplay.cpp
 
     platform/graphics/playstation/SystemFontDatabasePlayStation.cpp
@@ -78,6 +79,7 @@ list(APPEND WebCore_SOURCES
     platform/graphics/egl/GLFenceEGL.cpp
     platform/graphics/egl/GLFenceGL.cpp
 
+    platform/crt/UserAgentCRT.cpp
     platform/network/crt/CurlSSLHandleCRT.cpp
     platform/network/playstation/NetworkStateNotifierPlayStation.cpp
 
@@ -103,6 +105,9 @@ if (TARGET Skia)
 endif ()
 
 list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+    platform/graphics/DMABufBuffer.h
+    platform/graphics/DMABufBufferAttributes.h
+
     rendering/playstation/RenderThemePlayStation.h
 )
 

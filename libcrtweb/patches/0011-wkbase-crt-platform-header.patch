@@ -1,0 +1,24 @@
+diff -urN a/Source/WebKit/Shared/API/c/WKBase.h b/Source/WebKit/Shared/API/c/WKBase.h
+--- a/Source/WebKit/Shared/API/c/WKBase.h	2026-10-12 09:40:24.988748148 +0900
++++ b/Source/WebKit/Shared/API/c/WKBase.h	2026-10-12 09:40:24.988788980 +0900
+@@ -38,7 +38,7 @@
+ #include <WebKit/WKBaseMac.h>
+ #elif defined(_WIN32)
+ #include <WebKit/WKBaseWin.h>
+-#elif defined(__SCE__)
++#elif defined(__SCE__) || defined(BUILDING_CRT__)
+ #include <WebKit/WKBasePlayStation.h>
+ #endif
+ 
+diff -urN a/Source/WebKit/UIProcess/API/C/WKAPICast.h b/Source/WebKit/UIProcess/API/C/WKAPICast.h
+--- a/Source/WebKit/UIProcess/API/C/WKAPICast.h	2026-10-12 09:40:24.989361164 +0900
++++ b/Source/WebKit/UIProcess/API/C/WKAPICast.h	2026-10-12 09:40:24.989406126 +0900
+@@ -444,7 +444,7 @@
+ #include "WKAPICastWin.h"
+ #endif
+ 
+-#if defined(__SCE__)
++#if defined(__SCE__) || defined(BUILDING_CRT__)
+ #include "WKAPICastPlayStation.h"
+ #endif
+ 

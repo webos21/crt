@@ -30,4 +30,5 @@ include(${CMAKE_CURRENT_LIST_DIR}/PlatformJSCOnly.cmake)
 # WebCore's SharedMemory.h uses WTF::UnixFileDescriptor.
 list(APPEND WTF_PUBLIC_HEADERS
     unix/UnixFileDescriptor.h
+    linux/RealTimeThreads.h
 )

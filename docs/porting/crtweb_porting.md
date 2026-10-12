@@ -91,6 +91,28 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
   `PLATFORM(CRT)`: that preference exists only for GTK/WPEPlatform, and the CRT port has no
   hardware-acceleration setting (CPU painting until Tranche 9).
 
+- `0010` widens the 16 files of Source/WebKit that select per-port members and behaviour with
+  `PLATFORM(PLAYSTATION)` (process paths in the launch options, libwpe event classes, the socket
+  monitor of `IPC::Connection`, website-data directories) to `|| PLATFORM(CRT)`.
+- `0011` takes the PlayStation-shaped C API headers (`WKViewRef`, `WKAPICastPlayStation.h`) under
+  `BUILDING_CRT__`.
+- `0012` makes the framework header copies in the build tree symlinks on hosts that can create them
+  (clang's `#pragma once` does not deduplicate copies; GCC does, which is why Linux/GCC ports do not
+  meet it).
+- `0013` selects `DrawingAreaCRT` in `DrawingArea::create`.
+
+## WebKit files of PlatformCRT (milestone B4)
+
+`libcrtweb/port/Source/WebKit/PlatformCRT.cmake` follows `PlatformPlayStation.cmake`. CRT-owned files:
+`UIProcess/Launcher/crt/ProcessLauncherCRT.cpp`, `WebProcess/InjectedBundle/crt/InjectedBundleCRT.cpp`,
+`WebProcess/WebPage/crt/DrawingAreaCRT.{h,cpp}`, `Platform/crt/WPELoaderCRT.cpp`, and in WebCore
+`platform/crt/UserAgentCRT.cpp`. The Web and Network process executables are upstream's Unix entry
+points (`WebProcess/EntryPoint/unix`), linked against `libWebKit.so`. Taken from PlayStation unchanged:
+`Platform/IPC/unix`, the libwpe event files, `UIProcess/playstation` (page client, view, preferences,
+process pool), `WebProcess/playstation`, `Shared/unix/AuxiliaryProcessMain`, the C API. Not taken:
+the PlayStation SDK launcher, bundle loader and `dlopen()` entry points, and the stale compositing
+files (`LayerTreeHostPlayStation`, `ThreadedCompositorPlayStation`, `AcceleratedSurfacePlayStation`).
+
 ## WebCore files of PlatformCRT (milestone B3)
 
 `libcrtweb/port/Source/WebCore/PlatformCRT.cmake` and `.../PAL/pal/PlatformCRT.cmake` follow

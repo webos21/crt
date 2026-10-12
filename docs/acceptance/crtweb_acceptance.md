@@ -1249,7 +1249,7 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 | **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10; replayed 2026-10-11 on macOS/arm64 and 2026-10-12 on Windows/x64**: the 1B/1C JSC acceptance passes through `--port CRT` |
 | **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64), replayed 2026-10-11 (macOS/arm64) and 2026-10-12 (Windows/x64, OpenSSL and libcurl static)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
 | **B3** | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | **done 2026-10-11 (Linux/x86_64), replayed on macOS/arm64 and Windows/x64 (2026-10-12)**: `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link (`tools/build_webkit_crt_port.py --run-tests`) |
-| B4 | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | the UI process launches the Web and Network processes and a message round-trips; killing a child is detected |
+| **B4** | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | **done 2026-10-12 (Linux/x86_64)**: the UI process launches the Web and Network processes and a message round-trips; killing a child is detected (`crtweb_process_test`) |
 | B5 | First render | `reference.html` loads and the Tranche 2 proof holds (DOM/canvas string, 640x480, >= 4 colours), delivered through the 3A frame contract to `surface_probe`; the frame is diffed against the WPE reference and the difference is reported |
 | B6 | Input | the 3A input checks (pointer click -> page report and pixel change, key code/modifiers, wheel, text, resize, stalled consumer) pass against the CRT port instead of the WPE module |
 | B7 | Close | 100x create/destroy without growth, host-ABI audit clean, patch manifest and license scan re-run, docs and `HISTORY.md` updated |
@@ -1467,6 +1467,31 @@ not insert), networking and TLS, any process model, the CA bundle. *Open:* macOS
 and Windows for B3; `UserAgent`, curl TLS handle (CA store) and display files are still the
 PlayStation SDK ones or absent and are CRT-owned work in B4/B5; first-run font scan of the bundled
 fonts takes about two minutes (fontconfig cache).
+
+*B4 result (Linux/x86_64, 2026-10-12).* `tools/build_webkit_crt_port.py --webkit --run-tests` also builds
+`libWebKit.so` and the `WebProcess` and `NetworkProcess` executables and runs
+`libcrtweb/tests/webkit/crtweb_process_test`, a UI process written against the C API: creating a view
+launches both child processes (separate pids, children of the test, running the CRT executables);
+`WKPageLoadHTMLString` goes UI -> Web process and `didFinishNavigation` comes back over the
+SOCK_SEQPACKET/`SCM_RIGHTS` IPC connection; `kill -9` of the Web process is seen as
+`webProcessDidCrash` and the pid is gone. 20/20 consecutive runs pass (0.7 s each) and no child outlives
+the test. The IPC layer is upstream's Unix backend (`Platform/IPC/unix`, with PlayStation's
+select()-based socket monitor: the generic RunLoop has no file-descriptor sources), and the launcher is
+CRT's (`UIProcess/Launcher/crt/ProcessLauncherCRT.cpp`: `posix_spawn`, a reaper thread per child).
+*Decisions this forced (all CRT-owned files or carried patches, `docs/porting/crtweb_porting.md`):*
+upstream's PlayStation WebKit list is stale at this commit (a mis-cased file name, a compositor
+that no longer builds, an SDK-only bundle loader), so PlatformCRT takes the PlayStation files that
+still build, supplies its own injected-bundle loader, user agent and libwpe loader interface, and
+replaces the compositing stack: the maintained one (LayerTreeHost, ThreadedCompositor,
+AcceleratedSurface) requires GLib, EGL and, for software frames, the WPEPlatform buffer protocol, so the
+Web process draws through a CRT `DrawingAreaCRT` that **accepts calls and paints nothing in B4**;
+B5 makes it paint on the CPU and adds the UI-side counterpart. Patches 0010-0013 widen
+`PLATFORM(PLAYSTATION)` sites in WebKit, select the PlayStation-shaped C API headers, make the framework
+header copies symlinks (clang's `#pragma once` does not deduplicate copies: 26 files redefined the same
+enumerators) and hook the drawing area. *Not exercised:* painting, input, any network request (the
+Network process starts and idles), the injected bundle (the CRT Linux libdl cannot load ELF), shutdown
+under load, Windows and macOS (the launcher needs a `/proc/self/exe` replacement on macOS; Windows uses
+upstream's `win` launcher at Tranche 6).
 
 *Risks, named so they are watched rather than discovered.* (1) ~~The bundled Skia m154 must build with
 CRT's clang and libc++~~ *retired by B3 (it does)* (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about

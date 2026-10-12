@@ -1,0 +1,12 @@
+diff -urN a/Source/cmake/WebKitMacros.cmake b/Source/cmake/WebKitMacros.cmake
+--- a/Source/cmake/WebKitMacros.cmake	2026-10-12 09:20:53.325240666 +0900
++++ b/Source/cmake/WebKitMacros.cmake	2026-10-12 09:20:53.325546601 +0900
+@@ -791,7 +791,7 @@
+         # NO_SYMLINK for destinations post-processed in-place (e.g. ANGLE headers).
+         if (opt_COMMAND)
+             set(command ${opt_COMMAND})
+-        elseif (APPLE AND NOT opt_NO_SYMLINK)
++        elseif ((APPLE OR CRT_SYMLINK_FRAMEWORK_HEADERS) AND NOT opt_NO_SYMLINK)
+             set(command ${CMAKE_COMMAND} -E create_symlink)
+         else ()
+             set(command ${CMAKE_COMMAND} -E copy_if_different)

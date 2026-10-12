@@ -28,7 +28,8 @@
 #
 #   OFF (default)  milestone B1: JavaScriptCore exactly as JSCOnly builds it.
 #   ON             milestone B3: WTF, JavaScriptCore, the bundled Skia, PAL and WebCore for the CRT
-#                  platform. WebKit (UI/Web/Network process, milestone B4) is not enabled yet.
+#                  platform. With CRT_ENABLE_WEBKIT=ON as well (milestone B4): WebKit, its Web and
+#                  Network process executables and the CRT process launcher.
 #
 # The ON configuration is modelled on OptionsPlayStation.cmake (a non-GLib, non-Apple port with a
 # generic run loop, curl, OpenSSL and a C embedding API), with Skia in place of Cairo as upstream
@@ -36,6 +37,7 @@
 # crtweb_acceptance.md, "3B plan", decisions D2-D8).
 
 option(CRT_ENABLE_WEBCORE "Build WebCore and PAL for the CRT platform" OFF)
+option(CRT_ENABLE_WEBKIT "Also build WebKit (UI, Web and Network process code); needs CRT_ENABLE_WEBCORE" OFF)
 
 if (NOT CRT_ENABLE_WEBCORE)
     include(OptionsJSCOnly)
@@ -43,12 +45,22 @@ else ()
     set(PORT CRT)
 
     # Dependencies are CRT ports installed under one prefix (porting/recipes, group "web").
+    # Clang deduplicates #pragma once per file, so the framework header copies WebKit makes in the
+    # build tree must be symlinks (patch 0011); a Windows build host may not be able to create them.
+    if (NOT CMAKE_HOST_WIN32)
+        set(CRT_SYMLINK_FRAMEWORK_HEADERS ON)
+    endif ()
+
     find_package(Threads REQUIRED)
     find_package(ICU 70.1 REQUIRED COMPONENTS data i18n uc)
 
     set(ENABLE_WEBKIT_LEGACY OFF)
     set(ENABLE_WEBINSPECTORUI OFF)
-    set(ENABLE_WEBKIT OFF)
+    if (CRT_ENABLE_WEBKIT)
+        set(ENABLE_WEBKIT ON)
+    else ()
+        set(ENABLE_WEBKIT OFF)
+    endif ()
 
     # EGL and GLES2: WebCore links them unconditionally and Skia's Ganesh GL sources always
     # compile. Headers are WebKit's own copy (ThirdParty/ANGLE/include); the libraries are the
