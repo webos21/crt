@@ -11,6 +11,47 @@ substantive update.
 
 ## 2026-10-12
 
+### Web Tranche 3 replayed on Linux/aarch64: B1, B2, B3 and the 3A consumer contracts are green
+
+Ubuntu 26.04 aarch64 QEMU guest (4 CPUs, 7.4 GB RAM), Clang 21.1.8, at `be9df3a`, the in-tree SDK rebuilt with
+`cmake --fresh` (clean build, 0 warnings; `crt-ui-dist` verified; `ctest` 157/157). Nothing in CRT, the carried patches
+or the harnesses had to change.
+
+- **B1.** `build_webkit_jsc.py --port CRT --mode baseline-jit` from an empty work root: 44 acceptance steps pass
+  (compose 42 s, configure 9 s, build 348 s, acceptance 63 s) with a clean host-ABI audit; `--mode interpreter` passes
+  too (build 292 s).
+- **B2.** `port-build-web`/`port-test-web`: all 16 run tests pass (OpenSSL TLS 1.3 handshake in process; the
+  OpenSSL-backed libcurl over HTTPS on IPv4 and `::1` with the `CURLOPT_SSL_CTX_FUNCTION` hook; HarfBuzz, libjpeg-turbo,
+  libwebp, libxml2, libpsl, fontconfig, libwpe), static and shared. `check_web_dependencies.py` resolves all eleven
+  `find_package()` calls inside the prefix.
+- **B3.** `build_webkit_crt_port.py --run-tests -j3`: 7,857 steps in 26 min 30 s on four cores (Release, 3.2 GB build
+  tree). `crtweb_webcore_graph_test` prints element `<div/>`, text width 86.70 and 216 dark pixels, the Linux/x86_64,
+  macOS and Windows numbers. The audit finds no GLib symbol and 26 `DT_NEEDED` entries, all SDK, port or loader.
+- **3A.** `crtweb_wire_layout_test` and `crtweb_wire_transport_test` pass in the plain tree; with Skia on (pinned
+  Skia m148 from `crtgfx-skia-smoke`, 11 min) `crtweb_web_surface_test` prints `ok` and passed 20 of 20 runs, the Skia
+  smokes pass and the full `ctest` is 164/164. The WPE `crt` display module and the native end-to-end run are **not**
+  replayed here by decision: Tranche 2's native WPE reference is the Linux/amd64 comparison baseline only, and the
+  module and its end-to-end run build against it. (The aarch64 host was prepared for it and the reference build was
+  started, then stopped; the build tool stays x86_64-only and no aarch64 change was kept.)
+
+What the replay found:
+
+1. *A repository defect, not a host one.* `dbff12d` added `CurlSSLHandleCRT.cpp` and used it from
+   `PlatformCRT.cmake` without declaring it in `libcrtweb/patches/manifest.json`, so
+   `test_webkit_licensing.test_the_committed_manifest_passes` failed on every host. It is declared now (`BSD-2-Clause`,
+   `origin: crt`); tooling is 120/120 and `check_webkit_patch_manifest.py --tree` passes against the composed checkout
+   (9 patches, 31 modified files, 8 CRT-owned new files).
+2. *The dependency check needs more than `port-build-web`.* WebKit's `find_package(PNG)` and `find_package(SQLite3)` are
+   among its eleven, but libpng and SQLite are not in the `web` group, so a prefix built only with `port-build-web`
+   fails `check_web_dependencies.py` with `Could NOT find PNG`; building `port-build-libpng` and
+   `port-build-sqlite-amalgamation` fixes it.
+3. *Scratch space.* On this host `/tmp` is a 3.7 GB tmpfs (`usrquota`), which is memory and swap. A WebKit work root
+   there fills it (`EDQUOT`, and tool output is lost); work roots belong under `out/`.
+
+Also: the first-run fontconfig scan of the bundled fonts took 73 s here (about two minutes on Linux/x86_64).
+Open: B4-B7; the CA bundle and the SIMD/asm paths stay off, as on the other hosts. The Tranche 2 reference and the WPE
+`crt` module are not part of the aarch64 matrix.
+
 ### macOS AF_UNIX SOCK_SEQPACKET layer re-examined and hardened after review
 
 A review of the first CRT-framed implementation (`6152300`) was checked against the source; the findings that held

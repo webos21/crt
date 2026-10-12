@@ -734,7 +734,7 @@ native Linux desktop: `crtmedia_hw_decode_test` reports
 `hw_frame_observed=yes cpu_transfer=pass fallback=no`; flush/reuse and
 15/15 hardware lifecycle pass; full `ctest` 132/132.
 
-## Web-stage ports (Web Tranche 3B, milestones B2 and B3; Linux/x86_64 2026-10-10..11, macOS/arm64 B2 2026-10-11)
+## Web-stage ports (Web Tranche 3B, milestones B2 and B3; Linux/x86_64 2026-10-10..11, macOS/arm64 B2 2026-10-11, Linux/aarch64 2026-10-12)
 
 The dependencies WebKit's non-GLib ports require (`Source/cmake/OptionsWin.cmake`,
 `OptionsPlayStation.cmake`). They carry `"group": "web"`: `port-build-web`/`port-test-web` build and
@@ -757,8 +757,9 @@ calls against the prefix and fails on any host-path resolution.
 
 All eleven `find_package()` calls (the seven above plus ICU, PNG, SQLite3 and ZLIB from the existing
 ports) resolve under the CRT prefix with WebKit's own Find modules. Verified on Linux/x86_64 and
-macOS/arm64 (every row: static and shared run tests from a clean state, `shared-pass`); Linux/aarch64 and
-Windows are open for every row. The first non-`configure` recipes came with
+macOS/arm64 (every row: static and shared run tests from a clean state, `shared-pass`) and, on 2026-10-12, Linux/aarch64
+(every row, static and shared, 16 run tests; `check_web_dependencies.py` also needs the libpng and SQLite ports built,
+which are outside the `web` group). Windows is recorded below. The first non-`configure` recipes came with
 a `cmake` build system in `tools/crt-port-build.py` (generated cross toolchain file, find roots
 limited to the prefix and the sysroot, host build tools run without the prefix on the loader path),
 `configure_script`, `install_subdir`, `make_targets`/`install_targets`, `@CRT_ARCH@` and per-test

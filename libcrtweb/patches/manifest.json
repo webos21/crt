@@ -356,6 +356,13 @@
       "origin": "crt",
       "license": "BSD-2-Clause",
       "purpose": "force-included into CryptoKeyRSAOpenSSL.cpp: EVP_PKEY_get0_RSA() returning RSA* as OpenSSL 1.1 did"
+    },
+    {
+      "file": "Source/WebCore/platform/network/crt/CurlSSLHandleCRT.cpp",
+      "source": "libcrtweb/port/Source/WebCore/platform/network/crt/CurlSSLHandleCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "CurlSSLHandle::platformInitialize(), the libcurl backend's platform hook (B3): empty, the CA bundle stays unset (the embedder's, Tranche 8); defined because a COFF link reports the reference that an ELF --gc-sections link drops"
     }
   ]
 }

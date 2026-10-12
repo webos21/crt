@@ -1246,9 +1246,9 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 | | Milestone | Gate |
 |---|---|---|
 | B0 | Source and licensing gates | closed above |
-| **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10; replayed 2026-10-11 on macOS/arm64 and 2026-10-12 on Windows/x64**: the 1B/1C JSC acceptance passes through `--port CRT` |
-| **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64), replayed 2026-10-11 (macOS/arm64) and 2026-10-12 (Windows/x64, OpenSSL and libcurl static)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
-| **B3** | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | **done 2026-10-11 (Linux/x86_64), replayed on macOS/arm64 and Windows/x64 (2026-10-12)**: `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link (`tools/build_webkit_crt_port.py --run-tests`) |
+| **B1** | Port skeleton: `PORT=CRT` configures and builds JavaScriptCore from the pinned commit plus overlay | **done 2026-10-10; replayed 2026-10-11 on macOS/arm64 and 2026-10-12 on Windows/x64 and Linux/aarch64**: the 1B/1C JSC acceptance passes through `--port CRT` |
+| **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64), replayed 2026-10-11 (macOS/arm64) and 2026-10-12 (Windows/x64, OpenSSL and libcurl static; Linux/aarch64)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
+| **B3** | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | **done 2026-10-11 (Linux/x86_64), replayed on macOS/arm64, Windows/x64 and Linux/aarch64 (2026-10-12)**: `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link (`tools/build_webkit_crt_port.py --run-tests`) |
 | B4 | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | the UI process launches the Web and Network processes and a message round-trips; killing a child is detected |
 | B5 | First render | `reference.html` loads and the Tranche 2 proof holds (DOM/canvas string, 640x480, >= 4 colours), delivered through the 3A frame contract to `surface_probe`; the frame is diffed against the WPE reference and the difference is reported |
 | B6 | Input | the 3A input checks (pointer click -> page report and pixel change, key code/modifiers, wheel, text, resize, stalled consumer) pass against the CRT port instead of the WPE module |
@@ -1440,6 +1440,22 @@ KERNEL32, and no GLib symbol. The findings are in `HISTORY.md` (2026-10-12): COF
 `SkStrikeRef`), the 8,191-character `.cmd` limit and the 32,767-character spawn limit, native-program redirection, and
 the OpenSSL LLP64 target. *Open on Windows:* the multi-process milestones B4-B7, shared OpenSSL/libcurl, the CA bundle,
 SIMD/asm paths, and a clean-prerequisite story for Perl and pkgconf (`docs/guides` does not list them yet).
+
+*Tranche 3 on Linux/aarch64 (B1, B2, B3 and the 3A consumer contracts, 2026-10-12).* Ubuntu 26.04 aarch64 (QEMU, 4 CPUs,
+7.4 GB RAM), Clang 21.1.8, in-tree SDK rebuilt with `cmake --fresh` (0 warnings, `crt-ui-dist` verified, `ctest`
+157/157), with no change to CRT, the patches or the harnesses. **B1** `--port CRT` passes in `baseline-jit` (44 steps,
+clean host-ABI audit; compose 42 s, build 348 s, acceptance 63 s) and `interpreter` modes. **B2** the web ports'
+16 run tests pass, static and shared (TLS 1.3 handshake; HTTPS through the OpenSSL-backed libcurl on IPv4 and `::1`),
+and `check_web_dependencies.py` resolves all eleven calls once the libpng and SQLite ports are in the prefix.
+**B3** `build_webkit_crt_port.py --run-tests -j3` builds 7,857 steps in 26 min 30 s (Release, 3.2 GB) and the graph
+test prints text width 86.70 and 216 dark pixels, as on the other three hosts; no GLib symbol, 26 `DT_NEEDED`
+entries, none from the host. **3A** the wire layout and transport tests pass, and with Skia on `crtweb_web_surface_test`
+passes 20/20 (`ctest` 164/164). *Not replayed:* the WPE `crt` display module and the native end-to-end run, which need
+the Tranche 2 native WPE reference, which is the Linux/amd64 comparison baseline by decision and is not replayed
+on aarch64.
+*Findings:* `CurlSSLHandleCRT.cpp` was missing from the patch manifest (declared; every host's licensing unit test
+failed on it); the dependency check needs libpng and SQLite3 beyond `port-build-web`; a work root on a small tmpfs
+`/tmp` fails, so use a real disk.
 
 *B3 result (Linux/x86_64, 2026-10-11).* `tools/build_webkit_crt_port.py --run-tests` composes the
 tree (pinned commit + `libcrtweb/port` + patches 0001-0008), configures `-DPORT=CRT

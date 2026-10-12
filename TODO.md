@@ -96,7 +96,7 @@ Linux/x86_64**: `-DPORT=CRT` builds JavaScriptCore from the pinned commit plus `
 eleven) and **B3 is done on Linux/x86_64**: WebCore and PAL build and link with the bundled Skia into
 a program that paints and draws text (`tools/build_webkit_crt_port.py --run-tests`). **Next: B4**
 (UI/Web/Network processes, process launcher, IPC), then B5 first render through the 3A contract, B6
-input, B7 close; B1/B2 are replayed on macOS/arm64 (2026-10-11) and so are 3A's contracts and B3 (2026-10-12; macOS `SOCK_SEQPACKET` is CRT-provided, the WPE `crt` module stays Linux-only); B1-B3 are replayed on Windows/x64 too (2026-10-12; OpenSSL and libcurl static only); the Linux/aarch64 B3 replay is open. Also open:
+input, B7 close; B1/B2 are replayed on macOS/arm64 (2026-10-11) and so are 3A's contracts and B3 (2026-10-12; macOS `SOCK_SEQPACKET` is CRT-provided, the WPE `crt` module stays Linux-only); B1-B3 are replayed on Windows/x64 too (2026-10-12; OpenSSL and libcurl static only); B1-B3 and 3A's consumer contracts are replayed on Linux/aarch64 too (2026-10-12; the WPE module and the Tranche 2 reference stay Linux/x86_64). Also open:
 live crtgfx presentation of a web SurfaceView; GPU-buffer output (Tranche 9).
 * [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
   `crtui`'s web view; no WebKit type in a public header.
