@@ -1,0 +1,11 @@
+--- a/Source/WTF/wtf/FileSystem.cpp
++++ b/Source/WTF/wtf/FileSystem.cpp
+@@ -837,7 +837,7 @@
+ String createTemporaryDirectory()
+ {
+     std::error_code ec;
+-    std::string tempDir = std::filesystem::temp_directory_path(ec);
++    std::string tempDir = std::filesystem::temp_directory_path(ec).string();
+     if (ec)
+         return String();
+ 

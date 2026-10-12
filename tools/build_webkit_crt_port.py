@@ -266,8 +266,10 @@ def main() -> int:
     reconfigure = args.recompose and (build / "build.ninja").exists()
     if reconfigure:
         # Re-run cmake in the existing build directory with the (possibly changed) options.
-        defines = [f"-DCRT_WEBCORE_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webcore'}",
-                   f"-DCRT_WEBKIT_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webkit'}"]
+        # Every -D of a fresh configure (compiler flags included: a change to the persona's flags
+        # must reach an existing build directory), then the explicit defines.
+        fresh = configure_command(tree, build, sdk, prefix, arch, [], target_os)
+        defines = [item for item in fresh if item.startswith("-D") and not item.startswith("-DCMAKE_TOOLCHAIN_FILE")]
         jsc.run(["cmake"] + defines + [f"-D{d}" for d in args.define] + ["."], cwd=build, env=env)
     elif not (build / "build.ninja").exists() or not args.reuse_tree:
         jsc.run(configure_command(tree, build, sdk, prefix, arch, [f"-D{d}" for d in args.define], target_os),

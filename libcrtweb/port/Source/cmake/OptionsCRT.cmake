@@ -46,9 +46,29 @@ else ()
 
     # Dependencies are CRT ports installed under one prefix (porting/recipes, group "web").
     # Clang deduplicates #pragma once per file, so the framework header copies WebKit makes in the
-    # build tree must be symlinks (patch 0011); a Windows build host may not be able to create them.
+    # build tree must be symlinks (patch 0012). A Windows build host can create them only in Developer
+    # Mode (or elevated), so it is probed once: without symlinks the copies remain and the clang
+    # redefinition errors of B4 follow, which the probe's message names.
     if (NOT CMAKE_HOST_WIN32)
         set(CRT_SYMLINK_FRAMEWORK_HEADERS ON)
+    else ()
+        set(_crt_link_probe "${CMAKE_BINARY_DIR}/crt-symlink-probe")
+        file(REMOVE "${_crt_link_probe}")
+        file(CREATE_LINK "${CMAKE_CURRENT_LIST_FILE}" "${_crt_link_probe}" SYMBOLIC RESULT _crt_link_result)
+        file(REMOVE "${_crt_link_probe}")
+        if (_crt_link_result STREQUAL "0")
+            set(CRT_SYMLINK_FRAMEWORK_HEADERS ON)
+        else ()
+            message(WARNING "CRT: this Windows host cannot create symbolic links (${_crt_link_result}); "
+                "enable Developer Mode: WebKit's framework header copies need to be links for clang")
+        endif ()
+    endif ()
+
+    # A PE DLL has at most 65,535 exports and lld's MinGW driver exports everything that is not marked
+    # otherwise: libWebKit has ~207,000 symbols. Every consumer is a CRT program that links WebKit
+    # whole (the Web and Network processes, the UI-process test), so it is a static archive there.
+    if (CMAKE_HOST_WIN32)
+        set(WebKit_LIBRARY_TYPE STATIC)
     endif ()
 
     find_package(Threads REQUIRED)

@@ -10,7 +10,8 @@
 //      webProcessDidCrash fires, and the dead pid is no longer a child.
 // It never paints: milestone B5 does.
 //
-// Children are found by reading /proc on Linux and by asking ps(1) elsewhere (macOS has no /proc).
+// Children are found by reading /proc on Linux, by asking ps(1) on macOS (no /proc) and from a Toolhelp
+// snapshot on Windows.
 
 #define BUILDING_CRT__ 1
 
@@ -26,8 +27,10 @@
 #include <WebKit/WKURL.h>
 #include <WebKit/WKView.h>
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <stdint.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,7 +55,66 @@ static void check(bool condition, const char* what)
     ++failures;
 }
 
-#if defined(CRT_TARGET_OS_MACOS)
+#if defined(WTF_CRT_COFF_ASM)
+// Windows (the persona defines WTF_CRT_COFF_ASM): no /proc and no ps(1); the process list comes from
+// the Toolhelp snapshot, declared here because a CRT program does not see the Win32 headers.
+extern "C" {
+struct CrtProcessEntry {
+    unsigned int size, usage, processId;
+    uintptr_t defaultHeapId;
+    unsigned int moduleId, threads, parentProcessId;
+    int priorityClassBase;
+    unsigned int flags;
+    char exeFile[260];
+};
+void* __stdcall CreateToolhelp32Snapshot(unsigned int flags, unsigned int processId);
+int __stdcall Process32First(void* snapshot, CrtProcessEntry* entry);
+int __stdcall Process32Next(void* snapshot, CrtProcessEntry* entry);
+int __stdcall CloseHandle(void* handle);
+void* __stdcall OpenProcess(unsigned int access, int inherit, unsigned int processId);
+unsigned int __stdcall WaitForSingleObject(void* handle, unsigned int milliseconds);
+}
+
+// A terminated process stays in the snapshot while anyone still holds a handle to it (the CRT's reaper
+// does until waitpid); it is no longer a live child.
+static bool processExited(unsigned int pid)
+{
+    void* process = OpenProcess(0x00100000 /* SYNCHRONIZE */, 0, pid);
+    if (!process)
+        return true;
+    bool exited = WaitForSingleObject(process, 0) == 0 /* WAIT_OBJECT_0 */;
+    CloseHandle(process);
+    return exited;
+}
+
+// Children of this process whose executable is named `name` (with or without ".exe").
+static std::vector<pid_t> childrenNamed(const char* name)
+{
+    std::vector<pid_t> result;
+    void* snapshot = CreateToolhelp32Snapshot(0x2 /* TH32CS_SNAPPROCESS */, 0);
+    if (snapshot == reinterpret_cast<void*>(-1))
+        return result;
+    std::string wanted = name;
+    CrtProcessEntry entry;
+    entry.size = sizeof entry;
+    for (int more = Process32First(snapshot, &entry); more; more = Process32Next(snapshot, &entry)) {
+        if (static_cast<pid_t>(entry.parentProcessId) != getpid())
+            continue;
+        if (processExited(entry.processId))
+            continue;
+        std::string executable = entry.exeFile;
+        for (auto& c : executable)
+            c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+        std::string lowered = wanted;
+        for (auto& c : lowered)
+            c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+        if (executable == lowered || executable == lowered + ".exe")
+            result.push_back(static_cast<pid_t>(entry.processId));
+    }
+    CloseHandle(snapshot);
+    return result;
+}
+#elif defined(CRT_TARGET_OS_MACOS)
 // Children of this process whose executable is named `name`, from `ps -axo pid=,ppid=,comm=`.
 static std::vector<pid_t> childrenNamed(const char* name)
 {
@@ -147,6 +209,7 @@ static void timeoutFired(void*)
 
 int main()
 {
+    setvbuf(stdout, nullptr, _IOLBF, 0); // progress lines survive a hang that the harness kills
     WKRunLoopInitializeMain();
 
     WKContextConfigurationRef contextConfiguration = WKContextConfigurationCreate();
@@ -198,7 +261,19 @@ int main()
     WKRunLoopRunMain();
     alarm(0);
     check(webProcessCrashed, "killing the web process is detected (webProcessDidCrash)");
-    check(childrenNamed("WebProcess").empty() || childrenNamed("WebProcess")[0] != webPid, "the killed web process is gone");
+    // The reaper retires the process asynchronously to the crash notification; give it a moment.
+    bool gone = false;
+    for (int attempt = 0; attempt < 50 && !gone; ++attempt) {
+        auto remaining = childrenNamed("WebProcess");
+        gone = true;
+        for (pid_t pid : remaining)
+            gone = gone && pid != webPid;
+        if (!gone)
+            usleep(100000);
+        else
+            printf("crtweb_process_test: web process gone after %d ms\n", attempt * 100);
+    }
+    check(gone, "the killed web process is gone");
 
     if (failures)
         return 1;

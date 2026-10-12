@@ -386,7 +386,11 @@ def target_c_flags(target_os: str, arch: str):
         flags += [f"-U{name}" for name in (
             "WIN32", "WIN64", "WINNT", "_WIN32", "_WIN64", "__WIN32", "__WIN32__", "__WIN64", "__WIN64__",
             "__WINNT", "__WINNT__", "__MINGW32__", "__MINGW64__")]
-        flags += ["-D__linux__=1", "-DWTF_CRT_COFF_ASM=1", "-mno-ms-bitfields"]
+        # _LIBCPP_WIN32API: libc++.dll was built as a Windows library (std::filesystem::path holds
+        # wchar_t), but -U_WIN32 above would make the consumer's headers see a POSIX one (char): the
+        # first std::filesystem iteration across that boundary (WebKit's directorySize) crashed in
+        # libc++.dll. <__config> derives the macro from _WIN32, so it is named here.
+        flags += ["-D__linux__=1", "-DWTF_CRT_COFF_ASM=1", "-mno-ms-bitfields", "-D_LIBCPP_WIN32API"]
     if target_os == "linux":
         flags.append("-ftls-model=initial-exec")
     return flags

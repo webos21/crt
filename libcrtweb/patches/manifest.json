@@ -472,6 +472,23 @@
       ],
       "reason": "WebPasteboardProxy::readStringFromPasteboard is declared with uint64_t (the IPC message's type) but the libwpe file defines it with size_t, which are the same type on LP64 Linux and Windows-LP64-less targets but distinct on Darwin (unsigned long vs unsigned long long): the out-of-line definition matches no declaration there. The declaration is the IPC contract, so the definition follows it.",
       "remove_when": "Upstream spells the definition with the declaration's type (a WebKit bug fix; no CRT-specific condition)."
+    },
+    {
+      "id": "0015-wtf-filesystem-temp-directory-string",
+      "patch": "0015-wtf-filesystem-temp-directory-string.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WTF/wtf/FileSystem.cpp",
+          "sha256_before": "3ccf6fc3f4562fea69261258f2d0c9aa27413c1c0e00725b2b8cdd2b331e8c07",
+          "sha256_after": "13493ab3e8d9d743d0592cc4658f9b0e58b7e7e8827f55a4763d4a92a2449027",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "createTemporaryDirectory() initialises a std::string from a std::filesystem::path, an implicit conversion that exists only where path::value_type is char. The Windows libc++.dll holds wchar_t paths (_LIBCPP_WIN32API), which the Windows persona now declares so that std::filesystem calls cross the DLL boundary with one layout; there the conversion needs .string(), which is the same call on POSIX.",
+      "remove_when": "Upstream spells the conversion with .string() (a portability fix in WebKit; no CRT-specific condition)."
     }
   ],
   "license_policy": {
