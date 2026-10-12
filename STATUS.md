@@ -5,7 +5,7 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-10-10**.
+Last synchronized with the source tree and git history: **2026-10-12**.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -20,7 +20,8 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 - The default workflow builds and tests only the C stage. Explicit cumulative
   distributions then add C++, Simple Graphics, advanced Graphics/Media, and
   `05-ui` (`crtui`, accepted on all three hosts) under `out/<preset>/dist/`.
-  `06-web` is in bring-up with Tranches 0-2 closed, but has no product SDK yet
+  `06-web` is in bring-up with Tranches 0-2 closed and Tranche 3 active through
+  `PlatformCRT` milestone B4, but has no product SDK yet
   (the superseded `05-js`/`libcrtjs` skeleton was removed on 2026-09-29).
 - No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
   provide the host or vendor toolchain; CRT supplies the staged sysroot,
@@ -274,8 +275,9 @@ JavaScriptCore now exists only as an accepted `06-web` bring-up component.
 
 ### libcrtweb / 06-web
 
-The WebKit CRT Port is in progress. Tranches 0-2 are closed; detailed evidence
-and non-gating hardening follow-ups are in `docs/acceptance/crtweb_acceptance.md`:
+The WebKit CRT Port is in progress. Tranches 0-2 are closed and Tranche 3 is
+active; detailed evidence and non-gating hardening follow-ups are in
+`docs/acceptance/crtweb_acceptance.md`:
 
 - WPE WebKit 2.54.0 is pinned with archive hash, signed-tag/commit provenance,
   license inventory, patch manifest, and a source-security policy.
@@ -289,9 +291,17 @@ and non-gating hardening follow-ups are in `docs/acceptance/crtweb_acceptance.md
   JavaScript/canvas fixture through WPEPlatform's built-in headless backend.
   The accepted run returned the exact DOM proof and a visible 640x480 BGRA8888
   snapshot. This is deliberately a native reference build, not CRT integration.
-- No `PlatformCRT`, public `crtweb` API, `crtui` WebView, root CMake target, or
-  `06-web` distribution exists yet. Tranche 3, the Linux graphics/input
-  prototype followed by the product port source gate, is next.
+- Tranche 3A froze the shared-memory frame and input wire contract. Its native
+  WPEPlatform `crt` reference module passed end-to-end on Linux/x86_64, and the
+  consumer/layout/transport contracts have been replayed on macOS/arm64,
+  Windows/x64 and Linux/aarch64 where applicable.
+- The real `PlatformCRT` product port exists as a pinned full-source overlay.
+  B0-B3 are accepted across Linux/x86_64, macOS/arm64, Windows/x64 and
+  Linux/aarch64: source/license gates, `PORT=CRT` JSC, target dependencies, and
+  the WTF/PAL/WebCore/Skia graph. B4 is accepted on Linux/x86_64: UI, Web and
+  Network processes launch, round-trip IPC and report forced child termination.
+- B5 first render is next. The public `crtweb` API, `crtui` WebView, complete
+  lifecycle/cross-host process replay and `06-web` distribution do not exist yet.
 
 ### Upper Runtime Direction
 
@@ -352,7 +362,7 @@ and non-gating hardening follow-ups are in `docs/acceptance/crtweb_acceptance.md
   -- is composed by `crtgfx` rather than copied through an LVGL framebuffer) is
   accepted; `06-web` is in progress as a WebKit CRT Port (`PlatformCRT`) with
   `libcrtweb` and a WebView, using WPE WebKit as the reference. Tranches 0-2
-  are closed and Tranche 3 is next. WebRTC,
+  are closed, Tranche 3 is active through B4, and B5 first render is next. WebRTC,
   QuickJS, WebGPU, EME/DRM, V8, and Chromium/Ozone are deferred, not gates.
 
 The sequencing and ownership boundaries are recorded in
@@ -535,9 +545,9 @@ statuses, and exceptions are maintained in:
 1. Continue `TODO.md`'s active Web Runtime (`06-web`) work, a WebKit CRT Port.
    Application UI (`05-ui`, Tranches 0-7) is closed on all three hosts, so its
    External Surface contract is the accepted prerequisite. The order is
-   `docs/acceptance/crtweb_acceptance.md`: Tranches 0-2 (provenance, cross-host
-   JavaScriptCore, and the native Linux WPE reference baseline) are closed;
-   next is the Tranche 3 `PlatformCRT` graphics/input prototype. See
+   `docs/acceptance/crtweb_acceptance.md`: Tranches 0-2 are closed; Tranche 3A
+   and PlatformCRT B0-B3 are complete on all acceptance pairs, B4 is complete
+   on Linux/x86_64, and B5 first render is next. See
    `docs/porting/crtweb_porting.md`.
 2. Small follow-ups left by the UI work, not gates: teach
    `tools/prepare_release_assets.py` the `05-ui` SDK, and make a default-

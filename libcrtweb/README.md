@@ -5,15 +5,14 @@ plus the `crtweb` runtime/view API and the `crtui` WebView on top of it. Contrac
 tranche order and evidence: [`docs/acceptance/crtweb_acceptance.md`](../docs/acceptance/crtweb_acceptance.md);
 upstream mapping: [`docs/porting/crtweb_porting.md`](../docs/porting/crtweb_porting.md).
 
-**Status: bring-up.** Web Tranche 0 (scope, version and license freeze) is closed.
-Tranche 1 (JavaScriptCore) is closed on Linux/x86_64, Linux/aarch64, macOS/arm64
-and Windows/x64 through interpreter, Baseline/DFG/FTL, WebAssembly and the sampling
-profiler. Tranche 2 is closed on Linux/x86_64: the verified, unmodified WPE WebKit
-2.54.0 source renders a local fixture through WPEPlatform's built-in headless
-backend and captures the accepted 640x480 reference frame. W^X remains separate
-hardening. Tranche 3A (Linux/x86_64) has frozen the frame-producer and input contracts and
-proves them with a WPEPlatform `crt` display module and a CRT-side consumer. No `PlatformCRT`
-or `crtweb` API code exists yet; the root CMake build only adds the consumer-side test.
+**Status: bring-up.** Web Tranches 0-2 are closed. JavaScriptCore is accepted on
+Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64 through interpreter,
+Baseline/DFG/FTL, WebAssembly and the sampling profiler; the pristine WPE
+reference renders the accepted 640x480 frame on Linux/x86_64. Tranche 3A froze
+and proved the frame/input contract. The real `PlatformCRT` overlay has completed
+B0-B3 on all four acceptance pairs and B4 process launch/IPC on Linux/x86_64.
+B5 first render is next. The public `crtweb` API, WebView and packaged `06-web`
+SDK do not exist yet; W^X remains separate hardening.
 
 ## Layout
 
@@ -27,6 +26,9 @@ or `crtweb` API code exists yet; the root CMake build only adds the consumer-sid
 - `tests/platform-crt/` -- `surface_probe.c` (CRT-built consumer), `wpe_crt_host.c` (native
   WebKitWebView on the `crt` display), `crt_surface.html`, and `web_surface_test.cc` (the
   hermetic `crtui` SurfaceView test run by CTest). Driver: `tools/build_webkit_wpe_crt.py`.
+- `tests/webcore/` and `tests/webkit/` -- product-port graph/paint/text and
+  multi-process acceptance programs used by B3 and B4. Driver:
+  `tools/build_webkit_crt_port.py`.
 - `tests/wpe-reference/` -- the Tranche 2 native Linux fixture and headless WPE
   harness. It is deliberately a host program, not a CRT program.
 - `port/` -- the CRT-owned files of the `PlatformCRT` port, mirroring the WebKit tree (`Source/cmake/
@@ -46,10 +48,11 @@ Current and planned layout, following the tranche order:
 - `include/crtweb/` -- the public API. No WebKit, WPE or GLib type may appear here;
   `tools/verify_dist.py` will enforce it for `06-web` as it does for LVGL in `05-ui`.
 - `src/` -- the runtime/view implementation over the CRT-owned platform.
-- `platform/` -- `PlatformCRT`, the new WebKit CRT port (not a WPEPlatform backend),
-  backed by `crtgfx`, `crtui` external surfaces, `crtmedia` and the CRT PAL. WPEPlatform
-  appears only in the Linux first-green prototype (Tranche 3A) and is not the
-  cross-platform architecture; see `docs/porting/crtweb_porting.md`.
+- `port/` -- `PlatformCRT`, the new WebKit CRT port (not a WPEPlatform backend),
+  composed over the pinned full WebKit source. It is being connected to `crtgfx`,
+  `crtui` external surfaces, `crtmedia` and the CRT PAL tranche by tranche.
+  WPEPlatform appears only in the Linux first-green prototype (Tranche 3A) and
+  is not the cross-platform architecture; see `docs/porting/crtweb_porting.md`.
 - `tests/` and `tools/` -- per-tranche acceptance tests and demos, as in the other
   libraries.
 

@@ -1,9 +1,8 @@
-# TODO: CRT Shell, Rootfs, And Porting Loop
+# TODO: CRT Runtime Work Queue
 
-This file tracks the shell/rootfs/porting work queue. Only current work and
-planned follow-up stay here; completed work moves to `HISTORY.md` in reverse
-chronological order. Detailed policy and provenance stay in `docs/` and import
-manifests.
+This file tracks the active CRT runtime work queue and its ordered follow-up.
+Completed work moves to `HISTORY.md` in reverse chronological order. Detailed
+policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Notice
 
@@ -40,20 +39,21 @@ manifests.
   [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 - Keep work status in exactly one place per purpose, not restated across all
   three: [`HISTORY.md`](HISTORY.md) holds the detailed, dated record of what
-  was actually done and why; an item here in `TODO.md` should track live
-  progress in a line or two, not re-narrate what a finished sub-part already
-  accomplished (once something is done, move the detail to `HISTORY.md` and
-  cut it here rather than leaving both). [`STATUS.md`](STATUS.md) is updated
-  only when explicitly asked for, not as part of routine documentation
-  passes -- do not touch it on a normal work/doc-cleanup turn.
+  was actually done and why; `TODO.md` keeps only the terse ordered checkbox
+  outline needed to see the current tranche and its prerequisites. A checked
+  sub-gate may remain in that outline for sequence visibility, but commands,
+  dates, measurements and findings move to `HISTORY.md` or the owning
+  acceptance document rather than being repeated here. [`STATUS.md`](STATUS.md)
+  is updated only when explicitly asked for, not as part of routine
+  documentation passes -- do not touch it on a normal work/doc-cleanup turn.
 
 
 ## Done
 
 See [`HISTORY.md`](HISTORY.md) for the full, dated, reverse-chronological
-record of completed work. This section stays empty in `TODO.md` itself --
-when an item below is finished, move its writeup into `HISTORY.md` (dated,
-newest entry first) rather than leaving it here.
+record of completed work. This section stays empty in `TODO.md` itself. Finished
+top-level work moves to `HISTORY.md`; terse checked prerequisite gates may remain
+under an active tranche only to make its execution order legible.
 
 ## In Progress
 
@@ -65,56 +65,82 @@ accepted prerequisite (`HISTORY.md`, `docs/acceptance/crtui_acceptance.md`). The
 gates and host order live in
 [`docs/acceptance/crtweb_acceptance.md`](docs/acceptance/crtweb_acceptance.md); the upstream mapping in
 [`docs/porting/crtweb_porting.md`](docs/porting/crtweb_porting.md). Keep completed evidence in
-`HISTORY.md`; this list tracks only tranche state. Linux first (WPE is the
-reference), with an early three-host JavaScriptCore replay, then Windows/x64,
-then macOS/arm64.
+`HISTORY.md`; this list tracks only tranche state and execution order. Linux is
+the first implementation host because WPE is the reference; each tranche then
+uses the host replay order stated below and in the acceptance document.
 
-* [x] **0. Scope, version and license freeze.** Closed 2026-10-03: WPE WebKit
-  2.54.0 pinned and verified (`libcrtweb/third_party/webkit/`: recomputed SHA-256, signed
-  tag, license-file inventory), upstream mapping written, security/SBOM policy
-  confirmed; evidence in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
-* [x] **1. JavaScriptCore / JSCOnly bring-up.** Closed 2026-10-09 on
-  Linux/x86_64, Linux/aarch64, Windows/x64 and macOS/arm64. The interpreter,
-  Baseline JIT, concurrent DFG, FTL/B3, WebAssembly and separate sampling-
-  profiler builds pass their compile proofs, context/watchdog gates and host-
-  ABI audits; Linux/aarch64 was the final 1D-B/C/D replay. Detailed per-host
-  evidence and the remaining non-gating hardening limits are in `HISTORY.md`
-  and `docs/acceptance/crtweb_acceptance.md`. The next active product tranche is the
-  `PlatformCRT` graphics/input prototype below.
-* [x] **2. Linux WPE reference baseline.** Closed 2026-10-10 on Linux/x86_64:
-  verified upstream WPE 2.54.0, unmodified, renders local HTML through its
-  built-in headless backend and produces the accepted 640x480 snapshot.
-* [ ] **3. `PlatformCRT` graphics and input prototype.** **3A done on Linux/x86_64
-  2026-10-10:** the frame-producer and input contracts are frozen (v1), a WPEPlatform `crt`
-  display module (no WebKit patch) delivers WebKit frames to a CRT consumer through shared memory
-  and takes input back, with a hermetic `crtui` SurfaceView test and a native end-to-end run
-  (`HISTORY.md`, `docs/acceptance/crtweb_acceptance.md`). **3B source and licensing gates closed 2026-10-10**; the **3B plan** (PlayStation-shaped
-port, milestones B1-B7, `docs/acceptance/crtweb_acceptance.md`) is decided and **B1 is done on
-Linux/x86_64**: `-DPORT=CRT` builds JavaScriptCore from the pinned commit plus `libcrtweb/port`
-(one carried patch, 0005) and passes the interpreter and Baseline/DFG/FTL/Wasm acceptance.
-**B2 is done on Linux/x86_64** (the dependency ports; WebKit's own `find_package()` resolves all
-eleven) and **B3 is done on Linux/x86_64**: WebCore and PAL build and link with the bundled Skia into
-a program that paints and draws text (`tools/build_webkit_crt_port.py --run-tests`). **B4 is done on Linux/x86_64** (UI, Web and Network processes launch and exchange messages; a killed
-child is detected). **Next: B5** first render through the 3A contract (DrawingAreaCRT paints, UI side
-receives frames), then B6 input, B7 close; B1/B2 are replayed on macOS/arm64 (2026-10-11) and so are 3A's contracts and B3 (2026-10-12; macOS `SOCK_SEQPACKET` is CRT-provided, the WPE `crt` module stays Linux-only); B1-B3 are replayed on Windows/x64 too (2026-10-12; OpenSSL and libcurl static only); B1-B3 and 3A's consumer contracts are replayed on Linux/aarch64 too (2026-10-12; the Tranche 2 reference and the WPE module stay Linux/amd64 by decision). Also open:
-live crtgfx presentation of a web SurfaceView; GPU-buffer output (Tranche 9).
-* [ ] **4. `libcrtweb` and the WebView.** The CRT-owned runtime/view API and
-  `crtui`'s web view; no WebKit type in a public header.
-* [ ] **5. Multi-process lifecycle.** UI/Web/Network/GPU processes: launch, IPC,
-  shutdown, forced termination and recovery, 100x create/destroy, leak audit.
-* [ ] **6. Windows/x64 replay.**
-* [ ] **7. macOS/arm64 replay.**
-* [ ] **8. CRT subsystem substitution.** Network, media and capture, one at a
-  time, only after a working browser.
-* [ ] **9. GPU integration.** WebKit Skia output to an external surface, later a
-  shared/zero-copy buffer.
-* [ ] **10. Distribution and security closure.** Isolated `06-web` build from
-  the installed `05-ui` SDK; update `tools/create_stage_source.py` and
-  `tools/crt_dist_prerequisites.py` in the same change; provenance/SBOM/CVE
-  artifacts. The isolated stage chain also closes the complete build-host/target
-  split: gperf, Perl, Python, Ruby and ICU generators run as host tools and never
-  enter the SDK or target ABI audit; ICU, JSC, libc++ and WebKit remain target
-  artifacts. Prove it with an x86_64-host -> Linux/aarch64-target build.
+* [x] **0. Scope, version and license freeze.** Closed 2026-10-03.
+  * [x] Pin and verify WPE WebKit 2.54.0, signed tag/commit and archive hash.
+  * [x] Inventory licenses and freeze the security, source-correspondence and SBOM policy.
+* [x] **1. JavaScriptCore / JSCOnly bring-up.** Closed 2026-10-09 on all four
+  acceptance host/architecture pairs.
+  * [x] **1A:** build-host tool inventory and CRT-built ICU/gperf dependency ports.
+  * [x] **1B:** C-loop interpreter, lifecycle/thread/RSS checks and Host ABI audit.
+  * [x] **1C:** assembly interpreter plus Baseline JIT compile proof and watchdog.
+  * [x] **1D-A:** concurrent DFG compiler threads.
+  * [x] **1D-B:** FTL/B3.
+  * [x] **1D-C:** WebAssembly interpreter, BBQ/OMG and fast-memory fault path.
+  * [x] **1D-D:** separate sampling-profiler build and main/worker VM sampling.
+* [x] **2. Linux WPE reference baseline.** Closed 2026-10-10 on Linux/x86_64.
+  * [x] Build the pristine upstream WPE reference with the native toolchain.
+  * [x] Render the local HTML/CSS/DOM/JavaScript/canvas fixture and retain the
+    accepted 640x480 frame/proof string for later comparison.
+* [ ] **3. `PlatformCRT` graphics and input prototype.** Active; detailed
+  contracts, commands and evidence are in
+  [`docs/acceptance/crtweb_acceptance.md`](docs/acceptance/crtweb_acceptance.md).
+  * [x] **3A:** freeze the v1 frame/input wire contract; prove shared-memory
+    rendering and input through the Linux WPEPlatform `crt` reference module.
+  * [x] **3A consumer replay:** validate the wire/layout/consumer contracts on
+    macOS/arm64, Windows/x64 and Linux/aarch64; the WPE module itself remains
+    Linux/x86_64 reference-only by design.
+  * [x] **3B-B0:** pin the full product-source commit; close source correspondence,
+    per-file licensing and patch-manifest gates.
+  * [x] **3B-B1:** compose `PORT=CRT` and pass JSC acceptance on Linux/x86_64,
+    macOS/arm64, Windows/x64 and Linux/aarch64.
+  * [x] **3B-B2:** build and test the Web dependency ports and make WebKit's
+    `find_package()` resolve them on all four acceptance pairs (Windows OpenSSL
+    and libcurl remain static-only as documented).
+  * [x] **3B-B3:** build/link WTF, PAL and WebCore with bundled Skia and pass the
+    graph/paint/text test on all four acceptance pairs.
+  * [x] **3B-B4:** on Linux/x86_64 launch UI/Web/Network processes, round-trip IPC
+    and detect forced child termination.
+  * [ ] **3B-B5, next:** load `reference.html`, paint in `DrawingAreaCRT`, deliver
+    the first 640x480 frame through the 3A contract, present it through the CRT
+    consumer and report its difference from the Tranche 2 reference.
+  * [ ] **3B-B6:** route the frozen pointer/key/wheel/text/resize contract through
+    `PlatformCRT` and verify page reports, pixel changes and stalled-consumer behavior.
+  * [ ] **3B-B7:** close the Linux prototype with 100x create/destroy, bounded
+    growth, clean Host ABI audit, license scan and patch-manifest recheck.
+* [ ] **4. `libcrtweb` and the WebView.** Start after 3B-B7.
+  * [ ] Freeze and implement the CRT-owned runtime/view API and callbacks.
+  * [ ] Add `crtui` WebView integration without exposing WebKit/WPE/GLib types.
+* [ ] **5. Multi-process lifecycle.** B4 proves the initial Linux process/IPC
+  foundation; the complete lifecycle remains.
+  * [ ] Clean shutdown, forced WebProcess termination and recovery/reload.
+  * [ ] Navigation while resizing and 100x view create/destroy with leak/resource audit.
+  * [ ] Add GPUProcess only when Tranche 9 enables the GPU path.
+* [ ] **6. Windows/x64 replay.** B1-B3 prerequisites are green.
+  * [ ] Replay B4-B7 with Windows process launch, IPC handles and shared memory.
+  * [ ] Validate fonts, basic pointer/key input, TLS and DLL boundaries.
+* [ ] **7. macOS/arm64 replay.** B1-B3 prerequisites are green.
+  * [ ] Replay B4-B7 with the same `PlatformCRT` and public API, without native
+    WebKit framework shortcuts.
+  * [ ] Validate process/IPC behavior, fonts and basic input.
+* [ ] **8. CRT subsystem substitution.** Only after a working browser.
+  * [ ] Replace the reference network backend with CRT networking.
+  * [ ] Replace media playback and capture independently with `crtmedia`.
+* [ ] **9. GPU integration.**
+  * [ ] Present WebKit's private Skia output through the CRT external-surface path.
+  * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one
+    Skia context is not an initial gate.
+* [ ] **10. Distribution and security closure.**
+  * [ ] Build `06-web` in isolation from the installed `05-ui` SDK and add the
+    stage-source/prerequisite manifests.
+  * [ ] Prove the build-host/target split with x86_64-host -> Linux/aarch64-target:
+    host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
+  * [ ] Package `libcrtweb` and a browser sample; pass `verify_dist.py`, dependency,
+    RPATH/install-name and Host ABI audits on Linux, Windows and macOS.
+  * [ ] Publish provenance, notices, source correspondence, SBOM and CVE/advisory state.
 
 Web follow-up (not a gate): `tools/check_webkit_security.py` -- compare the pinned
 version with the upstream WPE advisory feed; becomes a package gate before the

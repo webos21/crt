@@ -30,8 +30,9 @@ Development and release follow the cumulative stages defined in
    [`crtui_acceptance.md`](../acceptance/crtui_acceptance.md).
 6. **Web Runtime (`06-web`)** — JavaScriptCore, WebCore, the WebKit
    multi-process runtime, a `PlatformCRT` port, and `crtweb`/WebView
-   integration. In progress (Tranches 0-2 closed: cross-host JavaScriptCore and
-   the native Linux WPE reference; Tranche 3 `PlatformCRT` prototype next); see [`crtweb_acceptance.md`](../acceptance/crtweb_acceptance.md)
+   integration. In progress: Tranches 0-2 are closed, and Tranche 3 has reached
+   B4 (cross-host WebCore graph plus Linux/x86_64 process/IPC foundation); B5
+   first render is next. See [`crtweb_acceptance.md`](../acceptance/crtweb_acceptance.md)
    and [`crtweb_porting.md`](../porting/crtweb_porting.md).
 
 The earlier plan named a QuickJS stage (`05-js`). It is superseded: WebKit

@@ -154,7 +154,7 @@ runtime은 다음 계층으로 나누어 설계한다.
 
 ## 프로젝트 구조
 
-다음은 프로젝트 루트의 현재 구성이다 (2026-10-03 기준). 폴더 하위에는 각각 세부
+다음은 프로젝트 루트의 현재 구성이다 (2026-10-12 기준). 폴더 하위에는 각각 세부
 폴더 목록이 존재할 수 있다.
 
 라이브러리 폴더(`libc/`, `libcrtgfx/` 등)는 공통으로 `include/`(public header),
@@ -265,13 +265,15 @@ runtime은 다음 계층으로 나누어 설계한다.
   - `cmake/crtui_sources.cmake`: in-tree 빌드와 isolated stage가 공유하는 source
     목록. 상세는 `libcrtui/README.md`, `docs/acceptance/crtui_acceptance.md`.
 - `libcrtweb/`
-  - `06-web`(WebKit CRT Port)의 자리. `third_party/webkit/`의 WPE WebKit 2.54.0 pin과
-    provenance(`recipe.json`, `license-inventory.json`), JSC/WPE reference 검증
-    (`tests/jsc`, `tests/wpe-reference`), 그리고 Tranche 3A의 계약과 prototype
-    (`platform/`: `crtweb_surface_wire.h`, `crtweb_surface_client.h`, WPEPlatform `crt`
-    display module; `tests/platform-crt/`)이 있다. `crtweb` API와 `PlatformCRT` 포트는
-    아직 없고, 루트 CMake에는 consumer 쪽 테스트(`crtweb_*`)만 연결되어 있다.
-    계약은 `docs/acceptance/crtweb_acceptance.md`, upstream 매핑은
+  - `06-web`(WebKit CRT Port)의 자리. `third_party/webkit/`의 WPE WebKit 2.54.0
+    reference와 full product-source pin/provenance, JSC/WPE reference 검증
+    (`tests/jsc`, `tests/wpe-reference`), Tranche 3A의 frame/input 계약과 Linux
+    WPEPlatform `crt` prototype(`platform/`, `tests/platform-crt/`)이 있다.
+  - 실제 `PlatformCRT` overlay는 `port/`에 있으며 B0-B3가 4개 acceptance pair에서,
+    B4 UI/Web/Network process launch와 IPC가 Linux/x86_64에서 검증되었다
+    (`tests/webcore`, `tests/webkit`). B5 first render가 다음 단계이다. 공개 `crtweb`
+    API, WebView와 `06-web` 배포 stage는 아직 없다. 계약은
+    `docs/acceptance/crtweb_acceptance.md`, upstream 매핑은
     `docs/porting/crtweb_porting.md`.
 
 ### Provenance and porting

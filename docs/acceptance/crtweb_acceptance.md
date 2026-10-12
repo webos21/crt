@@ -1,16 +1,19 @@
 # crtweb Acceptance (Stage `06-web`)
 
-**Status: in progress -- Tranches 0-2 are closed. JavaScriptCore passes the
-interpreter, Baseline/DFG/FTL tiers, WebAssembly and sampling-profiler
-acceptance on Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64. The
-pristine native WPE 2.54.0 reference renders the accepted local fixture on
-Linux/x86_64. W^X is separate hardening; no `PlatformCRT` or public `crtweb`
-API exists yet. Tranche 3 is next.** Detailed contract and tranche order for the
+**Status: in progress -- Tranches 0-2 are closed and Tranche 3 is active.
+JavaScriptCore passes the interpreter, Baseline/DFG/FTL tiers, WebAssembly and
+sampling-profiler acceptance on all four acceptance host/architecture pairs;
+the pristine WPE 2.54.0 reference renders the accepted fixture on Linux/x86_64.
+The `PlatformCRT` product port now has its source/licensing gate, JSC skeleton,
+dependency set and WebCore/PAL graph accepted across the four pairs (B0-B3),
+and its UI/Web/Network process launch plus IPC foundation accepted on
+Linux/x86_64 (B4). B5 first render is next. The public `crtweb` API and packaged
+`06-web` SDK do not exist yet; W^X remains separate hardening.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](../porting/crtweb_porting.md). Evidence is recorded
-here as each tranche closes; completed work goes to `../HISTORY.md` and the
-current tranche state to `../TODO.md`.
+here as each tranche closes; completed work goes to [`HISTORY.md`](../../HISTORY.md)
+and the current tranche state to [`TODO.md`](../../TODO.md).
 
 ## Purpose
 
@@ -1186,7 +1189,8 @@ Linux-only (`SOCK_SEQPACKET`; Windows and macOS need their own transport decisio
 named-pipe/stream framing, before Tranches 6 and 7; both were then made in CRT libc, below); keys other than US-layout Latin text have no
 IME path; the consumer test runs without a window or GPU (raster target), so live crtgfx
 presentation of a web SurfaceView is not shown yet. The two host-side gates below (full-commit pin,
-per-file license scan and patch manifest) are closed (see above); 3B itself -- the `PlatformCRT` port -- has not started.
+per-file license scan and patch manifest) are closed (see above). The product
+port subsequently completed B1-B4 below; B5 first render is the active step.
 
 #### 3B plan -- the `PlatformCRT` port (decided 2026-10-10)
 
@@ -1534,7 +1538,9 @@ Linux is the proof that the port's architecture holds.
 
 The same WebKit and `PlatformCRT` on the CRT PAL (not a WPE-for-Windows
 effort). Focus on process spawning, IPC handles, shared memory, executable
-pages, D3D12 surface integration, fonts, basic key/pointer input (IME is deferred past v1), TLS, DLL boundaries.
+pages, fonts, basic key/pointer input (IME is deferred past v1), TLS and DLL
+boundaries. D3D12 surface integration belongs to Tranche 9, after the
+shared-memory render/input path is accepted.
 
 ### 7. macOS/arm64 replay
 
