@@ -112,6 +112,9 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
   backingStoreSizeForCRT`), so an embedder does not copy a stale picture after a resize.
 - `0017` implements `WebPage::handleEditingKeyboardEvent` for PlayStation-shaped ports (caret
   movement, selection, deletion, newline/tab, character insertion), which upstream leaves a stub.
+- `0018` clears the removed node's `m_left`/`m_right` `CheckedPtr`s in `WTF::RedBlackTree::remove`; without it the generic
+  RunLoop's `ScheduledTask` destructor decrements a destroyed neighbour's count (WebProcessProxy teardown crash, B7).
+  Removal: upstream fixes `remove()`.
 
 ## WebKit files of PlatformCRT (milestone B4)
 

@@ -523,6 +523,23 @@
       ],
       "reason": "WebPage::handleEditingKeyboardEvent is where a keyboard event becomes an editing command or inserted text for ports that do not route keys through an input-method context (GLib ports use one). PlayStation's version is notImplemented(), so a focused text field never receives typed characters through the key path the web surface protocol uses (key and committed-text messages). PlatformCRT takes the Windows port's logic (WebPageWin.cpp) in the subset that needs no platform clipboard integration: caret movement, selection, deletion, line breaks and tabs, then the character.",
       "remove_when": "PlatformCRT gets an input-method (IME) path that composes and commits text (deferred past Web v1), or upstream gives the PlayStation port its own implementation."
+    },
+    {
+      "id": "0018-wtf-redblacktree-clear-removed-links",
+      "patch": "0018-wtf-redblacktree-clear-removed-links.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WTF/wtf/RedBlackTree.h",
+          "sha256_before": "e4f38fbcba6fcdc926075b60d458a9cd94303a74d0d1e943fd5132cfba266a60",
+          "sha256_after": "d48e512590a10fa32e92a5d41a8bd37f9e14ab92db8f4da8edd0dbca29a3588b",
+          "license": "BSD-3-Clause"
+        }
+      ],
+      "reason": "RedBlackTree::remove() leaves the removed node's CheckedPtr m_left/m_right pointing into the tree; when RunLoop's generic ScheduledTask (a ThreadSafeNode) outlives a former child, its destructor decrements the dead child's scribbled count and crashes (seen when a WebProcessProxy and its responsiveness timers are torn down).",
+      "remove_when": "WebKit upstream clears the removed node's child links in RedBlackTree::remove()."
     }
   ],
   "license_policy": {

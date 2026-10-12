@@ -339,6 +339,49 @@ def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) 
             "consumer_output": consumer_output.splitlines()}
 
 
+def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+    """B7: crtweb_lifecycle_test (100 create/load/paint/destroy cycles of a view with its Web and
+    Network processes; the test itself bounds descriptor, thread and RSS growth), then the Host ABI
+    audit twice over: the static one (ldd closure of every binary the port produced) and the runtime
+    one, from the MAPPED lines the test prints from /proc/<pid>/maps of each child: every file-backed
+    mapping of the UI, Web and Network processes must be the CRT SDK, the port prefix, this build
+    tree, the bundled fonts, the fontconfig cache, or the host's dynamic loader."""
+    result = run_program("crtweb_lifecycle_test", build, sdk, prefix, work, env)
+    allowed = [sdk.resolve(), prefix.resolve(), build.resolve(), (ROOT / "libcrtgfx" / "assets" / "fonts").resolve(),
+               work.resolve()]
+    mapped, violations = {}, []
+    for line in result["output"]:
+        if not line.startswith("MAPPED "):
+            continue
+        _, role, path = line.split(" ", 2)
+        mapped.setdefault(role, []).append(path)
+        if path.startswith(("[", "/memfd:")) or Path(path).name.startswith("ld-linux"):
+            continue
+        if not any(Path(path).resolve().is_relative_to(root) for root in allowed):
+            violations.append(f"{role}: maps {path}")
+    binaries = sorted(p for p in (build / "bin").iterdir() if p.is_file() and os.access(p, os.X_OK))
+    binaries += sorted((build / "lib").glob("libWebKit.so*"))
+    probe = work / "surface_probe"
+    if probe.exists():
+        binaries.append(probe)
+    # A CRT-linked static executable (surface_probe) has no DT_NEEDED: nothing for ldd to resolve.
+    readelf = shutil.which("llvm-readelf") or shutil.which("readelf")
+    static_binaries = [b for b in binaries
+                       if "(NEEDED)" not in jsc.run([readelf, "-d", str(b)], capture=True, check=False).stdout]
+    binaries = [b for b in binaries if b not in static_binaries]
+    static = jsc.host_abi_audit(sdk, prefix, build, binaries, {
+        "LD_LIBRARY_PATH": os.pathsep.join([str(build / "lib"), str(prefix / "curl-openssl" / "lib"),
+                                             str(sdk / "lib"), str(prefix / "lib")])}, "linux")
+    result["runtime_audit"] = {"roles": sorted(mapped), "mapped_files": sum(len(v) for v in mapped.values()),
+                               "violations": violations}
+    result["static_audit"] = {"binaries": [b.name for b in binaries],
+                              "statically_linked": [b.name for b in static_binaries], "ok": static["ok"],
+                              "violations": static["violations"], "known_host_libraries": static["known_host_libraries"]}
+    result["passed"] = (result["passed"] and not violations and static["ok"]
+                        and {"WebProcess", "NetworkProcess"} <= set(mapped))
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--recipe", type=Path, default=ROOT / "libcrtweb/third_party/webkit/recipe.json")
@@ -407,7 +450,7 @@ def main() -> int:
         return 0
     tests = ["crtweb_webcore_graph_test"] + (["crtweb_process_test"] if args.webkit else [])
     if args.run_tests and not args.target:
-        args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host"] if args.webkit else [])
+        args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host", "crtweb_lifecycle_test"] if args.webkit else [])
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -422,10 +465,11 @@ def main() -> int:
         results["render_through_surface_protocol"] = run_render_gate(build, sdk, prefix, work, env)
         print("B5 diff:", json.dumps(results["render_through_surface_protocol"].get("diff_against_wpe_reference")))
         results["input_through_surface_protocol"] = run_input_gate(build, sdk, prefix, work, env)
+        results["lifecycle_and_host_abi"] = run_lifecycle_gate(build, sdk, prefix, work, env)
     passed = all(r["passed"] for r in results.values())
     (work / "acceptance-b3.json").write_text(json.dumps(
         {"passed": passed, "programs": results}, indent=2) + "\n", encoding="utf-8")
-    print("B3-B6 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
+    print("B3-B7 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
     return 0 if passed else 1
 
 

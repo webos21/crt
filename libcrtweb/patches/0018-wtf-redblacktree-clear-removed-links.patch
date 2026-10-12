@@ -1,0 +1,15 @@
+diff -urN a/Source/WTF/wtf/RedBlackTree.h b/Source/WTF/wtf/RedBlackTree.h
+--- a/Source/WTF/wtf/RedBlackTree.h	2026-10-12 23:39:18.839900936 +0900
++++ b/Source/WTF/wtf/RedBlackTree.h	2026-10-12 23:39:18.839962301 +0900
+@@ -286,6 +286,11 @@
+         } else if (y->color() == Black)
+             removeFixup(x, xParent);
+ 
++        // The removed node must not keep CheckedPtr links into the tree: a former child that is
++        // destroyed before z would leave z's destructor decrementing a scribbled (zero) count.
++        z->m_left = nullptr;
++        z->m_right = nullptr;
++
+         return z;
+     }
+     

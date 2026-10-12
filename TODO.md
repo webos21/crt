@@ -112,9 +112,10 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **3B-B6:** on Linux/x86_64 the 3A input contract (pointer, key, wheel, text,
     resize, stalled consumer) passes through `PlatformCRT` against `surface_probe`.
     macOS/Windows/aarch64 replays are open.
-  * [ ] **3B-B7, next:** close the Linux prototype with 100x create/destroy, bounded
-    growth, clean Host ABI audit, license scan and patch-manifest recheck.
-* [ ] **4. `libcrtweb` and the WebView.** Start after 3B-B7.
+  * [x] **3B-B7:** Linux/x86_64 prototype closed: 100x create/destroy flat, Host ABI audit
+    (static and `/proc/maps`) clean, license scan and patch manifest rechecked (patch 0018).
+    macOS/Windows/aarch64 replays of B5-B7 are open.
+* [ ] **4. `libcrtweb` and the WebView.** 3B-B7 is done on Linux/x86_64.
   * [ ] Freeze and implement the CRT-owned runtime/view API and callbacks.
   * [ ] Add `crtui` WebView integration without exposing WebKit/WPE/GLib types.
 * [ ] **5. Multi-process lifecycle.** B4 proves the initial Linux process/IPC

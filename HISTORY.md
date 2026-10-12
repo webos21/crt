@@ -9,6 +9,31 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-13
+
+### Web Tranche 3B milestone B7: Linux/x86_64 prototype closed (100x create/destroy, Host ABI audit, rechecks)
+
+`crtweb_lifecycle_test` creates a context, page configuration and 320x240 view 100 times, loads a canvas
+page, checks the painted pixels, then releases everything and waits for the Web process to exit.
+Result: 100/100 iterations, after warm-up +0 descriptors, +0 threads, +264..332 KiB RSS (65.9 MiB, flat),
+no orphaned child after the run, about 80 s. The Network process is deliberately *not* required to
+exit: it belongs to upstream's default website data store and stays one reused process (the test checks
+it never exceeds one). The test's first run aborted in `WebProcessProxy` teardown
+(`crashDueToCheckedPtrToDeadObject` under `RunLoop::TimerBase::~TimerBase`). Root cause, upstream:
+`RedBlackTree::remove` leaves the removed node's `CheckedPtr` `m_left`/`m_right` pointing into the tree;
+the generic RunLoop's `ScheduledTask` is such a node, so when a former child timer task was destroyed
+first (zeroed by `WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR`), the removed node's destructor decremented a
+zero count. Carried patch 0018 clears the two links in `remove()` (BSD-3-Clause file; PlayStation's
+generic RunLoop should meet the same crash, not confirmed). Gates added to
+`build_webkit_crt_port.py` (`lifecycle_and_host_abi`): the Host ABI audit now covers every produced
+binary statically (ldd closure of `libWebKit`, `WebProcess`, `NetworkProcess`, the tests; `surface_probe`
+is statically linked) *and* at runtime: the UI, Web and Network processes' `/proc/<pid>/maps` (123 files)
+contain only the CRT SDK, the port prefix, the build tree, the bundled font, the fontconfig cache and the
+host dynamic loader. License scan re-run on the pinned tree: identical to
+`libcrtweb/third_party/webkit/license-scan.json`; patch manifest (18 patches, 56 modified files) and
+`test_webkit_licensing.py` pass. Open: macOS/Windows/aarch64 replays of B5-B7, forced Web process
+termination and recovery (Tranche 5).
+
 ## 2026-10-12
 
 ### Web Tranche 3B milestone B6: input through the web surface protocol

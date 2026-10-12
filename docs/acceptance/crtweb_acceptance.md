@@ -1256,7 +1256,7 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 | **B4** | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | **done 2026-10-12 (Linux/x86_64)**: the UI process launches the Web and Network processes and a message round-trips; killing a child is detected (`crtweb_process_test`) |
 | **B5** | First render | **done 2026-10-12 (Linux/x86_64)**: `reference.html` renders, the proof string is the WPE reference's, the frame reaches `surface_probe` through the 3A contract (`crtweb_render_test`, `--webkit --run-tests`) |
 | **B6** | Input | **done 2026-10-12 (Linux/x86_64)**: `surface_probe`'s full scripted run passes against `crtweb_surface_host` (the CRT port's frame producer) instead of the WPE module |
-| B7 | Close | 100x create/destroy without growth, host-ABI audit clean, patch manifest and license scan re-run, docs and `HISTORY.md` updated |
+| **B7** | Close | **done 2026-10-13 (Linux/x86_64)**: 100x create/destroy without growth, host-ABI audit clean (static and runtime), patch manifest and license scan re-run, docs and `HISTORY.md` updated |
 
 *B2 result (Linux/x86_64, 2026-10-10).* Seven recipes with `"group": "web"` (`libjpeg-turbo` 3.2.0,
 `libwebp` 1.6.0, `libxml2` 2.15.4, `libpsl` 0.23.3, `harfbuzz` 14.6.0, `openssl` 3.5.9,
@@ -1573,6 +1573,26 @@ drawing area (`WKViewCRTSetSize`); the UI process keeps painting the old backing
 first paint was white. *Not exercised:* IME and non-US-layout text (the committed-text path types ASCII
 through a US layout table), touch and pen pointers, drag, device scale factors other than 1, pointer
 leave.
+
+*B7 result (Linux/x86_64, 2026-10-13).* `libcrtweb/tests/webkit/crtweb_lifecycle_test` (driver gate
+`lifecycle_and_host_abi`) runs 100 create/load/paint/release cycles of a context, page configuration
+and 320x240 view; each checks the canvas and background pixels, exactly one Web and one Network process
+while alive, and the Web process gone after release. After a 10-iteration warm-up the run grew by +0
+descriptors, +0 threads and +264..332 KiB RSS (flat at 65.9 MiB), bounds being 2, 2 and 24 MiB; no child
+process outlives the run. The single Network process is shared by design (default website data store),
+so the test requires at most one, not none. *Host ABI audit:* every produced binary and `libWebKit.so`
+resolves only to the CRT SDK, the port prefix and the build tree (plus the host dynamic loader), and the
+runtime `/proc/<pid>/maps` of the UI, Web and Network processes (123 distinct files) contain nothing
+else (the test program itself is also checked for GLib symbols and unresolved DT_NEEDED, as in B3). *Rechecks:* the
+per-file license scan of the pinned tree is byte-identical to the recorded `license-scan.json`, the
+patch manifest (18 patches) verifies against the checkout, and the licensing tests pass. *Found and
+fixed:* patch 0018, an upstream `RedBlackTree::remove` that leaves the removed node's `CheckedPtr`
+links in place, crashed `WebProcessProxy` teardown through the generic RunLoop's timer tasks. *Link
+set, by upstream's published licenses and not machine-verified by this repository:* ICU (Unicode),
+OpenSSL 3 (Apache-2.0), curl (curl license), HarfBuzz (MIT), FreeType (FTL, used under FTL),
+fontconfig, libxml2, libpsl, expat (MIT-style), libwebp (BSD-3), libjpeg-turbo (IJG/BSD-3), libpng,
+zlib, SQLite (public domain), libwpe (BSD-2), CRT's EGL/GLES stub libraries. *Not covered:* forced Web
+process termination and recovery, navigation while resizing (Tranche 5), non-Linux hosts.
 
 *Risks, named so they are watched rather than discovered.* (1) ~~The bundled Skia m154 must build with
 CRT's clang and libc++~~ *retired by B3 (it does)* (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about

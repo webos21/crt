@@ -193,6 +193,14 @@ if (CRT_WEBKIT_TESTS)
     target_link_libraries(crtweb_surface_host PRIVATE WebKit)
     add_dependencies(crtweb_surface_host WebProcess NetworkProcess)
 
+    add_executable(crtweb_lifecycle_test ${CRT_WEBKIT_TESTS}/crtweb_lifecycle_test.cpp)
+    target_include_directories(crtweb_lifecycle_test PRIVATE
+        $<TARGET_PROPERTY:WebKit,INCLUDE_DIRECTORIES>
+        ${WebKit_FRAMEWORK_HEADERS_DIR}
+    )
+    target_link_libraries(crtweb_lifecycle_test PRIVATE WebKit)
+    add_dependencies(crtweb_lifecycle_test WebProcess NetworkProcess)
+
     add_executable(crtweb_render_test ${CRT_WEBKIT_TESTS}/crtweb_render_test.cpp)
     target_include_directories(crtweb_render_test PRIVATE
         $<TARGET_PROPERTY:WebKit,INCLUDE_DIRECTORIES>
