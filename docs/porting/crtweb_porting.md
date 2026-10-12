@@ -108,12 +108,17 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
   `-D_LIBCPP_WIN32API` (needed on Windows so WebKit and the imported libc++ agree on `path::value_type`) the path's
   native string is `std::wstring`. Removal: upstream uses `.string()` or the Windows port is built as `PORT=Win`.
 
+- `0016` exposes the UI-side backing store's size (`DrawingAreaProxyCoordinatedGraphics::
+  backingStoreSizeForCRT`), so an embedder does not copy a stale picture after a resize.
+- `0017` implements `WebPage::handleEditingKeyboardEvent` for PlayStation-shaped ports (caret
+  movement, selection, deletion, newline/tab, character insertion), which upstream leaves a stub.
+
 ## WebKit files of PlatformCRT (milestone B4)
 
 `libcrtweb/port/Source/WebKit/PlatformCRT.cmake` follows `PlatformPlayStation.cmake`. CRT-owned files:
 `UIProcess/Launcher/crt/ProcessLauncherCRT.cpp`, `WebProcess/InjectedBundle/crt/InjectedBundleCRT.cpp`,
 `WebProcess/WebPage/crt/DrawingAreaCRT.{h,cpp}` (B5: CPU painting through `DrawingAreaProxy::Update`),
-`UIProcess/API/C/crt/WKViewCRT.{h,cpp}` (`WKViewCRTCopyPixels`), `Platform/crt/WPELoaderCRT.cpp`, and in WebCore
+`UIProcess/API/C/crt/WKViewCRT.{h,cpp}` (`WKViewCRTCopyPixels`, `WKViewCRTSetSize`, `WKViewCRTHandlePointer/Wheel/Key/Text`), `Platform/crt/WPELoaderCRT.cpp`, and in WebCore
 `platform/crt/UserAgentCRT.cpp`. The Web and Network process executables are upstream's Unix entry
 points (`WebProcess/EntryPoint/unix`), linked against `libWebKit.so`. Taken from PlayStation unchanged:
 `Platform/IPC/unix`, the libwpe event files, `UIProcess/playstation` (page client, view, preferences,

@@ -1255,7 +1255,7 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 | **B3** | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | **done 2026-10-11 (Linux/x86_64), replayed on macOS/arm64, Windows/x64 and Linux/aarch64 (2026-10-12)**: `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link (`tools/build_webkit_crt_port.py --run-tests`) |
 | **B4** | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | **done 2026-10-12 (Linux/x86_64)**: the UI process launches the Web and Network processes and a message round-trips; killing a child is detected (`crtweb_process_test`) |
 | **B5** | First render | **done 2026-10-12 (Linux/x86_64)**: `reference.html` renders, the proof string is the WPE reference's, the frame reaches `surface_probe` through the 3A contract (`crtweb_render_test`, `--webkit --run-tests`) |
-| B6 | Input | the 3A input checks (pointer click -> page report and pixel change, key code/modifiers, wheel, text, resize, stalled consumer) pass against the CRT port instead of the WPE module |
+| **B6** | Input | **done 2026-10-12 (Linux/x86_64)**: `surface_probe`'s full scripted run passes against `crtweb_surface_host` (the CRT port's frame producer) instead of the WPE module |
 | B7 | Close | 100x create/destroy without growth, host-ABI audit clean, patch manifest and license scan re-run, docs and `HISTORY.md` updated |
 
 *B2 result (Linux/x86_64, 2026-10-10).* Seven recipes with `"group": "web"` (`libjpeg-turbo` 3.2.0,
@@ -1551,6 +1551,28 @@ more than 24 channel units, all of it text, because the CRT port's font set is t
 its own sans-serif; that is risk 4, now measured. *Not exercised:* animation, scrolling, input (B6),
 resize, device scale factors other than 1, damage-limited frames (every frame is sent with full
 damage), more than one frame in the consumer.
+
+*B6 result (Linux/x86_64, 2026-10-12).* `libcrtweb/tests/webkit/crtweb_surface_host` is the CRT counterpart
+of the Tranche 3A WPEPlatform module: it loads `crt_surface.html`, sends frames and titles to the
+consumer (`crtweb_surface_producer.h`) and turns the consumer's pointer, wheel, key, text, resize and
+focus messages into WebKit events through new C API entry points (`WKViewCRTHandlePointer/Wheel/Key/
+Text`, `WKViewCRTSetSize`). The 3A acceptance consumer, `surface_probe`, run unchanged and complete
+(built with the CRT toolchain), passes: first frame at 640x480 with the four quadrant colours; pointer
+down/up/click reported by the page and quadrant A turning white in pixels; `a` and Ctrl+Shift+`b` with
+the right `key`/`code`/modifier report; wheel; committed text `q` as a keydown and `Z` typed into a
+focused field (the `input` event); resize to 320x240 with proportional quadrants; and a consumer that
+stops acknowledging and releasing (the pool of three runs dry, the page keeps running, the newest
+picture arrives after recovery). Stable over repeated runs (4.4-5.5 s each). *Found by the run and fixed:*
+the fontconfig port installs no configuration, so a generic or WebKit-default family name matched
+nothing, the primary font of an empty `<input>` had no metrics and the control was 6 px high (the
+driver's configuration now aliases the generic and default names to the bundled font; a real embedder
+needs the same); PlayStation's `handleEditingKeyboardEvent` is a stub, so typed characters never reached
+a text field (patch 0017, the Windows port's key-command logic); `WKViewSetSize` does not reach the
+drawing area (`WKViewCRTSetSize`); the UI process keeps painting the old backing store after a shrink
+(patch 0016 exposes its size so a stale picture is not sent); a first frame sent before the page's
+first paint was white. *Not exercised:* IME and non-US-layout text (the committed-text path types ASCII
+through a US layout table), touch and pen pointers, drag, device scale factors other than 1, pointer
+leave.
 
 *Risks, named so they are watched rather than discovered.* (1) ~~The bundled Skia m154 must build with
 CRT's clang and libc++~~ *retired by B3 (it does)* (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about

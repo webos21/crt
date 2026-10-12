@@ -1,0 +1,120 @@
+diff -urN a/Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp b/Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp
+--- a/Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp	2026-10-12 23:03:11.806316342 +0900
++++ b/Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp	2026-10-12 23:03:11.806349039 +0900
+@@ -26,7 +26,14 @@
+ #include "config.h"
+ #include "WebPage.h"
+ 
++#include <WebCore/Editor.h>
++#include <WebCore/EventNames.h>
++#include <WebCore/KeyboardEvent.h>
++#include <WebCore/LocalFrame.h>
++#include <WebCore/LocalFrameInlines.h>
+ #include <WebCore/NotImplemented.h>
++#include <WebCore/PlatformKeyboardEvent.h>
++#include <WebCore/WindowsKeyboardCodes.h>
+ #include <WebCore/Page.h>
+ #include <WebCore/PointerCharacteristics.h>
+ #include <WebCore/Settings.h>
+@@ -81,10 +88,99 @@
+     return PointerCharacteristics::Fine;
+ }
+ 
++// The editing commands of the keys a text field handles itself (Windows' table, WebPageWin.cpp, in
++// the subset that needs no platform clipboard integration): caret movement, selection, deletion,
++// line breaks and tabs, then the characters themselves.
++static const char* commandNameForKeyEvent(WebCore::KeyboardEvent& event)
++{
++    using namespace WebCore;
++    auto* keyEvent = event.underlyingPlatformEvent();
++    if (!keyEvent)
++        return "";
++
++    bool shift = keyEvent->shiftKey();
++    bool control = keyEvent->controlKey();
++
++    if (event.type() == eventNames().keydownEvent) {
++        switch (keyEvent->windowsVirtualKeyCode()) {
++        case VK_BACK:
++            return control ? "DeleteWordBackward" : "DeleteBackward";
++        case VK_DELETE:
++            return control ? "DeleteWordForward" : "DeleteForward";
++        case VK_LEFT:
++            return control ? (shift ? "MoveWordLeftAndModifySelection" : "MoveWordLeft") : (shift ? "MoveLeftAndModifySelection" : "MoveLeft");
++        case VK_RIGHT:
++            return control ? (shift ? "MoveWordRightAndModifySelection" : "MoveWordRight") : (shift ? "MoveRightAndModifySelection" : "MoveRight");
++        case VK_UP:
++            return shift ? "MoveUpAndModifySelection" : "MoveUp";
++        case VK_DOWN:
++            return shift ? "MoveDownAndModifySelection" : "MoveDown";
++        case VK_HOME:
++            return control ? (shift ? "MoveToBeginningOfDocumentAndModifySelection" : "MoveToBeginningOfDocument")
++                : (shift ? "MoveToBeginningOfLineAndModifySelection" : "MoveToBeginningOfLine");
++        case VK_END:
++            return control ? (shift ? "MoveToEndOfDocumentAndModifySelection" : "MoveToEndOfDocument")
++                : (shift ? "MoveToEndOfLineAndModifySelection" : "MoveToEndOfLine");
++        case VK_PRIOR:
++            return shift ? "MovePageUpAndModifySelection" : "MovePageUp";
++        case VK_NEXT:
++            return shift ? "MovePageDownAndModifySelection" : "MovePageDown";
++        default:
++            return "";
++        }
++    }
++
++    // keypress: Control+letter arrives as the control character, Enter and Tab as theirs.
++    switch (event.charCode()) {
++    case '\r':
++        return shift ? "InsertLineBreak" : "InsertNewline";
++    case '\t':
++        return shift ? "InsertBacktab" : "InsertTab";
++    case 0x01:
++        return control ? "SelectAll" : "";
++    case 0x03:
++        return control ? "Copy" : "";
++    case 0x16:
++        return control ? "Paste" : "";
++    case 0x18:
++        return control ? "Cut" : "";
++    case 0x19:
++        return control ? "Redo" : "";
++    case 0x1A:
++        return control ? "Undo" : "";
++    default:
++        return "";
++    }
++}
++
+ bool WebPage::handleEditingKeyboardEvent(WebCore::KeyboardEvent& event)
+ {
+-    notImplemented();
+-    return false;
++    auto* frame = downcast<WebCore::Node>(event.target())->document().frame();
++    if (!frame)
++        return false;
++
++    auto* keyEvent = event.underlyingPlatformEvent();
++    if (!keyEvent || keyEvent->isSystemKey())
++        return false;
++
++    if (event.type() != WebCore::eventNames().keydownEvent && event.type() != WebCore::eventNames().keypressEvent)
++        return false;
++
++    auto command = frame->editor().command(String::fromLatin1(commandNameForKeyEvent(event)));
++
++    if (keyEvent->type() == WebCore::PlatformEvent::Type::RawKeyDown) {
++        // Commands that would insert text are left to the keypress event WebCore generates next.
++        return !command.isTextInsertion() && command.execute(&event);
++    }
++
++    if (command.execute(&event))
++        return true;
++
++    // Null and control characters would insert unexpected content.
++    if (event.charCode() < ' ')
++        return false;
++
++    return frame->editor().insertText(keyEvent->text(), &event);
+ }
+ 
+ void WebPage::getPlatformEditorState(LocalFrame& frame, EditorState& result) const

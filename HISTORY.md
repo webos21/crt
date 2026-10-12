@@ -11,6 +11,21 @@ substantive update.
 
 ## 2026-10-12
 
+### Web Tranche 3B milestone B6: input through the web surface protocol
+
+`crtweb_surface_host` (the CRT port's frame producer) is run against the unchanged, complete 3A
+consumer `surface_probe`: pointer click -> page report and pixel change, key code and modifiers, wheel,
+committed text into a focused field, resize, and a stalled consumer all pass (3/3 consecutive runs,
+4-5 s). Input enters through `WKViewCRTHandlePointer/Wheel/Key/Text` (libwpe events built from the
+contract's keysym + XKB keycode + modifiers). The run found five things: the fontconfig port installs
+no configuration, so generic and default family names matched nothing and an empty `<input>` collapsed
+to 6 px (aliases now in the driver's configuration); PlayStation's key-to-editing path is a stub
+(patch 0017); `WKViewSetSize` does not reach the drawing area (`WKViewCRTSetSize`); a shrink leaves
+the old backing store looking current (patch 0016); and the first frame went out before the first
+paint. The legacy loader client rejects a title callback, so the host polls `WKPageCopyTitle`. Open:
+IME, non-US layouts, touch/pen, drag, scale factors, B7 (100x create/destroy, leak audit, closing
+rechecks), macOS/Windows/aarch64 replays of B5 and B6.
+
 ### Web Tranche 3B milestone B5: first render through the web surface protocol
 
 `DrawingAreaCRT` paints on the CPU (dirty rectangles into a `ShareableBitmap`, `DrawingAreaProxy::Update`,

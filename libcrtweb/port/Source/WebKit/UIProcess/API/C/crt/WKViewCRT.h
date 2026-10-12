@@ -42,6 +42,32 @@ extern "C" {
 // is left untouched, so clear the buffer first if that matters).
 WK_EXPORT bool WKViewCRTCopyPixels(WKViewRef view, void* pixels, uint32_t width, uint32_t height, size_t strideBytes);
 
+// Resizes the view: the size WKViewSetSize stores is the one the page client reports, but nothing
+// tells the page's drawing area (the Web process keeps laying out at the old size) in the
+// PlayStation-shaped API; this sets both. Logical pixels.
+WK_EXPORT void WKViewCRTSetSize(WKViewRef view, uint32_t width, uint32_t height);
+
+// Input (milestone B6): the web surface protocol's input messages, as the contract states them
+// (libcrtweb/platform/crtweb_surface_wire.h), turned into WebKit's native events. Coordinates are
+// view-local logical pixels; `modifiers` uses the contract's bits (control 1, shift 2, alt 4, meta 8,
+// caps lock 16); `timeMs` 0 means "now". WebKit derives `key` from the keysym and `code` from the
+// keycode, so both are required; a keycode of 0 makes WebKit drop the event.
+enum {
+    kWKViewCRTPointerMove = 1,
+    kWKViewCRTPointerDown = 2,
+    kWKViewCRTPointerUp = 3,
+};
+
+// button: 1 primary, 2 middle, 3 secondary (0 for a move).
+WK_EXPORT void WKViewCRTHandlePointer(WKViewRef view, uint32_t action, uint32_t button, double x, double y, uint32_t modifiers, uint32_t timeMs);
+// Deltas in logical pixels, as the wire protocol: positive y scrolls the content up.
+WK_EXPORT void WKViewCRTHandleWheel(WKViewRef view, double x, double y, double deltaX, double deltaY, uint32_t timeMs);
+// keyval: an X11/XKB keysym; keycode: the Linux evdev code + 8.
+WK_EXPORT void WKViewCRTHandleKey(WKViewRef view, bool down, bool repeat, uint32_t keyval, uint32_t keycode, uint32_t modifiers, uint32_t timeMs);
+// Committed text (UTF-8, one code point used): pressed and released on the key a US keyboard
+// layout types it with. A character with no such key is dropped; IME composition is deferred.
+WK_EXPORT void WKViewCRTHandleText(WKViewRef view, const char* utf8);
+
 #ifdef __cplusplus
 }
 #endif

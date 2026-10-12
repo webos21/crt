@@ -66,7 +66,6 @@ list(APPEND WebCore_SOURCES
     platform/graphics/DMABufBuffer.cpp
     platform/graphics/PlatformDisplay.cpp
 
-    platform/graphics/playstation/SystemFontDatabasePlayStation.cpp
 
     platform/libwpe/PasteboardLibWPE.cpp
     platform/libwpe/PlatformKeyboardEventLibWPE.cpp
@@ -79,6 +78,7 @@ list(APPEND WebCore_SOURCES
     platform/graphics/egl/GLFenceEGL.cpp
     platform/graphics/egl/GLFenceGL.cpp
 
+    platform/crt/SystemFontDatabaseCRT.cpp
     platform/crt/UserAgentCRT.cpp
     platform/network/crt/CurlSSLHandleCRT.cpp
     platform/network/playstation/NetworkStateNotifierPlayStation.cpp

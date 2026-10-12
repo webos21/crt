@@ -1,0 +1,15 @@
+diff -urN a/Source/WebKit/UIProcess/CoordinatedGraphics/DrawingAreaProxyCoordinatedGraphics.h b/Source/WebKit/UIProcess/CoordinatedGraphics/DrawingAreaProxyCoordinatedGraphics.h
+--- a/Source/WebKit/UIProcess/CoordinatedGraphics/DrawingAreaProxyCoordinatedGraphics.h	2026-10-12 21:53:48.713070139 +0900
++++ b/Source/WebKit/UIProcess/CoordinatedGraphics/DrawingAreaProxyCoordinatedGraphics.h	2026-10-12 21:53:48.713129741 +0900
+@@ -57,6 +57,11 @@
+ #if !PLATFORM(WPE) && !PLATFORM(GTK)
+     void paint(PlatformPaintContextPtr, const WebCore::IntRect&, WebCore::Region& unpaintedRegion);
+ #endif
++#if PLATFORM(CRT)
++    // The size of the backing store as the Web process last sent it (empty before the first update):
++    // lets an embedder tell a picture of the current view size from a stale one after a resize.
++    WebCore::IntSize backingStoreSizeForCRT() const { return m_backingStore ? m_backingStore->size() : WebCore::IntSize(); }
++#endif
+ 
+     bool isInAcceleratedCompositingMode() const { return !m_layerTreeContext.isEmpty(); }
+     const LayerTreeContext& layerTreeContext() const LIFETIME_BOUND { return m_layerTreeContext; }

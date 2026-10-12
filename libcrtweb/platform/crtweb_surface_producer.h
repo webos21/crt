@@ -45,9 +45,14 @@ typedef struct crtweb_producer {
   uint64_t serial;
   uint64_t damage_serial;
   uint64_t acked_serial;
+  uint64_t last_frame_ns; /* when the last FRAME was sent */
   unsigned input_messages_dropped;
   uint32_t requested_width, requested_height; /* the consumer's last RESIZE */
   int bye;
+  /* Called for every consumer message except FRAME_ACK and BUFFER_RELEASE (which the producer
+   * handles itself): RESIZE, FOCUS, POINTER, WHEEL, KEY, TEXT, BYE. May be NULL. */
+  void (*on_message)(void* user, const void* message);
+  void* user;
 } crtweb_producer;
 
 static inline uint64_t crtweb_producer_now_ns(void) {
@@ -59,9 +64,14 @@ static inline uint64_t crtweb_producer_now_ns(void) {
 /* Handles one consumer message. */
 static inline void crtweb_producer_handle(crtweb_producer* p, const void* data) {
   const crtweb_wire_header* header = (const crtweb_wire_header*)data;
+  if (p->on_message != NULL && header->type != CRTWEB_C2P_FRAME_ACK && header->type != CRTWEB_C2P_BUFFER_RELEASE) {
+    p->on_message(p->user, data);
+  }
   switch (header->type) {
     case CRTWEB_C2P_FRAME_ACK:
-      p->acked_serial = ((const crtweb_wire_frame_ack*)data)->serial;
+      if (((const crtweb_wire_frame_ack*)data)->serial > p->acked_serial) {
+        p->acked_serial = ((const crtweb_wire_frame_ack*)data)->serial;
+      }
       break;
     case CRTWEB_C2P_BUFFER_RELEASE: {
       uint32_t id = ((const crtweb_wire_buffer_release*)data)->buffer_id;
@@ -116,7 +126,9 @@ static inline int crtweb_producer_pump(crtweb_producer* p, int timeout_ms) {
   }
 }
 
-/* Connects to the consumer listening on `path` and completes HELLO -> CONFIG. 0, or -1. */
+/* Connects to the consumer listening on `path` and completes HELLO -> CONFIG. 0, or -1.
+ * `*p` must be zero-initialised by the caller (`crtweb_producer p = {0};`); `on_message` and `user`
+ * may be set before the call and are kept. */
 static inline int crtweb_producer_connect(crtweb_producer* p, const char* path, uint32_t width, uint32_t height,
                                           uint32_t scale_percent) {
   struct sockaddr_un address;
@@ -126,7 +138,13 @@ static inline int crtweb_producer_connect(crtweb_producer* p, const char* path, 
   int fd = -1;
   unsigned i;
 
-  memset(p, 0, sizeof *p);
+  {
+    void (*on_message)(void*, const void*) = p->on_message;
+    void* user = p->user;
+    memset(p, 0, sizeof *p);
+    p->on_message = on_message;
+    p->user = user;
+  }
   for (i = 0; i < CRTWEB_POOL_SIZE; ++i) {
     p->buffers[i].fd = -1;
   }
@@ -238,35 +256,30 @@ static inline int crtweb_producer_buffer_prepare(crtweb_producer* p, unsigned in
 }
 
 /* Sends one complete picture (B, G, R, A premultiplied, `stride` bytes per row) as a FRAME with full
- * damage, preceded by the document title when it is non-NULL. Waits at most 250 ms for the previous
- * frame's ACK and for a free buffer (the contract's bounded wait). 0, or -1. */
-static inline int crtweb_producer_present(crtweb_producer* p, const void* pixels, uint32_t width, uint32_t height,
-                                          uint32_t stride, const char* title) {
-  uint64_t deadline = crtweb_producer_now_ns() + 250ull * 1000000ull;
+ * damage, preceded by the document title when it is non-NULL, without waiting.
+ * Returns 0 when sent, 1 when it cannot be sent now (the previous frame has not been acknowledged
+ * within the contract's 250 ms window, or the consumer holds every buffer of the pool: the caller keeps
+ * the newest picture and retries -- latest wins), -1 on a connection or allocation failure. */
+static inline int crtweb_producer_try_present(crtweb_producer* p, const void* pixels, uint32_t width, uint32_t height,
+                                              uint32_t stride, const char* title) {
   unsigned index = CRTWEB_POOL_SIZE;
   unsigned i;
   crtweb_wire_frame frame;
+  uint64_t now = crtweb_producer_now_ns();
 
-  while (p->serial > p->acked_serial && crtweb_producer_now_ns() < deadline) {
-    if (crtweb_producer_pump(p, 10) != 0) {
-      return -1;
-    }
+  if (p->serial > p->acked_serial && now - p->last_frame_ns < 250ull * 1000000ull) {
+    return 1;
   }
-  for (;;) {
-    for (i = 0; i < CRTWEB_POOL_SIZE; ++i) {
-      if (!p->buffers[i].in_use) {
-        index = i;
-        break;
-      }
-    }
-    if (index < CRTWEB_POOL_SIZE || crtweb_producer_now_ns() >= deadline) {
+  for (i = 0; i < CRTWEB_POOL_SIZE; ++i) {
+    if (!p->buffers[i].in_use) {
+      index = i;
       break;
     }
-    if (crtweb_producer_pump(p, 10) != 0) {
-      return -1;
-    }
   }
-  if (index >= CRTWEB_POOL_SIZE || crtweb_producer_buffer_prepare(p, index, width, height, width * 4u) != 0) {
+  if (index >= CRTWEB_POOL_SIZE) {
+    return 1;
+  }
+  if (crtweb_producer_buffer_prepare(p, index, width, height, width * 4u) != 0) {
     return -1;
   }
   {
@@ -298,13 +311,43 @@ static inline int crtweb_producer_present(crtweb_producer* p, const void* pixels
   frame.damage_y = 0;
   frame.damage_width = (int32_t)width;
   frame.damage_height = (int32_t)height;
-  frame.time_ns = crtweb_producer_now_ns();
+  frame.time_ns = now;
+  p->last_frame_ns = now;
   p->buffers[index].in_use = 1;
   if (crtweb_wire_send(p->socket_fd, &frame, sizeof frame, -1) != 0) {
     p->buffers[index].in_use = 0;
     return -1;
   }
   return 0;
+}
+
+/* The document title alone (it changes without a new picture). 0, or -1. */
+static inline int crtweb_producer_send_title(crtweb_producer* p, const char* title) {
+  crtweb_wire_title message;
+  memset(&message, 0, sizeof message);
+  message.header.type = CRTWEB_P2C_TITLE;
+  message.header.size = sizeof message;
+  strncpy(message.utf8, title, sizeof message.utf8 - 1);
+  return crtweb_wire_send(p->socket_fd, &message, sizeof message, -1);
+}
+
+/* Like crtweb_producer_try_present, but waits at most 250 ms for the previous frame's ACK and for a
+ * free buffer (the contract's bounded wait). 0, or -1. */
+static inline int crtweb_producer_present(crtweb_producer* p, const void* pixels, uint32_t width, uint32_t height,
+                                          uint32_t stride, const char* title) {
+  uint64_t deadline = crtweb_producer_now_ns() + 250ull * 1000000ull;
+  for (;;) {
+    int result = crtweb_producer_try_present(p, pixels, width, height, stride, title);
+    if (result <= 0) {
+      return result;
+    }
+    if (crtweb_producer_now_ns() >= deadline) {
+      return -1;
+    }
+    if (crtweb_producer_pump(p, 10) != 0) {
+      return -1;
+    }
+  }
 }
 
 /* Waits until the last frame sent is acknowledged. 0, or -1 on timeout or a lost connection. */
@@ -317,6 +360,10 @@ static inline int crtweb_producer_wait_ack(crtweb_producer* p, int timeout_ms) {
   }
   return 0;
 }
+
+/* Says BYE and keeps reading for `linger_ms` before closing, so a consumer that is still releasing
+ * the buffers of frames it received (or acknowledging them) does not hit a closed socket. */
+static inline void crtweb_producer_goodbye(crtweb_producer* p, int linger_ms);
 
 static inline void crtweb_producer_close(crtweb_producer* p) {
   unsigned i;
@@ -339,6 +386,23 @@ static inline void crtweb_producer_close(crtweb_producer* p) {
     p->buffers[i].map = NULL;
     p->buffers[i].fd = -1;
   }
+}
+
+static inline void crtweb_producer_goodbye(crtweb_producer* p, int linger_ms) {
+  if (p->socket_fd >= 0) {
+    crtweb_wire_header bye;
+    uint64_t deadline = crtweb_producer_now_ns() + (uint64_t)linger_ms * 1000000ull;
+    memset(&bye, 0, sizeof bye);
+    bye.type = CRTWEB_P2C_BYE;
+    bye.size = sizeof bye;
+    (void)crtweb_wire_send(p->socket_fd, &bye, sizeof bye, -1);
+    while (crtweb_producer_now_ns() < deadline) {
+      if (crtweb_producer_pump(p, 20) != 0) {
+        break;
+      }
+    }
+  }
+  crtweb_producer_close(p);
 }
 
 #ifdef __cplusplus

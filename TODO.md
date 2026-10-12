@@ -109,9 +109,10 @@ uses the host replay order stated below and in the acceptance document.
     the proof matches the WPE reference and the 640x480 frame reaches the CRT
     consumer through the 3A contract; 8.3 % of pixels differ (text: font set).
     macOS/Windows/aarch64 replays are open.
-  * [ ] **3B-B6, next:** route the frozen pointer/key/wheel/text/resize contract through
-    `PlatformCRT` and verify page reports, pixel changes and stalled-consumer behavior.
-  * [ ] **3B-B7:** close the Linux prototype with 100x create/destroy, bounded
+  * [x] **3B-B6:** on Linux/x86_64 the 3A input contract (pointer, key, wheel, text,
+    resize, stalled consumer) passes through `PlatformCRT` against `surface_probe`.
+    macOS/Windows/aarch64 replays are open.
+  * [ ] **3B-B7, next:** close the Linux prototype with 100x create/destroy, bounded
     growth, clean Host ABI audit, license scan and patch-manifest recheck.
 * [ ] **4. `libcrtweb` and the WebView.** Start after 3B-B7.
   * [ ] Freeze and implement the CRT-owned runtime/view API and callbacks.

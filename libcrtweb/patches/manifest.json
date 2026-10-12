@@ -489,6 +489,40 @@
       ],
       "reason": "createTemporaryDirectory() initialises a std::string from a std::filesystem::path, an implicit conversion that exists only where path::value_type is char. The Windows libc++.dll holds wchar_t paths (_LIBCPP_WIN32API), which the Windows persona now declares so that std::filesystem calls cross the DLL boundary with one layout; there the conversion needs .string(), which is the same call on POSIX.",
       "remove_when": "Upstream spells the conversion with .string() (a portability fix in WebKit; no CRT-specific condition)."
+    },
+    {
+      "id": "0016-crt-backing-store-size",
+      "patch": "0016-crt-backing-store-size.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/UIProcess/CoordinatedGraphics/DrawingAreaProxyCoordinatedGraphics.h",
+          "sha256_before": "22175b584132611b241da4f3180d8e73a9b9d08603365a9ac4dcf0aa90669bc0",
+          "sha256_after": "c3f65e66c996a65faaf3a020ab9de87e3278c24f09d2acb8567c2c12c336e14e",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "After a resize the UI process keeps painting from the old backing store until the Web process has sent an update of the new size; for a shrink the old store covers the new rectangle completely, so an embedder that copies the view out (WKViewCRTCopyPixels, for the web surface protocol) cannot tell a stale picture from the real one. PlatformCRT needs the backing store's size, which is private; one inline accessor under PLATFORM(CRT).",
+      "remove_when": "Upstream exposes the backing store size, or a resize invalidates the store at once."
+    },
+    {
+      "id": "0017-crt-editing-keyboard-events",
+      "patch": "0017-crt-editing-keyboard-events.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp",
+          "sha256_before": "2e3d40b25657b20f899743c61e86bb07041dab5600c5b3c9e28f5993aac77cd8",
+          "sha256_after": "6bba76c582c34e18d884bb67ea8c813ff00c988a6903e4069b273772ac928ae4",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "WebPage::handleEditingKeyboardEvent is where a keyboard event becomes an editing command or inserted text for ports that do not route keys through an input-method context (GLib ports use one). PlayStation's version is notImplemented(), so a focused text field never receives typed characters through the key path the web surface protocol uses (key and committed-text messages). PlatformCRT takes the Windows port's logic (WebPageWin.cpp) in the subset that needs no platform clipboard integration: caret movement, selection, deletion, line breaks and tabs, then the character.",
+      "remove_when": "PlatformCRT gets an input-method (IME) path that composes and commits text (deferred past Web v1), or upstream gives the PlayStation port its own implementation."
     }
   ],
   "license_policy": {
@@ -625,6 +659,13 @@
       "origin": "crt",
       "license": "BSD-2-Clause",
       "purpose": "CRT C API extension (B5): copy the view's backing store out"
+    },
+    {
+      "file": "Source/WebCore/platform/crt/SystemFontDatabaseCRT.cpp",
+      "source": "libcrtweb/port/Source/WebCore/platform/crt/SystemFontDatabaseCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "system font shorthands: generic sans-serif at 13/11 px (PlayStation's file returns the standard family and logs)"
     }
   ]
 }

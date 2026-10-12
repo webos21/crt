@@ -163,6 +163,23 @@ def audit_program(program: Path, sdk: Path, prefix: Path, env: dict, build: Path
             "ok": not glib and not unresolved}
 
 
+# The family names WebKit asks fontconfig for: the CSS generic families, the names WebKit's default
+# preferences use for them, and system-ui. The fontconfig port installs no default configuration, so
+# without these aliases a name that is not an installed family matches nothing, the primary font of
+# an empty form control has no metrics and the control collapses to its border (found by the B6 run:
+# an <input> with font-family sans-serif was 6 px high).
+GENERIC_FAMILIES = ("sans-serif", "serif", "monospace", "cursive", "fantasy", "system-ui", "ui-sans-serif",
+                    "Times", "Times New Roman", "Helvetica", "Arial", "Courier", "Courier New")
+
+
+def font_configuration(fonts_dir: str, cache_dir: str) -> str:
+    aliases = "".join(
+        f"<alias binding=\"same\"><family>{name}</family><prefer><family>DejaVu Sans Mono</family></prefer></alias>"
+        for name in GENERIC_FAMILIES)
+    return ('<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n'
+            f"<fontconfig><dir>{fonts_dir}</dir><cachedir>{cache_dir}</cachedir>{aliases}</fontconfig>\n")
+
+
 def run_program(name: str, build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
                 target_os: str = "linux") -> dict:
     """Run one gate program from <build>/bin with a fontconfig file that scans only the bundled
@@ -182,10 +199,7 @@ def run_program(name: str, build: Path, sdk: Path, prefix: Path, work: Path, env
     else:
         fonts_text, cache_text = str(fonts), str(cache)
     conf = work / "fonts.conf"
-    conf.write_text(
-        '<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n'
-        f'<fontconfig><dir>{fonts_text}</dir><cachedir>{cache_text}</cachedir></fontconfig>\n',
-        encoding="utf-8")
+    conf.write_text(font_configuration(fonts_text, cache_text), encoding="utf-8")
     run_env = dict(env)
     run_env["FONTCONFIG_FILE"] = crt_path(conf) if target_os == "windows" else str(conf)
     if target_os == "windows":
@@ -289,6 +303,42 @@ def run_render_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict)
     return result
 
 
+def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+    """B6: the 3A acceptance consumer (surface_probe, its full scripted run: pointer click -> page report
+    and pixel change, key code and modifiers, wheel, committed text, resize, stalled consumer) against
+    crtweb_surface_host, the CRT port's frame producer, instead of the native WPE module."""
+    import subprocess
+    probe = work / "surface_probe"
+    if not probe.exists():
+        jsc.run([str(sdk / "tools" / "crt-cc"), "-O1", "-o", str(probe),
+                 str(ROOT / "libcrtweb" / "tests" / "platform-crt" / "surface_probe.c")], env=env)
+    socket_path = str(work / "input.sock")
+    run_env = dict(env)
+    run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
+    run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+    consumer = subprocess.Popen([str(probe), socket_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, env=run_env)
+    try:
+        line = consumer.stdout.readline()
+        if "SURFACE_PROBE_LISTENING" not in line:
+            return {"passed": False, "reason": f"consumer did not listen: {line!r}"}
+        producer = subprocess.run(
+            [str(build / "bin" / "crtweb_surface_host"),
+             str(ROOT / "libcrtweb" / "tests" / "platform-crt" / "crt_surface.html"), socket_path],
+            env=run_env, cwd=work, capture_output=True, text=True, timeout=240)
+        consumer_output, _ = consumer.communicate(timeout=60)
+        print(consumer_output, end="")
+        if producer.stderr:
+            print(producer.stderr, end="", file=sys.stderr)
+    finally:
+        if consumer.poll() is None:
+            consumer.kill()
+    ok = producer.returncode == 0 and consumer.returncode == 0 and "surface_probe: ok" in consumer_output
+    return {"passed": ok, "producer_returncode": producer.returncode, "consumer_returncode": consumer.returncode,
+            "consumer_output": consumer_output.splitlines()}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--recipe", type=Path, default=ROOT / "libcrtweb/third_party/webkit/recipe.json")
@@ -357,7 +407,7 @@ def main() -> int:
         return 0
     tests = ["crtweb_webcore_graph_test"] + (["crtweb_process_test"] if args.webkit else [])
     if args.run_tests and not args.target:
-        args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test"] if args.webkit else [])
+        args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host"] if args.webkit else [])
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -371,10 +421,11 @@ def main() -> int:
     if args.webkit and target_os == "linux":
         results["render_through_surface_protocol"] = run_render_gate(build, sdk, prefix, work, env)
         print("B5 diff:", json.dumps(results["render_through_surface_protocol"].get("diff_against_wpe_reference")))
+        results["input_through_surface_protocol"] = run_input_gate(build, sdk, prefix, work, env)
     passed = all(r["passed"] for r in results.values())
     (work / "acceptance-b3.json").write_text(json.dumps(
         {"passed": passed, "programs": results}, indent=2) + "\n", encoding="utf-8")
-    print("B3/B4/B5 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
+    print("B3-B6 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
     return 0 if passed else 1
 
 

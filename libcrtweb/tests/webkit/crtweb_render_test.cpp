@@ -221,7 +221,7 @@ int main(int argc, char** argv)
 
     if (argc >= 4) {
         // Deliver the frame through the web surface protocol (the 3A frame producer contract).
-        crtweb_producer producer;
+        crtweb_producer producer = { };
         if (crtweb_producer_connect(&producer, argv[3], ViewWidth, ViewHeight, 100) != 0)
             check(false, "connected to the consumer and received CONFIG");
         else {
