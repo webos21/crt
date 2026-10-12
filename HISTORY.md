@@ -11,6 +11,41 @@ substantive update.
 
 ## 2026-10-13
 
+### Web Tranche 3B milestones B5-B7 replayed on Windows/x64: two kernel-handle leaks and a wrong peer found in the PAL
+
+`build_webkit_crt_port.py --webkit --run-tests` on Windows now runs the same B5/B6/B7 gates as Linux
+(`render_through_surface_protocol`, `input_through_surface_protocol`, `lifecycle_and_host_abi`) and passes 3/3
+consecutive runs, no child left, `ctest` 184/184. No WebKit source needed a new patch; every defect was in the PAL.
+
+- *B5/B6 passed first time:* `crtweb_render_test` (proof string identical, 678 colours, frame to `surface_probe`) and the
+  full scripted 3A input run (pointer, key, wheel, text, resize, stalled consumer) work over the CRT's AF_UNIX
+  SEQPACKET and memfd mappings, built with the CRT toolchain as `surface_probe.exe`. The diff against the native WPE
+  reference is not computed (there is no WPE reference build on this host); the gate does not require it.
+- *B7 failed: +7 kernel handles per create/destroy cycle* (RSS and threads were flat). `NtQueryObject` types of the
+  UI process's handles (`CRTWEB_LIFECYCLE_HANDLES=1`, a diagnostic in the test) named them:
+  1. **Thread + event per thread.** The signal backend duplicates a thread handle and creates a sigsuspend() event for
+     every thread that touches it; `__crt_windows_signal_detach_current()` never closed them (3 threads per cycle).
+     They are closed at thread end, under the sender's `injecting` lock so a concurrent `pthread_kill` cannot use a
+     closed handle.
+  2. **A socket per cycle, and a descriptor that did not arrive.** A process that made both ends of a `socketpair()` and
+     handed one end to a child asks Winsock for the peer's pid and gets its *own*: the passed descriptor was
+     duplicated into the sender itself (leak) and the receiver was given a handle value that is not a socket in its
+     process (`ENOTSOCK`). WebKit's UI process forwards the Network process's sockets this way. The record now says
+     the handle lives in the sender (`CRT_SEQ_FLAG_SOURCE_PROCESS`, sender pid) and the receiver takes it with
+     `DuplicateHandle(..., CLOSE_SOURCE)`. `unix_socket_test: test_descriptor_sent_to_inheriting_child` fails on the old
+     code and passes on the new. Limit: a sender that exits before the receiver receives takes the descriptor with it.
+- *Host ABI audit, Windows form.* Static: the `llvm-objdump -p` import closure of every produced `.exe`/`.dll` (CRT
+  SDK, port prefix, build tree, OS runtime contract). Runtime: the Toolhelp module list of the UI, Web and Network
+  processes (111 files) is the CRT SDK, the port prefix, the build tree and System32 DLLs. `msvcrt.dll` and
+  `ucrtbase.dll` appear in every Windows process (advapi32/RPCRT4 import them), so the runtime list only reports OS
+  DLLs; a CRT binary importing the host C runtime is what the static half catches.
+- *Test.* `crtweb_lifecycle_test` has a Windows branch (Toolhelp children, `K32GetProcessMemoryInfo`,
+  `GetProcessHandleCount`, thread count); its "descriptors" are kernel handles. Result: 100/100 cycles,
+  +0 handles, -36..-56 KiB RSS (13.6 MiB), +0 threads, about 85 s.
+
+Open: macOS and Linux/aarch64 replays of B5-B7; the Linux/macOS hosts have not re-run `unix_socket_test` with the new
+case; forced Web process termination and recovery (Tranche 5).
+
 ### Web Tranche 3B milestone B7: Linux/x86_64 prototype closed (100x create/destroy, Host ABI audit, rechecks)
 
 `crtweb_lifecycle_test` creates a context, page configuration and 320x240 view 100 times, loads a canvas

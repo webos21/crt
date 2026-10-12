@@ -471,6 +471,21 @@ Found by the Windows replay of B4 (`libc/src/arch/windows/common/syscall.c`).
 - *Inheritance.* CRT sockets are non-inheritable; a handle inherited by an unrelated native child kept connections alive
   past the exit of their owners. Descriptors reach CRT children through the spawn snapshot, not handle inheritance.
 
+### Windows: handles per thread, and the peer of a socketpair (2026-10-13)
+
+Found by the B7 lifecycle test (+7 kernel handles per create/destroy cycle).
+
+- *Per-thread signal state.* The thread handle (for `pthread_kill`'s suspend/inject) and the `sigsuspend()` event were
+  never closed when a thread ended; both leaked for every thread. They are closed in
+  `__crt_windows_signal_detach_current()` while holding the target's `injecting` lock.
+- *`SCM_RIGHTS` from a process that made both ends of a `socketpair()`.* `SIO_AF_UNIX_GETPEERPID` names the process
+  that created the pair as the peer of both ends, so the descriptor was duplicated into the sender, not into the child
+  that holds the other end; the receiver got a handle value that is no socket of its own. A record flagged
+  `CRT_SEQ_FLAG_SOURCE_PROCESS` carries the sender's pid and the receiver claims the handle with
+  `DuplicateHandle(sender, handle, self, CLOSE_SOURCE)`. If the sender has exited the descriptor is gone and
+  `recvmsg` drops it (`MSG_CTRUNC` path closes it). Test: `unix_socket_test`
+  (`test_descriptor_sent_to_inheriting_child`, also on Linux/macOS where it is trivially true).
+
 ## IPv6 on macOS (2026-10-11)
 
 Found by turning IPv6 back on in libcurl: the macOS socket layer translated only `AF_INET` and `AF_UNIX`.

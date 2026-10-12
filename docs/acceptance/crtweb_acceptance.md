@@ -1594,6 +1594,18 @@ fontconfig, libxml2, libpsl, expat (MIT-style), libwebp (BSD-3), libjpeg-turbo (
 zlib, SQLite (public domain), libwpe (BSD-2), CRT's EGL/GLES stub libraries. *Not covered:* forced Web
 process termination and recovery, navigation while resizing (Tranche 5), non-Linux hosts.
 
+*B5-B7 replayed on Windows/x64 (2026-10-13).* The three driver gates run unchanged in structure
+(`tools/build_webkit_crt_port.py`; programs found as `.exe`, DLLs through `PATH`, the surface socket named by its
+drive-letter path) and pass 3/3 consecutive runs: `crtweb_render_test` (proof identical, 678 colours,
+`surface_probe` accepts the frame; no native WPE reference exists on this host, so the pixel diff is not computed),
+the scripted 3A input run, and `crtweb_lifecycle_test` (100 cycles, +0 handles, +0 threads, RSS flat at 13.6 MiB, at most
+one Network process, no orphan). The host ABI audit has a Windows form: the static import closure of every produced
+binary, and the Toolhelp module list of the UI, Web and Network processes (111 files: CRT SDK, port prefix, build
+tree, System32 DLLs). The replay found, in CRT, two handle leaks that Linux does not have (per-thread signal-state
+handles, and a descriptor forwarded by a process that made both ends of a socketpair; `docs/porting/bionic_libc_gaps.md`)
+and no new WebKit patch. *Not exercised on Windows:* the same set as Linux, plus a sender that exits before its
+descriptor is received.
+
 *Risks, named so they are watched rather than discovered.* (1) ~~The bundled Skia m154 must build with
 CRT's clang and libc++~~ *retired by B3 (it does)* (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about
 16,000 files, so build time and the unified-source layout dominate iteration; (3) OpenSSL and an
