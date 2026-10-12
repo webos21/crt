@@ -94,6 +94,8 @@ list(APPEND WebKit_SOURCES
     UIProcess/API/C/playstation/WKRunLoop.cpp
     UIProcess/API/C/playstation/WKView.cpp
 
+    UIProcess/API/C/crt/WKViewCRT.cpp
+
     UIProcess/CoordinatedGraphics/DrawingAreaProxyCoordinatedGraphics.cpp
 
     UIProcess/Launcher/crt/ProcessLauncherCRT.cpp
@@ -127,6 +129,7 @@ list(APPEND WebKit_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBKIT_DIR}/Platform/generic"
     "${WEBKIT_DIR}/Shared/glib"
     "${WEBKIT_DIR}/Shared/libwpe"
+    "${WEBKIT_DIR}/UIProcess/API/C/crt"
     "${WEBKIT_DIR}/UIProcess/API/C/playstation"
     "${WEBKIT_DIR}/UIProcess/API/libwpe"
     "${WEBKIT_DIR}/UIProcess/API/playstation"
@@ -161,6 +164,8 @@ list(APPEND WebKit_PUBLIC_FRAMEWORK_HEADERS
     Shared/API/c/playstation/WKBasePlayStation.h
     Shared/API/c/playstation/WKEventPlayStation.h
 
+    UIProcess/API/C/crt/WKViewCRT.h
+
     UIProcess/API/C/playstation/WKContextConfigurationPlayStation.h
     UIProcess/API/C/playstation/WKPagePrivatePlayStation.h
     UIProcess/API/C/playstation/WKRunLoop.h
@@ -179,4 +184,12 @@ if (CRT_WEBKIT_TESTS)
     )
     target_link_libraries(crtweb_process_test PRIVATE WebKit)
     add_dependencies(crtweb_process_test WebProcess NetworkProcess)
+
+    add_executable(crtweb_render_test ${CRT_WEBKIT_TESTS}/crtweb_render_test.cpp)
+    target_include_directories(crtweb_render_test PRIVATE
+        $<TARGET_PROPERTY:WebKit,INCLUDE_DIRECTORIES>
+        ${WebKit_FRAMEWORK_HEADERS_DIR}
+    )
+    target_link_libraries(crtweb_render_test PRIVATE WebKit)
+    add_dependencies(crtweb_render_test WebProcess NetworkProcess)
 endif ()

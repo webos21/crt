@@ -11,6 +11,20 @@ substantive update.
 
 ## 2026-10-12
 
+### Web Tranche 3B milestone B5: first render through the web surface protocol
+
+`DrawingAreaCRT` paints on the CPU (dirty rectangles into a `ShareableBitmap`, `DrawingAreaProxy::Update`,
+`DisplayDidRefresh` pacing: the protocol of upstream's non-composited drawing area, re-implemented
+against today's `DrawingArea`), the UI process composes into upstream's Skia `BackingStore`, and
+`WKViewCRTCopyPixels` copies it out. `libcrtweb/platform/crtweb_surface_producer.h` is a header-only C
+implementation of the 3A producer contract (HELLO/CONFIG, a pool of three memfd buffers, ACK pacing,
+BUFFER_RELEASE ownership). `crtweb_render_test` renders the Tranche 2 fixture in a 640x480 view, checks
+the proof string against the WPE reference's, and sends the frame to `surface_probe --reference` (a new
+mode of the 3A consumer, built with the CRT toolchain); the driver diffs the frame against the native
+WPE reference. Result: proof identical, 678 colours incl. all five fixture colours, solid regions
+identical to the pixel, 8.3 % of pixels differ, all text (the CRT font set differs from the WPE
+host's). 15/15 runs. Open: input (B6), 100x create/destroy (B7), animation/scrolling/resize, damage.
+
 ### Web Tranche 3B milestone B4 replayed on Windows/x64: process kill, handle lifetime and AF_UNIX close fixed in the PAL
 
 `build_webkit_crt_port.py --webkit --run-tests` (Windows host, persona clang/lld, imported libc++) builds a static

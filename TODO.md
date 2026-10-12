@@ -105,10 +105,11 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **3B-B4:** on Linux/x86_64 launch UI/Web/Network processes, round-trip IPC
     and detect forced child termination. Replayed on macOS/arm64 and
     Windows/x64 (2026-10-12).
-  * [ ] **3B-B5, next:** load `reference.html`, paint in `DrawingAreaCRT`, deliver
-    the first 640x480 frame through the 3A contract, present it through the CRT
-    consumer and report its difference from the Tranche 2 reference.
-  * [ ] **3B-B6:** route the frozen pointer/key/wheel/text/resize contract through
+  * [x] **3B-B5:** on Linux/x86_64 `reference.html` renders through `DrawingAreaCRT`,
+    the proof matches the WPE reference and the 640x480 frame reaches the CRT
+    consumer through the 3A contract; 8.3 % of pixels differ (text: font set).
+    macOS/Windows/aarch64 replays are open.
+  * [ ] **3B-B6, next:** route the frozen pointer/key/wheel/text/resize contract through
     `PlatformCRT` and verify page reports, pixel changes and stalled-consumer behavior.
   * [ ] **3B-B7:** close the Linux prototype with 100x create/destroy, bounded
     growth, clean Host ABI audit, license scan and patch-manifest recheck.

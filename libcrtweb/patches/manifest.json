@@ -611,6 +611,20 @@
       "origin": "crt",
       "license": "BSD-2-Clause",
       "purpose": "libwpe loader interface (static libwpe): no backend objects from WebKit"
+    },
+    {
+      "file": "Source/WebKit/UIProcess/API/C/crt/WKViewCRT.h",
+      "source": "libcrtweb/port/Source/WebKit/UIProcess/API/C/crt/WKViewCRT.h",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "CRT C API extension (B5): copy the view's backing store out"
+    },
+    {
+      "file": "Source/WebKit/UIProcess/API/C/crt/WKViewCRT.cpp",
+      "source": "libcrtweb/port/Source/WebKit/UIProcess/API/C/crt/WKViewCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "CRT C API extension (B5): copy the view's backing store out"
     }
   ]
 }

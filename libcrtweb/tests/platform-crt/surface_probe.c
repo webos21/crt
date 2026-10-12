@@ -270,6 +270,69 @@ static void key(uint32_t down, uint32_t keyval, uint32_t keycode, uint32_t modif
   send_simple(CRTWEB_C2P_KEY, &k, sizeof k);
 }
 
+/* The first-render check: one 640x480 frame whose pixels carry the fixture's colours. */
+static int run_reference(const char* output, double started) {
+  static const uint32_t wanted[] = {0x10243c, 0x1982c4, 0x8ac926, 0xff595e, 0x6a4c93, 0xffca3a};
+  uint32_t seen[4096];
+  unsigned distinct = 0, i;
+  uint32_t x, y;
+
+  want_frames_target = 1;
+  CHECK(pump(have_frames, 60.0), "no frame within 60 s");
+  CHECK(config_seen, "no CONFIG before the first frame");
+  if (current != NULL) {
+    CHECK(current->width == 640 && current->height == 480, "frame is %ux%u", current->width, current->height);
+    for (y = 0; y < current->height; ++y) {
+      for (x = 0; x < current->width; ++x) {
+        uint8_t r, g, b, a;
+        uint32_t rgb;
+        unsigned k;
+        pixel(current, x, y, &r, &g, &b, &a);
+        rgb = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+        for (k = 0; k < distinct && seen[k] != rgb; ++k) {
+        }
+        if (k == distinct && distinct < sizeof seen / sizeof seen[0]) {
+          seen[distinct++] = rgb;
+        }
+      }
+    }
+    CHECK(distinct >= 4, "only %u distinct colours", distinct);
+    for (i = 0; i < sizeof wanted / sizeof wanted[0]; ++i) {
+      unsigned k;
+      for (k = 0; k < distinct && seen[k] != wanted[i]; ++k) {
+      }
+      CHECK(k < distinct, "fixture colour #%06x missing", wanted[i]);
+    }
+    if (output != NULL) {
+      FILE* out = fopen(output, "wb");
+      if (out != NULL) {
+        fprintf(out, "P6\n%u %u\n255\n", current->width, current->height);
+        for (y = 0; y < current->height; ++y) {
+          for (x = 0; x < current->width; ++x) {
+            uint8_t r, g, b, a;
+            uint8_t rgb[3];
+            pixel(current, x, y, &r, &g, &b, &a);
+            rgb[0] = r;
+            rgb[1] = g;
+            rgb[2] = b;
+            fwrite(rgb, 1, 3, out);
+          }
+        }
+        fclose(out);
+      }
+    }
+  }
+  printf("SURFACE_PROBE_REFERENCE frames=%u colours=%u title='%s' elapsed=%.1fs\n", frames, distinct, title, now() - started);
+  { crtweb_wire_header bye_message; memset(&bye_message, 0, sizeof bye_message); send_simple(CRTWEB_C2P_BYE, &bye_message, sizeof bye_message); }
+  pump(got_bye, 5.0);
+  if (failures != 0) {
+    printf("surface_probe: %d check(s) failed\n", failures);
+    return 1;
+  }
+  printf("surface_probe: ok\n");
+  return 0;
+}
+
 int main(int argc, char** argv) {
   struct sockaddr_un address;
   int listener;
@@ -277,8 +340,13 @@ int main(int argc, char** argv) {
   crtweb_wire_hello hello;
   double started = now();
 
-  if (argc != 2 || strlen(argv[1]) >= sizeof address.sun_path) {
-    fprintf(stderr, "usage: %s SOCKET_PATH\n", argv[0]);
+  /* --reference [OUT.ppm]: the Web Tranche 3B first-render check against the Tranche 2 fixture
+   * (libcrtweb/tests/wpe-reference/reference.html) instead of the scripted crt_surface.html run. */
+  int reference_mode = argc >= 3 && strcmp(argv[2], "--reference") == 0;
+  const char* reference_output = reference_mode && argc >= 4 ? argv[3] : NULL;
+
+  if ((argc != 2 && !reference_mode) || argc < 2 || strlen(argv[1]) >= sizeof address.sun_path) {
+    fprintf(stderr, "usage: %s SOCKET_PATH [--reference [OUT.ppm]]\n", argv[0]);
     return 2;
   }
   unlink(argv[1]);
@@ -306,6 +374,10 @@ int main(int argc, char** argv) {
   hello.height = 480;
   hello.scale_percent = 100;
   send_simple(CRTWEB_C2P_HELLO, &hello, sizeof hello);
+
+  if (reference_mode) {
+    return run_reference(reference_output, started);
+  }
 
   /* 1. first frame: the page's four quadrants at the requested size. */
   want_frames_target = 1;

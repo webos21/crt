@@ -210,6 +210,85 @@ def run_program(name: str, build: Path, sdk: Path, prefix: Path, work: Path, env
             "output": completed.stdout.splitlines()}
 
 
+def ppm_pixels(path: Path):
+    """(width, height, bytes) of a binary P6 file."""
+    data = path.read_bytes()
+    header = data.split(b"\n", 3)
+    width, height = (int(v) for v in header[1].split())
+    return width, height, header[3]
+
+
+def compare_frames(frame: Path, reference: Path) -> dict:
+    """How far the CRT frame is from the native WPE reference: the share of pixels that differ by more
+    than 24 summed channel units, and the share inside the fixture's solid regions. Text is expected
+    to differ (CRT's font set is the bundled fonts, WPE's the host's)."""
+    w, h, a = ppm_pixels(frame)
+    w2, h2, b = ppm_pixels(reference)
+    result = {"size": [w, h], "reference_size": [w2, h2]}
+    if (w, h) != (w2, h2):
+        result["comparable"] = False
+        return result
+    differing = 0
+    for i in range(0, len(a), 3):
+        if abs(a[i] - b[i]) + abs(a[i + 1] - b[i + 1]) + abs(a[i + 2] - b[i + 2]) > 24:
+            differing += 1
+    result["comparable"] = True
+    result["differing_pixels"] = differing
+    result["differing_percent"] = round(100.0 * differing / (w * h), 2)
+    # Solid regions of the fixture: background, aside, canvas fills.
+    probes = {"background": (20, 300), "aside": (540, 400), "canvas_red": (100, 290), "canvas_purple": (200, 290)}
+    for name, (x, y) in probes.items():
+        index = (y * w + x) * 3
+        result[name] = {"crt": list(a[index:index + 3]), "reference": list(b[index:index + 3])}
+    return result
+
+
+def run_render_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+    """B5: reference.html rendered by the CRT port, delivered through the web surface protocol to
+    surface_probe (built here with the CRT toolchain), and diffed against the native WPE reference."""
+    import subprocess
+    import time
+    probe = work / "surface_probe"
+    source = ROOT / "libcrtweb" / "tests" / "platform-crt" / "surface_probe.c"
+    jsc.run([str(sdk / "tools" / "crt-cc"), "-O1", "-o", str(probe), str(source)], env=env)
+    socket_path = str(work / "surface.sock")
+    frame_from_consumer = work / "frame-consumer.ppm"
+    frame_from_producer = work / "frame-producer.ppm"
+    run_env = dict(env)
+    run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
+    run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+    consumer = subprocess.Popen([str(probe), socket_path, "--reference", str(frame_from_consumer)],
+                                stdout=subprocess.PIPE, text=True, env=run_env)
+    try:
+        line = consumer.stdout.readline()
+        if "SURFACE_PROBE_LISTENING" not in line:
+            return {"passed": False, "reason": f"consumer did not listen: {line!r}"}
+        producer = subprocess.run(
+            [str(build / "bin" / "crtweb_render_test"),
+             str(ROOT / "libcrtweb" / "tests" / "wpe-reference" / "reference.html"),
+             str(frame_from_producer), socket_path],
+            env=run_env, cwd=work, capture_output=True, text=True, timeout=180)
+        print(producer.stdout, end="")
+        print(producer.stderr, end="", file=sys.stderr)
+        consumer_output, _ = consumer.communicate(timeout=60)
+        print(consumer_output, end="")
+    finally:
+        if consumer.poll() is None:
+            consumer.kill()
+    ok = (producer.returncode == 0 and "crtweb_render_test: ok" in producer.stdout
+          and consumer.returncode == 0 and "surface_probe: ok" in consumer_output)
+    result = {"passed": ok, "producer_returncode": producer.returncode, "consumer_returncode": consumer.returncode,
+              "producer_output": producer.stdout.splitlines(), "consumer_output": consumer_output.splitlines()}
+    reference = ROOT / "out" / "web-reference" / "result" / "wpe-reference.ppm"
+    if frame_from_consumer.exists() and reference.exists():
+        result["diff_against_wpe_reference"] = compare_frames(frame_from_consumer, reference)
+        result["frame_identical_to_producer_copy"] = frame_from_consumer.read_bytes() == frame_from_producer.read_bytes()
+    else:
+        result["diff_against_wpe_reference"] = "reference or consumer frame missing"
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--recipe", type=Path, default=ROOT / "libcrtweb/third_party/webkit/recipe.json")
@@ -278,7 +357,7 @@ def main() -> int:
         return 0
     tests = ["crtweb_webcore_graph_test"] + (["crtweb_process_test"] if args.webkit else [])
     if args.run_tests and not args.target:
-        args.target = list(tests) + (["WebProcess", "NetworkProcess"] if args.webkit else [])
+        args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test"] if args.webkit else [])
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -289,10 +368,13 @@ def main() -> int:
     if status != 0 or not args.run_tests:
         return status
     results = {name: run_program(name, build, sdk, prefix, work, env, target_os) for name in tests}
+    if args.webkit and target_os == "linux":
+        results["render_through_surface_protocol"] = run_render_gate(build, sdk, prefix, work, env)
+        print("B5 diff:", json.dumps(results["render_through_surface_protocol"].get("diff_against_wpe_reference")))
     passed = all(r["passed"] for r in results.values())
     (work / "acceptance-b3.json").write_text(json.dumps(
         {"passed": passed, "programs": results}, indent=2) + "\n", encoding="utf-8")
-    print("B3/B4 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
+    print("B3/B4/B5 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
     return 0 if passed else 1
 
 
