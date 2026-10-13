@@ -395,28 +395,43 @@ extern "C" int main() {
   check(hosts.size() == 1, "one owned host for recovery");
   if (hosts.size() == 1) {
     for (unsigned i = 0; i < 3; ++i) {
+      unsigned terminated_before = terminated;
       auto loads_finished = [&] {
         unsigned count = 0;
         for (const auto& load : seen.loads) if (load.compare(0, 2, "3:") == 0) ++count;
         return count;
       };
       unsigned finished_before = loads_finished();
-      // Earlier cross-site navigation can leave cached/prewarmed WebProcesses. Terminate all Web
-      // children of this owned host so the current page, rather than an idle cached process, dies.
+      // Earlier cross-site navigation can leave cached/prewarmed WebProcesses and the public
+      // consumer deliberately cannot distinguish those implementation details from the active
+      // page process. Probe the observed children one at a time and stop as soon as the page's
+      // termination callback identifies the active one. Killing the whole process pool at once is
+      // not the public recovery contract and can race WebKit's cache replenishment on Windows.
       auto old = web_pids(hosts[0].pid);
       check(!old.empty(), "WebView has a WebProcess");
-      for (pid_t pid : old) check(kill(pid, SIGKILL) == 0, "kill WebView's WebProcess");
-      check(pump_until([&] { return terminated == i + 1; }), "WebView termination callback exactly once");
+      unsigned killed = 0;
+      for (pid_t pid : old) {
+        check(kill(pid, SIGKILL) == 0, "kill a WebView WebProcess candidate");
+        ++killed;
+        if (pump_until([&] { return terminated > terminated_before; }, 3000)) break;
+      }
+      check(terminated > terminated_before, "WebView termination callback received");
+      check(terminated == terminated_before + 1, "WebView termination callback exactly once");
       uint64_t serial = web.frame_serial();
       check(web.reload(), "reload after termination sent");
+      // A replacement starts every process killed above (the active page plus cached/prewarmed
+      // processes).  On a loaded Windows acceptance host that cold launch can exceed the ordinary
+      // 20-second interaction timeout; use the same finite 60-second bound as the initial host
+      // handshake without weakening the required finished-load, fresh-frame or pixel checks.
       check(pump_until([&] { return loads_finished() > finished_before && web.frame_serial() > serial
-          && near_rgb(pixel(40 + 20, 20 + 20), 255, 255, 255); }), "recovered WebView repaints");
+          && near_rgb(pixel(40 + 20, 20 + 20), 255, 255, 255); }, 60000), "recovered WebView repaints");
       auto replacement = web_pids(hosts[0].pid);
       check(!replacement.empty(), "WebView replacement WebProcess");
-      for (pid_t pid : replacement)
-        check(std::find(old.begin(), old.end(), pid) == old.end(), "WebView uses a new WebProcess PID");
+      check(std::any_of(replacement.begin(), replacement.end(), [&](pid_t pid) {
+        return std::find(old.begin(), old.end(), pid) == old.end();
+      }), "WebView uses a new WebProcess PID");
       printf("crtweb_webview_test: recovery %u terminated=%u killed=%zu replacement=%zu\n", i + 1,
-          terminated, old.size(), replacement.size());
+          terminated, static_cast<size_t>(killed), replacement.size());
     }
   }
 
@@ -437,11 +452,28 @@ extern "C" int main() {
         && web.surface()->frame_height() == 90; }), "repeat load/resize frame");
     web.shutdown();
     check(crtweb_test::children().empty(), "repeat host reaped");
+    if ((i + 1) % 5 == 0) {
+      auto sample = crtweb_test::resources();
+      printf("crtweb_webview_test: lifecycle cycle %u: rss=%+ld KiB threads=%+ld descriptors=%+ld\n",
+          i + 1, sample.memoryKiB - baseline.memoryKiB, sample.threads - baseline.threads,
+          sample.descriptors - baseline.descriptors);
+    }
     if (failures) break;
   }
   auto final = crtweb_test::resources();
-  printf("crtweb_webview_test: lifecycle 20 cycles: rss=%+ld KiB threads=%+ld descriptors=%+ld\n",
-      final.memoryKiB - baseline.memoryKiB, final.threads - baseline.threads, final.descriptors - baseline.descriptors);
+  /* Windows may finish closing AF_UNIX/file handles on a runtime worker just after the reaped host
+   * disconnects.  Require the same strict bound after a finite settling interval; a real cumulative
+   * leak still remains above the threshold and fails. */
+  unsigned settled_ms = 0;
+  while (settled_ms < 5000 && final.descriptors >= 0 && final.threads >= 0
+      && (final.descriptors - baseline.descriptors > 2 || final.threads - baseline.threads > 2)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    settled_ms += 20;
+    final = crtweb_test::resources();
+  }
+  printf("crtweb_webview_test: lifecycle 20 cycles: rss=%+ld KiB threads=%+ld descriptors=%+ld settled=%u ms\n",
+      final.memoryKiB - baseline.memoryKiB, final.threads - baseline.threads,
+      final.descriptors - baseline.descriptors, settled_ms);
   check(baseline.memoryKiB >= 0 && baseline.threads >= 0 && baseline.descriptors >= 0, "consumer resource observations available");
   check(final.descriptors >= 0 && final.descriptors - baseline.descriptors <= 2, "consumer descriptors/handles bounded");
   check(final.threads >= 0 && final.threads - baseline.threads <= 2, "consumer threads bounded");

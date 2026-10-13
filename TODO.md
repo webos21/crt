@@ -130,8 +130,9 @@ uses the host replay order stated below and in the acceptance document.
 * [x] **5. Multi-process lifecycle.** Closed on Linux/x86_64 2026-10-13:
   public API recovery, bounded teardown and 100x runtime/view cycles; evidence
   in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`. GPUProcess joins in Tranche 9.
-* [ ] **6. Windows/x64 replay.** B4-B7 and Tranche 4 are green; replay the new
-  Tranche 5 public API/WebView lifecycle gates and their resource/Host ABI audits.
+* [x] **6. Windows/x64 replay.** Closed 2026-10-14: the combined eight-entry
+  public API/WebView lifecycle, B5-B7 and static/runtime PE Host ABI gate is green;
+  evidence and fixes are in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
 * [x] **7. macOS/arm64 replay.** Done 2026-10-13: B3-B7, Tranche 4 and the Tranche 5
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Only after a working browser.

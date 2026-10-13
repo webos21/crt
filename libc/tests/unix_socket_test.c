@@ -42,6 +42,50 @@ static int failures;
 
 static char socket_path[256];
 
+#if defined(_WIN32) || defined(__MINGW32__)
+__declspec(dllimport) void* __stdcall GetCurrentProcess(void);
+__declspec(dllimport) int __stdcall GetProcessHandleCount(void*, unsigned*);
+
+static unsigned process_handle_count(void) {
+  unsigned count = 0;
+  return GetProcessHandleCount(GetCurrentProcess(), &count) ? count : 0;
+}
+
+static void test_cloexec_socket_spawn_snapshot(const char* self) {
+  int listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  unsigned before;
+  unsigned after;
+  int i;
+
+  CHECK(listener >= 0, "CLOEXEC socket for spawn snapshot cleanup");
+  if (listener < 0) return;
+  {
+    char* const argv[] = {(char*)self, (char*)"spawn-exit", 0};
+    pid_t pid = 0;
+    int status = 0;
+
+    CHECK(posix_spawn(&pid, self, 0, 0, argv, environ) == 0, "warm up spawn handle infrastructure");
+    if (pid > 0) CHECK(waitpid(pid, &status, 0) == pid, "reap spawn warm-up child");
+  }
+  before = process_handle_count();
+  for (i = 0; i < 32; ++i) {
+    char* const argv[] = {(char*)self, (char*)"spawn-exit", 0};
+    pid_t pid = 0;
+    int status = 0;
+
+    CHECK(posix_spawn(&pid, self, 0, 0, argv, environ) == 0, "spawn with a CLOEXEC socket");
+    if (pid > 0) {
+      CHECK(waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+            "reap child spawned with a CLOEXEC socket");
+    }
+  }
+  after = process_handle_count();
+  printf("unix_socket_test: CLOEXEC spawn handles before=%u after=%u\n", before, after);
+  CHECK(before > 0 && after <= before + 2, "spawn snapshot releases duplicated CLOEXEC socket handles");
+  close(listener);
+}
+#endif
+
 static void make_path(const char* tag) {
   const char* base = getenv("TMPDIR");
 
@@ -1088,6 +1132,9 @@ static void test_framed_descriptor_cleanup(void) {
 
 int main(int argc, char** argv) {
   alarm(240); /* a broken record layer must fail this test, not hang it */
+  if (argc > 1 && strcmp(argv[1], "spawn-exit") == 0) {
+    return 0;
+  }
   if (argc > 2 && strcmp(argv[1], "child") == 0) {
     return run_child(argv[2]);
   }
@@ -1103,6 +1150,9 @@ int main(int argc, char** argv) {
   test_stream_path();
   test_stream_nonblocking_and_poll();
   test_native_peer_sees_raw_bytes();
+#if defined(_WIN32) || defined(__MINGW32__)
+  test_cloexec_socket_spawn_snapshot(argv[0]);
+#endif
   if (seqpacket_available()) {
     test_seqpacket_records();
     test_seqpacket_path();

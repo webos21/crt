@@ -47,6 +47,10 @@ def port_environment(sdk: Path, prefix: Path, gperf: Path | None, target_os: str
         # WebKit's generators are Python and Perl programs that read their input with the process's
         # default encoding (cp949 here), not the UTF-8 the sources are in.
         env["PYTHONUTF8"] = "1"
+        # WebKit enables ccache automatically when it is on PATH.  Native ccache cannot launch the
+        # SDK's .cmd compiler wrappers directly, so a reconfigure on a machine that happens to have
+        # ccache would otherwise turn a previously working build into a full-tree compile failure.
+        env["WK_USE_CCACHE"] = "NO"
         # A native Windows Perl: the bindings generator compares paths the build hands it with paths
         # it computes, which MSYS's Perl (Git for Windows) spells /c/... against C:/...
         for candidate in (Path("C:/Strawberry/perl/bin"),):
@@ -531,8 +535,14 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
     result["foreign_exports"] = foreign
     build_root = sdk.parent.parent  # <preset>/dist/05-ui -> <preset>
     test = build_root / "libcrtweb" / ("crtweb_webview_test" + exe)
-    if not test.exists() and (build_root / "build.ninja").exists():
-        jsc.run(["ninja", "-C", str(build_root), "crtweb_webview_test"], env=env, check=False)
+    if (build_root / "build.ninja").exists():
+        # This executable belongs to the in-tree 05-ui build rather than the composed WebKit tree.
+        # Always ask Ninja to refresh it: merely checking that an old executable exists silently
+        # skips newly-added WebView acceptance code after a pull.
+        built = jsc.run(["ninja", "-C", str(build_root), "crtweb_webview_test"], env=env, check=False)
+        if built.returncode:
+            result["reason"] = f"failed to rebuild {test}"
+            return result
     if not test.exists():
         result["reason"] = f"{test} was not built (ninja -C {build_root} crtweb_webview_test)"
         return result
@@ -586,6 +596,8 @@ def main() -> int:
     if target_os not in ("linux", "macos", "windows"):
         raise SystemExit(f"B3 is not replayed on {target_os} (docs/acceptance/crtweb_acceptance.md)")
     candidate = prefix / "bin" / "gperf"
+    if os.name == "nt" and not candidate.exists():
+        candidate = candidate.with_suffix(".exe")
     gperf = args.gperf or (candidate if candidate.exists() else
                            Path(shutil.which("gperf")) if shutil.which("gperf") else None)
     if gperf is None:

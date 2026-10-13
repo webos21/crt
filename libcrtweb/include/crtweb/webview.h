@@ -192,13 +192,19 @@ class WebView {
   /* Ends the page: BYE, then waits for the host to exit (killing it after a few seconds). */
   void shutdown() {
     if (client_) {
+      // Stop application callbacks first, but keep receiving until the owned host exits. On
+      // Windows an SCM_RIGHTS record duplicates its handle into this process before the framed
+      // message is sent. Dropping the socket with unread BUFFER_ADD records would strand those
+      // remote memfd handles here; draining imports and closes each descriptor in the normal
+      // SurfaceClient message path.
+      client_->on_event = nullptr;
       client_->close_connection();
-      client_.reset();
     }
     if (child_ > 0) {
       auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
       int status = 0;
       while (waitpid(child_, &status, WNOHANG) == 0) {
+        if (client_) client_->poll(0);
         if (std::chrono::steady_clock::now() >= deadline) {
           kill(child_, SIGKILL);
           waitpid(child_, &status, 0);
@@ -207,6 +213,10 @@ class WebView {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
       }
       child_ = 0;
+    }
+    if (client_) {
+      while (client_->poll(0)) { }
+      client_.reset();
     }
     scripts_.clear();
   }

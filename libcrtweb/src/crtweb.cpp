@@ -252,8 +252,14 @@ void didStartProvisionalNavigation(WKPageRef page, WKNavigationRef, WKTypeRef, c
 
 void didCommitNavigation(WKPageRef page, WKNavigationRef, WKTypeRef, const void* clientInfo)
 {
-    if (crtweb_view* view = viewFrom(clientInfo))
+    if (crtweb_view* view = viewFrom(clientInfo)) {
+        // A reload after process death may start while crash notifications from the retired
+        // process pool are still queued.  Keep the termination latch set until the replacement
+        // process has actually committed; clearing it when load/reload is merely requested lets
+        // a late old-generation notification masquerade as a second crash of the new page.
+        view->terminatedReported = false;
         deliverLoad(view, CRTWEB_LOAD_COMMITTED, takeURL(WKPageCopyActiveURL(page)), nullptr);
+    }
 }
 
 void didFinishNavigation(WKPageRef page, WKNavigationRef, WKTypeRef, const void* clientInfo)
@@ -1169,7 +1175,6 @@ crtweb_result crtweb_view_load_url(crtweb_view* view, const char* url)
     WKURLRef wkURL = WKURLCreateWithUTF8CString(localURL.c_str());
     if (!wkURL)
         return CRTWEB_ERROR_INVALID_ARGUMENT;
-    view->terminatedReported = false;
     WKPageLoadURL(view->page, wkURL);
     WKRelease(wkURL);
     return CRTWEB_OK;
@@ -1185,7 +1190,6 @@ crtweb_result crtweb_view_load_html(crtweb_view* view, const char* html, const c
     WKStringRef string = WKStringCreateWithUTF8CString(html);
     std::string localBase = base_url && *base_url ? localFileURL(base_url) : std::string("about:blank");
     WKURLRef base = WKURLCreateWithUTF8CString(localBase.c_str());
-    view->terminatedReported = false;
     WKPageLoadHTMLString(view->page, string, base);
     WKRelease(base);
     WKRelease(string);
@@ -1202,7 +1206,6 @@ crtweb_result crtweb_view_stop(crtweb_view* view)
 crtweb_result crtweb_view_reload(crtweb_view* view)
 {
     CRTWEB_CHECK_VIEW(view);
-    view->terminatedReported = false;
     WKPageReload(view->page);
     return CRTWEB_OK;
 }

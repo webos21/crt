@@ -2170,14 +2170,10 @@ void __crt_fd_snapshot_dispose(struct crt_fd_snapshot* snapshot) {
       if ((snapshot->entries[i].flags & CRT_FD_SNAPSHOT_FLAG_REMOTE_PROCESS_HANDLE) != 0) {
         continue;
       }
-      if (snapshot->entries[i].kind == CRT_FD_SNAPSHOT_KIND_SOCKET) {
-        init_winsock();
-        if (winsock.closesocket != 0) {
-          winsock.closesocket((SOCKET)snapshot->entries[i].handle);
-        }
-      } else {
-        CloseHandle((HANDLE)snapshot->entries[i].handle);
-      }
+      /* export() made every snapshot copy with DuplicateHandle(), including sockets. It is a raw
+       * duplicated HANDLE, not a socket descriptor registered by socket()/WSASocket(), and must be
+       * released with CloseHandle(). The child-duplication path below follows the same rule. */
+      CloseHandle((HANDLE)snapshot->entries[i].handle);
     }
   }
   memset(snapshot, 0, sizeof(*snapshot));
@@ -2802,14 +2798,10 @@ static const struct crt_fd_snapshot_entry* fd_snapshot_find_const_entry(
 
 static void fd_snapshot_close_entry(struct crt_fd_snapshot_entry* entry) {
   if (entry->handle != 0 && entry->handle != (uintptr_t)INVALID_HANDLE_VALUE) {
-    if (entry->kind == CRT_FD_SNAPSHOT_KIND_SOCKET) {
-      init_winsock();
-      if (winsock.closesocket != 0) {
-        winsock.closesocket((SOCKET)entry->handle);
-      }
-    } else {
-      CloseHandle((HANDLE)entry->handle);
-    }
+    /* Snapshot entries originate in DuplicateHandle(), including socket entries. closesocket()
+     * rejects that raw snapshot copy and leaks it; only an imported fd-table socket is closed with
+     * closesocket(). */
+    CloseHandle((HANDLE)entry->handle);
   }
   entry->handle = 0;
   entry->kind = CRT_FD_SNAPSHOT_KIND_NONE;
@@ -8076,8 +8068,13 @@ long __crt_sys_kill(long pid, int sig) {
  * real; and its logging is what makes a *future* ERROR_FILE_NOT_FOUND
  * failure -- transient or not -- immediately diagnosable by the exact
  * path it names, instead of requiring this same investigation again.
+ * Tranche 6's forced WebProcess death/recovery replay later found the real
+ * transient variant: immediately replacing the same executable after a
+ * forced termination can return ERROR_ACCESS_DENIED while Windows or an
+ * image/security filter still retires the old image section. The identical
+ * path succeeds moments later, so that one error shares this bounded retry.
  * Every other CreateProcessA() failure is returned to the caller exactly
- * as before, on the first attempt, with no added delay: this must never
+ * as before, on the first attempt: this must never
  * silently hide a real, persistent failure (this project's own stage-
  * runner rule), and a genuinely missing/broken application_path fails
  * identically on every retry, so it still surfaces, just after a brief,
@@ -8090,11 +8087,13 @@ long __crt_sys_kill(long pid, int sig) {
  */
 #define CRT_SPAWN_CREATEPROCESS_RETRY_MAX 5
 static void crt_log_createprocess_retry(
-    const char* application_path, int attempt, int attempt_max) {
+    const char* application_path, DWORD error, int attempt, int attempt_max) {
   char line[4096];
   size_t len = 0;
   size_t path_len = strlen(application_path);
-  const char* prefix = "crt: CreateProcessA transient ERROR_FILE_NOT_FOUND for '";
+  const char* prefix = error == CRT_WIN_ERROR_ACCESS_DENIED
+      ? "crt: CreateProcessA transient ERROR_ACCESS_DENIED for '"
+      : "crt: CreateProcessA transient ERROR_FILE_NOT_FOUND for '";
   const char* mid = "', retrying (attempt ";
   size_t prefix_len = strlen(prefix);
   size_t mid_len = strlen(mid);
@@ -8158,12 +8157,13 @@ static BOOL crt_createprocess_with_retry(
         application_path, command_line, 0, 0, 1, creation_flags,
         environment_block, current_directory, startup, process);
     error = created ? 0 : GetLastError();
-    if (created || error != (DWORD)CRT_ERROR_FILE_NOT_FOUND ||
+    if (created || (error != (DWORD)CRT_ERROR_FILE_NOT_FOUND &&
+                    error != CRT_WIN_ERROR_ACCESS_DENIED) ||
         attempt == CRT_SPAWN_CREATEPROCESS_RETRY_MAX) {
       break;
     }
     crt_log_createprocess_retry(
-        application_path, attempt, CRT_SPAWN_CREATEPROCESS_RETRY_MAX);
+        application_path, error, attempt, CRT_SPAWN_CREATEPROCESS_RETRY_MAX);
     Sleep((DWORD)(10 * attempt));
   }
   *out_error = error;

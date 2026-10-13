@@ -9,6 +9,54 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-14
+
+### Web Tranche 6 closed on Windows/x64: lifecycle recovery, handle ownership and PE audit
+
+The Windows/x64 replay of `tools/build_webkit_crt_port.py --webkit --run-tests`
+passes all eight combined B3-C8/Tranche 5 entries. The public API test recovers
+the same view from three forced WebProcess deaths, covers the launch-before-first-
+pump, busy-runtime and sibling-runtime cases, and finishes 100 lifecycle cycles
+at **+4 KiB RSS, -1 thread, +0 handles** after warm-up. The `crtui` WebView
+recovers and repaints three times with exactly one termination callback per active
+process death, then finishes twenty host cycles at **+4 KiB RSS, -2 threads,
++0 handles** without needing its bounded settling interval. Internal B7 finishes
+100 cycles at **-32 KiB RSS, -3 threads, +0 handles**, with at most two children.
+The runtime PE audit maps 108 files across UIProcess, WebProcess and NetworkProcess
+with no violation; the static audit covers 14 executables/DLLs with no foreign
+dependency, and the WebView host/library audit is also clean.
+
+The replay found and fixed Windows-specific ownership and acceptance defects:
+
+- fd snapshots always contain `DuplicateHandle` copies, including socket entries.
+  Disposing those copies with `closesocket` failed and leaked a handle on every
+  spawn; both parent and child snapshot cleanup now use `CloseHandle`, guarded by
+  a 32-spawn CLOEXEC AF_UNIX regression in `unix_socket_test`.
+- WebView shutdown used to discard unread surface messages after sending BYE.
+  On Windows, handles carried by those already-framed SCM_RIGHTS records had
+  already been duplicated into the consumer. Shutdown now disables application
+  callbacks but drains the surface channel through host exit, importing and
+  closing each queued handle before releasing the client.
+- A late crash notification from a retired process could be mistaken for the
+  replacement's death. The per-view termination latch is reset only when the new
+  navigation commits, not when reload is merely requested.
+- Cross-site history leaves cached/prewarmed WebProcesses that a public consumer
+  cannot identify. The WebView recovery test now probes observed candidates one
+  at a time and stops when the active page's callback arrives, instead of racing
+  WebKit by killing the whole process pool simultaneously. It still requires a
+  new PID, a finished load, a fresh frame and exact pixels; cached process
+  ownership remains covered by runtime/host shutdown.
+- The acceptance driver now always asks Ninja to refresh `crtweb_webview_test`,
+  recognizes `gperf.exe` in the dependency prefix and disables auto-detected
+  native ccache for `.cmd` compiler wrappers. A bounded Windows replacement-
+  process `ERROR_ACCESS_DENIED` retry is logged just like the existing transient
+  file-not-found retry.
+
+Reproduction uses the Windows `05-ui` SDK and port prefix with
+`--work-root C:\crtw\b3w --reuse-tree --webkit --run-tests -j 8`; the accepted
+machine-readable result is `C:\crtw\b3w\acceptance-b3.json`. Together with the
+macOS/arm64 replay below, both host replay tranches are closed; Tranche 8 is next.
+
 ## 2026-10-13
 
 ### Web Tranche 7: Tranche 5 lifecycle replayed on macOS/arm64 (nothing had to change)
@@ -24,7 +72,7 @@ A first run was against a tree composed before the pull and so lacked patch 0022
 `Error receiving IPC message on socket -1` lines (the race patch 0022 fixes), and a local edit that fixed them in patch
 0019 would have collided with 0022's expected hash. It was dropped for the original patches; the recomposed run prints
 none. The SDK `libc.dylib` in `dist/05-ui` was refreshed from the build tree again (delete, copy, re-sign).
-Open: Windows/x64 replay of Tranche 5 (Tranche 6), Tranche 8 onward.
+Windows/x64 subsequently closed Tranche 6 on 2026-10-14. Open: Tranche 8 onward.
 
 ### Web Tranche 5 closed on Linux/x86_64: public API recovery and bounded process teardown
 
@@ -76,9 +124,10 @@ The new tests found and resolved these ownership/lifetime defects:
 Reproduction and the frozen bounds are in
 [`docs/acceptance/crtweb_acceptance.md`](docs/acceptance/crtweb_acceptance.md), Tranche 5;
 the run writes `out/web-crt-webcore/acceptance-b3.json` and the local log is
-`out/web-crt-webcore/tranche5-gate.log`. Windows/x64 and macOS/arm64 must replay
-these new gates in Tranches 6-7; their already-completed B4-B7/Tranche 4 evidence
-is preserved. GPUProcess remains deferred until Tranche 9 enables GPU rendering.
+`out/web-crt-webcore/tranche5-gate.log`. macOS/arm64 replayed these gates in
+Tranche 7 on 2026-10-13 and Windows/x64 in Tranche 6 on 2026-10-14. Their
+already-completed B4-B7/Tranche 4 evidence is preserved. GPUProcess remains
+deferred until Tranche 9 enables GPU rendering.
 
 ### Web Tranche 4 replayed on Windows/x64: DLL constructors, POSIX record locks and two boundary spellings; Tranche 4 closed
 
