@@ -11,6 +11,21 @@ substantive update.
 
 ## 2026-10-13
 
+### Web Tranche 7: Tranche 5 lifecycle replayed on macOS/arm64 (nothing had to change)
+
+After pulling the Linux closure of Tranche 5, the combined gate (`build_webkit_crt_port.py --webkit --run-tests
+--recompose`) passes on macOS with all 22 patches applied from a clean checkout: the public API lifecycle test (three
+forced WebProcess deaths recover into new PIDs; 100 cycles, +16 KiB RSS, +0 threads, +0 descriptors), the WebView
+gate (termination events, reload and recomposition three times, 20 host cycles +0/+0/+0), internal B7 (+64 KiB, +0,
++0), the static and runtime Host ABI audits (364 mapped files, 15 binaries) and the export/header firewall. No code,
+patch or recipe changed on this host; the Linux author had already written the libproc branch of the shared
+observation helper (`crtweb_test_process.h`) and `tools/build_webkit_crt_port.py` already enabled Tranche 4/5 on macOS.
+A first run was against a tree composed before the pull and so lacked patch 0022; it printed three
+`Error receiving IPC message on socket -1` lines (the race patch 0022 fixes), and a local edit that fixed them in patch
+0019 would have collided with 0022's expected hash. It was dropped for the original patches; the recomposed run prints
+none. The SDK `libc.dylib` in `dist/05-ui` was refreshed from the build tree again (delete, copy, re-sign).
+Open: Windows/x64 replay of Tranche 5 (Tranche 6), Tranche 8 onward.
+
 ### Web Tranche 5 closed on Linux/x86_64: public API recovery and bounded process teardown
 
 The combined `tools/build_webkit_crt_port.py --webkit --run-tests` gate now runs

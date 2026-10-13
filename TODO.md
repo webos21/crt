@@ -132,8 +132,8 @@ uses the host replay order stated below and in the acceptance document.
   in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`. GPUProcess joins in Tranche 9.
 * [ ] **6. Windows/x64 replay.** B4-B7 and Tranche 4 are green; replay the new
   Tranche 5 public API/WebView lifecycle gates and their resource/Host ABI audits.
-* [ ] **7. macOS/arm64 replay.** B4-B7 and Tranche 4 are green; replay the new
-  Tranche 5 public API/WebView lifecycle gates with the same `PlatformCRT` port.
+* [x] **7. macOS/arm64 replay.** Done 2026-10-13: B3-B7, Tranche 4 and the Tranche 5
+  public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Only after a working browser.
   * [ ] Replace the reference network backend with CRT networking.
   * [ ] Replace media playback and capture independently with `crtmedia`.

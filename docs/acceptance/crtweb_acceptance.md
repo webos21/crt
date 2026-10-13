@@ -1827,6 +1827,25 @@ Same WebKit, same `PlatformCRT`, same `libcrtweb` API. Apple's native WebKit
 framework is deliberately not used as a shortcut -- that would not be a
 cross-platform CRT port.
 
+*Replayed on macOS/arm64 (2026-10-13), nothing in the engine, the port or the PAL changed.* The combined
+`tools/build_webkit_crt_port.py --webkit --run-tests` gate, from a clean recompose of all 22 carried patches, passes all
+eight entries: `crtweb_webcore_graph_test`, `crtweb_process_test`, `crtweb_api_test`, `crtweb_api_lifecycle_test`,
+B5 render, B6 input, internal B7 with its Host ABI audit, and the crtui WebView gate. The Tranche 5 evidence on
+macOS: three forced WebProcess deaths of the public API recover into a replacement PID with the exact pixels; 100
+create/load/resize/paint/destroy cycles of the public API grow **+16 KiB RSS, +0 threads, +0 descriptors** (the
+numbers vary by one thread between runs of the test: 4/4 standalone runs pass); the WebView terminates the active and
+cached/prewarmed children of its owned host three times, receives exactly one termination event each time and
+recomposes (`killed=3 replacement=1`), and its 20 host launch/shutdown cycles grow +0/+0/+0; internal B7 100 cycles
+**+64 KiB RSS, +0 threads, +0 descriptors**, 364 mapped files in the three live processes (sampled by `vmmap` from
+outside) all SDK, prefix or build tree, 15 binaries pass the static recursive Mach-O audit, the header/export
+firewall of `libcrtweb.dylib` is clean, and no `Error receiving IPC message` line appears in the gate or in
+repeated standalone runs (patch 0022 makes a closed descriptor a close). Process and resource observation
+uses libproc (`proc_listchildpids`, `proc_name`, `proc_pidinfo`) declared inside the tests, as for B7, and is not part
+of the target ABI. *Method note:* a gate run without `--recompose` after a pull that adds a patch uses a stale tree and
+looks like a pass or a failure of the wrong thing; the driver's SHA gate catches the mismatch only when a
+patch is re-applied. *Not exercised on macOS:* GPUProcess (Tranche 9), and a run of the whole gate three times in a row
+(one clean gate plus the standalone repeats above).
+
 ### 8. CRT subsystem substitution
 
 Only after a working browser. Replace, one at a time, the components WPE
