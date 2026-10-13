@@ -3775,13 +3775,276 @@ static long windows_lock_start(HANDLE handle, const struct flock* lock, long lon
   return 0;
 }
 
+/* ---- POSIX record locks (fcntl F_GETLK/F_SETLK/F_SETLKW) over LockFileEx ----
+ *
+ * Windows byte-range locks differ from POSIX ones in ways that break the first real consumer, SQLite's
+ * unix VFS (the cookie database, local storage, IndexedDB of the WebKit CRT port: "database is locked"):
+ *  - a lock is owned by a handle, POSIX locks by the process (SQLite takes one with one descriptor and
+ *    releases it with another);
+ *  - a region can only be unlocked exactly as it was locked, POSIX allows unlocking part of a lock or a
+ *    span that covers several (SQLite unlocks PENDING+RESERVED, which it locked as two bytes);
+ *  - an existing lock cannot be converted (shared <-> exclusive) by locking again, POSIX converts.
+ * The table below keeps the process's view: per file (volume serial + file index) the exact set of
+ * ranges physically locked through one owner handle. Every operation is done on that view: overlapped
+ * ranges are unlocked physically, split, and the pieces locked again, then the requested range is locked.
+ * Not atomic against other processes (the conversion window), which SQLite's own protocol tolerates.
+ * Closing the owner handle ends the file's entry and Windows releases its locks, as POSIX close() does. */
+#define CRT_RLOCK_FILES 32
+#define CRT_RLOCK_RANGES 64
+#define CRT_RLOCK_INFINITE 0xffffffffffffffffULL
+
+struct crt_rlock_range {
+  unsigned long long start;
+  unsigned long long end; /* exclusive; CRT_RLOCK_INFINITE: to the end of the file and beyond */
+  int type;               /* F_RDLCK or F_WRLCK */
+};
+
+struct crt_rlock_file {
+  int used;
+  DWORD volume;
+  DWORD index_high;
+  DWORD index_low;
+  HANDLE owner;
+  int count;
+  struct crt_rlock_range ranges[CRT_RLOCK_RANGES];
+};
+
+static struct crt_rlock_file rlock_files[CRT_RLOCK_FILES];
+static volatile long rlock_guard;
+
+static void rlock_acquire(void) {
+  while (__atomic_exchange_n(&rlock_guard, 1, __ATOMIC_ACQUIRE) != 0) {
+    Sleep(0);
+  }
+}
+
+static void rlock_release(void) {
+  __atomic_store_n(&rlock_guard, 0, __ATOMIC_RELEASE);
+}
+
+static unsigned long long rlock_length(unsigned long long start, unsigned long long end) {
+  return end == CRT_RLOCK_INFINITE ? CRT_RLOCK_INFINITE - start : end - start;
+}
+
+static int rlock_phys_lock(HANDLE handle, unsigned long long start, unsigned long long end, int type, int wait) {
+  OVERLAPPED overlapped;
+  unsigned long long length = rlock_length(start, end);
+  DWORD flags = 0;
+
+  memset(&overlapped, 0, sizeof(overlapped));
+  overlapped.Offset = (DWORD)(start & 0xffffffffU);
+  overlapped.OffsetHigh = (DWORD)(start >> 32);
+  if (type == F_WRLCK) {
+    flags |= LOCKFILE_EXCLUSIVE_LOCK;
+  }
+  if (!wait) {
+    flags |= LOCKFILE_FAIL_IMMEDIATELY;
+  }
+  return LockFileEx(handle, flags, 0, (DWORD)(length & 0xffffffffU), (DWORD)(length >> 32), &overlapped) != 0;
+}
+
+static void rlock_phys_unlock(HANDLE handle, unsigned long long start, unsigned long long end) {
+  OVERLAPPED overlapped;
+  unsigned long long length = rlock_length(start, end);
+
+  memset(&overlapped, 0, sizeof(overlapped));
+  overlapped.Offset = (DWORD)(start & 0xffffffffU);
+  overlapped.OffsetHigh = (DWORD)(start >> 32);
+  (void)UnlockFileEx(handle, 0, (DWORD)(length & 0xffffffffU), (DWORD)(length >> 32), &overlapped);
+}
+
+static struct crt_rlock_file* rlock_find(HANDLE handle, int create) {
+  struct crt_by_handle_file_information info;
+  int i;
+  int free_slot = -1;
+
+  if (!GetFileInformationByHandle(handle, &info)) {
+    return 0;
+  }
+  for (i = 0; i < CRT_RLOCK_FILES; ++i) {
+    if (rlock_files[i].used) {
+      if (rlock_files[i].volume == info.volume_serial_number && rlock_files[i].index_high == info.file_index_high &&
+          rlock_files[i].index_low == info.file_index_low) {
+        return &rlock_files[i];
+      }
+    } else if (free_slot < 0) {
+      free_slot = i;
+    }
+  }
+  if (!create || free_slot < 0) {
+    return 0;
+  }
+  memset(&rlock_files[free_slot], 0, sizeof(rlock_files[free_slot]));
+  rlock_files[free_slot].used = 1;
+  rlock_files[free_slot].volume = info.volume_serial_number;
+  rlock_files[free_slot].index_high = info.file_index_high;
+  rlock_files[free_slot].index_low = info.file_index_low;
+  rlock_files[free_slot].owner = handle;
+  return &rlock_files[free_slot];
+}
+
+static void rlock_remove_at(struct crt_rlock_file* file, int index) {
+  memmove(&file->ranges[index], &file->ranges[index + 1],
+          (size_t)(file->count - index - 1) * sizeof(file->ranges[0]));
+  --file->count;
+}
+
+/* Unlocks [start, end) in the file's view: every overlapped range is unlocked physically and the parts
+ * outside [start, end) are locked again as separate ranges. Returns 0, or -ENOLCK when the table is full. */
+static long rlock_clear(struct crt_rlock_file* file, unsigned long long start, unsigned long long end) {
+  int i = 0;
+
+  while (i < file->count) {
+    struct crt_rlock_range range = file->ranges[i];
+
+    if (range.end <= start || range.start >= end) {
+      ++i;
+      continue;
+    }
+    rlock_phys_unlock(file->owner, range.start, range.end);
+    rlock_remove_at(file, i);
+    if (range.start < start) {
+      if (file->count >= CRT_RLOCK_RANGES) {
+        return -ENOLCK;
+      }
+      if (rlock_phys_lock(file->owner, range.start, start, range.type, 0)) {
+        file->ranges[file->count].start = range.start;
+        file->ranges[file->count].end = start;
+        file->ranges[file->count].type = range.type;
+        ++file->count;
+      }
+    }
+    if (range.end > end) {
+      if (file->count >= CRT_RLOCK_RANGES) {
+        return -ENOLCK;
+      }
+      if (rlock_phys_lock(file->owner, end, range.end, range.type, 0)) {
+        file->ranges[file->count].start = end;
+        file->ranges[file->count].end = range.end;
+        file->ranges[file->count].type = range.type;
+        ++file->count;
+      }
+    }
+    i = 0; /* the array was edited: look again from the start */
+  }
+  return 0;
+}
+
+/* The file's descriptor closed (or the process is leaving): Windows released its locks with the handle. */
+static void rlock_forget_handle(HANDLE handle) {
+  int i;
+
+  rlock_acquire();
+  for (i = 0; i < CRT_RLOCK_FILES; ++i) {
+    if (rlock_files[i].used && rlock_files[i].owner == handle) {
+      rlock_files[i].used = 0;
+      rlock_files[i].count = 0;
+    }
+  }
+  rlock_release();
+}
+
+static long rlock_set(HANDLE handle, int type, unsigned long long start, unsigned long long end, int wait) {
+  struct crt_rlock_file* file;
+  struct crt_rlock_range saved[CRT_RLOCK_RANGES];
+  int saved_count;
+  long result;
+  int i;
+
+  for (;;) {
+    rlock_acquire();
+    file = rlock_find(handle, type != F_UNLCK);
+    if (file == 0) {
+      rlock_release();
+      return type == F_UNLCK ? 0 : -ENOLCK;
+    }
+    if (type == F_UNLCK) {
+      result = rlock_clear(file, start, end);
+      rlock_release();
+      return result;
+    }
+    saved_count = file->count;
+    memcpy(saved, file->ranges, (size_t)saved_count * sizeof(saved[0]));
+    result = rlock_clear(file, start, end);
+    if (result == 0 && file->count >= CRT_RLOCK_RANGES) {
+      result = -ENOLCK;
+    }
+    if (result == 0) {
+      if (rlock_phys_lock(file->owner, start, end, type, 0)) {
+        file->ranges[file->count].start = start;
+        file->ranges[file->count].end = end;
+        file->ranges[file->count].type = type;
+        ++file->count;
+        rlock_release();
+        return 0;
+      }
+      result = -EAGAIN;
+    }
+    /* Put back what the conversion took away: the parts of the old ranges inside [start, end). */
+    for (i = 0; i < saved_count; ++i) {
+      unsigned long long lo = saved[i].start > start ? saved[i].start : start;
+      unsigned long long hi = saved[i].end < end ? saved[i].end : end;
+
+      if (lo < hi && file->count < CRT_RLOCK_RANGES && rlock_phys_lock(file->owner, lo, hi, saved[i].type, 0)) {
+        file->ranges[file->count].start = lo;
+        file->ranges[file->count].end = hi;
+        file->ranges[file->count].type = saved[i].type;
+        ++file->count;
+      }
+    }
+    rlock_release();
+    if (result == -EAGAIN && wait) {
+      Sleep(5); /* F_SETLKW: poll, the way a blocked LockFileEx would not let a signal in either */
+      continue;
+    }
+    return result;
+  }
+}
+
+/* F_GETLK: is [start, end) locked by someone else? Our own ranges never conflict with us. */
+static int rlock_conflicts(HANDLE handle, int type, unsigned long long start, unsigned long long end) {
+  struct crt_rlock_file* file;
+  unsigned long long cursor = start;
+  int conflict = 0;
+  int i;
+
+  rlock_acquire();
+  file = rlock_find(handle, 0);
+  while (cursor < end && !conflict) {
+    unsigned long long gap_end = end;
+    int covered = 0;
+
+    if (file != 0) {
+      for (i = 0; i < file->count; ++i) {
+        if (file->ranges[i].start <= cursor && file->ranges[i].end > cursor) {
+          cursor = file->ranges[i].end;
+          covered = 1;
+          break;
+        }
+        if (file->ranges[i].start > cursor && file->ranges[i].start < gap_end) {
+          gap_end = file->ranges[i].start;
+        }
+      }
+    }
+    if (covered) {
+      continue;
+    }
+    if (rlock_phys_lock(handle, cursor, gap_end, type, 0)) {
+      rlock_phys_unlock(handle, cursor, gap_end);
+    } else {
+      conflict = 1;
+    }
+    cursor = gap_end;
+  }
+  rlock_release();
+  return conflict;
+}
+
 long __crt_sys_fcntl(int fd, int cmd, void* arg) {
   HANDLE handle = get_fd_handle(fd);
   struct flock* lock = (struct flock*)arg;
-  OVERLAPPED overlapped;
-  unsigned long long length;
+  unsigned long long end;
   long long start;
-  DWORD flags = 0;
   long result;
 
   if (handle == INVALID_HANDLE_VALUE) {
@@ -3794,51 +4057,25 @@ long __crt_sys_fcntl(int fd, int cmd, void* arg) {
   if (result < 0) {
     return result;
   }
-  length = lock->l_len == 0 ? 0xffffffffffffffffULL - (unsigned long long)start
-                            : (unsigned long long)lock->l_len;
-  memset(&overlapped, 0, sizeof(overlapped));
-  overlapped.Offset = (DWORD)((uint64_t)start & 0xffffffffU);
-  overlapped.OffsetHigh = (DWORD)(((uint64_t)start >> 32) & 0xffffffffU);
+  end = lock->l_len == 0 ? CRT_RLOCK_INFINITE : (unsigned long long)start + (unsigned long long)lock->l_len;
 
   if (cmd == F_GETLK) {
-    flags = lock->l_type == F_WRLCK ? LOCKFILE_EXCLUSIVE_LOCK : 0;
-    flags |= LOCKFILE_FAIL_IMMEDIATELY;
-    if (LockFileEx(handle, flags, 0, (DWORD)(length & 0xffffffffU),
-                   (DWORD)(length >> 32), &overlapped)) {
-      (void)UnlockFileEx(handle, 0, (DWORD)(length & 0xffffffffU), (DWORD)(length >> 32),
-                         &overlapped);
-      lock->l_type = F_UNLCK;
-      lock->l_pid = 0;
-      return 0;
-    }
-    result = fail_last_error();
-    if (result == -EAGAIN || result == -EACCES) {
-      lock->l_type = F_WRLCK;
-      lock->l_pid = 0;
-      return 0;
-    }
-    return result;
-  }
-  if (cmd == F_SETLK || cmd == F_SETLKW) {
-    if (lock->l_type == F_UNLCK) {
-      return UnlockFileEx(handle, 0, (DWORD)(length & 0xffffffffU), (DWORD)(length >> 32),
-                          &overlapped)
-                 ? 0
-                 : fail_last_error();
-    }
     if (lock->l_type != F_RDLCK && lock->l_type != F_WRLCK) {
       return -EINVAL;
     }
-    if (lock->l_type == F_WRLCK) {
-      flags |= LOCKFILE_EXCLUSIVE_LOCK;
+    if (rlock_conflicts(handle, lock->l_type, (unsigned long long)start, end)) {
+      lock->l_type = F_WRLCK;
+    } else {
+      lock->l_type = F_UNLCK;
     }
-    if (cmd == F_SETLK) {
-      flags |= LOCKFILE_FAIL_IMMEDIATELY;
+    lock->l_pid = 0;
+    return 0;
+  }
+  if (cmd == F_SETLK || cmd == F_SETLKW) {
+    if (lock->l_type != F_UNLCK && lock->l_type != F_RDLCK && lock->l_type != F_WRLCK) {
+      return -EINVAL;
     }
-    return LockFileEx(handle, flags, 0, (DWORD)(length & 0xffffffffU),
-                      (DWORD)(length >> 32), &overlapped)
-               ? 0
-               : fail_last_error();
+    return rlock_set(handle, lock->l_type, (unsigned long long)start, end, cmd == F_SETLKW);
   }
   return -EINVAL;
 }
@@ -3974,6 +4211,7 @@ static void crt_socket_graceful_if_last(SOCKET s) {
   }
 }
 
+static void rlock_forget_handle(HANDLE handle);
 static long close_fd_slot(int fd) {
   HANDLE handle;
 
@@ -4061,6 +4299,7 @@ static long close_fd_slot(int fd) {
   fd_table[fd] = 0;
   fd_kind[fd] = CRT_FD_KIND_NONE;
   fd_flags[fd] = 0;
+  rlock_forget_handle(handle);
   if (!CloseHandle(handle)) {
     return fail_last_error();
   }

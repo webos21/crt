@@ -611,6 +611,10 @@ add_crt_test(spawn_kill_test spawn_kill_test.c)
 set_tests_properties(spawn_kill_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "spawn_kill_test: ok"
   TIMEOUT 60)
+add_crt_test(fcntl_record_lock_test fcntl_record_lock_test.c)
+set_tests_properties(fcntl_record_lock_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fcntl_record_lock_test: ok"
+  TIMEOUT 60)
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"
