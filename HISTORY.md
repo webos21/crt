@@ -11,6 +11,22 @@ substantive update.
 
 ## 2026-10-13
 
+### Web Tranche 3B B5-B7 replayed on macOS/arm64: one PlatformCRT defect (patch 0019)
+
+`build_webkit_crt_port.py --webkit --run-tests` runs B3-B7 on macOS: render through the surface protocol, the scripted
+input run, 100 create/destroy cycles with the Host ABI audit in its Mach-O form (static recursive audit of every binary;
+`vmmap` of the three live processes sampled by the driver). All pass; the lifecycle is flat (threads +0, descriptors +0,
+RSS +96 KiB). What it took: the driver and `crtweb_lifecycle_test` learned macOS (loader path, libproc for children,
+threads and RSS, `fcntl(F_GETFD)` descriptor count, host-side `vmmap`); a first design that ran `ps`/`vmmap` through
+`popen` inside the test process was dropped because the observer is itself a child that changes the lifecycle under
+test, and `proc_listchildpids` returns a count of pids, which first made the test believe it had no children and skip
+the wait for the Web process (a measurement bug that looked like a leak of two threads per cycle). The leak that
+remained was real: the PlayStation socket-monitor thread sits in `select()` holding its `Connection`, and on macOS a
+`close()` from another thread does not wake it, so each cycle kept a monitor thread and a work queue. Patch 0019 bounds
+that `select()` at 100 ms. Merged with the same-day Windows replay of B5-B7 (the driver's `gate_environment` and the
+lifecycle test's per-host branches). The native WPE reference frame is not available on this host, so the B5 pixel diff
+is not computed here. Open: Linux/aarch64 only on assembly changes (policy); B8 onward.
+
 ### Web Tranche 3B milestones B5-B7 replayed on Windows/x64: two kernel-handle leaks and a wrong peer found in the PAL
 
 `build_webkit_crt_port.py --webkit --run-tests` on Windows now runs the same B5/B6/B7 gates as Linux

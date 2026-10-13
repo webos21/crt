@@ -1,4 +1,4 @@
-// Web Tranche 3B, milestone B7: lifecycle and resource audit of the Linux prototype.
+// Web Tranche 3B, milestone B7: lifecycle and resource audit of the PlatformCRT prototype.
 //
 // Creates, uses and destroys a web context and view `N` times in one UI process (default 100):
 //   * every iteration launches a Web and a Network process, loads a page with a canvas and a script,
@@ -10,7 +10,10 @@
 //   * during the first iteration the files mapped into the Web and Network processes are listed
 //     (MAPPED lines) so the driver can run the Host ABI audit on what really ran, not only on what
 //     the executables name.
-// Arguments: [iterations]. Linux only (it reads /proc).
+// Arguments: [iterations]. Linux reads /proc, Windows uses Toolhelp and kernel32, macOS libproc (the
+// declarations below are local to this test and not part of the target ABI); on macOS the acceptance driver
+// samples the processes' mapped files from outside with vmmap(1), because an observer started from this
+// multi-threaded process would itself be a child that disturbs the lifecycle being measured.
 
 #define BUILDING_CRT__ 1
 
@@ -28,6 +31,7 @@
 #include <WebKit/WKViewCRT.h>
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -257,6 +261,66 @@ static void printMappedFiles(pid_t pid, const std::string& name)
     }
     for (auto& file : files)
         printf("MAPPED %s %s\n", name.c_str(), file.c_str());
+}
+
+#elif defined(CRT_TARGET_OS_MACOS)
+// libSystem's libproc, declared here (a CRT program does not see Darwin's headers). proc_listchildpids
+// returns the NUMBER of pids it stored, not a byte count.
+extern "C" int proc_listchildpids(pid_t, void*, int);
+extern "C" int proc_name(int, void*, uint32_t);
+extern "C" int proc_pidinfo(int, int, uint64_t, void*, int);
+
+static constexpr int procPidTaskInfo = 4; // PROC_PIDTASKINFO
+struct ProcTaskInfo {
+    uint64_t virtualSize, residentSize, totalUser, totalSystem, threadsUser, threadsSystem;
+    int32_t policy, faults, pageIns, copyOnWriteFaults, messagesSent, messagesReceived, machSystemCalls,
+        unixSystemCalls, contextSwitches, threadCount, runningThreadCount, priority;
+};
+
+static long statusValue(const char* key)
+{
+    ProcTaskInfo info { };
+    if (proc_pidinfo(getpid(), procPidTaskInfo, 0, &info, sizeof(info)) != static_cast<int>(sizeof(info)))
+        return -1;
+    return !strcmp(key, "VmRSS") ? static_cast<long>(info.residentSize / 1024)
+        : !strcmp(key, "Threads") ? info.threadCount : -1;
+}
+
+static unsigned openFileDescriptors()
+{
+    long limit = sysconf(_SC_OPEN_MAX);
+    if (limit < 0 || limit > 65536)
+        limit = 65536;
+    unsigned count = 0;
+    for (int descriptor = 0; descriptor < limit; ++descriptor)
+        if (fcntl(descriptor, F_GETFD) >= 0)
+            ++count;
+    return count;
+}
+
+// Live children of this process (a zombie is not listed by libproc's name lookup).
+static std::vector<std::pair<pid_t, std::string>> children()
+{
+    std::vector<std::pair<pid_t, std::string>> result;
+    pid_t pids[64] { };
+    int found = proc_listchildpids(getpid(), pids, sizeof(pids));
+    if (found <= 0)
+        return result;
+    size_t count = static_cast<size_t>(found);
+    if (count > sizeof(pids) / sizeof(pids[0]))
+        count = sizeof(pids) / sizeof(pids[0]);
+    for (size_t i = 0; i < count; ++i) {
+        char name[256] { };
+        if (pids[i] <= 0 || proc_name(pids[i], name, sizeof(name)) <= 0)
+            continue;
+        result.emplace_back(pids[i], name);
+    }
+    return result;
+}
+
+static void printMappedFiles(pid_t, const std::string&)
+{
+    // The driver reads the Mach-O mappings with vmmap(1) from outside (see the header comment).
 }
 
 #else

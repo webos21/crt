@@ -15,8 +15,11 @@ CMake option or a compiler flag.
 import argparse
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -195,7 +198,8 @@ def gate_environment(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
             [str(sdk / "bin"), str(prefix / "bin"), str(prefix / "lib"), str(build / "bin"), run_env.get("PATH", "")])
         run_env["FONTCONFIG_FILE"] = crt_path(work / "fonts.conf")
     else:
-        run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        loader_path = "DYLD_LIBRARY_PATH" if target_os == "macos" else "LD_LIBRARY_PATH"
+        run_env[loader_path] = os.pathsep.join(
             [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
         run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
     return run_env
@@ -352,6 +356,51 @@ def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
             "consumer_output": consumer_output.splitlines()}
 
 
+def observe_macos_processes(parent_pid: int) -> dict:
+    """The mapped files of the three live B7 processes (UI, Web, Network), from the host side. macOS has
+    no /proc, and an observer started inside the process under test (popen of ps/vmmap) is a child
+    that changes the lifecycle being measured, so the driver samples while the test runs."""
+    children = {}
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and len(children) < 2:
+        snapshot = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True,
+                                  check=False).stdout
+        for line in snapshot.splitlines():
+            fields = line.strip().split(None, 2)
+            if len(fields) != 3 or not fields[0].isdigit() or not fields[1].isdigit():
+                continue
+            if int(fields[1]) == parent_pid and Path(fields[2]).name in ("WebProcess", "NetworkProcess"):
+                children[Path(fields[2]).name] = int(fields[0])
+        if len(children) < 2:
+            time.sleep(0.02)
+    mapped = {}
+    pattern = re.compile(r"(?:^|\s)(/(?:Users|private|tmp|usr|System)/.*)$")
+    for role, pid in {"UIProcess": parent_pid, **children}.items():
+        output = subprocess.run(["vmmap", str(pid)], capture_output=True, text=True, check=False).stdout
+        files = set()
+        for line in output.splitlines():
+            match = pattern.search(line)
+            if match:
+                files.add(match.group(1).rstrip())
+        mapped[role] = sorted(files)
+    return mapped
+
+
+def run_lifecycle_program_macos(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> tuple:
+    """crtweb_lifecycle_test as run_program runs it, with the host-side sampling of the process maps."""
+    program = build / "bin" / "crtweb_lifecycle_test"
+    process = subprocess.Popen([str(program)], cwd=work, env=gate_environment(build, sdk, prefix, work, env, "macos"),
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    mapped = observe_macos_processes(process.pid)
+    stdout, stderr = process.communicate()
+    print(stdout, end="")
+    print(stderr, end="", file=sys.stderr)
+    audit = audit_program_native(program, sdk, prefix, build, "macos")
+    passed = process.returncode == 0 and "crtweb_lifecycle_test: ok" in stdout and audit["ok"]
+    return ({"passed": passed, "returncode": process.returncode, "audit": audit,
+             "output": stdout.splitlines()}, mapped)
+
+
 def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
     """B7: crtweb_lifecycle_test (100 create/load/paint/destroy cycles of a view with its Web and
     Network processes; the test itself bounds descriptor, thread and RSS growth), then the Host ABI
@@ -359,7 +408,12 @@ def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: di
     one, from the MAPPED lines the test prints from /proc/<pid>/maps of each child: every file-backed
     mapping of the UI, Web and Network processes must be the CRT SDK, the port prefix, this build
     tree, the bundled fonts, the fontconfig cache, or the host's dynamic loader."""
-    result = run_program("crtweb_lifecycle_test", build, sdk, prefix, work, env, target_os)
+    if target_os == "macos":
+        result, observed = run_lifecycle_program_macos(build, sdk, prefix, work, env)
+        mapped_lines = [f"MAPPED {role} {path}" for role, paths in observed.items() for path in paths]
+    else:
+        result = run_program("crtweb_lifecycle_test", build, sdk, prefix, work, env, target_os)
+        mapped_lines = result["output"]
     windows = target_os == "windows"
     allowed = [sdk.resolve(), prefix.resolve(), build.resolve(), (ROOT / "libcrtgfx" / "assets" / "fonts").resolve(),
                work.resolve()]
@@ -370,7 +424,7 @@ def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: di
     system_root = Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve() if windows else None
     os_runtime = set()
     mapped, violations = {}, []
-    for line in result["output"]:
+    for line in mapped_lines:
         if not line.startswith("MAPPED "):
             continue
         _, role, path = line.split(" ", 2)
@@ -386,6 +440,12 @@ def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: di
             continue
         if path.startswith(("[", "/memfd:")) or Path(path).name.startswith("ld-linux"):
             continue
+        # vmmap lists the dyld shared-cache closure of every process. Direct Mach-O dependencies are
+        # held to libSystem by the static audit below; what is mapped outside the OS-owned cache must be
+        # the CRT SDK, the port prefix or this build.
+        if target_os == "macos" and (path.startswith(("/usr/lib/", "/System/Library/"))
+                                     or path == "/usr/bin/vmmap" or "/*/" in path):
+            continue
         if not any(Path(path).resolve().is_relative_to(root) for root in allowed):
             violations.append(f"{role}: maps {path}")
     if windows:
@@ -398,18 +458,21 @@ def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: di
         static = jsc.host_abi_audit(sdk, prefix, build, binaries, {}, "windows")
     else:
         binaries = sorted(p for p in (build / "bin").iterdir() if p.is_file() and os.access(p, os.X_OK))
-        binaries += sorted((build / "lib").glob("libWebKit.so*"))
+        binaries += sorted((build / "lib").glob("libWebKit*.dylib*" if target_os == "macos" else "libWebKit.so*"))
         probe = work / "surface_probe"
         if probe.exists():
             binaries.append(probe)
-        # A CRT-linked static executable (surface_probe) has no DT_NEEDED: nothing for ldd to resolve.
-        readelf = shutil.which("llvm-readelf") or shutil.which("readelf")
-        static_binaries = [b for b in binaries
-                           if "(NEEDED)" not in jsc.run([readelf, "-d", str(b)], capture=True, check=False).stdout]
-        binaries = [b for b in binaries if b not in static_binaries]
+        static_binaries = []
+        if target_os == "linux":
+            # A CRT-linked static executable (surface_probe) has no DT_NEEDED: nothing for ldd to resolve.
+            readelf = shutil.which("llvm-readelf") or shutil.which("readelf")
+            static_binaries = [b for b in binaries
+                               if "(NEEDED)" not in jsc.run([readelf, "-d", str(b)], capture=True, check=False).stdout]
+            binaries = [b for b in binaries if b not in static_binaries]
+        loader_path = "DYLD_LIBRARY_PATH" if target_os == "macos" else "LD_LIBRARY_PATH"
         static = jsc.host_abi_audit(sdk, prefix, build, binaries, {
-            "LD_LIBRARY_PATH": os.pathsep.join([str(build / "lib"), str(prefix / "curl-openssl" / "lib"),
-                                                 str(sdk / "lib"), str(prefix / "lib")])}, "linux")
+            loader_path: os.pathsep.join([str(build / "lib"), str(prefix / "curl-openssl" / "lib"),
+                                          str(sdk / "lib"), str(prefix / "lib")])}, target_os)
     result["runtime_audit"] = {"roles": sorted(mapped), "mapped_files": sum(len(v) for v in mapped.values()),
                                "violations": violations}
     if windows:
@@ -501,7 +564,7 @@ def main() -> int:
     if status != 0 or not args.run_tests:
         return status
     results = {name: run_program(name, build, sdk, prefix, work, env, target_os) for name in tests}
-    if args.webkit and target_os in ("linux", "windows"):
+    if args.webkit and target_os in ("linux", "macos", "windows"):
         results["render_through_surface_protocol"] = run_render_gate(build, sdk, prefix, work, env, target_os)
         print("B5 diff:", json.dumps(results["render_through_surface_protocol"].get("diff_against_wpe_reference")))
         results["input_through_surface_protocol"] = run_input_gate(build, sdk, prefix, work, env, target_os)

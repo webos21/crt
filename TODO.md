@@ -108,13 +108,13 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **3B-B5:** on Linux/x86_64 `reference.html` renders through `DrawingAreaCRT`,
     the proof matches the WPE reference and the 640x480 frame reaches the CRT
     consumer through the 3A contract; 8.3 % of pixels differ (text: font set).
-    Windows/x64 replayed (2026-10-13); macOS/aarch64 replays are open.
+    Windows/x64 and macOS/arm64 replayed (2026-10-13); Linux/aarch64 only on assembly changes.
   * [x] **3B-B6:** on Linux/x86_64 the 3A input contract (pointer, key, wheel, text,
     resize, stalled consumer) passes through `PlatformCRT` against `surface_probe`.
-    Windows/x64 replayed (2026-10-13); macOS/aarch64 replays are open.
+    Windows/x64 and macOS/arm64 replayed (2026-10-13); Linux/aarch64 only on assembly changes.
   * [x] **3B-B7:** Linux/x86_64 prototype closed: 100x create/destroy flat, Host ABI audit
     (static and `/proc/maps`) clean, license scan and patch manifest rechecked (patch 0018).
-    Windows/x64 replayed (2026-10-13); macOS/aarch64 replays of B5-B7 are open.
+    Windows/x64 and macOS/arm64 replayed (2026-10-13); Linux/aarch64 only on assembly changes (patch 0019 on macOS).
 * [ ] **4. `libcrtweb` and the WebView.** 3B-B7 is done on Linux/x86_64.
   * [ ] Freeze and implement the CRT-owned runtime/view API and callbacks.
   * [ ] Add `crtui` WebView integration without exposing WebKit/WPE/GLib types.

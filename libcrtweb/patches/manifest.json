@@ -540,6 +540,23 @@
       ],
       "reason": "RedBlackTree::remove() leaves the removed node's CheckedPtr m_left/m_right pointing into the tree; when RunLoop's generic ScheduledTask (a ThreadSafeNode) outlives a former child, its destructor decrements the dead child's scribbled count and crashes (seen when a WebProcessProxy and its responsiveness timers are torn down).",
       "remove_when": "WebKit upstream clears the removed node's child links in RedBlackTree::remove()."
+    },
+    {
+      "id": "0019-crt-ipc-monitor-bounded-wait",
+      "patch": "0019-crt-ipc-monitor-bounded-wait.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp",
+          "sha256_before": "a24b983a784995b1c272275b543422ba93e433669454d38528b6f017148a7964",
+          "sha256_after": "a5f8346606190997fed86dc363c7af830a72e128d888b5936c2ccd6aeaff36ce",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "PlatformCRT uses the PlayStation socket-monitor thread, which retains its Connection while blocked in select(). POSIX does not require close() in another thread to interrupt that select(), and macOS B7 replay reproduced one retained socket monitor and receive WorkQueue per Web process lifecycle. A bounded wait lets the monitor re-check the released descriptor and terminate without busy-spinning; readable sockets still dispatch immediately.",
+      "remove_when": "PlatformCRT replaces the PlayStation-shaped monitor with an interruptible event-loop source, or WebKit explicitly wakes and joins the socket monitor during connection invalidation."
     }
   ],
   "license_policy": {

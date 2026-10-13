@@ -1254,9 +1254,9 @@ is not closed on another host until it passes there (Tranches 6/7 own those repl
 | **B2** | Dependency ports (D8): HarfBuzz, libjpeg-turbo, libwebp, libxml2, libpsl, OpenSSL, OpenSSL-backed libcurl | **done 2026-10-10 (Linux/x86_64), replayed 2026-10-11 (macOS/arm64) and 2026-10-12 (Windows/x64, OpenSSL and libcurl static; Linux/aarch64)**: each recipe configures, builds, installs and passes its run test, and WebKit's own `find_package()` calls resolve all of them (`tools/check_web_dependencies.py`) |
 | **B3** | WebCore and PAL build under `PORT=CRT` with the bundled Skia: CRT replacements for the WTF/WebCore platform files | **done 2026-10-11 (Linux/x86_64), replayed on macOS/arm64, Windows/x64 and Linux/aarch64 (2026-10-12)**: `WebCore` and `PAL` link into a test program that starts WTF, creates a `Page`-less WebCore object graph and paints a Skia surface; no GLib symbol in the link (`tools/build_webkit_crt_port.py --run-tests`) |
 | **B4** | WebKit multi-process: UIProcess/WebProcess/NetworkProcess for CRT, process launcher, IPC over Unix sockets | **done 2026-10-12 (Linux/x86_64)**: the UI process launches the Web and Network processes and a message round-trips; killing a child is detected (`crtweb_process_test`) |
-| **B5** | First render | **done 2026-10-12 (Linux/x86_64)**: `reference.html` renders, the proof string is the WPE reference's, the frame reaches `surface_probe` through the 3A contract (`crtweb_render_test`, `--webkit --run-tests`) |
-| **B6** | Input | **done 2026-10-12 (Linux/x86_64)**: `surface_probe`'s full scripted run passes against `crtweb_surface_host` (the CRT port's frame producer) instead of the WPE module |
-| **B7** | Close | **done 2026-10-13 (Linux/x86_64)**: 100x create/destroy without growth, host-ABI audit clean (static and runtime), patch manifest and license scan re-run, docs and `HISTORY.md` updated |
+| **B5** | First render | **done 2026-10-12 (Linux/x86_64), replayed on Windows/x64 and macOS/arm64 (2026-10-13)**: `reference.html` renders, the proof string is the WPE reference's, the frame reaches `surface_probe` through the 3A contract (`crtweb_render_test`, `--webkit --run-tests`) |
+| **B6** | Input | **done 2026-10-12 (Linux/x86_64), replayed on Windows/x64 and macOS/arm64 (2026-10-13)**: `surface_probe`'s full scripted run passes against `crtweb_surface_host` (the CRT port's frame producer) instead of the WPE module |
+| **B7** | Close | **done 2026-10-13 (Linux/x86_64), replayed on Windows/x64 and macOS/arm64 (2026-10-13)**: 100x create/destroy without growth, host-ABI audit clean (static and runtime), patch manifest and license scan re-run, docs and `HISTORY.md` updated |
 
 *B2 result (Linux/x86_64, 2026-10-10).* Seven recipes with `"group": "web"` (`libjpeg-turbo` 3.2.0,
 `libwebp` 1.6.0, `libxml2` 2.15.4, `libpsl` 0.23.3, `harfbuzz` 14.6.0, `openssl` 3.5.9,
@@ -1605,6 +1605,22 @@ tree, System32 DLLs). The replay found, in CRT, two handle leaks that Linux does
 handles, and a descriptor forwarded by a process that made both ends of a socketpair; `docs/porting/bionic_libc_gaps.md`)
 and no new WebKit patch. *Not exercised on Windows:* the same set as Linux, plus a sender that exits before its
 descriptor is received.
+
+*B5-B7 replayed on macOS/arm64 (2026-10-13).* The same three gates pass through `tools/build_webkit_crt_port.py`
+(loader path `DYLD_LIBRARY_PATH`): `crtweb_render_test` (proof identical, 678 colours, `surface_probe` accepts the
+frame; the native WPE reference is not on this host, so the pixel diff is not computed), the scripted 3A input run, and
+`crtweb_lifecycle_test` (100 cycles: threads +0, descriptors +0, RSS +96 KiB from 20.6 MiB, at most two children at
+once, none left). The Host ABI audit has a Mach-O form: the static recursive audit of every produced binary (direct
+dependencies are CRT SDK, port prefix, build tree or libSystem; no GLib symbol) and the runtime one, in which the driver
+samples `vmmap(1)` of the UI, Web and Network processes while the test runs (`/proc` does not exist; an observer started
+inside the process under test would be a child that disturbs what it measures): everything mapped outside the OS's dyld
+shared cache is the SDK, the prefix or the build tree (365 files, no violation). The replay found **one** defect, in
+PlatformCRT: the PlayStation socket-monitor thread blocks in `select()` holding its `Connection`, and a `close()` in
+another thread does not wake a blocked `select()` on macOS, so every lifecycle left a monitor thread and a work queue
+(two threads and about 200 KiB per cycle). Patch 0019 gives that `select()` a 100 ms bound; the loop already re-reads the
+descriptor. The test observes children and resources through libproc on macOS (`proc_listchildpids` returns a pid count,
+not bytes). *Not re-run on Linux and Windows:* patch 0019 applies there too (target group `crt-port`); it changes a
+timeout, not a contract. *Not exercised on macOS:* the same set as Linux.
 
 *Risks, named so they are watched rather than discovered.* (1) ~~The bundled Skia m154 must build with
 CRT's clang and libc++~~ *retired by B3 (it does)* (CRT's own Skia is m148 and is built by other tooling); (2) WebCore is about

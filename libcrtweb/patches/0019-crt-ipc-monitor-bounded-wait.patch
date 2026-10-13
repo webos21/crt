@@ -1,0 +1,13 @@
+diff -urN a/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp b/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp
+--- a/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp
++++ b/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp
+@@ -346,7 +346,8 @@
+                 FD_ZERO(&fdSet);
+                 FD_SET(fd, &fdSet);
+ 
+-                if (-1 != select(maxFd + 1, &fdSet, 0, 0, 0)) {
++                struct timeval timeout { 0, 100000 };
++                if (-1 != select(maxFd + 1, &fdSet, 0, 0, &timeout)) {
+                     if (FD_ISSET(fd, &fdSet))
+                         protectedThis->readyReadHandler();
+                 }
