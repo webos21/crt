@@ -116,8 +116,8 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **3B-B7:** Linux/x86_64 prototype closed: 100x create/destroy flat, Host ABI audit
     (static and `/proc/maps`) clean, license scan and patch manifest rechecked (patch 0018).
     Windows/x64 and macOS/arm64 replayed (2026-10-13); Linux/aarch64 only on assembly changes (patch 0019 on macOS).
-* [ ] **4. `libcrtweb` and the WebView.** C0-C2 and C4-C8 done on Linux/x86_64 2026-10-13
-  (`HISTORY.md`); the host replays (C3) remain.
+* [x] **4. `libcrtweb` and the WebView.** C0-C8 done on Linux/x86_64 2026-10-13 and replayed on
+  macOS/arm64 and Windows/x64 (`HISTORY.md`); closed.
   * [x] **C0-C2:** the CRT-owned runtime/view API and callbacks (`crtweb.h`, `libcrtweb.so`) and
     the `crtui` WebView (`crtweb::WebView` over the out-of-process `crtweb_host`).
   * [x] **C4:** multiple runtimes per process, each with its own website data store.
@@ -125,8 +125,8 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **C6:** downloads (request, destination decision, progress, result).
   * [x] **C7:** popups (`window.open`, `window.close`) and dialogs (alert, confirm, prompt).
   * [x] **C8:** IME: composition, commit of arbitrary UTF-8 (Hangul), cancel.
-  * [ ] **C3:** replay `crtweb_api_test` and `crtweb_webview_test` (and C4-C8) on macOS/arm64
-    and Windows/x64. macOS/arm64 replayed (2026-10-13); Windows/x64 is open.
+  * [x] **C3:** replay `crtweb_api_test` and `crtweb_webview_test` (and C4-C8) on macOS/arm64
+    and Windows/x64: macOS/arm64 and Windows/x64 replayed (2026-10-13).
 * [ ] **5. Multi-process lifecycle.** B4 proves the initial Linux process/IPC
   foundation; the complete lifecycle remains.
   * [ ] Clean shutdown, forced WebProcess termination and recovery/reload.

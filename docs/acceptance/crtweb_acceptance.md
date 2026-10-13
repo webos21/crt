@@ -1649,7 +1649,7 @@ Policy and rules: [`libcrtweb_api_policy.md`](../design/libcrtweb_api_policy.md)
 | **C6** (done) | Downloads: request callback with the destination decision, progress, result | a `Content-Disposition: attachment` response is saved byte-for-byte; cancel and failure are reported |
 | **C7** (done) | Popups and dialogs: `window.open`/`window.close`, alert/confirm/prompt answered by the application | a popup is vetoed or adopted as a new view; dialog results reach the page |
 | **C8** (done) | IME: composition, commit of UTF-8 text, cancel | `compositionstart/update/end` events and a committed Hangul string in an input; through `crtweb::WebView` too |
-| C3 | Host replays (C0-C8): macOS/arm64, Windows/x64 | the same tests: **macOS/arm64 done 2026-10-13**, Windows/x64 open |
+| C3 (done) | Host replays (C0-C8): macOS/arm64, Windows/x64 | the same tests: **macOS/arm64 and Windows/x64 done 2026-10-13** |
 
 *Why the WebView is out of process.* An application that uses `crtui` links its own static C runtime,
 Skia and the host window/GPU libraries (the `-Wl,--exclude-libs,ALL` static link of the SDK examples,
@@ -1737,6 +1737,19 @@ directory called `rmdir` (it used `stat`); (3) the macOS curl-openssl in the web
 and crashing at exit; the gate runs this test without a loader path (`crtweb_host` has its own rpaths); (5) the driver only enabled Tranche 4 on Linux. *Not exercised on
 macOS:* the same set as Linux, and the `ctest` entry of `crtweb_webview_test` only reports "skipped" without
 `CRTWEB_HOST` (the driver's gate is the evidence).
+
+*Tranche 4 replayed on Windows/x64 (2026-10-13), which closes it.* The driver builds `libcrtweb.dll`,
+`crtweb_host.exe` and `crtweb_api_test.exe` and runs the gate (B3-B7 unchanged, `crtweb_api_test` C0-C8 against the
+loopback HTTP server, the in-tree `crtweb_webview_test` against the host, the public-header and PE export firewall
+(`libcrtweb.dll` exports `crtweb_*` only), and the host ABI audit of the host and the library): 3/3 consecutive
+runs, 15/15 `crtweb_api_test` alone, no leftover process, `ctest` 186/186. Found and fixed, none in the public API:
+(1) a DLL's static constructors were never run, so `libcrtweb.dll`'s global `std::map` was unconstructed (toolchain
+wrappers and `dllcrt.c`); (2) SQLite's POSIX record-lock protocol failed on `LockFileEx` (a per-process lock table
+in `fcntl`); (3) `file:` URLs and the data directory spelled as `C:\dir` are rewritten to `/c/dir` by
+`libcrtweb` (libcurl and SQLite's unix VFS are POSIX-persona code); (4) patch 0022, a teardown race in
+`Connection::readyReadHandler()`; (5) the tests' `rm -rf` through `system()` and the stale `--disable-file` curl.
+*Not exercised on Windows:* the same set as Linux/macOS; local-storage clearing and IME candidate geometry remain
+outside v1. The replay deliberately did not change the Web process model (GPU, recovery: Tranche 5).
 
 ### 5. Multi-process lifecycle
 

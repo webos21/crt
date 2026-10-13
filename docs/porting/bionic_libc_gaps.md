@@ -565,6 +565,25 @@ Building fontconfig, libwpe and WebCore against the SDK showed these gaps, all f
 Covered by `random_state_test`, `shm_open_test`, `android_log_test`, the fontconfig and libwpe port
 tests and `crtweb_webcore_graph_test`.
 
+## Windows replay of Web Tranche 4 (2026-10-13)
+
+- *Static constructors of a CRT-built DLL.* A DLL has no crt1: the `-shared` links of `tools/crt-cc` and
+  `tools/crt-c++` now bracket the DLL's `.ctors`/`.CRT$XCU`/`.dtors` regions with `crt1_ctors_begin.o`,
+  `crt1_ctors_walker.o` and `crt1_ctors_end.o`, and `crtDllMainCRTStartup` (dllcrt.c) runs the constructors at
+  `DLL_PROCESS_ATTACH` and the destructors on `FreeLibrary` (not at process exit, as for every DLL). An SDK
+  built before this change has DLLs without constructors; rebuild what carries namespace-scope C++ objects.
+- *`fcntl` record locks.* `F_SETLK`/`F_SETLKW`/`F_GETLK` keep a per-file view of the process's locks over
+  `LockFileEx`: conversion (read to write and back), unlocking part of a lock or a span over several, locking and
+  unlocking through different descriptors of one file, and release when the owning descriptor closes. Differences
+  from POSIX: the lock is not released when a *different* descriptor of the file closes; the conversion is
+  unlock-then-lock and so not atomic against other processes; `l_pid` is 0; at most 32 files with 64 ranges each.
+  Test: `fcntl_record_lock_test` (SQLite's sequence, two descriptors, a second process).
+- *Host paths.* `getcwd()` outside a rootfs keeps returning the Windows spelling (`C:\dir`). Code that
+  treats a path as absolute only when it starts with `/` (SQLite's unix VFS, libcurl's `file:` handling) fails with
+  it; the `/c/dir` spelling works everywhere the PAL translates paths. `libcrtweb` converts at its boundary;
+  making `getcwd()` itself return the POSIX spelling is the broader fix and not done (it changes every program's
+  view of its working directory).
+
 ## Found by the crtui WebView and `crtweb` (Web Tranche 4; 2026-10-13)
 
 - `accept4()` is not provided (Bionic has it). `crtweb::WebView` uses `accept()` followed by

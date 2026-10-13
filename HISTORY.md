@@ -11,6 +11,46 @@ substantive update.
 
 ## 2026-10-13
 
+### Web Tranche 4 replayed on Windows/x64: DLL constructors, POSIX record locks and two boundary spellings; Tranche 4 closed
+
+`tools/build_webkit_crt_port.py --webkit --run-tests` on Windows builds `libcrtweb.dll`, `crtweb_host.exe` and
+`crtweb_api_test.exe`, runs the in-tree `crtweb_webview_test` against the host, and the whole B3-C8 gate passes
+3/3 consecutive runs (`crtweb_api_test` also 15/15 alone, no IPC error on stderr; lifecycle +0 handles; no child left);
+`ctest` 186/186. Nothing in the engine changed except a one-hunk carried patch; the defects were in the PAL, the
+toolchain wrappers and two path spellings.
+
+- *Static constructors of a DLL never ran.* `crtDllMainCRTStartup` (dllcrt.c) had no equivalent of crt1's
+  `__crt_run_init_array`, and the `-shared` links of `tools/crt-cc`/`tools/crt-c++` did not bracket the DLL's
+  `.ctors`/`.CRT$XCU` regions. A namespace-scope `std::map` in `libcrtweb.dll` was zero-filled memory, and the first
+  `crtweb_view_destroy` iterated it (null node, access violation); WebKit hid the same gap because it mostly uses
+  function-local statics. The shared link now places `crt1_ctors_begin.o`/`crt1_ctors_walker.o` first and
+  `crt1_ctors_end.o` last (their symbols excluded from the export table), and `dllcrt.c` walks both regions on
+  `DLL_PROCESS_ATTACH` (destructors on `FreeLibrary`, not at process exit). Weak references: a DLL linked without
+  the markers (libc.dll itself) behaves as before. This is probably also the cause of the open "std::cout crashes
+  with shared libc++.dll" note; not re-measured.
+- *POSIX record locks over LockFileEx.* SQLite (the cookie database, local storage, IndexedDB) reported "database
+  is locked": `fcntl(F_SETLK)` mapped 1:1 to `LockFileEx`, which is per handle, cannot convert a lock and cannot
+  unlock part of or a span over several locks. `__crt_sys_fcntl` now keeps the process's view per file (volume +
+  index): exact physical ranges through one owner handle, conversion and splitting done by unlock-and-relock,
+  `F_GETLK` over the part not our own, `F_SETLKW` by polling, the entry dropped when the owner closes.
+  `libc/tests/fcntl_record_lock_test.c` runs SQLite's SHARED/RESERVED/EXCLUSIVE sequence on two descriptors and
+  against a second process. Limit: the conversion window is not atomic against other processes.
+- *Windows host paths.* `getcwd()` outside a rootfs is `C:\dir`; a `file://` URL built from it reaches the
+  POSIX-persona libcurl as `file:///C:/dir` and is rejected as a bad URL, and SQLite's unix VFS takes a path
+  that does not start with `/` for a relative one (`/C:\dir/C:\dir/cookies.db`, unable to open). `libcrtweb`
+  rewrites `file:` URLs and the data directory to the CRT's `/c/dir` spelling at the API boundary
+  (`docs/design/libcrtweb_api_policy.md`).
+- *Patch 0022.* `Connection::readyReadHandler()` returns when the descriptor was released under it
+  (about one run in three printed `Error receiving IPC message on socket -1` at teardown and reported a second
+  `didClose`; 15/15 clean after). Stacked on 0019; the manifest checker passes (22 patches).
+- *Harness.* The new tests removed their scratch directories with `system("rm -rf ...")`, which finds no `rm` for a
+  CRT program whose PATH is a host PATH; they use `libcrtweb/tests/common/crtweb_test_fs.h`. The driver's webview
+  gate reads the PE export table (`llvm-readobj --coff-exports`) and the `.exe`/`.dll` names; `curl-openssl` had to
+  be rebuilt for `file:` (`port-rebuild-curl-openssl`), as on macOS.
+
+Open: Linux/aarch64 only if assembly changes (policy). The Linux/macOS hosts have not re-run `fcntl_record_lock_test`,
+the `unix_socket_test` forwarding case, the DLL-constructor change (Windows only) or patch 0022.
+
 ### Web Tranche 4 replayed on macOS/arm64: `realpath` lost path tails, `remove` of a directory link, and a loader-path trap
 
 The whole gate passes (`--webkit --run-tests`): B3-B7, `crtweb_api_test` (5/5), the in-tree `crtweb_webview_test`

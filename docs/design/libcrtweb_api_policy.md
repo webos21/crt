@@ -48,6 +48,11 @@ public header, an exported symbol or a dependency of the SDK's consumer-facing l
    `crtweb_view_load_url`. `on_navigation_request` may veto any main-frame navigation, including
    those the page starts itself. Sub-frame navigations are not reported in v1.
 
+7. **Paths.** On Windows a path or `file:` URL may be spelled with a host drive (`C:\dir`, `file:///C:/dir`). The
+   runtime hands the engine the CRT's POSIX spelling (`/c/dir`) for `file:` URLs and for `data_directory`, because
+   libcurl and SQLite inside the engine take only `/`-rooted absolute paths. Other path arguments (a download
+   destination) are passed through as given.
+
 ## Scope of v1, and deliberate limits
 
 Part of v1 (Tranche 4, milestones C4-C8; the acceptance document owns the evidence): several runtimes

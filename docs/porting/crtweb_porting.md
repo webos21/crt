@@ -120,6 +120,10 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
   Removal: upstream fixes `remove()`.
 - `0020` makes `WebPage::platformUserAgent` (PlayStation) return the page's own user agent, so the embedder's
   application name reaches `navigator.userAgent` (stacked on 0017, same file). Removal: upstream takes it into account.
+- `0022` makes `Connection::readyReadHandler()` return when the socket descriptor was released under it (the
+  PlayStation-shaped socket monitor dispatches from its own thread while `platformInvalidate()` closes the
+  descriptor first): a runtime teardown printed "Error receiving IPC message on socket -1" and reported a second
+  `didClose` (Windows replay of Tranche 4). Stacked on 0019. Removal: upstream detaches the monitor first.
 - `0021` adds three WebPage messages (`SetCompositionCRT`, `ConfirmCompositionCRT`, `InsertTextCRT`) for the embedder's
   input method: non-Cocoa builds have no composition entry point in the Web process. Removal: upstream offers a
   platform-neutral composition/insertion message.
