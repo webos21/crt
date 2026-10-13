@@ -7,7 +7,8 @@ upstream mapping: [`docs/porting/crtweb_porting.md`](../docs/porting/crtweb_port
 
 **Status: bring-up.** Web Tranches 0-3 are closed on Linux/x86_64, macOS/arm64 and Windows/x64
 (`PlatformCRT` renders, takes input and survives 100x create/destroy; JavaScriptCore is accepted on all
-four acceptance pairs). Tranche 4 is in progress on Linux/x86_64: the public C API `crtweb`
+four acceptance pairs). Tranche 4 is in progress on Linux/x86_64 (several runtimes, website data, downloads,
+popups, dialogs and IME are in): the public C API `crtweb`
 (`include/crtweb/crtweb.h`, `src/crtweb.cpp` -> `libcrtweb.so`), the out-of-process `crtweb_host`
 (`tools/crtweb_host.cpp`) and the `crtui` WebView `crtweb::WebView` (`include/crtweb/webview.h`) over
 the web surface protocol and its control extension. A packaged `06-web` SDK does not exist yet

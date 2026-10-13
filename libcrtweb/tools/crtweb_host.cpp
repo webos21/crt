@@ -9,7 +9,9 @@
 // application links its own static C runtime, Skia and host GPU/window libraries, which cannot share
 // an address space with libWebKit.so (docs/design/libcrtweb_api_policy.md, "Why a separate process").
 //
-// Usage: crtweb_host consumer-socket [initial-url]
+// Usage: crtweb_host consumer-socket [--data-dir=DIR] [--cookie-policy=N] [initial-url]
+//   DIR: persistent website data (cookies, cache, storage); without it the runtime is ephemeral.
+//   N: 0 accept all cookies, 1 none, 2 first party only.
 
 #include "crtweb/crtweb.h"
 
@@ -24,6 +26,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,6 +41,13 @@ uint32_t gWidth = 640;
 uint32_t gHeight = 480;
 bool gFrameReady;
 int gHistory = -1;
+
+// A download decision the host is waiting for (the engine's request callback is synchronous).
+uint32_t gDecisionFor;
+bool gDecisionArrived;
+bool gDecisionAccept;
+std::string gDecisionPath;
+std::map<uint32_t, crtweb_dialog*> gDialogs;
 
 void sendEvent(crtweb_event event, uint32_t id, uint32_t flags, const std::string& argument)
 {
@@ -94,6 +104,60 @@ void onTerminated(crtweb_view*, void*)
     sendEvent(CRTWEB_EVENT_PROCESS_TERMINATED, 0, 0, std::string());
 }
 
+int onDownloadRequest(crtweb_view*, const crtweb_download_info* info, char* path, size_t capacity, void*)
+{
+    std::string argument = std::string(info->url) + std::string(1, '\0') + info->suggested_filename + std::string(1, '\0')
+        + info->mime_type + std::string(1, '\0') + std::to_string(info->expected_length);
+    gDecisionFor = info->id;
+    gDecisionArrived = false;
+    sendEvent(CRTWEB_EVENT_DOWNLOAD_REQUEST, info->id, 0, argument);
+    // Wait for the application's answer, reading the socket meanwhile; no answer cancels.
+    for (int waited = 0; !gDecisionArrived && !gProducer.bye && waited < 60000; waited += 20) {
+        if (crtweb_producer_pump(&gProducer, 20) != 0)
+            break;
+    }
+    if (!gDecisionArrived || !gDecisionAccept || gDecisionPath.empty() || gDecisionPath.size() >= capacity)
+        return 0;
+    memcpy(path, gDecisionPath.c_str(), gDecisionPath.size() + 1);
+    return 1;
+}
+
+void onDownloadProgress(crtweb_view*, uint32_t id, uint64_t received, uint64_t expected, void*)
+{
+    sendEvent(CRTWEB_EVENT_DOWNLOAD_PROGRESS, id, 0,
+        std::to_string(received) + std::string(1, '\0') + std::to_string(expected));
+}
+
+void onDownloadFinished(crtweb_view*, uint32_t id, crtweb_download_status status, const char* path, void*)
+{
+    sendEvent(CRTWEB_EVENT_DOWNLOAD_FINISHED, id, static_cast<uint32_t>(status), path ? path : "");
+}
+
+int onPopupRequest(crtweb_view*, const char* url, void*)
+{
+    sendEvent(CRTWEB_EVENT_POPUP_REQUESTED, 0, 0, url ? url : "");
+    return 0; // the host shows one view; the application decides what to do with the request
+}
+
+void onCloseRequested(crtweb_view*, void*)
+{
+    sendEvent(CRTWEB_EVENT_CLOSE_REQUESTED, 0, 0, std::string());
+}
+
+void onDialog(crtweb_view*, crtweb_dialog* dialog, crtweb_dialog_kind kind, const char* message, const char* defaultText, void*)
+{
+    static uint32_t nextId;
+    uint32_t id = ++nextId;
+    gDialogs[id] = dialog;
+    sendEvent(CRTWEB_EVENT_DIALOG, id, static_cast<uint32_t>(kind),
+        std::string(message ? message : "") + std::string(1, '\0') + (defaultText ? defaultText : ""));
+}
+
+void onDataCleared(crtweb_runtime*, crtweb_result, void* data)
+{
+    sendEvent(CRTWEB_EVENT_DATA_CLEARED, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(data)), 0, std::string());
+}
+
 struct ScriptRequest {
     uint32_t id;
 };
@@ -131,6 +195,35 @@ void runCommand(const crtweb_blob_assembler& command)
         }
         break;
     }
+    case CRTWEB_COMMAND_IME_SET_COMPOSITION:
+        crtweb_view_ime_set_composition(gView, argument.c_str(), command.id, command.flags);
+        break;
+    case CRTWEB_COMMAND_IME_COMMIT:
+        crtweb_view_ime_commit(gView, argument.c_str());
+        break;
+    case CRTWEB_COMMAND_IME_CANCEL:
+        crtweb_view_ime_cancel(gView);
+        break;
+    case CRTWEB_COMMAND_DIALOG_RESULT: {
+        auto found = gDialogs.find(command.id);
+        if (found != gDialogs.end()) {
+            crtweb_dialog_complete(found->second, (command.flags & 1u) != 0, argument.c_str());
+            gDialogs.erase(found);
+        }
+        break;
+    }
+    case CRTWEB_COMMAND_DOWNLOAD_DECISION:
+        if (command.id == gDecisionFor) {
+            gDecisionAccept = (command.flags & 1u) != 0;
+            gDecisionPath = argument;
+            gDecisionArrived = true;
+        }
+        break;
+    case CRTWEB_COMMAND_CLEAR_DATA:
+        if (crtweb_runtime_clear_data(gRuntime, command.flags, onDataCleared,
+                reinterpret_cast<void*>(static_cast<uintptr_t>(command.id))) != CRTWEB_OK)
+            sendEvent(CRTWEB_EVENT_DATA_CLEARED, command.id, 0, std::string());
+        break;
     default:
         break;
     }
@@ -195,9 +288,20 @@ void onMessage(void*, const void* data)
 
 int main(int argc, char** argv)
 {
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "usage: %s consumer-socket [initial-url]\n", argv[0]);
+    std::string dataDirectory;
+    uint32_t cookiePolicy = 0;
+    const char* initialURL = nullptr;
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s consumer-socket [--data-dir=DIR] [--cookie-policy=N] [initial-url]\n", argv[0]);
         return 2;
+    }
+    for (int i = 2; i < argc; ++i) {
+        if (!strncmp(argv[i], "--data-dir=", 11))
+            dataDirectory = argv[i] + 11;
+        else if (!strncmp(argv[i], "--cookie-policy=", 16))
+            cookiePolicy = static_cast<uint32_t>(atoi(argv[i] + 16));
+        else
+            initialURL = argv[i];
     }
     gProducer.on_message = onMessage;
     if (crtweb_producer_connect(&gProducer, argv[1], gWidth, gHeight, 100) != 0) {
@@ -211,7 +315,10 @@ int main(int argc, char** argv)
 
     crtweb_runtime_config runtimeConfig = { };
     runtimeConfig.struct_size = sizeof runtimeConfig;
-    runtimeConfig.application_name = "CRTWebHost/1";
+    runtimeConfig.application_name = "CRTWebHost";
+    if (!dataDirectory.empty())
+        runtimeConfig.data_directory = dataDirectory.c_str();
+    runtimeConfig.cookie_policy = cookiePolicy;
     if (crtweb_runtime_create(&runtimeConfig, &gRuntime) != CRTWEB_OK) {
         fprintf(stderr, "crtweb_host: cannot create the runtime\n");
         return 1;
@@ -231,10 +338,16 @@ int main(int argc, char** argv)
     callbacks.on_url_changed = onURL;
     callbacks.on_frame = onFrame;
     callbacks.on_process_terminated = onTerminated;
+    callbacks.on_download_request = onDownloadRequest;
+    callbacks.on_download_progress = onDownloadProgress;
+    callbacks.on_download_finished = onDownloadFinished;
+    callbacks.on_popup_request = onPopupRequest;
+    callbacks.on_close_requested = onCloseRequested;
+    callbacks.on_dialog = onDialog;
     crtweb_view_set_callbacks(gView, &callbacks);
     crtweb_view_set_focus(gView, 1);
-    if (argc == 3)
-        crtweb_view_load_url(gView, argv[2]);
+    if (initialURL)
+        crtweb_view_load_url(gView, initialURL);
 
     alarm(600);
     signal(SIGALRM, [](int) { _exit(3); });

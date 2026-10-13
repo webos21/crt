@@ -32,7 +32,9 @@
 #include "NativeWebWheelEvent.h"
 #include "PlayStationWebView.h"
 #include "WKAPICast.h"
+#include "WebPageMessages.h"
 #include "WebPageProxy.h"
+#include "WebProcessProxy.h"
 #include <WebCore/IntRect.h>
 #include <WebCore/Region.h>
 #include <string.h>
@@ -268,4 +270,46 @@ void WKViewCRTHandleText(WKViewRef view, const char* utf8)
         return;
     WKViewCRTHandleKey(view, true, false, character, keycode, modifiers, 0);
     WKViewCRTHandleKey(view, false, false, character, keycode, modifiers, 0);
+}
+
+// IME (Web Tranche 4, milestone C8): the embedder's input method owns composition; these entry points
+// hand its result to the focused frame's editor through the CRT messages of patch 0021 (the
+// non-Cocoa Web process has no composition entry point of its own), and bypass the US-layout key
+// mapping of WKViewCRTHandleText so any UTF-8 text can be committed.
+template<typename Message>
+static void sendToPage(WKViewRef viewRef, Message&& message)
+{
+    auto* view = WebKit::toImpl(viewRef);
+    if (!view || !view->page() || !view->page()->hasRunningProcess())
+        return;
+    auto* page = view->page();
+    page->legacyMainFrameProcess().send(WTF::move(message), page->webPageIDInMainFrameProcess());
+}
+
+void WKViewCRTInsertText(WKViewRef view, const char* utf8)
+{
+    if (utf8 && *utf8)
+        sendToPage(view, Messages::WebPage::InsertTextCRT(String::fromUTF8(utf8)));
+}
+
+void WKViewCRTSetComposition(WKViewRef view, const char* utf8, uint32_t cursorStart, uint32_t cursorLength)
+{
+    if (utf8)
+        sendToPage(view, Messages::WebPage::SetCompositionCRT(String::fromUTF8(utf8), cursorStart, cursorLength));
+}
+
+void WKViewCRTConfirmComposition(WKViewRef view)
+{
+    sendToPage(view, Messages::WebPage::ConfirmCompositionCRT(String()));
+}
+
+void WKViewCRTConfirmCompositionWithText(WKViewRef view, const char* utf8)
+{
+    if (utf8)
+        sendToPage(view, Messages::WebPage::ConfirmCompositionCRT(String::fromUTF8(utf8)));
+}
+
+void WKViewCRTCancelComposition(WKViewRef view)
+{
+    sendToPage(view, Messages::WebPage::SetCompositionCRT(String(), 0, 0));
 }

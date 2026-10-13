@@ -9,6 +9,8 @@
 
 #include "crtweb/webview.h"
 
+#include "../common/crtweb_test_http_server.h"
+
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkSurface.h"
@@ -211,6 +213,154 @@ extern "C" int main() {
   check(web.load_url("file:///crtweb_webview_missing.html"), "load a missing file");
   check(pump_until([&] { return has_load(4, "missing"); }), "load failure event");
   check(!web.load_url(std::string(2 * 1024 * 1024, 'x')), "an argument over the control limit is refused");
+
+  /* ---- Tranche 4: website data, downloads, dialogs, popups, input method over the protocol ---- */
+  {
+    HttpServer server;
+    auto evaluate_string = [&](crtweb::WebView& view, const std::string& script) {
+      std::string result = "<none>";
+      bool got = false;
+      view.evaluate(script, [&](const std::string& value, bool is_error) {
+        result = is_error ? "<error>" : value;
+        got = true;
+      });
+      pump_until([&] { return got; });
+      return result;
+    };
+    auto load_titled = [&](crtweb::WebView& view, std::string& title_slot, const std::string& url, const std::string& wanted) {
+      view.load_url(url);
+      return pump_until([&] { return title_slot == wanted; });
+    };
+
+    // Downloads: the application chooses the destination; the bytes arrive intact.
+    std::string saved_path = directory + "/crtweb_webview_download.bin";
+    struct { bool finished = false; crtweb::WebView::DownloadStatus status{}; uint64_t last = 0; std::string suggested; } download;
+    web.on_download_request = [&](const crtweb::WebView::DownloadInfo& info) {
+      download.suggested = info.suggested_filename;
+      return saved_path;
+    };
+    web.on_download_progress = [&](uint32_t, uint64_t received, uint64_t) { download.last = received; };
+    web.on_download_finished = [&](uint32_t, crtweb::WebView::DownloadStatus status, const std::string&) {
+      download.finished = true;
+      download.status = status;
+    };
+    check(load_titled(web, seen.title, server.url("/page"), "http page"), "http page through the WebView");
+    web.load_url(server.url("/dl"));
+    check(pump_until([&] { return download.finished; }), "download finished over the protocol");
+    check(download.status == crtweb::WebView::DownloadStatus::Ok && download.suggested == "blob.bin" && download.last == kDownloadSize,
+          "download status, filename and size");
+    {
+      std::string got;
+      if (FILE* file = fopen(saved_path.c_str(), "rb")) {
+        char buffer[8192];
+        size_t length;
+        while ((length = fread(buffer, 1, sizeof buffer, file)) > 0) got.append(buffer, length);
+        fclose(file);
+      }
+      check(got == downloadBody(), "downloaded bytes match");
+      unlink(saved_path.c_str());
+    }
+
+    // Dialogs: answered by the application.
+    std::vector<std::string> dialogs;
+    web.on_dialog = [&](crtweb::WebView::DialogKind kind, const std::string& message, const std::string& default_text,
+                        std::function<void(bool, const std::string&)> complete) {
+      dialogs.push_back(std::to_string(static_cast<int>(kind)) + ":" + message);
+      if (kind == crtweb::WebView::DialogKind::Prompt) complete(true, "Lee " + default_text);
+      else complete(true, std::string());
+    };
+    check(evaluate_string(web, "confirm('sure?')") == "true" && dialogs.size() == 1 && dialogs[0] == "2:sure?", "confirm over the protocol");
+    check(evaluate_string(web, "prompt('who?', 'x')") == "Lee x", "prompt answer reaches the page");
+
+    // Popups: the host blocks the window and reports the URL; the application opens a second WebView
+    // (a second host process and runtime) for it.
+    check(load_titled(web, seen.title, server.url("/opener"), "opener"), "opener page");
+    std::string popup_url;
+    web.on_popup_requested = [&](const std::string& url) { popup_url = url; };
+    crtui_input click = {};
+    click.window = scene.window;
+    click.x = 40 + 50;
+    click.y = 20 + 50;
+    click.type = CRTUI_INPUT_POINTER_MOVE;
+    web.forward(click, surface_bounds(&scene));
+    click.type = CRTUI_INPUT_POINTER_DOWN;
+    web.forward(click, surface_bounds(&scene));
+    click.type = CRTUI_INPUT_POINTER_UP;
+    web.forward(click, surface_bounds(&scene));
+    check(pump_until([&] { return !popup_url.empty(); }), "popup request reported");
+    check(popup_url.find("/popup-target") != std::string::npos, "popup url");
+    {
+      crtweb::WebView second;
+      std::string second_title;
+      second.on_title = [&](const std::string& title) { second_title = title; };
+      check(second.launch(host, 120, 90, popup_url.c_str()), "a second WebView (second host and runtime)");
+      auto both = [&](const std::function<bool()>& done) {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(20000);
+        while (!done()) {
+          if (std::chrono::steady_clock::now() >= deadline) return false;
+          web.poll(10);
+          second.poll(10);
+        }
+        return true;
+      };
+      check(both([&] { return second_title == "popup"; }), "the second WebView loads the popup page");
+      check(seen.title == "opener", "the first WebView is unaffected");
+      second.shutdown();
+    }
+
+    // Input method: Hangul composition and commit into a field.
+    check(load_titled(web, seen.title, server.url("/ime"), "ime"), "ime page");
+    click.x = 40 + 20;
+    click.y = 20 + 12;
+    click.type = CRTUI_INPUT_POINTER_DOWN;
+    web.forward(click, surface_bounds(&scene));
+    click.type = CRTUI_INPUT_POINTER_UP;
+    web.forward(click, surface_bounds(&scene));
+    pump_until([&] { return false; }, 150);
+    check(web.ime_set_composition("\xED\x95\x9C", 1, 0), "composition sent");
+    check(web.ime_commit("\xED\x95\x9C\xEA\xB8\x80"), "commit sent");
+    check(pump_until([&] { return evaluate_string(web, "document.getElementById('t').value") == "\xED\x95\x9C\xEA\xB8\x80"; }),
+          "the committed Hangul is the field value");
+    check(evaluate_string(web, "window.log.join('|')").find("compositionend") != std::string::npos, "composition events reached the page");
+
+    // Website data: ephemeral by default; a data directory persists cookies across host restarts; clearing works.
+    check(load_titled(web, seen.title, server.url("/set"), "set"), "cookie set (ephemeral host)");
+    check(load_titled(web, seen.title, server.url("/read"), "cookie:sid=abc123"), "cookie read back");
+    bool cleared = false;
+    check(web.clear_data(crtweb::WebView::kDataCookies | crtweb::WebView::kDataCache, [&] { cleared = true; }), "clear_data sent");
+    check(pump_until([&] { return cleared; }), "clear_data completed");
+    check(load_titled(web, seen.title, server.url("/page"), "http page") && load_titled(web, seen.title, server.url("/read"), "cookie:"),
+          "no cookie after clearing");
+    {
+      std::string data = directory + "/crtweb_webview_data";
+      std::string remove = "rm -rf '" + data + "'";
+      if (system(remove.c_str()) != 0) fprintf(stderr, "crtweb_webview_test: could not clear %s\n", data.c_str());
+      crtweb::WebView::LaunchOptions options;
+      options.data_directory = data;
+      std::string title;
+      {
+        crtweb::WebView first;
+        first.on_title = [&](const std::string& t) { title = t; };
+        check(first.launch(host, 100, 75, nullptr, 60000, options), "host with a data directory");
+        first.load_url(server.url("/set"));
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (title != "set" && std::chrono::steady_clock::now() < deadline) first.poll(20);
+        check(title == "set", "cookie set in the persistent host");
+        first.shutdown();
+      }
+      {
+        crtweb::WebView again;
+        title.clear();
+        again.on_title = [&](const std::string& t) { title = t; };
+        check(again.launch(host, 100, 75, nullptr, 60000, options), "host restarted on the same directory");
+        again.load_url(server.url("/read"));
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (title != "cookie:sid=abc123" && std::chrono::steady_clock::now() < deadline) again.poll(20);
+        check(title == "cookie:sid=abc123", "the cookie survived the host restart");
+        again.shutdown();
+      }
+    }
+  }
 
   /* ---- resize ---- */
   check(crtui_widget_set_bounds(scene.ui, scene.surface, 40, 20, 100, 75) == CRTUI_OK, "shrink the view");

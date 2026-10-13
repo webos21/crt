@@ -79,7 +79,8 @@ int main(void) {
             CRTWEB_BLOB_MAX_TOTAL == 1048576u,
         "control extension constants");
   CHECK(CRTWEB_COMMAND_LOAD_URL == 1 && CRTWEB_COMMAND_EVALUATE == 7 && CRTWEB_EVENT_LOAD_STARTED == 1 &&
-            CRTWEB_EVENT_PROCESS_TERMINATED == 8,
+            CRTWEB_EVENT_PROCESS_TERMINATED == 8 && CRTWEB_COMMAND_IME_SET_COMPOSITION == 8 &&
+            CRTWEB_COMMAND_CLEAR_DATA == 13 && CRTWEB_EVENT_DOWNLOAD_REQUEST == 9 && CRTWEB_EVENT_DATA_CLEARED == 15,
         "command and event numbers");
   SIZE(crtweb_wire_blob, 128);
   OFFSET(crtweb_wire_blob, code, 8);

@@ -7,10 +7,11 @@
  * ownership and threading rules: docs/design/libcrtweb_api_policy.md; evidence:
  * docs/acceptance/crtweb_acceptance.md.
  *
- * Model. One runtime owns the shared machinery (Network process, website data, event loop
- * integration). A runtime owns any number of views; each view is one page with its own Web process
- * state, size, focus and navigation history. The application pumps the runtime from the thread that
- * created it; every callback is delivered from inside crtweb_runtime_pump(), on that thread, never
+ * Model. A runtime owns a website data store (cookies, cache, storage: ephemeral or in a directory),
+ * its web process pool and its views; a process may have several runtimes with isolated data. A view
+ * is one page with its own Web process state, size, focus and navigation history. All runtimes belong
+ * to the thread that created the first one and share one event loop: crtweb_runtime_pump() on any of
+ * them services every runtime. Every callback is delivered from inside a pump, on that thread, never
  * from another one and never re-entrantly from an API call.
  *
  * Pixels. A view paints on the CPU. crtweb_view_copy_frame() copies the newest picture out as
@@ -65,11 +66,16 @@ typedef struct crtweb_runtime_config {
   /* A product token appended to the user agent ("MyApp" gives "... Safari/605.1.15 MyApp/605.1.15":
    * WebKit adds its own version). NULL: none. */
   const char* application_name;
+  /* Directory for this runtime's website data: cookies, cache, local storage. NULL: ephemeral (in
+   * memory only, gone with the runtime). Two runtimes must not share a directory. */
+  const char* data_directory;
+  /* A crtweb_cookie_policy; 0 accepts all cookies. */
+  uint32_t cookie_policy;
 } crtweb_runtime_config;
 
-/* config may be NULL for the defaults. At most one runtime exists per process in v1
- * (CRTWEB_ERROR_STATE on the second); the creating thread owns it. The web processes are started
- * lazily by the first view. */
+/* config may be NULL for the defaults. Any number of runtimes may exist, all used from the thread
+ * that created the first (CRTWEB_ERROR_STATE from another). The web processes are started lazily by
+ * the first view. */
 CRTWEB_API crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_runtime** out_runtime);
 
 /* Destroys every remaining view first. Waits (bounded, a few seconds) for the Web process of each
@@ -77,10 +83,29 @@ CRTWEB_API crtweb_result crtweb_runtime_create(const crtweb_runtime_config* conf
 CRTWEB_API void crtweb_runtime_destroy(crtweb_runtime* runtime);
 
 /* Runs the web event loop on the calling (owning) thread: IPC, page work, painting notifications,
- * and the callbacks of every view. Returns after up to timeout_ms (0 = one pass without waiting);
+ * and the callbacks of every view of every runtime. Returns after up to timeout_ms (0 = one pass without waiting);
  * with a non-zero timeout it returns early as soon as a callback was delivered or a frame became
  * available. Returns CRTWEB_OK, or CRTWEB_ERROR_STATE from another thread. */
 CRTWEB_API crtweb_result crtweb_runtime_pump(crtweb_runtime* runtime, uint32_t timeout_ms);
+
+/* ---- website data -------------------------------------------------------------------------- */
+
+typedef enum crtweb_cookie_policy {
+  CRTWEB_COOKIES_ALWAYS = 0,     /* accept every cookie */
+  CRTWEB_COOKIES_NEVER = 1,      /* accept none */
+  CRTWEB_COOKIES_NO_THIRD_PARTY = 2 /* accept cookies of the visited site only */
+} crtweb_cookie_policy;
+
+CRTWEB_API crtweb_result crtweb_runtime_set_cookie_policy(crtweb_runtime* runtime, crtweb_cookie_policy policy);
+
+#define CRTWEB_DATA_COOKIES 0x1u /* every cookie of the runtime */
+#define CRTWEB_DATA_CACHE 0x2u   /* the HTTP network cache */
+
+/* Removes the given kinds of website data (a bit set) from the runtime. The callback (may be NULL)
+ * runs from crtweb_runtime_pump() once every kind has been removed. */
+typedef void (*crtweb_data_callback)(crtweb_runtime* runtime, crtweb_result result, void* user_data);
+CRTWEB_API crtweb_result crtweb_runtime_clear_data(crtweb_runtime* runtime, uint32_t types,
+                                                   crtweb_data_callback callback, void* user_data);
 
 /* ---- views --------------------------------------------------------------------------------- */
 
@@ -180,6 +205,20 @@ CRTWEB_API crtweb_result crtweb_view_key(crtweb_view* view, int down, int repeat
 /* Committed text (UTF-8). v1 types ASCII through a US layout; composition is not supported. */
 CRTWEB_API crtweb_result crtweb_view_text(crtweb_view* view, const char* utf8);
 
+/* ---- input method -------------------------------------------------------------------------- */
+
+/* The application's input method owns composition; these calls hand its state to the page
+ * (compositionstart/update/end events, the marked text and the committed result).
+ * Shows `text_utf8` as the marked (composing) text; the caret sits at `cursor_start` UTF-16 units into
+ * it with `cursor_length` selected. */
+CRTWEB_API crtweb_result crtweb_view_ime_set_composition(crtweb_view* view, const char* text_utf8,
+                                                         uint32_t cursor_start, uint32_t cursor_length);
+/* Commits text_utf8 (any UTF-8; a Hangul syllable, a word): replaces the composition if one is active,
+ * otherwise inserts at the caret. */
+CRTWEB_API crtweb_result crtweb_view_ime_commit(crtweb_view* view, const char* text_utf8);
+/* Removes the composition without committing it. */
+CRTWEB_API crtweb_result crtweb_view_ime_cancel(crtweb_view* view);
+
 /* ---- callbacks ----------------------------------------------------------------------------- */
 
 typedef enum crtweb_load_event {
@@ -188,6 +227,32 @@ typedef enum crtweb_load_event {
   CRTWEB_LOAD_FINISHED = 3,  /* the document and its resources finished */
   CRTWEB_LOAD_FAILED = 4     /* the navigation failed; message describes why */
 } crtweb_load_event;
+
+typedef struct crtweb_download_info {
+  uint32_t struct_size;
+  uint32_t id;                      /* identifies the download in the progress and finished callbacks */
+  const char* url;
+  const char* suggested_filename;   /* from Content-Disposition or the URL; may be empty */
+  const char* mime_type;
+  uint64_t expected_length;         /* 0 when unknown */
+} crtweb_download_info;
+
+typedef enum crtweb_download_status {
+  CRTWEB_DOWNLOAD_OK = 0,
+  CRTWEB_DOWNLOAD_FAILED = 1,
+  CRTWEB_DOWNLOAD_CANCELLED = 2
+} crtweb_download_status;
+
+typedef enum crtweb_dialog_kind {
+  CRTWEB_DIALOG_ALERT = 1,
+  CRTWEB_DIALOG_CONFIRM = 2,
+  CRTWEB_DIALOG_PROMPT = 3,
+  CRTWEB_DIALOG_BEFORE_UNLOAD = 4 /* the "leave this page?" confirmation */
+} crtweb_dialog_kind;
+
+/* A pending JavaScript dialog. The page is blocked until crtweb_dialog_complete() is called, from
+ * inside the callback or later. */
+typedef struct crtweb_dialog crtweb_dialog;
 
 typedef struct crtweb_view_callbacks {
   uint32_t struct_size;
@@ -204,7 +269,35 @@ typedef struct crtweb_view_callbacks {
   int (*on_navigation_request)(crtweb_view* view, const char* url_utf8, void* user_data);
   /* The Web process of this view crashed or was killed; the page is blank until a new load. */
   void (*on_process_terminated)(crtweb_view* view, void* user_data);
+
+  /* A response that is not shown (an attachment or a type the engine cannot display) is a download.
+   * Write the destination path (UTF-8, NUL-terminated, at most `capacity` bytes) into `path` and return
+   * non-zero to save it there (an existing file is overwritten), or return 0 to cancel. Without this
+   * callback downloads are cancelled. */
+  int (*on_download_request)(crtweb_view* view, const crtweb_download_info* info, char* path, size_t capacity,
+                             void* user_data);
+  void (*on_download_progress)(crtweb_view* view, uint32_t id, uint64_t received_bytes, uint64_t expected_bytes,
+                               void* user_data);
+  void (*on_download_finished)(crtweb_view* view, uint32_t id, crtweb_download_status status, const char* path_utf8,
+                               void* user_data);
+
+  /* window.open() / target=_blank. Return non-zero to let the page open a new window: the library then
+   * creates a new view in the same runtime (the opener's size) and reports it with on_popup_created
+   * so the application can set its callbacks and show it. Without this callback popups are blocked. */
+  int (*on_popup_request)(crtweb_view* opener, const char* url_utf8, void* user_data);
+  void (*on_popup_created)(crtweb_view* opener, crtweb_view* popup, void* user_data);
+  /* window.close() from the page: the application decides whether to destroy the view. */
+  void (*on_close_requested)(crtweb_view* view, void* user_data);
+
+  /* alert/confirm/prompt/beforeunload. Answer with crtweb_dialog_complete(). Without this callback an
+   * alert is dismissed, a confirm and a prompt are cancelled and a beforeunload allows leaving. */
+  void (*on_dialog)(crtweb_view* view, crtweb_dialog* dialog, crtweb_dialog_kind kind, const char* message_utf8,
+                    const char* default_text_utf8, void* user_data);
 } crtweb_view_callbacks;
+
+/* Completes a dialog exactly once. accepted: OK/true (alert: ignored); text_utf8: a prompt's answer
+ * (NULL means empty). Destroying the view completes its pending dialogs as cancelled. */
+CRTWEB_API crtweb_result crtweb_dialog_complete(crtweb_dialog* dialog, int accepted, const char* text_utf8);
 
 /* Replaces the callback set (NULL clears it). The struct is copied. */
 CRTWEB_API crtweb_result crtweb_view_set_callbacks(crtweb_view* view, const crtweb_view_callbacks* callbacks);

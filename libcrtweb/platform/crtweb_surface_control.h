@@ -38,7 +38,13 @@ typedef enum crtweb_command {
   CRTWEB_COMMAND_RELOAD,
   CRTWEB_COMMAND_GO_BACK,
   CRTWEB_COMMAND_GO_FORWARD,
-  CRTWEB_COMMAND_EVALUATE       /* arg: script; id: the request id the result event repeats */
+  CRTWEB_COMMAND_EVALUATE,      /* arg: script; id: the request id the result event repeats */
+  CRTWEB_COMMAND_IME_SET_COMPOSITION, /* arg: marked text; id: cursor start; flags: cursor length (UTF-16 units) */
+  CRTWEB_COMMAND_IME_COMMIT,    /* arg: the committed text */
+  CRTWEB_COMMAND_IME_CANCEL,
+  CRTWEB_COMMAND_DIALOG_RESULT, /* id: the dialog id of the event; flags bit 0: accepted; arg: a prompt's text */
+  CRTWEB_COMMAND_DOWNLOAD_DECISION, /* id: the download id; flags bit 0: accept; arg: destination path */
+  CRTWEB_COMMAND_CLEAR_DATA     /* id: request id; flags: CRTWEB_DATA_* bits (cookies 1, cache 2) */
 } crtweb_command;
 
 typedef enum crtweb_event {
@@ -49,7 +55,16 @@ typedef enum crtweb_event {
   CRTWEB_EVENT_URL_CHANGED,        /* arg: url */
   CRTWEB_EVENT_HISTORY,            /* flags: bit 0 can go back, bit 1 can go forward */
   CRTWEB_EVENT_SCRIPT_RESULT,      /* id: the request id; flags bit 0: error; arg: the result string */
-  CRTWEB_EVENT_PROCESS_TERMINATED  /* the page's Web process is gone; the page is blank until a load */
+  CRTWEB_EVENT_PROCESS_TERMINATED, /* the page's Web process is gone; the page is blank until a load */
+  CRTWEB_EVENT_DOWNLOAD_REQUEST,   /* id: download id; arg: url NUL suggested filename NUL mime NUL expected length (decimal);
+                                      the host waits for CRTWEB_COMMAND_DOWNLOAD_DECISION (cancelled after 60 s) */
+  CRTWEB_EVENT_DOWNLOAD_PROGRESS,  /* id; arg: received (decimal) NUL expected (decimal) */
+  CRTWEB_EVENT_DOWNLOAD_FINISHED,  /* id; flags: 0 ok, 1 failed, 2 cancelled; arg: destination path */
+  CRTWEB_EVENT_POPUP_REQUESTED,    /* arg: url. The host blocks the popup; the application may open its own view */
+  CRTWEB_EVENT_CLOSE_REQUESTED,    /* window.close() */
+  CRTWEB_EVENT_DIALOG,             /* id: dialog id; flags: 1 alert, 2 confirm, 3 prompt, 4 beforeunload;
+                                      arg: message NUL default text; answered with CRTWEB_COMMAND_DIALOG_RESULT */
+  CRTWEB_EVENT_DATA_CLEARED        /* id: the CLEAR_DATA request id */
 } crtweb_event;
 
 typedef struct crtweb_wire_blob {

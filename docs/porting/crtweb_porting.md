@@ -120,13 +120,16 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
   Removal: upstream fixes `remove()`.
 - `0020` makes `WebPage::platformUserAgent` (PlayStation) return the page's own user agent, so the embedder's
   application name reaches `navigator.userAgent` (stacked on 0017, same file). Removal: upstream takes it into account.
+- `0021` adds three WebPage messages (`SetCompositionCRT`, `ConfirmCompositionCRT`, `InsertTextCRT`) for the embedder's
+  input method: non-Cocoa builds have no composition entry point in the Web process. Removal: upstream offers a
+  platform-neutral composition/insertion message.
 
 ## WebKit files of PlatformCRT (milestone B4)
 
 `libcrtweb/port/Source/WebKit/PlatformCRT.cmake` follows `PlatformPlayStation.cmake`. CRT-owned files:
 `UIProcess/Launcher/crt/ProcessLauncherCRT.cpp`, `WebProcess/InjectedBundle/crt/InjectedBundleCRT.cpp`,
 `WebProcess/WebPage/crt/DrawingAreaCRT.{h,cpp}` (B5: CPU painting through `DrawingAreaProxy::Update`),
-`UIProcess/API/C/crt/WKViewCRT.{h,cpp}` (`WKViewCRTCopyPixels`, `WKViewCRTSetSize`, `WKViewCRTHandlePointer/Wheel/Key/Text`), `Platform/crt/WPELoaderCRT.cpp`, and in WebCore
+`UIProcess/API/C/crt/WKViewCRT.{h,cpp}` (`WKViewCRTCopyPixels`, `WKViewCRTSetSize`, `WKViewCRTHandlePointer/Wheel/Key/Text`, the IME calls), `Platform/crt/WPELoaderCRT.cpp`, and in WebCore
 `platform/crt/UserAgentCRT.cpp`. The Web and Network process executables are upstream's Unix entry
 points (`WebProcess/EntryPoint/unix`), linked against `libWebKit.so`. Taken from PlayStation unchanged:
 `Platform/IPC/unix`, the libwpe event files, `UIProcess/playstation` (page client, view, preferences,

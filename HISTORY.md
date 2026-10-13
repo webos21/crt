@@ -11,6 +11,22 @@ substantive update.
 
 ## 2026-10-13
 
+### Web Tranche 4, milestones C4-C8: several runtimes, website data, downloads, popups/dialogs, IME (Linux/x86_64)
+
+`crtweb` gained runtimes with their own website data store (ephemeral, or a data directory with a
+cookie file, cache and storage; cookie accept policy; `crtweb_runtime_clear_data`), downloads (the
+application chooses the destination, sees progress and the result), popups (`on_popup_request`/
+`on_popup_created`, `window.close`), JavaScript dialogs answered asynchronously, and IME
+(`crtweb_view_ime_*`: composition, commit of any UTF-8, cancel). Several runtimes share the one web
+event loop; a pump services all of them. The WebView carries the same through the control extension
+(IME, dialog, download decision and clear-data commands; download, popup, dialog and data-cleared events);
+the host reports popups and the application opens another WebView for them, which is also the
+multiple-runtime case. Patch 0021 adds the three Web-process messages the non-Cocoa port lacks for
+composition and insertion. `crtweb_api_test` (now with a loopback HTTP server shared with
+`crtweb_webview_test`) and the whole gate pass. Open: macOS/Windows replay (C3), local-storage clearing,
+IME caret rectangle for candidate windows, authentication/permission prompts, file pickers, context
+menus.
+
 ### Web Tranche 4: `crtweb` runtime/view API and the crtui WebView (Linux/x86_64)
 
 The public API is plain C (`libcrtweb/include/crtweb/crtweb.h`): one runtime per process, views with

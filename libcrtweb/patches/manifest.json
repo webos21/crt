@@ -574,6 +574,35 @@
       ],
       "reason": "PlayStation's WebPage::platformUserAgent always answers standardUserAgentForURL() for a page with site-specific quirks enabled, which cannot carry the embedder's application name; navigator.userAgent therefore ignored WKPageSetApplicationNameForUserAgent. Stacked on 0017, which edits the same file.",
       "remove_when": "Upstream's PlayStation port (or CRT's user agent platform file) takes the application name into account."
+    },
+    {
+      "id": "0021-crt-ime-composition-messages",
+      "patch": "0021-crt-ime-composition-messages.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/WebProcess/WebPage/WebPage.messages.in",
+          "sha256_before": "cb7fb25ed33d229d1c285ba734fc2d3d75e25d6de7b88b0390fa31fdde1188a2",
+          "sha256_after": "cf91eca014b17142340d2eedf28162dbf99f14d6fc35c2f7c104020a621af5f6",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/WebProcess/WebPage/WebPage.h",
+          "sha256_before": "ae59736934240b795d5329ea8f4ac99a11a55ad55bd8a5a4536e9e4dba3cf280",
+          "sha256_after": "0a7fb39fd3ce6354d72ade3402bef1b3fb24f6431c072575f8e46a1ced989b0f",
+          "license": "BSD-2-Clause"
+        },
+        {
+          "file": "Source/WebKit/WebProcess/WebPage/WebPage.cpp",
+          "sha256_before": "6efc563ba1b4b96d881d00f5b2bd5211120887470abb567deaabfa7165d97dad",
+          "sha256_after": "637d105ab0e0507c283cdb7c44e741903453ecf901045c546bb84ef6f7d792c1",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "Non-Cocoa builds have no input-method entry points in the Web process (GTK/WPE drive composition through key events with an input-method context). Three messages hand the embedder's composition state straight to the focused frame's editor: marked text, commit, and plain insertion of arbitrary UTF-8 (the US-layout key mapping of WKViewCRTHandleText cannot type Hangul).",
+      "remove_when": "Upstream offers a platform-neutral composition/insertion message (WebPage SetCompositionAsync/InsertTextAsync outside PLATFORM(COCOA))."
     }
   ],
   "license_policy": {

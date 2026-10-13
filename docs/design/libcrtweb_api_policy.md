@@ -48,14 +48,20 @@ public header, an exported symbol or a dependency of the SDK's consumer-facing l
    `crtweb_view_load_url`. `on_navigation_request` may veto any main-frame navigation, including
    those the page starts itself. Sub-frame navigations are not reported in v1.
 
-## Deliberate v1 limits
+## Scope of v1, and deliberate limits
 
-Recorded so they are decisions, not omissions: one runtime per process; device scale 100 % only;
-no multi-process crash *recovery* (the application is told with `on_process_terminated`, Tranche 5
-owns recovery); no downloads, popups/new windows, permission prompts, dialogs (alert/confirm),
-authentication challenges, cookies or website-data management; no composition/IME; no JavaScript
-message channel (only `crtweb_view_evaluate_script`); no accessibility. Each is a later addition
-to this header, not a reason to expose a WebKit object.
+Part of v1 (Tranche 4, milestones C4-C8; the acceptance document owns the evidence): several runtimes
+per process, each with its own website data store; cookie and website-data control (a data directory,
+ephemeral or persistent; accept policy; clearing); downloads (the application decides the
+destination and sees progress and the result); popups (`window.open`, `window.close`) and
+JavaScript dialogs (alert, confirm, prompt) answered by the application; and IME (composition and
+commit of arbitrary UTF-8).
+
+Not in v1, recorded so they are decisions, not omissions: device scale other than 100 %; multi-process
+crash *recovery* (the application is told with `on_process_terminated`, Tranche 5 owns recovery);
+authentication challenges, permission prompts (geolocation, camera, notifications), file pickers and
+context menus; a JavaScript message channel (only `crtweb_view_evaluate_script`); accessibility.
+Each is a later addition to this header, not a reason to expose a WebKit object.
 
 ## The crtui WebView, and why it is a separate process
 
@@ -79,8 +85,11 @@ WebView uses it. Applications that do not link the static window/GPU stack (a co
 test, `crtweb_host` itself) can use `crtweb` directly.
 
 Consequences of the protocol path, kept visible: `on_navigation_request` (a synchronous veto) exists
-only in-process; the control channel is one-way request/event. Text titles are truncated to the
-frozen 95 bytes of `TITLE`. A larger argument than 1 MiB is refused by the client.
+only in-process; the control channel is request/event, and the host waits for the application only
+where the engine's own callback is synchronous (a download's destination, 60 s). Popups are reported,
+not created: the host shows one view, and the application opens another `WebView` (its own host and
+runtime) if it wants the window. Text titles are truncated to the frozen 95 bytes of `TITLE`. A larger
+argument than 1 MiB is refused by the client.
 
 ## Relationship to the 3A wire protocol
 

@@ -6,11 +6,17 @@
 // checks, destruction semantics, and a second runtime after the first was destroyed.
 
 #include "crtweb/crtweb.h"
+#include "../common/crtweb_test_http_server.h"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <unistd.h>
+
+#include <atomic>
 
 #include <functional>
 #include <string>
@@ -141,6 +147,254 @@ static uint32_t pixelAt(const std::vector<uint32_t>& pixels, uint32_t width, uin
     return pixels[static_cast<size_t>(y) * width + x];
 }
 
+
+static std::string titleOf(crtweb_view* view)
+{
+    char buffer[256];
+    return crtweb_view_get_title(view, buffer, sizeof buffer, nullptr) == CRTWEB_OK ? buffer : "";
+}
+
+static bool loadAndWait(crtweb_view* view, const std::string& url, const std::string& wantedTitle)
+{
+    if (crtweb_view_load_url(view, url.c_str()) != CRTWEB_OK)
+        return false;
+    return pumpUntil([&] { return titleOf(view) == wantedTitle; }, 20000);
+}
+
+static void testWebsiteDataAndRuntimes(const HttpServer& server, const std::string& directory)
+{
+    crtweb_view_config config = { sizeof(crtweb_view_config), 200, 150, 100 };
+
+    // Two runtimes in one process: cookies set through one are invisible to the other.
+    crtweb_runtime* a = gRuntime;
+    crtweb_runtime* b = nullptr;
+    CHECK(crtweb_runtime_create(nullptr, &b) == CRTWEB_OK && b && b != a, "a second runtime");
+    crtweb_view* viewA = nullptr;
+    crtweb_view* viewB = nullptr;
+    CHECK(crtweb_view_create(a, &config, &viewA) == CRTWEB_OK && crtweb_view_create(b, &config, &viewB) == CRTWEB_OK, "a view in each runtime");
+    CHECK(loadAndWait(viewA, server.url("/set"), "set"), "runtime A sets a cookie");
+    CHECK(loadAndWait(viewA, server.url("/read"), "cookie:sid=abc123"), "runtime A sees its cookie");
+    CHECK(loadAndWait(viewB, server.url("/read"), "cookie:"), "runtime B does not see it (isolated stores)");
+
+    // Clearing: the cookie is gone from A afterwards, the callback runs from the pump.
+    bool cleared = false;
+    CHECK(crtweb_runtime_clear_data(a, CRTWEB_DATA_COOKIES | CRTWEB_DATA_CACHE,
+              [](crtweb_runtime*, crtweb_result result, void* data) { *static_cast<bool*>(data) = result == CRTWEB_OK; }, &cleared) == CRTWEB_OK,
+        "clear_data accepted");
+    CHECK(pumpUntil([&] { return cleared; }), "clear_data completed");
+    CHECK(loadAndWait(viewA, server.url("/page"), "http page") && loadAndWait(viewA, server.url("/read"), "cookie:"), "the cookie is gone after clearing");
+    CHECK(crtweb_runtime_clear_data(a, 0, nullptr, nullptr) == CRTWEB_ERROR_INVALID_ARGUMENT, "clear_data needs a type");
+
+    // Cookie policy: with NEVER nothing is stored.
+    CHECK(crtweb_runtime_set_cookie_policy(b, CRTWEB_COOKIES_NEVER) == CRTWEB_OK, "cookie policy");
+    CHECK(loadAndWait(viewB, server.url("/set"), "set") && loadAndWait(viewB, server.url("/read"), "cookie:"), "no cookie is kept under the NEVER policy");
+    crtweb_view_destroy(viewB);
+    crtweb_runtime_destroy(b); // the first runtime keeps working
+    CHECK(loadAndWait(viewA, server.url("/page"), "http page"), "runtime A after runtime B was destroyed");
+    crtweb_view_destroy(viewA);
+
+    // A data directory: the cookie outlives its runtime.
+    crtweb_runtime_config persistent = { };
+    persistent.struct_size = sizeof persistent;
+    persistent.data_directory = directory.c_str();
+    crtweb_runtime* c = nullptr;
+    CHECK(crtweb_runtime_create(&persistent, &c) == CRTWEB_OK && c, "persistent runtime");
+    crtweb_view* viewC = nullptr;
+    CHECK(crtweb_view_create(c, &config, &viewC) == CRTWEB_OK, "view in the persistent runtime");
+    CHECK(loadAndWait(viewC, server.url("/set"), "set"), "persistent runtime sets a cookie");
+    crtweb_view_destroy(viewC);
+    crtweb_runtime_destroy(c);
+    crtweb_runtime* d = nullptr;
+    CHECK(crtweb_runtime_create(&persistent, &d) == CRTWEB_OK && d, "persistent runtime again");
+    crtweb_view* viewD = nullptr;
+    CHECK(crtweb_view_create(d, &config, &viewD) == CRTWEB_OK, "view again");
+    CHECK(loadAndWait(viewD, server.url("/read"), "cookie:sid=abc123"), "the cookie survived the restart");
+    crtweb_view_destroy(viewD);
+    crtweb_runtime_destroy(d);
+}
+
+struct DownloadRecord {
+    std::string destination;
+    bool accept { true };
+    uint32_t requested { 0 };
+    std::string url, suggested, mime;
+    uint64_t expected { 0 };
+    uint64_t lastReceived { 0 };
+    unsigned progress { 0 };
+    bool finished { false };
+    crtweb_download_status status { CRTWEB_DOWNLOAD_OK };
+};
+
+struct UiRecord {
+    std::vector<std::string> dialogs; // "<kind>:<message>"
+    std::string promptAnswer { "Kim" };
+    bool confirmAnswer { true };
+    crtweb_view* popup { nullptr };
+    unsigned popupRequests { 0 };
+    bool allowPopup { true };
+    bool closeRequested { false };
+    std::string popupTitle;
+};
+
+static void testDownloadsPopupsDialogs(const HttpServer& server, const std::string& directory)
+{
+    crtweb_view_config config = { sizeof(crtweb_view_config), 200, 150, 100 };
+    crtweb_view* view = nullptr;
+    CHECK(crtweb_view_create(gRuntime, &config, &view) == CRTWEB_OK, "view for downloads and dialogs");
+
+    DownloadRecord download;
+    download.destination = directory + "/blob.bin";
+    UiRecord ui;
+    crtweb_view_callbacks callbacks = { };
+    callbacks.struct_size = sizeof callbacks;
+    callbacks.user_data = &download;
+    callbacks.on_download_request = [](crtweb_view*, const crtweb_download_info* info, char* path, size_t capacity, void* data) -> int {
+        auto* r = static_cast<DownloadRecord*>(data);
+        ++r->requested;
+        r->url = info->url;
+        r->suggested = info->suggested_filename;
+        r->mime = info->mime_type;
+        r->expected = info->expected_length;
+        if (!r->accept)
+            return 0;
+        snprintf(path, capacity, "%s", r->destination.c_str());
+        return 1;
+    };
+    callbacks.on_download_progress = [](crtweb_view*, uint32_t, uint64_t received, uint64_t, void* data) {
+        auto* r = static_cast<DownloadRecord*>(data);
+        ++r->progress;
+        r->lastReceived = received;
+    };
+    callbacks.on_download_finished = [](crtweb_view*, uint32_t, crtweb_download_status status, const char*, void* data) {
+        auto* r = static_cast<DownloadRecord*>(data);
+        r->finished = true;
+        r->status = status;
+    };
+    CHECK(crtweb_view_set_callbacks(view, &callbacks) == CRTWEB_OK, "download callbacks");
+
+    CHECK(loadAndWait(view, server.url("/page"), "http page"), "page before the download");
+    CHECK(crtweb_view_load_url(view, server.url("/dl").c_str()) == CRTWEB_OK, "start the download");
+    CHECK(pumpUntil([&] { return download.finished; }), "download finished");
+    CHECK(download.status == CRTWEB_DOWNLOAD_OK && download.requested == 1, "download ok after one request");
+    CHECK(download.suggested == "blob.bin" && download.mime == "application/octet-stream" && download.url.find("/dl") != std::string::npos,
+        "download info: url, filename, type");
+    CHECK(download.lastReceived == kDownloadSize && download.progress >= 1, "download progress reached the full size");
+    {
+        std::string expected = downloadBody(), got;
+        if (FILE* file = fopen(download.destination.c_str(), "rb")) {
+            char buffer[8192];
+            size_t length;
+            while ((length = fread(buffer, 1, sizeof buffer, file)) > 0)
+                got.append(buffer, length);
+            fclose(file);
+        }
+        CHECK(got == expected, "the saved file is byte-for-byte the response");
+        unlink(download.destination.c_str());
+    }
+    CHECK(titleOf(view) == "http page", "the page stays after a download");
+
+    // A refused download is cancelled and reported, and the page keeps working.
+    download.accept = false;
+    download.finished = false;
+    CHECK(crtweb_view_load_url(view, server.url("/dl").c_str()) == CRTWEB_OK, "second download");
+    CHECK(pumpUntil([&] { return download.finished || download.requested == 2; }), "refusal seen");
+    CHECK(download.requested == 2, "the request callback was asked again");
+    CHECK(loadAndWait(view, server.url("/page"), "http page"), "the view works after a refused download");
+
+    // ---- dialogs ----
+    callbacks.user_data = &ui;
+    callbacks.on_dialog = [](crtweb_view*, crtweb_dialog* dialog, crtweb_dialog_kind kind, const char* message, const char*, void* data) {
+        auto* r = static_cast<UiRecord*>(data);
+        r->dialogs.push_back(std::to_string(kind) + ":" + message);
+        if (kind == CRTWEB_DIALOG_PROMPT)
+            crtweb_dialog_complete(dialog, 1, r->promptAnswer.c_str());
+        else
+            crtweb_dialog_complete(dialog, r->confirmAnswer ? 1 : 0, nullptr);
+    };
+    callbacks.on_popup_request = [](crtweb_view*, const char*, void* data) -> int {
+        auto* r = static_cast<UiRecord*>(data);
+        ++r->popupRequests;
+        return r->allowPopup ? 1 : 0;
+    };
+    callbacks.on_popup_created = [](crtweb_view*, crtweb_view* popup, void* data) { static_cast<UiRecord*>(data)->popup = popup; };
+    callbacks.on_close_requested = [](crtweb_view*, void* data) { static_cast<UiRecord*>(data)->closeRequested = true; };
+    callbacks.on_download_request = nullptr;
+    CHECK(crtweb_view_set_callbacks(view, &callbacks) == CRTWEB_OK, "dialog and popup callbacks");
+    CHECK(evaluate(view, "alert('hello'); 'after'") == "after" && ui.dialogs.size() == 1 && ui.dialogs[0] == "1:hello", "alert is shown and answered");
+    CHECK(evaluate(view, "confirm('really?')") == "true" && ui.dialogs.back() == "2:really?", "confirm accepted");
+    ui.confirmAnswer = false;
+    CHECK(evaluate(view, "confirm('again?')") == "false", "confirm declined");
+    CHECK(evaluate(view, "prompt('name?', 'x')") == "Kim" && ui.dialogs.back() == "3:name?", "prompt answered with text");
+
+    // Without callbacks the documented defaults apply: alert dismissed, confirm false, prompt null.
+    crtweb_view_set_callbacks(view, nullptr);
+    CHECK(evaluate(view, "alert('x'); confirm('y') + ',' + prompt('z')") == "false,null", "dialog defaults without callbacks");
+    callbacks.user_data = &ui;
+    crtweb_view_set_callbacks(view, &callbacks);
+
+    // ---- popups ----
+    CHECK(loadAndWait(view, server.url("/opener"), "opener"), "opener page");
+    crtweb_view_pointer(view, CRTWEB_VIEW_POINTER_MOVE, 0, 50, 50, 0);
+    crtweb_view_pointer(view, CRTWEB_VIEW_POINTER_DOWN, 1, 50, 50, 0);
+    crtweb_view_pointer(view, CRTWEB_VIEW_POINTER_UP, 1, 50, 50, 0);
+    CHECK(pumpUntil([&] { return ui.popup != nullptr; }, 10000), "the allowed popup was created as a new view");
+    if (ui.popup) {
+        CHECK(ui.popupRequests == 1, "one popup request");
+        CHECK(pumpUntil([&] { return titleOf(ui.popup) == "popup"; }, 15000), "the popup loads its page");
+        CHECK(titleOf(view) == "opener", "the opener is unchanged");
+        crtweb_view_destroy(ui.popup);
+        ui.popup = nullptr;
+    }
+    ui.allowPopup = false;
+    ui.popupRequests = 0;
+    crtweb_view_pointer(view, CRTWEB_VIEW_POINTER_DOWN, 1, 50, 50, 0);
+    crtweb_view_pointer(view, CRTWEB_VIEW_POINTER_UP, 1, 50, 50, 0);
+    CHECK(pumpUntil([&] { return ui.popupRequests == 1; }, 10000), "the vetoed popup was asked");
+    crtweb_runtime_pump(gRuntime, 100);
+    CHECK(ui.popup == nullptr, "a vetoed popup creates no view");
+
+    // window.close() is reported to the application.
+    CHECK(evaluate(view, "window.close(); 'closed'") == "closed", "window.close called");
+    crtweb_view_destroy(view);
+}
+
+static void testInputMethod(const HttpServer& server)
+{
+    crtweb_view_config config = { sizeof(crtweb_view_config), 200, 100, 100 };
+    crtweb_view* view = nullptr;
+    CHECK(crtweb_view_create(gRuntime, &config, &view) == CRTWEB_OK, "view for the input method");
+    CHECK(loadAndWait(view, server.url("/ime"), "ime"), "ime page");
+    crtweb_view_set_focus(view, 1);
+    crtweb_view_pointer(view, CRTWEB_VIEW_POINTER_DOWN, 1, 20, 12, 0);
+    crtweb_view_pointer(view, CRTWEB_VIEW_POINTER_UP, 1, 20, 12, 0);
+    crtweb_runtime_pump(gRuntime, 100);
+
+    // Hangul composition: marked text updates, then the commit.
+    CHECK(crtweb_view_ime_set_composition(view, "\xE3\x85\x8E", 1, 0) == CRTWEB_OK, "composition begins (ㅎ)");
+    CHECK(pumpUntil([&] { return evaluate(view, "window.log.join('|')").find("compositionstart") != std::string::npos; }, 8000), "compositionstart reached the page");
+    CHECK(crtweb_view_ime_set_composition(view, "\xED\x95\x9C", 1, 0) == CRTWEB_OK, "composition updates (한)");
+    CHECK(pumpUntil([&] { return evaluate(view, "document.getElementById('t').value") == "\xED\x95\x9C"; }, 8000), "the marked text is in the field");
+    CHECK(crtweb_view_ime_commit(view, "\xED\x95\x9C\xEA\xB8\x80") == CRTWEB_OK, "commit (한글)");
+    CHECK(pumpUntil([&] { return evaluate(view, "document.getElementById('t').value") == "\xED\x95\x9C\xEA\xB8\x80"; }, 8000), "committed text is the field value");
+    std::string log = evaluate(view, "window.log.join('|')");
+    CHECK(log.find("compositionupdate") != std::string::npos && log.find("compositionend") != std::string::npos, "compositionupdate and compositionend were delivered");
+
+    // Insertion without a composition (any UTF-8, not only what a US keyboard types).
+    CHECK(crtweb_view_ime_commit(view, "\xEA\xB0\x80") == CRTWEB_OK, "insert (가)");
+    CHECK(pumpUntil([&] { return evaluate(view, "document.getElementById('t').value") == "\xED\x95\x9C\xEA\xB8\x80\xEA\xB0\x80"; }, 8000), "inserted text appended");
+
+    // A cancelled composition leaves the value alone.
+    CHECK(crtweb_view_ime_set_composition(view, "\xEB\x82\x98", 1, 0) == CRTWEB_OK, "composition (나)");
+    CHECK(crtweb_view_ime_cancel(view) == CRTWEB_OK, "cancel");
+    if (getenv("CRTWEB_API_TEST_TRACE")) {
+        crtweb_runtime_pump(gRuntime, 200);
+        fprintf(stderr, "after cancel: value=%s log=%s\n", evaluate(view, "document.getElementById('t').value").c_str(), evaluate(view, "window.log.join('|')").c_str());
+    }
+    CHECK(pumpUntil([&] { return evaluate(view, "document.getElementById('t').value") == "\xED\x95\x9C\xEA\xB8\x80\xEA\xB0\x80"; }, 8000), "cancel keeps the committed text");
+    CHECK(crtweb_view_ime_commit(view, nullptr) == CRTWEB_ERROR_INVALID_ARGUMENT, "null text refused");
+    crtweb_view_destroy(view);
+}
+
 int main()
 {
     char cwd[4096];
@@ -164,8 +418,6 @@ int main()
     config.struct_size = sizeof config;
     config.application_name = "CrtWebApiTest";
     CHECK(crtweb_runtime_create(&config, &gRuntime) == CRTWEB_OK && gRuntime, "runtime created");
-    crtweb_runtime* second = nullptr;
-    CHECK(crtweb_runtime_create(nullptr, &second) == CRTWEB_ERROR_STATE && !second, "one runtime per process");
     CHECK(crtweb_runtime_pump(nullptr, 0) == CRTWEB_ERROR_INVALID_ARGUMENT, "pump without runtime");
 
     crtweb_view_config viewConfig = { };
@@ -308,6 +560,18 @@ int main()
     unsigned before = otherRecorder.loads.size();
     crtweb_runtime_pump(gRuntime, 50);
     CHECK(otherRecorder.loads.size() == before, "no callback after destroy");
+
+    // ---- website data, several runtimes, downloads, popups, dialogs, input method (Tranche 4) ----
+    {
+        std::string scratch = directory + "/crtweb_api_data";
+        std::string remove = "rm -rf '" + scratch + "'";
+        if (system(remove.c_str()) != 0)
+            fprintf(stderr, "crtweb_api_test: could not clear %s\n", scratch.c_str());
+        HttpServer server;
+        testWebsiteDataAndRuntimes(server, scratch);
+        testDownloadsPopupsDialogs(server, directory);
+        testInputMethod(server);
+    }
 
     // ---- shutdown, and a runtime again ----
     crtweb_view_destroy(view);

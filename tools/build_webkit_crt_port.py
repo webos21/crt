@@ -626,7 +626,7 @@ def main() -> int:
     passed = all(r["passed"] for r in results.values())
     (work / "acceptance-b3.json").write_text(json.dumps(
         {"passed": passed, "programs": results}, indent=2) + "\n", encoding="utf-8")
-    print("B3-C2 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
+    print("B3-C8 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
     return 0 if passed else 1
 
 

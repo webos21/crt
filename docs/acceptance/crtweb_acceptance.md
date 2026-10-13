@@ -1644,7 +1644,12 @@ Policy and rules: [`libcrtweb_api_policy.md`](../design/libcrtweb_api_policy.md)
 | **C0** (done) | Freeze the plain-C runtime/view API and its rules; the page-control extension of the web surface protocol | policy document; header; `wire_layout_test` covers the extension's layout |
 | **C1** (done) | `libcrtweb.so` over `PlatformCRT`: runtime, views, navigation, history, script, frame copy, input, callbacks | `crtweb_api_test` includes only `<crtweb/crtweb.h>`; exports are `crtweb_*` only |
 | **C2** (done) | The `crtui` WebView: `crtweb::WebView` over the out-of-process `crtweb_host` | `crtweb_webview_test` composes the page in a crtui window and drives it through crtui input |
-| C3 | Host replays: macOS/arm64, Windows/x64 | the same two tests (open) |
+| **C4** (done) | Several runtimes per process, each with its own website data store | `crtweb_api_test`: two runtimes, isolated cookies and storage, either one destroyed alone |
+| **C5** (done) | Cookies and website data: data directory (persistent or ephemeral), cookie accept policy, clearing | a cookie set by a page is visible to the next load, survives a runtime restart in a persistent directory, and is gone after clear or in an ephemeral runtime |
+| **C6** (done) | Downloads: request callback with the destination decision, progress, result | a `Content-Disposition: attachment` response is saved byte-for-byte; cancel and failure are reported |
+| **C7** (done) | Popups and dialogs: `window.open`/`window.close`, alert/confirm/prompt answered by the application | a popup is vetoed or adopted as a new view; dialog results reach the page |
+| **C8** (done) | IME: composition, commit of UTF-8 text, cancel | `compositionstart/update/end` events and a committed Hangul string in an input; through `crtweb::WebView` too |
+| C3 | Host replays (C0-C8): macOS/arm64, Windows/x64 | the same tests (open) |
 
 *Why the WebView is out of process.* An application that uses `crtui` links its own static C runtime,
 Skia and the host window/GPU libraries (the `-Wl,--exclude-libs,ALL` static link of the SDK examples,
@@ -1680,8 +1685,41 @@ the application name. (4) The patch-manifest checker could not express stacked p
 (0019 on 0010, 0020 on 0017); it now accepts a patch that starts from the upstream bytes or from the
 previous patch's result. *Not done / open:* macOS/Windows replay of Tranche 4 (the driver gates it
 Linux-only), `on_navigation_request` and script callbacks across the WebView's process boundary
-beyond what the control extension carries, IME, downloads, popups and dialogs, cookies and website
-data, multiple runtimes per process, GPU frames, and a packaged `06-web` SDK (Tranche 10).
+beyond what the control extension carries, GPU frames, and a packaged `06-web` SDK (Tranche 10).
+IME, downloads, popups and dialogs, cookies and website data and several runtimes per process were
+open at C2 and are closed by C4-C8 below.
+
+*C4-C8 result (Linux/x86_64, 2026-10-13).* `crtweb_api_test` now also runs a loopback HTTP server
+(`libcrtweb/tests/common/crtweb_test_http_server.h`: cookies, a 70,000-byte attachment, a popup opener, an
+input page) so the engine's real network path is exercised; 6.4 s, 3/3 runs, and
+`crtweb_webview_test` repeats every item through `crtweb::WebView` and a real `crtweb_host`, 6.1 s.
+*C4, several runtimes:* two runtimes in one process, each with its own data store; a cookie set through
+one is invisible to the other, destroying one leaves the other working, and a second `crtweb_host`
+(its own runtime) runs beside the first. *C5, website data:* a cookie set by a page is read back by the next
+load, `crtweb_runtime_clear_data` (cookies, cache) removes it and calls back from the pump, the
+`NEVER` policy stores nothing, and a runtime with a `data_directory` keeps the cookie across a
+runtime restart (and across a host restart through the WebView). Local-storage and IndexedDB
+directories are configured but not exposed to clearing in v1. *C6, downloads:* an attachment is saved
+byte-for-byte to the destination the application chose, with url, suggested filename, type, progress
+and the final status; a refused download is cancelled and the view keeps working. Over the protocol the
+host asks the application and waits (cancelling after 60 s). *C7, popups and dialogs:* `window.open` from
+a click creates a new `crtweb_view` (or is vetoed); `window.close()` is reported; alert, confirm and
+prompt are answered by the application and reach the page (`true`, `false`, the typed text), with
+the documented defaults when no callback is set, and a destroyed view releases its pending dialogs. Over
+the protocol the host never opens a second window: it reports the popup URL and the application starts a
+second `WebView` (second host and runtime), which the test does. *C8, IME:* `compositionstart`,
+`compositionupdate` and `compositionend` reach the page, a marked Hangul string becomes the committed
+text, text outside a US layout is inserted, and a cancelled composition removes the marked text; through
+`crtweb::WebView` as commands. *Found and fixed by the run:* (1) the non-Cocoa Web process has no
+composition entry point (GTK/WPE drive an input-method context through key events), so patch 0021
+adds three WebPage messages (`SetCompositionCRT`, `ConfirmCompositionCRT`, `InsertTextCRT`) over
+`Editor::setComposition/confirmComposition/insertText`; (2) `Editor::cancelComposition` left the marked
+text in the field, so cancel replaces it with nothing and confirms; (3) the shared
+`WKContextSetDownloadClient` path (`WKContextDownloadClient`) and `WKPageUIClientV9` work on `PlatformCRT`
+as is, no patch. *Not in v1 (decisions in `libcrtweb_api_policy.md`):* authentication challenges,
+permission prompts, file pickers and context menus, a JavaScript message channel, device scale,
+local-storage clearing, and IME candidate-window geometry (the page's caret rectangle is not
+reported back to the application).
 
 ### 5. Multi-process lifecycle
 

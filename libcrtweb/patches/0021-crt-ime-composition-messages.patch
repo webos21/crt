@@ -1,0 +1,96 @@
+diff -urN a/Source/WebKit/WebProcess/WebPage/WebPage.cpp b/Source/WebKit/WebProcess/WebPage/WebPage.cpp
+--- a/Source/WebKit/WebProcess/WebPage/WebPage.cpp	2026-10-13 11:31:58.245350062 +0900
++++ b/Source/WebKit/WebProcess/WebPage/WebPage.cpp	2026-10-13 11:37:35.634412146 +0900
+@@ -7402,6 +7402,59 @@
+     editor->confirmComposition(compositionString);
+ }
+ 
++#if PLATFORM(CRT)
++void WebPage::setCompositionCRT(const String& text, uint64_t selectionStart, uint64_t selectionLength)
++{
++    RefPtr frame = corePage()->focusController().focusedOrMainFrame();
++    if (!frame)
++        return;
++
++    Ref editor = frame->editor();
++    if (!editor->canEdit())
++        return;
++
++    if (text.isEmpty()) {
++        // Cancel: replace the marked text with nothing and end the composition (Editor::
++        // cancelComposition leaves the marked characters in the field).
++        editor->setComposition(emptyString(), { }, { }, { }, 0, 0);
++        editor->confirmComposition();
++        return;
++    }
++    Vector<CompositionUnderline> underlines;
++    underlines.append(CompositionUnderline(0, text.length(), CompositionUnderlineColor::TextColor, Color(Color::black), false));
++    editor->setComposition(text, underlines, { }, { }, selectionStart, selectionStart + selectionLength);
++}
++
++void WebPage::confirmCompositionCRT(const String& text)
++{
++    RefPtr frame = corePage()->focusController().focusedOrMainFrame();
++    if (!frame)
++        return;
++
++    Ref editor = frame->editor();
++    if (!editor->canEdit())
++        return;
++
++    if (text.isNull())
++        editor->confirmComposition();
++    else
++        editor->confirmComposition(text);
++}
++
++void WebPage::insertTextCRT(const String& text)
++{
++    RefPtr frame = corePage()->focusController().focusedOrMainFrame();
++    if (!frame)
++        return;
++
++    Ref editor = frame->editor();
++    if (!editor->canEdit())
++        return;
++
++    editor->insertText(text, nullptr);
++}
++#endif
++
+ void WebPage::wheelEventHandlersChanged(bool hasHandlers)
+ {
+     if (m_hasWheelEventHandlers == hasHandlers)
+diff -urN a/Source/WebKit/WebProcess/WebPage/WebPage.h b/Source/WebKit/WebProcess/WebPage/WebPage.h
+--- a/Source/WebKit/WebProcess/WebPage/WebPage.h	2026-10-13 11:31:58.242670403 +0900
++++ b/Source/WebKit/WebProcess/WebPage/WebPage.h	2026-10-13 11:31:58.242829989 +0900
+@@ -1404,6 +1404,13 @@
+     void setCompositionForTesting(const String& compositionString, uint64_t from, uint64_t length, bool suppressUnderline, const Vector<WebCore::CompositionHighlight>&, const HashMap<String, Vector<WebCore::CharacterRange>>&);
+     bool hasCompositionForTesting();
+     void confirmCompositionForTesting(const String& compositionString);
++
++#if PLATFORM(CRT)
++    // The embedder's input method (libcrtweb, crtweb_view_ime_*): marked text, commit, plain insertion.
++    void setCompositionCRT(const String& text, uint64_t selectionStart, uint64_t selectionLength);
++    void confirmCompositionCRT(const String& text);
++    void insertTextCRT(const String& text);
++#endif
+     String frameTextForTestingIncludingSubframes(bool includingSubframes);
+ 
+ #if PLATFORM(COCOA)
+diff -urN a/Source/WebKit/WebProcess/WebPage/WebPage.messages.in b/Source/WebKit/WebProcess/WebPage/WebPage.messages.in
+--- a/Source/WebKit/WebProcess/WebPage/WebPage.messages.in	2026-10-13 11:31:58.241588486 +0900
++++ b/Source/WebKit/WebProcess/WebPage/WebPage.messages.in	2026-10-13 11:31:58.241659930 +0900
+@@ -550,6 +550,12 @@
+     SetCanRunBeforeUnloadConfirmPanel(bool canRunBeforeUnloadConfirmPanel)
+     SetCanRunModal(bool canRunModal)
+ 
++#if PLATFORM(CRT)
++    SetCompositionCRT(String text, uint64_t selectionStart, uint64_t selectionLength)
++    ConfirmCompositionCRT(String text)
++    InsertTextCRT(String text)
++#endif
++
+ #if PLATFORM(GTK) || PLATFORM(WPE)
+     CancelComposition(String text)
+     DeleteSurrounding(int64_t offset, unsigned characterCount)

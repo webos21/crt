@@ -68,6 +68,19 @@ WK_EXPORT void WKViewCRTHandleKey(WKViewRef view, bool down, bool repeat, uint32
 // layout types it with. A character with no such key is dropped; IME composition is deferred.
 WK_EXPORT void WKViewCRTHandleText(WKViewRef view, const char* utf8);
 
+// IME (milestone C8). WKViewCRTInsertText commits UTF-8 text of any length (a Hangul syllable, a
+// whole string) at the caret, as an input method's commit does; the composition calls drive the
+// page's composition state (`compositionstart/update/end`): WKViewCRTSetComposition shows `utf8` as
+// the marked text with the caret at cursorStart (+ cursorLength selected), counted in UTF-16 units of
+// the composition string; WKViewCRTConfirmComposition commits what is marked; WKViewCRTCancelComposition
+// removes it.
+WK_EXPORT void WKViewCRTInsertText(WKViewRef view, const char* utf8);
+WK_EXPORT void WKViewCRTSetComposition(WKViewRef view, const char* utf8, uint32_t cursorStart, uint32_t cursorLength);
+WK_EXPORT void WKViewCRTConfirmComposition(WKViewRef view);
+// Ends the composition with `utf8` as its final text (what an input method's commit string is).
+WK_EXPORT void WKViewCRTConfirmCompositionWithText(WKViewRef view, const char* utf8);
+WK_EXPORT void WKViewCRTCancelComposition(WKViewRef view);
+
 #ifdef __cplusplus
 }
 #endif

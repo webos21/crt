@@ -63,6 +63,38 @@ class WebView {
   /* The host process ended or the connection broke; the view shows its last picture. */
   std::function<void()> on_closed;
 
+  struct DownloadInfo {
+    uint32_t id = 0;
+    std::string url, suggested_filename, mime_type;
+    uint64_t expected_length = 0; /* 0: unknown */
+  };
+  enum class DownloadStatus { Ok = 0, Failed = 1, Cancelled = 2 };
+  /* Called from poll() when a response is to be saved. Return the destination path to accept (an
+   * existing file is overwritten) or an empty string to cancel. Without a callback downloads are
+   * cancelled. The host waits for the answer, so answer promptly. */
+  std::function<std::string(const DownloadInfo&)> on_download_request;
+  std::function<void(uint32_t id, uint64_t received, uint64_t expected)> on_download_progress;
+  std::function<void(uint32_t id, DownloadStatus status, const std::string& path)> on_download_finished;
+
+  /* window.open()/target=_blank: the host never creates a second window; it reports the request so
+   * the application can open the URL in a WebView of its own (or ignore it). */
+  std::function<void(const std::string& url)> on_popup_requested;
+  std::function<void()> on_close_requested; /* window.close() */
+
+  enum class DialogKind { Alert = 1, Confirm = 2, Prompt = 3, BeforeUnload = 4 };
+  /* alert/confirm/prompt/beforeunload: call `complete(accepted, text)` exactly once, from the callback
+   * or later; the page waits. Without a callback an alert is dismissed, a confirm and a prompt are
+   * cancelled and leaving a page is allowed. */
+  std::function<void(DialogKind kind, const std::string& message, const std::string& default_text,
+                     std::function<void(bool accepted, const std::string& text)> complete)>
+      on_dialog;
+
+  /* Settings of the host's runtime, fixed at launch. */
+  struct LaunchOptions {
+    std::string data_directory;   /* empty: ephemeral website data */
+    uint32_t cookie_policy = 0;   /* 0 accept all, 1 none, 2 first party only */
+  };
+
   WebView() = default;
   WebView(const WebView&) = delete;
   WebView& operator=(const WebView&) = delete;
@@ -74,6 +106,11 @@ class WebView {
    * finds its Web and Network process executables next to itself, or in CRTWEB_PROCESS_DIR. */
   bool launch(const char* host_path, uint32_t width, uint32_t height, const char* initial_url = nullptr,
               int timeout_ms = 60000) {
+    return launch(host_path, width, height, initial_url, timeout_ms, LaunchOptions());
+  }
+
+  bool launch(const char* host_path, uint32_t width, uint32_t height, const char* initial_url, int timeout_ms,
+              const LaunchOptions& options) {
     shutdown();
     const char* base = getenv("TMPDIR");
     std::string pattern = std::string(base && *base ? base : "/tmp") + "/crtwebXXXXXX";
@@ -100,7 +137,11 @@ class WebView {
       return false;
     }
 
+    std::string data_option = "--data-dir=" + options.data_directory;
+    std::string policy_option = "--cookie-policy=" + std::to_string(options.cookie_policy);
     std::vector<char*> argv = {const_cast<char*>(host_path), const_cast<char*>(path.c_str())};
+    if (!options.data_directory.empty()) argv.push_back(const_cast<char*>(data_option.c_str()));
+    if (options.cookie_policy != 0) argv.push_back(const_cast<char*>(policy_option.c_str()));
     if (initial_url != nullptr) argv.push_back(const_cast<char*>(initial_url));
     argv.push_back(nullptr);
     pid_t child = 0;
@@ -220,6 +261,24 @@ class WebView {
   const std::string& title() const { return client_ ? client_->title() : empty_; }
   const std::string& url() const { return url_; }
 
+  /* ---- input method: the application's IME state, handed to the page ---- */
+  bool ime_set_composition(const std::string& text, uint32_t cursor_start = 0, uint32_t cursor_length = 0) {
+    return client_ && client_->send_command(CRTWEB_COMMAND_IME_SET_COMPOSITION, cursor_start, text.data(), text.size(), cursor_length);
+  }
+  bool ime_commit(const std::string& text) { return command(CRTWEB_COMMAND_IME_COMMIT, 0, text); }
+  bool ime_cancel() { return command(CRTWEB_COMMAND_IME_CANCEL, 0, std::string()); }
+
+  /* ---- website data ---- */
+  static constexpr uint32_t kDataCookies = 1u;
+  static constexpr uint32_t kDataCache = 2u;
+  /* Removes the given kinds of data; callback() runs from poll() when done. */
+  bool clear_data(uint32_t types, std::function<void()> callback = nullptr) {
+    uint32_t id = ++next_script_;
+    if (!client_ || !client_->send_command(CRTWEB_COMMAND_CLEAR_DATA, id, nullptr, 0, types)) return false;
+    data_requests_[id] = std::move(callback);
+    return true;
+  }
+
   /* Evaluates script in the main frame. callback(result, error) runs from poll(). */
   bool evaluate(const std::string& script, std::function<void(const std::string& result, bool error)> callback) {
     uint32_t id = ++next_script_;
@@ -264,12 +323,74 @@ class WebView {
       case CRTWEB_EVENT_PROCESS_TERMINATED:
         if (on_terminated) on_terminated();
         break;
+      case CRTWEB_EVENT_DOWNLOAD_REQUEST: {
+        DownloadInfo info;
+        info.id = id;
+        std::vector<std::string> fields = split_fields(argument);
+        if (fields.size() > 0) info.url = fields[0];
+        if (fields.size() > 1) info.suggested_filename = fields[1];
+        if (fields.size() > 2) info.mime_type = fields[2];
+        if (fields.size() > 3) info.expected_length = strtoull(fields[3].c_str(), nullptr, 10);
+        std::string destination = on_download_request ? on_download_request(info) : std::string();
+        if (client_) client_->send_command(CRTWEB_COMMAND_DOWNLOAD_DECISION, id, destination.data(), destination.size(), destination.empty() ? 0u : 1u);
+        break;
+      }
+      case CRTWEB_EVENT_DOWNLOAD_PROGRESS: {
+        std::vector<std::string> fields = split_fields(argument);
+        if (on_download_progress && fields.size() >= 2)
+          on_download_progress(id, strtoull(fields[0].c_str(), nullptr, 10), strtoull(fields[1].c_str(), nullptr, 10));
+        break;
+      }
+      case CRTWEB_EVENT_DOWNLOAD_FINISHED:
+        if (on_download_finished) on_download_finished(id, static_cast<DownloadStatus>(flags), argument);
+        break;
+      case CRTWEB_EVENT_POPUP_REQUESTED:
+        if (on_popup_requested) on_popup_requested(first);
+        break;
+      case CRTWEB_EVENT_CLOSE_REQUESTED:
+        if (on_close_requested) on_close_requested();
+        break;
+      case CRTWEB_EVENT_DIALOG: {
+        auto answer = [this, id](bool accepted, const std::string& text) {
+          if (client_) client_->send_command(CRTWEB_COMMAND_DIALOG_RESULT, id, text.data(), text.size(), accepted ? 1u : 0u);
+        };
+        if (on_dialog)
+          on_dialog(static_cast<DialogKind>(flags), first, second, answer);
+        else
+          answer(flags == 1u || flags == 4u, std::string());
+        break;
+      }
+      case CRTWEB_EVENT_DATA_CLEARED: {
+        auto found = data_requests_.find(id);
+        if (found != data_requests_.end()) {
+          auto callback = std::move(found->second);
+          data_requests_.erase(found);
+          if (callback) callback();
+        }
+        break;
+      }
       default:
         break;
     }
   }
 
+  static std::vector<std::string> split_fields(const std::string& argument) {
+    std::vector<std::string> fields;
+    size_t start = 0;
+    for (;;) {
+      size_t end = argument.find('\0', start);
+      if (end == std::string::npos) {
+        fields.push_back(argument.substr(start));
+        break;
+      }
+      fields.push_back(argument.substr(start, end - start));
+      start = end + 1;
+    }
+    return fields;
+  }
+
   std::unique_ptr<SurfaceClient> client_;
+  std::map<uint32_t, std::function<void()>> data_requests_;
   pid_t child_ = 0;
   uint32_t width_ = 0, height_ = 0;
   uint32_t history_ = 0;

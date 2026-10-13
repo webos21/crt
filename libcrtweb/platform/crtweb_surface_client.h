@@ -180,9 +180,9 @@ class SurfaceClient {
   }
 
   /* Page control extension (crtweb_surface_control.h): sends a command to a crtweb host producer. */
-  bool send_command(uint32_t code, uint32_t id, const char* argument, size_t length) {
+  bool send_command(uint32_t code, uint32_t id, const char* argument, size_t length, uint32_t flags = 0) {
     if (closed_ || length > CRTWEB_BLOB_MAX_TOTAL) return false; /* too long: refused, the connection is fine */
-    if (crtweb_blob_send(socket_, CRTWEB_C2P_COMMAND, code, id, 0, argument, length) != 0) {
+    if (crtweb_blob_send(socket_, CRTWEB_C2P_COMMAND, code, id, flags, argument, length) != 0) {
       if (errno != EAGAIN) closed_ = true;
       return false;
     }

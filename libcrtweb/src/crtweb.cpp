@@ -1,7 +1,7 @@
 // libcrtweb: the CRT-owned web runtime and view API (Web Tranche 4) over the PlatformCRT port.
 //
 // The only translation unit that sees WebKit. Public contract: include/crtweb/crtweb.h and
-// docs/design/libcrtweb_api_policy.md. Everything runs on the thread that created the runtime;
+// docs/design/libcrtweb_api_policy.md. Everything runs on the thread that created the first runtime;
 // WebKit's run loop is driven by crtweb_runtime_pump() and every application callback is delivered
 // from there.
 
@@ -12,60 +12,104 @@
 
 #include "crtweb/crtweb.h"
 
+#include <WebKit/WKArray.h>
 #include <WebKit/WKBase.h>
 #include <WebKit/WKContext.h>
-#include <WebKit/WKArray.h>
 #include <WebKit/WKContextConfigurationRef.h>
+#include <WebKit/WKContextDownloadClient.h>
+#include <WebKit/WKCookieManager.h>
 #include <WebKit/WKDictionary.h>
-#include <WebKit/WKNumber.h>
+#include <WebKit/WKDownloadRef.h>
 #include <WebKit/WKErrorRef.h>
 #include <WebKit/WKFrameInfoRef.h>
 #include <WebKit/WKFramePolicyListener.h>
 #include <WebKit/WKGeometry.h>
+#include <WebKit/WKHTTPCookieStoreRef.h>
 #include <WebKit/WKNavigationActionRef.h>
+#include <WebKit/WKNavigationResponseRef.h>
+#include <WebKit/WKNumber.h>
 #include <WebKit/WKPage.h>
 #include <WebKit/WKPageConfigurationRef.h>
 #include <WebKit/WKPageNavigationClient.h>
+#include <WebKit/WKPageUIClient.h>
 #include <WebKit/WKRunLoop.h>
 #include <WebKit/WKString.h>
 #include <WebKit/WKType.h>
 #include <WebKit/WKURL.h>
 #include <WebKit/WKURLRequest.h>
+#include <WebKit/WKURLResponse.h>
 #include <WebKit/WKView.h>
 #include <WebKit/WKViewClient.h>
 #include <WebKit/WKViewCRT.h>
+#include <WebKit/WKWebsiteDataStoreConfigurationRef.h>
+#include <WebKit/WKWebsiteDataStoreRef.h>
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <new>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #if defined(_WIN32)
+#include <direct.h>
 #include <stdlib.h>
 #endif
 
 struct crtweb_view;
 
+struct DataOperation;
+
 struct crtweb_runtime {
-    std::thread::id owner;
     WKContextRef context { nullptr };
+    WKWebsiteDataStoreRef dataStore { nullptr };
     std::string applicationName;
     std::vector<crtweb_view*> views;
-    std::vector<crtweb_view*> doomed; // destroyed from inside a pump: freed when the pump ends
-    bool pumping { false };
-    bool activity { false };
+    std::vector<DataOperation*> operations;
+    uint32_t nextDownloadId { 0 };
+};
+
+struct DataOperation {
+    crtweb_runtime* runtime;
+    unsigned remaining;
+    crtweb_data_callback callback;
+    void* userData;
 };
 
 struct ScriptRequest {
     crtweb_view* view;
     crtweb_script_callback callback;
     void* userData;
+};
+
+struct DownloadState {
+    crtweb_view* view { nullptr };
+    uint32_t id { 0 };
+    std::string url;
+    std::string suggestedFilename;
+    std::string mimeType;
+    std::string path;
+    uint64_t expected { 0 };
+    uint64_t received { 0 };
+};
+
+enum class DialogType { Alert, Confirm, Prompt, BeforeUnload };
+
+struct crtweb_dialog {
+    crtweb_view* view;
+    DialogType type;
+    WKTypeRef listener; // retained
+    bool completed { false };
 };
 
 struct crtweb_view {
@@ -81,15 +125,22 @@ struct crtweb_view {
     bool painted { false };
     bool destroyed { false };
     bool terminatedReported { false };
+    bool composing { false };
     std::string title;
     std::string url;
     std::vector<ScriptRequest*> scripts;
+    std::vector<crtweb_dialog*> dialogs;
 };
 
 namespace {
 
-crtweb_runtime* gRuntime;
+std::vector<crtweb_runtime*> gRuntimes;
+std::thread::id gOwner;
 bool gRunLoopInitialized;
+bool gPumping;
+bool gActivity;
+std::vector<crtweb_view*> gDoomed; // destroyed from inside a pump: freed when the pump ends
+std::map<WKDownloadRef, DownloadState> gDownloads;
 
 std::string toUTF8(WKStringRef string)
 {
@@ -117,9 +168,14 @@ std::string takeURL(WKURLRef url)
     return result;
 }
 
-bool onOwnerThread(const crtweb_runtime* runtime)
+bool onOwnerThread()
 {
-    return runtime && runtime->owner == std::this_thread::get_id();
+    return !gRuntimes.empty() && gOwner == std::this_thread::get_id();
+}
+
+bool knownRuntime(const crtweb_runtime* runtime)
+{
+    return std::find(gRuntimes.begin(), gRuntimes.end(), runtime) != gRuntimes.end();
 }
 
 crtweb_result copyOut(const std::string& value, char* buffer, size_t capacity, size_t* needed)
@@ -150,7 +206,27 @@ bool hasAllowedScheme(const char* url)
     return false;
 }
 
-// ---- WebKit client callbacks -------------------------------------------------------------------
+void makeDirectory(const std::string& path)
+{
+#if defined(_WIN32)
+    _mkdir(path.c_str());
+#else
+    mkdir(path.c_str(), 0700);
+#endif
+}
+
+crtweb_view* findViewByPage(WKPageRef page)
+{
+    for (crtweb_runtime* runtime : gRuntimes) {
+        for (crtweb_view* view : runtime->views) {
+            if (view->page == page)
+                return view;
+        }
+    }
+    return nullptr;
+}
+
+// ---- view callbacks from WebKit ---------------------------------------------------------------
 
 crtweb_view* viewFrom(const void* clientInfo)
 {
@@ -160,7 +236,7 @@ crtweb_view* viewFrom(const void* clientInfo)
 
 void deliverLoad(crtweb_view* view, crtweb_load_event event, const std::string& url, const char* message)
 {
-    view->runtime->activity = true;
+    gActivity = true;
     if (view->callbacks.on_load)
         view->callbacks.on_load(view, event, url.c_str(), message, view->callbacks.user_data);
 }
@@ -219,7 +295,7 @@ void decidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef action, WK
             std::string url = takeURL(request ? WKURLRequestCopyURL(request) : nullptr);
             if (request)
                 WKRelease(request);
-            view->runtime->activity = true;
+            gActivity = true;
             allow = view->callbacks.on_navigation_request(view, url.c_str(), view->callbacks.user_data) != 0;
         }
     }
@@ -229,13 +305,29 @@ void decidePolicyForNavigationAction(WKPageRef, WKNavigationActionRef action, WK
         WKFramePolicyListenerIgnore(listener);
 }
 
+// A response the engine will not show is a download: an attachment, or a type it cannot display.
+void decidePolicyForNavigationResponse(WKPageRef, WKNavigationResponseRef response, WKFramePolicyListenerRef listener, WKTypeRef, const void*)
+{
+    bool download = !WKNavigationResponseCanShowMIMEType(response);
+    if (!download) {
+        if (WKURLResponseRef urlResponse = WKNavigationResponseCopyResponse(response)) {
+            download = WKURLResponseIsAttachment(urlResponse);
+            WKRelease(urlResponse);
+        }
+    }
+    if (download)
+        WKFramePolicyListenerDownload(listener);
+    else
+        WKFramePolicyListenerUse(listener);
+}
+
 void webProcessDidCrash(WKPageRef, const void* clientInfo)
 {
     crtweb_view* view = viewFrom(clientInfo);
     if (!view || view->terminatedReported)
         return;
     view->terminatedReported = true;
-    view->runtime->activity = true;
+    gActivity = true;
     if (view->callbacks.on_process_terminated)
         view->callbacks.on_process_terminated(view, view->callbacks.user_data);
 }
@@ -305,7 +397,7 @@ void scriptFinished(WKTypeRef result, WKErrorRef error, void* context)
             break;
         }
     }
-    view->runtime->activity = true;
+    gActivity = true;
     bool ok = false;
     std::string text = error || !result ? std::string() : scriptResultToString(result, ok);
     if (request->callback) {
@@ -316,21 +408,295 @@ void scriptFinished(WKTypeRef result, WKErrorRef error, void* context)
     }
 }
 
+// ---- dialogs and popups -------------------------------------------------------------------------
+
+void completeDialog(crtweb_dialog* dialog, bool accepted, const std::string* text)
+{
+    if (dialog->completed)
+        return;
+    dialog->completed = true;
+    switch (dialog->type) {
+    case DialogType::Alert:
+        WKPageRunJavaScriptAlertResultListenerCall(static_cast<WKPageRunJavaScriptAlertResultListenerRef>(dialog->listener));
+        break;
+    case DialogType::Confirm:
+        WKPageRunJavaScriptConfirmResultListenerCall(static_cast<WKPageRunJavaScriptConfirmResultListenerRef>(dialog->listener), accepted);
+        break;
+    case DialogType::Prompt: {
+        WKStringRef answer = accepted ? WKStringCreateWithUTF8CString(text ? text->c_str() : "") : nullptr;
+        WKPageRunJavaScriptPromptResultListenerCall(static_cast<WKPageRunJavaScriptPromptResultListenerRef>(dialog->listener), answer);
+        if (answer)
+            WKRelease(answer);
+        break;
+    }
+    case DialogType::BeforeUnload:
+        WKPageRunBeforeUnloadConfirmPanelResultListenerCall(static_cast<WKPageRunBeforeUnloadConfirmPanelResultListenerRef>(dialog->listener), accepted);
+        break;
+    }
+    WKRelease(dialog->listener);
+    dialog->listener = nullptr;
+    if (crtweb_view* view = dialog->view) {
+        auto& list = view->dialogs;
+        list.erase(std::remove(list.begin(), list.end(), dialog), list.end());
+    }
+    delete dialog;
+}
+
+void showDialog(crtweb_view* view, DialogType type, WKTypeRef listener, const std::string& message, const std::string& defaultText)
+{
+    auto* dialog = new crtweb_dialog { view, type, WKRetain(listener), false };
+    view->dialogs.push_back(dialog);
+    gActivity = true;
+    if (!view->callbacks.on_dialog) {
+        // The documented defaults: an alert is dismissed, a confirm and a prompt are cancelled, leaving
+        // a page is allowed.
+        completeDialog(dialog, type == DialogType::Alert || type == DialogType::BeforeUnload, nullptr);
+        return;
+    }
+    crtweb_dialog_kind kind = type == DialogType::Alert ? CRTWEB_DIALOG_ALERT
+        : type == DialogType::Confirm ? CRTWEB_DIALOG_CONFIRM
+        : type == DialogType::Prompt ? CRTWEB_DIALOG_PROMPT : CRTWEB_DIALOG_BEFORE_UNLOAD;
+    view->callbacks.on_dialog(view, dialog, kind, message.c_str(), defaultText.c_str(), view->callbacks.user_data);
+}
+
+void runJavaScriptAlert(WKPageRef, WKStringRef message, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptAlertResultListenerRef listener, const void* clientInfo)
+{
+    if (crtweb_view* view = viewFrom(clientInfo))
+        showDialog(view, DialogType::Alert, listener, toUTF8(message), std::string());
+    else
+        WKPageRunJavaScriptAlertResultListenerCall(listener);
+}
+
+void runJavaScriptConfirm(WKPageRef, WKStringRef message, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptConfirmResultListenerRef listener, const void* clientInfo)
+{
+    if (crtweb_view* view = viewFrom(clientInfo))
+        showDialog(view, DialogType::Confirm, listener, toUTF8(message), std::string());
+    else
+        WKPageRunJavaScriptConfirmResultListenerCall(listener, false);
+}
+
+void runJavaScriptPrompt(WKPageRef, WKStringRef message, WKStringRef defaultValue, WKFrameRef, WKSecurityOriginRef, WKPageRunJavaScriptPromptResultListenerRef listener, const void* clientInfo)
+{
+    if (crtweb_view* view = viewFrom(clientInfo))
+        showDialog(view, DialogType::Prompt, listener, toUTF8(message), toUTF8(defaultValue));
+    else
+        WKPageRunJavaScriptPromptResultListenerCall(listener, nullptr);
+}
+
+void runBeforeUnloadConfirmPanel(WKPageRef, WKStringRef message, WKFrameRef, WKPageRunBeforeUnloadConfirmPanelResultListenerRef listener, const void* clientInfo)
+{
+    if (crtweb_view* view = viewFrom(clientInfo))
+        showDialog(view, DialogType::BeforeUnload, listener, toUTF8(message), std::string());
+    else
+        WKPageRunBeforeUnloadConfirmPanelResultListenerCall(listener, true);
+}
+
+void closePage(WKPageRef, const void* clientInfo)
+{
+    crtweb_view* view = viewFrom(clientInfo);
+    if (!view)
+        return;
+    gActivity = true;
+    if (view->callbacks.on_close_requested)
+        view->callbacks.on_close_requested(view, view->callbacks.user_data);
+}
+
+void installClients(crtweb_view* view);
+
+WKPageRef createNewPage(WKPageRef, WKPageConfigurationRef configuration, WKNavigationActionRef action, WKWindowFeaturesRef, const void* clientInfo)
+{
+    crtweb_view* opener = viewFrom(clientInfo);
+    if (!opener || !opener->callbacks.on_popup_request)
+        return nullptr;
+    WKURLRequestRef request = WKNavigationActionCopyRequest(action);
+    std::string url = takeURL(request ? WKURLRequestCopyURL(request) : nullptr);
+    if (request)
+        WKRelease(request);
+    gActivity = true;
+    if (!opener->callbacks.on_popup_request(opener, url.c_str(), opener->callbacks.user_data))
+        return nullptr;
+
+    auto* popup = new (std::nothrow) crtweb_view;
+    if (!popup)
+        return nullptr;
+    popup->runtime = opener->runtime;
+    popup->width = opener->width;
+    popup->height = opener->height;
+    popup->view = WKViewCreate(configuration);
+    if (!popup->view) {
+        delete popup;
+        return nullptr;
+    }
+    popup->page = WKViewGetPage(popup->view);
+    installClients(popup);
+    WKViewCRTSetSize(popup->view, popup->width, popup->height);
+    WKViewSetActive(popup->view, true);
+    WKViewSetVisible(popup->view, true);
+    opener->runtime->views.push_back(popup);
+    if (opener->callbacks.on_popup_created)
+        opener->callbacks.on_popup_created(opener, popup, opener->callbacks.user_data);
+    // The engine adopts one reference of the returned page; the view keeps its own.
+    return static_cast<WKPageRef>(const_cast<void*>(WKRetain(popup->page)));
+}
+
+void installClients(crtweb_view* view)
+{
+    WKViewClientV0 viewClient = { };
+    viewClient.base.version = 0;
+    viewClient.base.clientInfo = view;
+    viewClient.setViewNeedsDisplay = setViewNeedsDisplay;
+    WKViewSetViewClient(view->view, &viewClient.base);
+
+    WKPageNavigationClientV0 navigationClient = { };
+    navigationClient.base.version = 0;
+    navigationClient.base.clientInfo = view;
+    navigationClient.decidePolicyForNavigationAction = decidePolicyForNavigationAction;
+    navigationClient.decidePolicyForNavigationResponse = decidePolicyForNavigationResponse;
+    navigationClient.didStartProvisionalNavigation = didStartProvisionalNavigation;
+    navigationClient.didFailProvisionalNavigation = didFailProvisionalNavigation;
+    navigationClient.didCommitNavigation = didCommitNavigation;
+    navigationClient.didFinishNavigation = didFinishNavigation;
+    navigationClient.didFailNavigation = didFailNavigation;
+    navigationClient.webProcessDidCrash = webProcessDidCrash;
+    WKPageSetPageNavigationClient(view->page, &navigationClient.base);
+
+    WKPageUIClientV9 uiClient = { };
+    uiClient.base.version = 9;
+    uiClient.base.clientInfo = view;
+    uiClient.createNewPage = createNewPage;
+    uiClient.close = closePage;
+    uiClient.runJavaScriptAlert = runJavaScriptAlert;
+    uiClient.runJavaScriptConfirm = runJavaScriptConfirm;
+    uiClient.runJavaScriptPrompt = runJavaScriptPrompt;
+    uiClient.runBeforeUnloadConfirmPanel = runBeforeUnloadConfirmPanel;
+    WKPageSetPageUIClient(view->page, &uiClient.base);
+}
+
+// ---- downloads ----------------------------------------------------------------------------------
+
+DownloadState* downloadFor(WKDownloadRef download)
+{
+    auto found = gDownloads.find(download);
+    return found == gDownloads.end() ? nullptr : &found->second;
+}
+
+void downloadDidStart(WKContextRef, WKDownloadRef download, const void* clientInfo)
+{
+    auto* runtime = const_cast<crtweb_runtime*>(static_cast<const crtweb_runtime*>(clientInfo));
+    DownloadState state;
+    state.view = findViewByPage(WKDownloadGetOriginatingPage(download));
+    state.id = ++runtime->nextDownloadId;
+    if (WKURLRequestRef request = WKDownloadCopyRequest(download)) {
+        state.url = takeURL(WKURLRequestCopyURL(request));
+        WKRelease(request);
+    }
+    gDownloads[download] = state;
+}
+
+void downloadDidReceiveResponse(WKContextRef, WKDownloadRef download, WKURLResponseRef response, const void*)
+{
+    if (DownloadState* state = downloadFor(download); state && response) {
+        state->mimeType = takeString(WKURLResponseCopyMIMEType(response));
+        state->suggestedFilename = takeString(WKURLResponseCopySuggestedFilename(response));
+        state->expected = WKURLResponseGetExpectedContentLength(response);
+    }
+}
+
+WKStringRef downloadDecideDestination(WKContextRef, WKDownloadRef download, WKStringRef filename, bool* allowOverwrite, const void*)
+{
+    DownloadState* state = downloadFor(download);
+    if (!state || !state->view || state->view->destroyed || !state->view->callbacks.on_download_request)
+        return nullptr; // cancelled: no one to decide
+    if (state->suggestedFilename.empty())
+        state->suggestedFilename = toUTF8(filename);
+    crtweb_download_info info = { };
+    info.struct_size = sizeof info;
+    info.id = state->id;
+    info.url = state->url.c_str();
+    info.suggested_filename = state->suggestedFilename.c_str();
+    info.mime_type = state->mimeType.c_str();
+    info.expected_length = state->expected;
+    std::vector<char> path(4096, '\0');
+    gActivity = true;
+    crtweb_view* view = state->view;
+    if (!view->callbacks.on_download_request(view, &info, path.data(), path.size(), view->callbacks.user_data) || !path[0])
+        return nullptr;
+    path.back() = '\0';
+    state->path = path.data();
+    if (allowOverwrite)
+        *allowOverwrite = true;
+    return WKStringCreateWithUTF8CString(state->path.c_str());
+}
+
+void downloadDidReceiveData(WKContextRef, WKDownloadRef download, uint64_t length, const void*)
+{
+    DownloadState* state = downloadFor(download);
+    if (!state)
+        return;
+    state->received += length;
+    crtweb_view* view = state->view;
+    if (view && !view->destroyed && view->callbacks.on_download_progress) {
+        gActivity = true;
+        view->callbacks.on_download_progress(view, state->id, state->received, state->expected, view->callbacks.user_data);
+    }
+}
+
+void finishDownload(WKDownloadRef download, crtweb_download_status status)
+{
+    DownloadState* state = downloadFor(download);
+    if (!state)
+        return;
+    DownloadState done = *state;
+    gDownloads.erase(download);
+    crtweb_view* view = done.view;
+    if (view && !view->destroyed && view->callbacks.on_download_finished) {
+        gActivity = true;
+        view->callbacks.on_download_finished(view, done.id, status, done.path.c_str(), view->callbacks.user_data);
+    }
+}
+
+void downloadDidFinish(WKContextRef, WKDownloadRef download, const void*)
+{
+    finishDownload(download, CRTWEB_DOWNLOAD_OK);
+}
+
+void downloadDidFail(WKContextRef, WKDownloadRef download, WKErrorRef, const void*)
+{
+    finishDownload(download, CRTWEB_DOWNLOAD_FAILED);
+}
+
+void downloadDidCancel(WKContextRef, WKDownloadRef download, const void*)
+{
+    finishDownload(download, CRTWEB_DOWNLOAD_CANCELLED);
+}
+
 void detach(crtweb_view* view)
 {
     // Stop WebKit calling back into a view the application no longer has.
     WKPageSetPageNavigationClient(view->page, nullptr);
+    WKPageSetPageUIClient(view->page, nullptr);
     WKViewSetViewClient(view->view, nullptr);
     for (ScriptRequest* request : view->scripts)
         request->view = nullptr;
     view->scripts.clear();
+    // Pending dialogs are answered as cancelled so the page is not left blocked.
+    std::vector<crtweb_dialog*> dialogs = view->dialogs;
+    for (crtweb_dialog* dialog : dialogs)
+        completeDialog(dialog, false, nullptr);
+    for (auto& entry : gDownloads) {
+        if (entry.second.view == view) {
+            entry.second.view = nullptr;
+            WKDownloadCancel(entry.first, nullptr, nullptr);
+        }
+    }
     view->callbacks = { };
 }
 
 void release(crtweb_view* view)
 {
     WKRelease(view->view);
-    WKRelease(view->pageConfiguration);
+    if (view->pageConfiguration)
+        WKRelease(view->pageConfiguration);
     delete view;
 }
 
@@ -346,7 +712,7 @@ void pollState(crtweb_view* view)
     std::string title = takeString(WKPageCopyTitle(view->page));
     if (title != view->title) {
         view->title = title;
-        view->runtime->activity = true;
+        gActivity = true;
         if (view->callbacks.on_title_changed)
             view->callbacks.on_title_changed(view, view->title.c_str(), view->callbacks.user_data);
         if (view->destroyed)
@@ -355,10 +721,25 @@ void pollState(crtweb_view* view)
     std::string url = takeURL(WKPageCopyActiveURL(view->page));
     if (url != view->url) {
         view->url = url;
-        view->runtime->activity = true;
+        gActivity = true;
         if (view->callbacks.on_url_changed)
             view->callbacks.on_url_changed(view, view->url.c_str(), view->callbacks.user_data);
     }
+}
+
+void dataOperationStep(DataOperation* operation)
+{
+    if (--operation->remaining)
+        return;
+    crtweb_runtime* runtime = operation->runtime;
+    if (runtime) {
+        auto& list = runtime->operations;
+        list.erase(std::remove(list.begin(), list.end(), operation), list.end());
+        gActivity = true;
+        if (operation->callback)
+            operation->callback(runtime, CRTWEB_OK, operation->userData);
+    }
+    delete operation;
 }
 
 } // namespace
@@ -386,6 +767,9 @@ const char* crtweb_result_string(crtweb_result result)
     return "unknown";
 }
 
+#define CRTWEB_HAS_FIELD(config, field) \
+    ((config) && (config)->struct_size >= offsetof(std::remove_pointer_t<decltype(config)>, field) + sizeof((config)->field))
+
 crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_runtime** out_runtime)
 {
     if (!out_runtime)
@@ -393,11 +777,10 @@ crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_
     *out_runtime = nullptr;
     if (config && config->struct_size < sizeof(uint32_t) * 2)
         return CRTWEB_ERROR_INVALID_ARGUMENT;
-    if (gRuntime)
+    if (!gRuntimes.empty() && !onOwnerThread())
         return CRTWEB_ERROR_STATE;
 
-    if (config && config->struct_size >= offsetof(crtweb_runtime_config, process_directory) + sizeof(char*)
-        && config->process_directory && *config->process_directory) {
+    if (CRTWEB_HAS_FIELD(config, process_directory) && config->process_directory && *config->process_directory) {
 #if defined(_WIN32)
         _putenv_s("CRTWEB_PROCESS_DIR", config->process_directory);
 #else
@@ -408,24 +791,117 @@ crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_
     auto* runtime = new (std::nothrow) crtweb_runtime;
     if (!runtime)
         return CRTWEB_ERROR_OUT_OF_MEMORY;
-    runtime->owner = std::this_thread::get_id();
-    if (config && config->struct_size >= offsetof(crtweb_runtime_config, application_name) + sizeof(char*)
-        && config->application_name)
+    if (CRTWEB_HAS_FIELD(config, application_name) && config->application_name)
         runtime->applicationName = config->application_name;
 
     if (!gRunLoopInitialized) {
         WKRunLoopInitializeMain();
         gRunLoopInitialized = true;
     }
+
+    // The website data store: ephemeral, or rooted in the data directory.
+    if (CRTWEB_HAS_FIELD(config, data_directory) && config->data_directory && *config->data_directory) {
+        std::string root = config->data_directory;
+        while (root.size() > 1 && (root.back() == '/' || root.back() == '\\'))
+            root.pop_back();
+        makeDirectory(root);
+        WKWebsiteDataStoreConfigurationRef storeConfiguration = WKWebsiteDataStoreConfigurationCreate();
+        auto set = [&](const char* name, void (*setter)(WKWebsiteDataStoreConfigurationRef, WKStringRef)) {
+            std::string path = root + "/" + name;
+            makeDirectory(path);
+            WKStringRef string = WKStringCreateWithUTF8CString(path.c_str());
+            setter(storeConfiguration, string);
+            WKRelease(string);
+        };
+        set("cache", WKWebsiteDataStoreConfigurationSetNetworkCacheDirectory);
+        set("localstorage", WKWebsiteDataStoreConfigurationSetLocalStorageDirectory);
+        set("indexeddb", WKWebsiteDataStoreConfigurationSetIndexedDBDatabaseDirectory);
+        set("general", WKWebsiteDataStoreConfigurationSetGeneralStorageDirectory);
+        std::string cookies = root + "/cookies.db";
+        WKStringRef cookieFile = WKStringCreateWithUTF8CString(cookies.c_str());
+        WKWebsiteDataStoreConfigurationSetCookieStorageFile(storeConfiguration, cookieFile);
+        WKRelease(cookieFile);
+        runtime->dataStore = WKWebsiteDataStoreCreateWithConfiguration(storeConfiguration);
+        WKRelease(storeConfiguration);
+    } else {
+        runtime->dataStore = WKWebsiteDataStoreCreateNonPersistentDataStore();
+    }
+    if (!runtime->dataStore) {
+        delete runtime;
+        return CRTWEB_ERROR_PLATFORM;
+    }
+
     WKContextConfigurationRef contextConfiguration = WKContextConfigurationCreate();
     runtime->context = WKContextCreateWithConfiguration(contextConfiguration);
     WKRelease(contextConfiguration);
     if (!runtime->context) {
+        WKRelease(runtime->dataStore);
         delete runtime;
         return CRTWEB_ERROR_PLATFORM;
     }
-    gRuntime = runtime;
+
+    WKContextDownloadClientV0 downloadClient = { };
+    downloadClient.base.version = 0;
+    downloadClient.base.clientInfo = runtime;
+    downloadClient.didStart = downloadDidStart;
+    downloadClient.didReceiveResponse = downloadDidReceiveResponse;
+    downloadClient.decideDestinationWithSuggestedFilename = downloadDecideDestination;
+    downloadClient.didReceiveData = downloadDidReceiveData;
+    downloadClient.didFinish = downloadDidFinish;
+    downloadClient.didFail = downloadDidFail;
+    downloadClient.didCancel = downloadDidCancel;
+    WKContextSetDownloadClient(runtime->context, &downloadClient.base);
+
+    if (gRuntimes.empty())
+        gOwner = std::this_thread::get_id();
+    gRuntimes.push_back(runtime);
     *out_runtime = runtime;
+
+    if (CRTWEB_HAS_FIELD(config, cookie_policy) && config->cookie_policy)
+        crtweb_runtime_set_cookie_policy(runtime, static_cast<crtweb_cookie_policy>(config->cookie_policy));
+    return CRTWEB_OK;
+}
+
+crtweb_result crtweb_runtime_set_cookie_policy(crtweb_runtime* runtime, crtweb_cookie_policy policy)
+{
+    if (!runtime || !knownRuntime(runtime))
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    if (!onOwnerThread())
+        return CRTWEB_ERROR_STATE;
+    WKHTTPCookieAcceptPolicy wkPolicy;
+    switch (policy) {
+    case CRTWEB_COOKIES_ALWAYS: wkPolicy = kWKHTTPCookieAcceptPolicyAlways; break;
+    case CRTWEB_COOKIES_NEVER: wkPolicy = kWKHTTPCookieAcceptPolicyNever; break;
+    case CRTWEB_COOKIES_NO_THIRD_PARTY: wkPolicy = kWKHTTPCookieAcceptPolicyOnlyFromMainDocumentDomain; break;
+    default: return CRTWEB_ERROR_INVALID_ARGUMENT;
+    }
+    WKHTTPCookieStoreSetHTTPCookieAcceptPolicy(WKWebsiteDataStoreGetHTTPCookieStore(runtime->dataStore), wkPolicy, nullptr, [](void*) { });
+    return CRTWEB_OK;
+}
+
+crtweb_result crtweb_runtime_clear_data(crtweb_runtime* runtime, uint32_t types, crtweb_data_callback callback, void* user_data)
+{
+    if (!runtime || !knownRuntime(runtime))
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    if (!onOwnerThread())
+        return CRTWEB_ERROR_STATE;
+    types &= CRTWEB_DATA_COOKIES | CRTWEB_DATA_CACHE;
+    if (!types)
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    auto* operation = new (std::nothrow) DataOperation { runtime, 0, callback, user_data };
+    if (!operation)
+        return CRTWEB_ERROR_OUT_OF_MEMORY;
+    operation->remaining = ((types & CRTWEB_DATA_COOKIES) ? 1u : 0u) + ((types & CRTWEB_DATA_CACHE) ? 1u : 0u);
+    runtime->operations.push_back(operation);
+    // `remaining` counts the requests still to finish; the step function deletes the operation.
+    if (types & CRTWEB_DATA_COOKIES) {
+        WKHTTPCookieStoreDeleteAllCookies(WKWebsiteDataStoreGetHTTPCookieStore(runtime->dataStore), operation,
+            [](void* context) { dataOperationStep(static_cast<DataOperation*>(context)); });
+    }
+    if (types & CRTWEB_DATA_CACHE) {
+        WKWebsiteDataStoreRemoveNetworkCache(runtime->dataStore, operation,
+            [](void* context) { dataOperationStep(static_cast<DataOperation*>(context)); });
+    }
     return CRTWEB_OK;
 }
 
@@ -433,16 +909,20 @@ crtweb_result crtweb_runtime_pump(crtweb_runtime* runtime, uint32_t timeout_ms)
 {
     if (!runtime)
         return CRTWEB_ERROR_INVALID_ARGUMENT;
-    if (!onOwnerThread(runtime) || runtime->pumping)
+    if (!knownRuntime(runtime))
         return CRTWEB_ERROR_STATE;
-    runtime->pumping = true;
-    runtime->activity = false;
+    if (!onOwnerThread() || gPumping)
+        return CRTWEB_ERROR_STATE;
+    gPumping = true;
+    gActivity = false;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     for (;;) {
         runLoopPass();
         // Views may be created, destroyed or reloaded from callbacks: iterate a copy and skip the
         // ones that went away.
-        std::vector<crtweb_view*> snapshot = runtime->views;
+        std::vector<crtweb_view*> snapshot;
+        for (crtweb_runtime* each : gRuntimes)
+            snapshot.insert(snapshot.end(), each->views.begin(), each->views.end());
         for (crtweb_view* view : snapshot) {
             if (view->destroyed)
                 continue;
@@ -451,38 +931,44 @@ crtweb_result crtweb_runtime_pump(crtweb_runtime* runtime, uint32_t timeout_ms)
                 view->damaged = false;
                 ++view->serial;
                 view->painted = true;
-                runtime->activity = true;
+                gActivity = true;
                 if (view->callbacks.on_frame)
                     view->callbacks.on_frame(view, view->serial, view->callbacks.user_data);
             }
         }
-        if (runtime->activity || std::chrono::steady_clock::now() >= deadline)
+        if (gActivity || std::chrono::steady_clock::now() >= deadline)
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    runtime->pumping = false;
-    for (crtweb_view* view : runtime->doomed)
+    gPumping = false;
+    for (crtweb_view* view : gDoomed)
         release(view);
-    runtime->doomed.clear();
+    gDoomed.clear();
     return CRTWEB_OK;
 }
 
 void crtweb_runtime_destroy(crtweb_runtime* runtime)
 {
-    if (!runtime || !onOwnerThread(runtime) || runtime != gRuntime || runtime->pumping)
+    if (!runtime || !knownRuntime(runtime) || !onOwnerThread() || gPumping)
         return;
     std::vector<crtweb_view*> views = runtime->views;
     for (crtweb_view* view : views)
         crtweb_view_destroy(view);
+    for (DataOperation* operation : runtime->operations)
+        operation->runtime = nullptr; // its WebKit callback still arrives and frees it
+    runtime->operations.clear();
+    WKContextSetDownloadClient(runtime->context, nullptr);
     WKRelease(runtime->context);
     runtime->context = nullptr;
+    WKRelease(runtime->dataStore);
+    runtime->dataStore = nullptr;
+    gRuntimes.erase(std::remove(gRuntimes.begin(), gRuntimes.end(), runtime), gRuntimes.end());
     // The Web process exits on its own once nothing references it; let the run loop deliver that.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
     while (std::chrono::steady_clock::now() < deadline) {
         runLoopPass();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    gRuntime = nullptr;
     delete runtime;
 }
 
@@ -491,7 +977,7 @@ crtweb_result crtweb_view_create(crtweb_runtime* runtime, const crtweb_view_conf
     if (!runtime || !config || !out_view || config->struct_size < offsetof(crtweb_view_config, scale_percent))
         return CRTWEB_ERROR_INVALID_ARGUMENT;
     *out_view = nullptr;
-    if (!onOwnerThread(runtime))
+    if (!knownRuntime(runtime) || !onOwnerThread())
         return CRTWEB_ERROR_STATE;
     if (!config->width || !config->height)
         return CRTWEB_ERROR_INVALID_ARGUMENT;
@@ -506,6 +992,7 @@ crtweb_result crtweb_view_create(crtweb_runtime* runtime, const crtweb_view_conf
     view->height = config->height;
     view->pageConfiguration = WKPageConfigurationCreate();
     WKPageConfigurationSetContext(view->pageConfiguration, runtime->context);
+    WKPageConfigurationSetWebsiteDataStore(view->pageConfiguration, runtime->dataStore);
     view->view = WKViewCreate(view->pageConfiguration);
     if (!view->view) {
         WKRelease(view->pageConfiguration);
@@ -513,30 +1000,12 @@ crtweb_result crtweb_view_create(crtweb_runtime* runtime, const crtweb_view_conf
         return CRTWEB_ERROR_PLATFORM;
     }
     view->page = WKViewGetPage(view->view);
-
-    WKViewClientV0 viewClient = { };
-    viewClient.base.version = 0;
-    viewClient.base.clientInfo = view;
-    viewClient.setViewNeedsDisplay = setViewNeedsDisplay;
-    WKViewSetViewClient(view->view, &viewClient.base);
-
-    WKPageNavigationClientV0 navigationClient = { };
-    navigationClient.base.version = 0;
-    navigationClient.base.clientInfo = view;
-    navigationClient.decidePolicyForNavigationAction = decidePolicyForNavigationAction;
-    navigationClient.didStartProvisionalNavigation = didStartProvisionalNavigation;
-    navigationClient.didFailProvisionalNavigation = didFailProvisionalNavigation;
-    navigationClient.didCommitNavigation = didCommitNavigation;
-    navigationClient.didFinishNavigation = didFinishNavigation;
-    navigationClient.didFailNavigation = didFailNavigation;
-    navigationClient.webProcessDidCrash = webProcessDidCrash;
-    WKPageSetPageNavigationClient(view->page, &navigationClient.base);
+    installClients(view);
 
     if (!runtime->applicationName.empty()) {
         WKStringRef name = WKStringCreateWithUTF8CString(runtime->applicationName.c_str());
         WKPageSetApplicationNameForUserAgent(view->page, name);
         WKRelease(name);
-
     }
 
     WKViewCRTSetSize(view->view, view->width, view->height);
@@ -550,7 +1019,7 @@ crtweb_result crtweb_view_create(crtweb_runtime* runtime, const crtweb_view_conf
 
 void crtweb_view_destroy(crtweb_view* view)
 {
-    if (!view || view->destroyed || !onOwnerThread(view->runtime))
+    if (!view || view->destroyed || !onOwnerThread())
         return;
     crtweb_runtime* runtime = view->runtime;
     view->destroyed = true;
@@ -561,8 +1030,8 @@ void crtweb_view_destroy(crtweb_view* view)
         }
     }
     detach(view);
-    if (runtime->pumping)
-        runtime->doomed.push_back(view);
+    if (gPumping)
+        gDoomed.push_back(view);
     else
         release(view);
 }
@@ -570,7 +1039,7 @@ void crtweb_view_destroy(crtweb_view* view)
 #define CRTWEB_CHECK_VIEW(view)                                                              \
     if (!(view))                                                                             \
         return CRTWEB_ERROR_INVALID_ARGUMENT;                                                \
-    if ((view)->destroyed || !onOwnerThread((view)->runtime))                                \
+    if ((view)->destroyed || !onOwnerThread())                                               \
         return CRTWEB_ERROR_STATE
 
 crtweb_result crtweb_view_load_url(crtweb_view* view, const char* url)
@@ -638,14 +1107,14 @@ crtweb_result crtweb_view_go_forward(crtweb_view* view)
 
 int crtweb_view_can_go_back(const crtweb_view* view)
 {
-    if (!view || view->destroyed || !onOwnerThread(view->runtime))
+    if (!view || view->destroyed || !onOwnerThread())
         return 0;
     return WKPageCanGoBack(view->page) ? 1 : 0;
 }
 
 int crtweb_view_can_go_forward(const crtweb_view* view)
 {
-    if (!view || view->destroyed || !onOwnerThread(view->runtime))
+    if (!view || view->destroyed || !onOwnerThread())
         return 0;
     return WKPageCanGoForward(view->page) ? 1 : 0;
 }
@@ -769,6 +1238,39 @@ crtweb_result crtweb_view_text(crtweb_view* view, const char* utf8)
     return CRTWEB_OK;
 }
 
+crtweb_result crtweb_view_ime_set_composition(crtweb_view* view, const char* text_utf8, uint32_t cursor_start, uint32_t cursor_length)
+{
+    CRTWEB_CHECK_VIEW(view);
+    if (!text_utf8)
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    WKViewCRTSetComposition(view->view, text_utf8, cursor_start, cursor_length);
+    view->composing = *text_utf8 != '\0';
+    return CRTWEB_OK;
+}
+
+crtweb_result crtweb_view_ime_commit(crtweb_view* view, const char* text_utf8)
+{
+    CRTWEB_CHECK_VIEW(view);
+    if (!text_utf8)
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    if (view->composing) {
+        // The final text replaces the composition and ends it.
+        WKViewCRTConfirmCompositionWithText(view->view, text_utf8);
+        view->composing = false;
+    } else {
+        WKViewCRTInsertText(view->view, text_utf8);
+    }
+    return CRTWEB_OK;
+}
+
+crtweb_result crtweb_view_ime_cancel(crtweb_view* view)
+{
+    CRTWEB_CHECK_VIEW(view);
+    WKViewCRTCancelComposition(view->view);
+    view->composing = false;
+    return CRTWEB_OK;
+}
+
 crtweb_result crtweb_view_set_callbacks(crtweb_view* view, const crtweb_view_callbacks* callbacks)
 {
     CRTWEB_CHECK_VIEW(view);
@@ -780,6 +1282,17 @@ crtweb_result crtweb_view_set_callbacks(crtweb_view* view, const crtweb_view_cal
         memcpy(&view->callbacks, callbacks, size);
         view->callbacks.struct_size = sizeof(crtweb_view_callbacks);
     }
+    return CRTWEB_OK;
+}
+
+crtweb_result crtweb_dialog_complete(crtweb_dialog* dialog, int accepted, const char* text_utf8)
+{
+    if (!dialog || dialog->completed)
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    if (!onOwnerThread())
+        return CRTWEB_ERROR_STATE;
+    std::string text = text_utf8 ? text_utf8 : "";
+    completeDialog(dialog, accepted != 0, &text);
     return CRTWEB_OK;
 }
 
