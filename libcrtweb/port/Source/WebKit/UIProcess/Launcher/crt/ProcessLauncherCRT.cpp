@@ -28,13 +28,13 @@
 // AuxiliaryProcessMain already speak (argv: processIdentifier, connection file descriptor).
 //
 // Where PlayStation asks its SDK to launch a .self and the GTK/WPE ports use GSubprocess, this uses
-// posix_spawn from CRT libc, so the same file serves Linux and macOS; Windows has its own
-// launcher in upstream (win/ProcessLauncherWin.cpp) and arrives with Tranche 6. A reaper thread per
+// posix_spawn from CRT libc, so the same file serves Linux, macOS and Windows. A reaper thread per
 // child collects its exit status so a killed child leaves no zombie; the UI process learns of the
 // death through the closed connection, as upstream does.
 
 #include "config.h"
 #include "ProcessLauncher.h"
+#include "WKViewCRT.h"
 
 #include "IPCUtilities.h"
 #include <errno.h>
@@ -46,6 +46,9 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <map>
+#include <mutex>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/FileSystem.h>
 #include <wtf/RunLoop.h>
 #include <wtf/Threading.h>
@@ -54,6 +57,42 @@
 #include <wtf/text/WTFString.h>
 
 extern char** environ;
+
+namespace {
+struct ChildProcesses {
+    std::mutex lock;
+    std::map<uint64_t, pid_t> running;
+};
+ChildProcesses& children()
+{
+    static NeverDestroyed<ChildProcesses> registry;
+    return registry.get();
+}
+}
+
+// Tokens are WebKit's unique process identifiers, not recyclable OS PIDs. Runtime teardown can
+// wait for its own children without touching another runtime or a process which reused a PID.
+bool WKViewCRTProcessIsRunning(uint64_t token)
+{
+    std::lock_guard<std::mutex> guard(children().lock);
+    return children().running.count(token);
+}
+size_t WKViewCRTLiveProcessTokens(uint64_t* tokens, size_t capacity)
+{
+    std::lock_guard<std::mutex> guard(children().lock);
+    size_t index = 0;
+    for (const auto& process : children().running) {
+        if (index < capacity) tokens[index] = process.first;
+        ++index;
+    }
+    return index;
+}
+void WKViewCRTTerminateProcess(uint64_t token)
+{
+    std::lock_guard<std::mutex> guard(children().lock);
+    auto found = children().running.find(token);
+    if (found != children().running.end()) kill(found->second, SIGKILL);
+}
 
 namespace WebKit {
 
@@ -117,9 +156,16 @@ void ProcessLauncher::launchProcess()
     // The child owns its copy of the client end; dropping ours lets the server see EOF when it exits.
     socketPair.client = { };
 
-    Thread::create("CRT process reaper"_s, [pid] {
+    uint64_t token = m_launchOptions.processIdentifier.toUInt64();
+    {
+        std::lock_guard<std::mutex> guard(children().lock);
+        children().running.emplace(token, pid);
+    }
+    Thread::create("CRT process reaper"_s, [pid, token] {
         int status = 0;
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+        std::lock_guard<std::mutex> guard(children().lock);
+        children().running.erase(token);
     })->detach();
 
     RunLoop::mainSingleton().dispatch([protectedThis = Ref { *this }, pid, serverIdentifier = WTF::move(socketPair.server)] mutable {

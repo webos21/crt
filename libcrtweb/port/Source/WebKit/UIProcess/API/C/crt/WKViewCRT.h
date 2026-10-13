@@ -47,6 +47,15 @@ WK_EXPORT bool WKViewCRTCopyPixels(WKViewRef view, void* pixels, uint32_t width,
 // PlayStation-shaped API; this sets both. Logical pixels.
 WK_EXPORT void WKViewCRTSetSize(WKViewRef view, uint32_t width, uint32_t height);
 
+// Internal lifecycle bridge: tokens are unique launch identifiers and remain running until reaped.
+WK_EXPORT uint64_t WKViewCRTProcessToken(WKViewRef view);
+WK_EXPORT bool WKViewCRTProcessIsRunning(uint64_t token);
+WK_EXPORT size_t WKViewCRTLiveProcessTokens(uint64_t* tokens, size_t capacity);
+WK_EXPORT void WKViewCRTTerminateProcess(uint64_t token);
+// Observes an existing network process without starting one as a side effect.
+WK_EXPORT uint64_t WKWebsiteDataStoreCRTProcessToken(WKWebsiteDataStoreRef store);
+WK_EXPORT size_t WKContextCRTProcessTokens(WKContextRef context, uint64_t* tokens, size_t capacity);
+
 // Input (milestone B6): the web surface protocol's input messages, as the contract states them
 // (libcrtweb/platform/crtweb_surface_wire.h), turned into WebKit's native events. Coordinates are
 // view-local logical pixels; `modifiers` uses the contract's bits (control 1, shift 2, alt 4, meta 8,

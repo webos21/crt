@@ -37,6 +37,7 @@ namespace crtweb {
 
 class SurfaceClient {
  public:
+  /* Takes ownership of socket_fd; destruction releases images/mappings and closes the socket. */
   explicit SurfaceClient(int socket_fd) : socket_(socket_fd) {}
   ~SurfaceClient() {
     image_.reset();
@@ -44,6 +45,7 @@ class SurfaceClient {
     for (Buffer& buffer : buffers_) {
       if (buffer.map != nullptr) munmap(buffer.map, buffer.size);
     }
+    if (socket_ >= 0) ::close(socket_);
   }
   SurfaceClient(const SurfaceClient&) = delete;
   SurfaceClient& operator=(const SurfaceClient&) = delete;

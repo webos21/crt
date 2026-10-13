@@ -35,6 +35,9 @@
 #include "WebPageMessages.h"
 #include "WebPageProxy.h"
 #include "WebProcessProxy.h"
+#include "WebProcessPool.h"
+#include "WebsiteDataStore.h"
+#include "NetworkProcessProxy.h"
 #include <WebCore/IntRect.h>
 #include <WebCore/Region.h>
 #include <string.h>
@@ -47,6 +50,29 @@ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
 #include <skia/core/SkCanvas.h>
 #include <skia/core/SkImageInfo.h>
 WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
+
+uint64_t WKWebsiteDataStoreCRTProcessToken(WKWebsiteDataStoreRef store)
+{
+    auto* network = WebKit::toImpl(store)->networkProcessIfExists();
+    return network ? network->coreProcessIdentifier().toUInt64() : 0;
+}
+
+uint64_t WKViewCRTProcessToken(WKViewRef view)
+{
+    auto* page = WebKit::toImpl(view)->page();
+    return page ? page->legacyMainFrameProcess().coreProcessIdentifier().toUInt64() : 0;
+}
+
+size_t WKContextCRTProcessTokens(WKContextRef context, uint64_t* tokens, size_t capacity)
+{
+    const auto& processes = WebKit::toImpl(context)->processes();
+    size_t index = 0;
+    for (const auto& process : processes) {
+        if (index < capacity) tokens[index] = process->coreProcessIdentifier().toUInt64();
+        ++index;
+    }
+    return index;
+}
 
 bool WKViewCRTCopyPixels(WKViewRef viewRef, void* pixels, uint32_t width, uint32_t height, size_t strideBytes)
 {

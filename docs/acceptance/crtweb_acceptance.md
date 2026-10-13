@@ -1,14 +1,10 @@
 # crtweb Acceptance (Stage `06-web`)
 
-**Status: in progress -- Tranches 0-2 are closed and Tranche 3 is active.
-JavaScriptCore passes the interpreter, Baseline/DFG/FTL tiers, WebAssembly and
-sampling-profiler acceptance on all four acceptance host/architecture pairs;
-the pristine WPE 2.54.0 reference renders the accepted fixture on Linux/x86_64.
-The `PlatformCRT` product port now has its source/licensing gate, JSC skeleton,
-dependency set and WebCore/PAL graph accepted across the four pairs (B0-B3),
-and its UI/Web/Network process launch plus IPC foundation accepted on
-Linux/x86_64 (B4). B5 first render is next. The public `crtweb` API and packaged
-`06-web` SDK do not exist yet; W^X remains separate hardening.** Detailed contract and tranche order for the
+**Status: in progress. Tranches 0-4 are closed, including the public `crtweb`
+API and `crtui` WebView on Linux/x86_64, macOS/arm64 and Windows/x64.
+Tranche 5 is closed on Linux/x86_64 with public-API/process lifecycle acceptance;
+Tranches 6-7 replay its new gates on Windows and macOS. A packaged `06-web`
+SDK follows in Tranche 10.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](../porting/crtweb_porting.md). Evidence is recorded
@@ -1753,20 +1749,79 @@ outside v1. The replay deliberately did not change the Web process model (GPU, r
 
 ### 5. Multi-process lifecycle
 
-UIProcess with WebProcess, NetworkProcess, and GPUProcess (GPUProcess is on by default in the WPE port): launch through WebKit's `ProcessLauncher`/`AuxiliaryProcess` on CRT PAL primitives (not `WPEProcessManager`, which is Android-only), IPC, clean
-shutdown, forced WebProcess termination and recovery/reload, 100x view
-create/destroy, navigation while resizing, resource-leak audit. Closing this on
-Linux is the proof that the port's architecture holds.
+**Closed on Linux/x86_64, 2026-10-13.** Windows/x64 and macOS/arm64 replay the
+new gates in Tranches 6-7; their earlier B4-B7/Tranche 4 evidence is retained.
+
+UIProcess with WebProcess and NetworkProcess: launch through WebKit's
+`ProcessLauncher`/`AuxiliaryProcess` on CRT PAL primitives, IPC, clean shutdown,
+forced WebProcess termination and recovery/reload, 100x view create/destroy,
+navigation while resizing and resource-leak audit. GPUProcess joins this contract
+when Tranche 9 enables GPU rendering; it is disabled in the accepted CPU port.
+
+The public-API gate is `libcrtweb/tests/webkit/crtweb_api_lifecycle_test.cpp`,
+built and run by the existing `tools/build_webkit_crt_port.py --webkit --run-tests`
+entry point alongside B3-C8. It includes only the public `crtweb` header and the
+test-owned process/resource observer, and requires:
+
+- Three forced WebProcess deaths, one callback per death, a replacement PID,
+  reload on the same view and exact canvas/background pixels at the final extent.
+  After death, frame copy must return `CRTWEB_WOULD_BLOCK` without modifying the
+  destination. Recovery policy belongs to the application.
+- Cooperative shutdown and shutdown of an infinite JavaScript loop, both below
+  five seconds, with all owned children reaped when destruction returns.
+  Destroying one busy runtime leaves a sibling runtime usable.
+- Twenty launch-in-flight shutdowns before the first pump.
+- One hundred runtime/view create/load/resize/paint/destroy cycles, alternating
+  explicit view destruction with runtime-owned destruction, with script work
+  pending at teardown. No callback reaches the retired view. Every cycle leaves
+  no owned child; on Linux the observer counts zombies as remaining children.
+- After ten warm-up cycles, RSS growth <=24 MiB, thread growth <=2, and open
+  descriptor/handle growth <=2. Missing resource observations fail acceptance.
+
+`crtweb_webview_test` also kills the WebProcess children of its owned host after
+cross-site navigation (including cached/prewarmed processes), receives the
+termination event and reloads/composes a fresh frame three times. It then runs
+twenty host launch/load/resize/shutdown cycles, with child and consumer resource
+bounds. The existing B7 static and runtime Host ABI audits remain part of the
+combined gate. The policy is in [`libcrtweb_api_policy.md`](../design/libcrtweb_api_policy.md).
+
+Reproduce on the Linux acceptance tree:
+
+```sh
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root out/linux-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/linux-host-ninja-debug/port-tests/install \
+  --work-root out/web-crt-webcore --reuse-tree --webkit --run-tests -j 8
+```
+
+The combined result is written to `out/web-crt-webcore/acceptance-b3.json`;
+`crtweb_api_lifecycle_test` defaults to the required 100 cycles (an optional
+numeric argument >=12 is only a diagnostic shortened run). The accepted public
+run grew RSS by 28 KiB after warm-up, with +0 threads and +0 descriptors.
+Internal B7's 100 cycles grew RSS by 228 KiB, with +0 threads and +0 descriptors;
+WebView's twenty host cycles grew +0 KiB RSS, +0 threads and +0 descriptors.
+All eight entries of the combined B3-C8/Tranche 5 result passed, including the
+static/runtime Host ABI audits and public header/export boundary.
+WebView recovery also covers the previously accepted cookie/download/popup/IME
+path before killing the host's cached and active WebProcess children.
 
 ### 6. Windows/x64 replay
 
+B4-B7 and Tranche 4 are already replayed. The remaining gate is the new Tranche 5
+public API/WebView recovery and teardown suite, using the same driver and
+resource/Host ABI audits; its observer counts native handles instead of Linux fds.
+
 The same WebKit and `PlatformCRT` on the CRT PAL (not a WPE-for-Windows
 effort). Focus on process spawning, IPC handles, shared memory, executable
-pages, fonts, basic key/pointer input (IME is deferred past v1), TLS and DLL
+pages, fonts, basic key/pointer input, TLS and DLL
 boundaries. D3D12 surface integration belongs to Tranche 9, after the
 shared-memory render/input path is accepted.
 
 ### 7. macOS/arm64 replay
+
+B4-B7 and Tranche 4 are already replayed. Replay the new Tranche 5 lifecycle gates,
+including late session-cleanup launches, sibling-runtime isolation, descriptor
+counts and the static/runtime Host ABI audits.
 
 Same WebKit, same `PlatformCRT`, same `libcrtweb` API. Apple's native WebKit
 framework is deliberately not used as a shortcut -- that would not be a

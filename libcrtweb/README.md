@@ -7,12 +7,14 @@ upstream mapping: [`docs/porting/crtweb_porting.md`](../docs/porting/crtweb_port
 
 **Status: bring-up.** Web Tranches 0-3 are closed on Linux/x86_64, macOS/arm64 and Windows/x64
 (`PlatformCRT` renders, takes input and survives 100x create/destroy; JavaScriptCore is accepted on all
-four acceptance pairs). Tranche 4 is in progress on Linux/x86_64 (several runtimes, website data, downloads,
-popups, dialogs and IME are in): the public C API `crtweb`
+four acceptance pairs). Tranche 4 is closed on Linux/x86_64, macOS/arm64 and Windows/x64:
+the public C API `crtweb`
 (`include/crtweb/crtweb.h`, `src/crtweb.cpp` -> `libcrtweb.so`), the out-of-process `crtweb_host`
 (`tools/crtweb_host.cpp`) and the `crtui` WebView `crtweb::WebView` (`include/crtweb/webview.h`) over
 the web surface protocol and its control extension. A packaged `06-web` SDK does not exist yet
 (Tranche 10); W^X remains separate hardening.
+Current lifecycle work and replay order are tracked in [`TODO.md`](../TODO.md);
+the process/recovery contract and measured results are owned by Web acceptance.
 
 ## Layout
 
@@ -29,6 +31,9 @@ the web surface protocol and its control extension. A packaged `06-web` SDK does
 - `tests/webcore/` and `tests/webkit/` -- product-port graph/paint/text and
   multi-process acceptance programs used by B3 and B4. Driver:
   `tools/build_webkit_crt_port.py`.
+  `crtweb_api_lifecycle_test` covers public API recovery, shutdown, navigation while
+  resizing and 100x runtime/view cycles; `tests/platform-crt/webview_test.cc` covers
+  recovery and resource ownership through the `crtui` WebView and its host.
 - `tests/wpe-reference/` -- the Tranche 2 native Linux fixture and headless WPE
   harness. It is deliberately a host program, not a CRT program.
 - `port/` -- the CRT-owned files of the `PlatformCRT` port, mirroring the WebKit tree (`Source/cmake/

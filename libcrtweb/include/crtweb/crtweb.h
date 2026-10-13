@@ -78,8 +78,9 @@ typedef struct crtweb_runtime_config {
  * the first view. */
 CRTWEB_API crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_runtime** out_runtime);
 
-/* Destroys every remaining view first. Waits (bounded, a few seconds) for the Web process of each
- * to exit. */
+/* Destroys every remaining view first. Waits up to two seconds for owned Web/Network processes to
+ * exit, then terminates unresponsive children and waits up to two more seconds for reaping.
+ * A Network process shared with another live runtime is left with that runtime. */
 CRTWEB_API void crtweb_runtime_destroy(crtweb_runtime* runtime);
 
 /* Runs the web event loop on the calling (owning) thread: IPC, page work, painting notifications,
@@ -267,7 +268,9 @@ typedef struct crtweb_view_callbacks {
   /* A main-frame navigation is about to start. Return non-zero to allow it, 0 to cancel it.
    * Without this callback every navigation is allowed. */
   int (*on_navigation_request)(crtweb_view* view, const char* url_utf8, void* user_data);
-  /* The Web process of this view crashed or was killed; the page is blank until a new load. */
+  /* The Web process of this view crashed or was killed. Reported once per termination; frame copy
+   * returns WOULD_BLOCK until a new paint. The same view supports reload/load_url/load_html for
+   * recovery, including from this callback. The application chooses whether/what to reload. */
   void (*on_process_terminated)(crtweb_view* view, void* user_data);
 
   /* A response that is not shown (an attachment or a type the engine cannot display) is a download.

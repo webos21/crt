@@ -78,6 +78,7 @@ struct crtweb_runtime {
     std::string applicationName;
     std::vector<crtweb_view*> views;
     std::vector<DataOperation*> operations;
+    std::vector<uint64_t> processTokens;
     uint32_t nextDownloadId { 0 };
 };
 
@@ -329,6 +330,9 @@ void webProcessDidCrash(WKPageRef, const void* clientInfo)
     if (!view || view->terminatedReported)
         return;
     view->terminatedReported = true;
+    view->painted = false;
+    view->damaged = false;
+    view->composing = false;
     gActivity = true;
     if (view->callbacks.on_process_terminated)
         view->callbacks.on_process_terminated(view, view->callbacks.user_data);
@@ -337,7 +341,8 @@ void webProcessDidCrash(WKPageRef, const void* clientInfo)
 void setViewNeedsDisplay(WKViewRef, WKRect, const void* clientInfo)
 {
     if (crtweb_view* view = viewFrom(clientInfo))
-        view->damaged = true;
+        if (!view->terminatedReported)
+            view->damaged = true;
 }
 
 // Result of WKPageEvaluateJavaScript: the page's value as WebKit's API objects (string, number, boolean,
@@ -692,6 +697,7 @@ void detach(crtweb_view* view)
         }
     }
     view->callbacks = { };
+    WKPageClose(view->page);
 }
 
 void release(crtweb_view* view)
@@ -707,6 +713,25 @@ void runLoopPass()
 {
     WKRunLoopCallOnMainThread([](void*) { WKRunLoopStopMain(); }, nullptr);
     WKRunLoopRunMain();
+}
+
+void rememberProcesses(crtweb_runtime* runtime)
+{
+    auto remember = [&](uint64_t token) {
+        if (token && std::find(runtime->processTokens.begin(), runtime->processTokens.end(), token)
+            == runtime->processTokens.end()) runtime->processTokens.push_back(token);
+    };
+    // Forget completed launches so a long-lived browser retains no unbounded PID/token history.
+    auto& tokens = runtime->processTokens;
+    tokens.erase(std::remove_if(tokens.begin(), tokens.end(), [](uint64_t token) {
+        return !WKViewCRTProcessIsRunning(token);
+    }), tokens.end());
+    for (auto* view : runtime->views)
+        remember(WKViewCRTProcessToken(view->view));
+    std::vector<uint64_t> pool(WKContextCRTProcessTokens(runtime->context, nullptr, 0));
+    WKContextCRTProcessTokens(runtime->context, pool.data(), pool.size());
+    for (uint64_t token : pool) remember(token);
+    remember(WKWebsiteDataStoreCRTProcessToken(runtime->dataStore));
 }
 
 void pollState(crtweb_view* view)
@@ -939,6 +964,7 @@ crtweb_result crtweb_runtime_pump(crtweb_runtime* runtime, uint32_t timeout_ms)
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     for (;;) {
         runLoopPass();
+        for (auto* each : gRuntimes) rememberProcesses(each);
         // Views may be created, destroyed or reloaded from callbacks: iterate a copy and skip the
         // ones that went away.
         std::vector<crtweb_view*> snapshot;
@@ -972,9 +998,17 @@ void crtweb_runtime_destroy(crtweb_runtime* runtime)
 {
     if (!runtime || !knownRuntime(runtime) || !onOwnerThread() || gPumping)
         return;
+    rememberProcesses(runtime);
+    std::vector<uint64_t> foreignTokens(WKViewCRTLiveProcessTokens(nullptr, 0));
+    foreignTokens.resize(WKViewCRTLiveProcessTokens(foreignTokens.data(), foreignTokens.size()));
+    for (uint64_t owned : runtime->processTokens)
+        foreignTokens.erase(std::remove(foreignTokens.begin(), foreignTokens.end(), owned), foreignTokens.end());
     std::vector<crtweb_view*> views = runtime->views;
     for (crtweb_view* view : views)
         crtweb_view_destroy(view);
+    // Closing an in-flight page can initialize its store's NetworkProcess. Capture that launch
+    // after page close as well, before releasing the context/store which owns the process proxy.
+    rememberProcesses(runtime);
     for (DataOperation* operation : runtime->operations)
         operation->runtime = nullptr; // its WebKit callback still arrives and frees it
     runtime->operations.clear();
@@ -984,11 +1018,50 @@ void crtweb_runtime_destroy(crtweb_runtime* runtime)
     WKRelease(runtime->dataStore);
     runtime->dataStore = nullptr;
     gRuntimes.erase(std::remove(gRuntimes.begin(), gRuntimes.end(), runtime), gRuntimes.end());
-    // The Web process exits on its own once nothing references it; let the run loop deliver that.
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
-    while (std::chrono::steady_clock::now() < deadline) {
+    // WebKit may share its default NetworkProcess across website data stores. A surviving runtime
+    // owns that launch too; closing one runtime must neither wait for it nor terminate it.
+    auto refreshOwnership = [&] {
+        for (auto* other : gRuntimes) {
+            rememberProcesses(other);
+            for (uint64_t shared : other->processTokens) {
+                auto& tokens = runtime->processTokens;
+                tokens.erase(std::remove(tokens.begin(), tokens.end(), shared), tokens.end());
+                if (std::find(foreignTokens.begin(), foreignTokens.end(), shared) == foreignTokens.end())
+                    foreignTokens.push_back(shared);
+            }
+        }
+        // Deferred page/session cleanup can launch a NetworkProcess after its data store has been
+        // released. The launcher registry still owns that child. Include new launches while excluding
+        // every launch which predated teardown or belongs to a surviving runtime's pool/store.
+        std::vector<uint64_t> live(WKViewCRTLiveProcessTokens(nullptr, 0));
+        live.resize(WKViewCRTLiveProcessTokens(live.data(), live.size()));
+        for (uint64_t token : live)
+            if (std::find(foreignTokens.begin(), foreignTokens.end(), token) == foreignTokens.end()
+                && std::find(runtime->processTokens.begin(), runtime->processTokens.end(), token) == runtime->processTokens.end())
+                runtime->processTokens.push_back(token);
+    };
+    refreshOwnership();
+    auto running = [&] {
+        return std::any_of(runtime->processTokens.begin(), runtime->processTokens.end(), WKViewCRTProcessIsRunning);
+    };
+    // Give cooperative close two seconds, then terminate only this runtime's still-owned launches.
+    // The reaper's token retires after waitpid, so socket EOF alone cannot masquerade as teardown.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    runLoopPass();
+    refreshOwnership();
+    while (running() && std::chrono::steady_clock::now() < deadline) {
         runLoopPass();
+        refreshOwnership();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    if (running()) {
+        for (uint64_t token : runtime->processTokens) WKViewCRTTerminateProcess(token);
+        deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (running() && std::chrono::steady_clock::now() < deadline) {
+            runLoopPass();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        if (running()) fprintf(stderr, "crtweb: child reaping exceeded shutdown deadline\n");
     }
     delete runtime;
 }
@@ -1043,6 +1116,7 @@ void crtweb_view_destroy(crtweb_view* view)
     if (!view || view->destroyed || !onOwnerThread())
         return;
     crtweb_runtime* runtime = view->runtime;
+    rememberProcesses(runtime);
     view->destroyed = true;
     for (size_t i = 0; i < runtime->views.size(); ++i) {
         if (runtime->views[i] == view) {

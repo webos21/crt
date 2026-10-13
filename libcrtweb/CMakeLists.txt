@@ -1,7 +1,7 @@
-# libcrtweb (06-web). Not a library yet: Tranche 3A only adds the consumer-side test of the frozen
-# frame-producer/input contracts (docs/acceptance/crtweb_acceptance.md, Tranche 3). The WebKit
-# side (the "crt" WPEPlatform module, the JSC and WPE reference builds) is built by
-# tools/build_webkit_*.py against the native WPE build, not by this CMake project.
+# libcrtweb (06-web). This in-tree project owns the wire/consumer tests for the external-surface
+# contract. libcrtweb, crtweb_host and the WebKit-side gates are built separately by
+# tools/build_webkit_crt_port.py against the installed CRT SDK; the native WPE reference and
+# prototype have their own tools/build_webkit_wpe_*.py entry points.
 # The frozen wire contract's sizes, offsets and numbers are checked on every host (plain C, no socket).
 add_crt_test(crtweb_wire_layout_test tests/platform-crt/wire_layout_test.c)
 target_include_directories(crtweb_wire_layout_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/platform")

@@ -101,6 +101,7 @@ void onFrame(crtweb_view*, uint64_t, void*)
 
 void onTerminated(crtweb_view*, void*)
 {
+    gFrameReady = false;
     sendEvent(CRTWEB_EVENT_PROCESS_TERMINATED, 0, 0, std::string());
 }
 

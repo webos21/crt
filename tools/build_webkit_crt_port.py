@@ -238,7 +238,9 @@ def run_program(name: str, build: Path, sdk: Path, prefix: Path, work: Path, env
         run_env[variable] = os.pathsep.join(
             [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
     # Run in the work directory: the Network process keeps its cookie jar in the current directory.
-    completed = jsc.run([str(program)], env=run_env, cwd=work, check=False, capture=True)
+    # A lifecycle failure must not leave the acceptance driver blocked forever.
+    completed = subprocess.run([str(program)], env=run_env, cwd=work, check=False,
+                               capture_output=True, text=True, timeout=900 if "lifecycle" in name else 300)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     audit = (audit_program_native(program, sdk, prefix, build, target_os)
@@ -623,7 +625,7 @@ def main() -> int:
     if args.configure_only:
         return 0
     tests = ["crtweb_webcore_graph_test"] + (["crtweb_process_test"] if args.webkit else []) \
-        + (["crtweb_api_test"] if args.webkit and target_os in ("linux", "macos", "windows") else [])
+        + (["crtweb_api_test", "crtweb_api_lifecycle_test"] if args.webkit and target_os in ("linux", "macos", "windows") else [])
     if args.run_tests and not args.target:
         args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host", "crtweb_lifecycle_test"]
                                           if args.webkit else []) \
@@ -648,7 +650,7 @@ def main() -> int:
     passed = all(r["passed"] for r in results.values())
     (work / "acceptance-b3.json").write_text(json.dumps(
         {"passed": passed, "programs": results}, indent=2) + "\n", encoding="utf-8")
-    print("B3-C8 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
+    print("B3-C8/Tranche 5 gate:", "PASSED" if passed else "FAILED", {k: v["passed"] for k, v in results.items()})
     return 0 if passed else 1
 
 

@@ -11,6 +11,60 @@ substantive update.
 
 ## 2026-10-13
 
+### Web Tranche 5 closed on Linux/x86_64: public API recovery and bounded process teardown
+
+The combined `tools/build_webkit_crt_port.py --webkit --run-tests` gate now runs
+`crtweb_api_lifecycle_test`, built against the public header and `libcrtweb` alone,
+alongside the accepted B3-C8, internal B7 and `crtui` WebView gates. Three forced
+WebProcess deaths recover by reloading the same view into a replacement PID,
+with exact canvas/background pixels at the new size. Twenty runtimes destroyed
+before their first pump leave no live child or zombie. A busy infinite script
+is retired without a late callback; destroying that runtime preserves its sibling.
+One hundred create/load/resize/paint/destroy cycles, alternating explicit view
+destruction with runtime-owned destruction and with scripts still pending at close,
+leave no child. Every destruction is bounded below five seconds. The public API
+run's post-warm-up growth is **+28 KiB RSS, +0 threads, +0 descriptors**.
+
+The `crtui` WebView gate also terminates the active and cached/prewarmed WebProcess
+children of its owned host after the cookie/download/popup/IME tests, receives
+exactly one termination event and reloads/composes a fresh frame three times. Its
+twenty host launch/load/resize/shutdown cycles grow **+0 KiB RSS, +0 threads,
++0 descriptors**. Internal B7 still passes 100 cycles (**+228 KiB RSS, +0 threads,
++0 descriptors**); static and runtime Host ABI audits, header/export privacy, B5
+render, B6 input and the previous public API gate all pass. The wire-layout,
+transport and surface CTests pass 3/3; JSC/licensing driver tests pass 18/18, and
+the patch manifest still validates 22 carried patches/62 modified upstream
+files/18 CRT-owned overlay files. No upstream patch or PAL ABI was added.
+
+The new tests found and resolved these ownership/lifetime defects:
+
+- A dead view still advertised its previous backing-store picture as a valid
+  frame. Crash handling now invalidates paint/damage/composition state; frame
+  copy returns `CRTWEB_WOULD_BLOCK` until a new paint. `crtweb_host` also retires
+  its pending-frame flag when it reports the termination event.
+- Runtime destruction slept for 300 ms and returned while an unresponsive WebProcess
+  remained. The CRT launcher now registers unique WebKit launch tokens and retires
+  each only after its reaper's `waitpid` completes. The runtime tracks the page and
+  whole process pool, including cached/prewarmed children, closes each page explicitly,
+  waits two seconds for cooperative shutdown, then terminates unresponsive owned
+  launches and waits up to two more seconds for reaping. Other runtimes' launches,
+  including a shared NetworkProcess, are excluded.
+- Launch-in-flight teardown exposed a subtler case: deferred session cleanup can
+  start a NetworkProcess after context/store release. The shutdown loop refreshes
+  the launcher registry, includes these new launches and excludes launches which
+  predated teardown or belong to a surviving runtime. Observing only the view's
+  PID or its store before release missed that short-lived child.
+- `SurfaceClient` released its images/mappings but never closed its owned connection
+  socket. Its destructor now closes the descriptor after image/buffer retirement,
+  so repeated WebView host shutdown does not accumulate consumer connections.
+
+Reproduction and the frozen bounds are in
+[`docs/acceptance/crtweb_acceptance.md`](docs/acceptance/crtweb_acceptance.md), Tranche 5;
+the run writes `out/web-crt-webcore/acceptance-b3.json` and the local log is
+`out/web-crt-webcore/tranche5-gate.log`. Windows/x64 and macOS/arm64 must replay
+these new gates in Tranches 6-7; their already-completed B4-B7/Tranche 4 evidence
+is preserved. GPUProcess remains deferred until Tranche 9 enables GPU rendering.
+
 ### Web Tranche 4 replayed on Windows/x64: DLL constructors, POSIX record locks and two boundary spellings; Tranche 4 closed
 
 `tools/build_webkit_crt_port.py --webkit --run-tests` on Windows builds `libcrtweb.dll`, `crtweb_host.exe` and

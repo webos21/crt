@@ -17,8 +17,10 @@ public header, an exported symbol or a dependency of the SDK's consumer-facing l
 
 ## Model
 
-- **Runtime.** At most one per process in v1. It owns the shared machinery: the Network
-  process, website data, the web event loop. Web processes start lazily with the first view.
+- **Runtime.** Several per process in v1, each with its own website data store and process pool.
+  All belong to the first runtime's creating thread and share the web event loop. The engine can
+  share a Network process across stores; destroying one runtime preserves another's live launches.
+  Web processes start lazily with the first view.
 - **View.** One page: navigation history, size, focus, painted picture. Any number per runtime.
 - **Pumping.** WebKit's work happens on the thread that created the runtime and only while the
   application calls `crtweb_runtime_pump()`. Every callback is delivered from inside a pump, on that
@@ -53,6 +55,20 @@ public header, an exported symbol or a dependency of the SDK's consumer-facing l
    libcurl and SQLite inside the engine take only `/`-rooted absolute paths. Other path arguments (a download
    destination) are passed through as given.
 
+8. **Termination and recovery.** `on_process_terminated` reports a WebProcess death once. The view
+   handle and navigation history survive; the application chooses `reload`, `load_url` or
+   `load_html`, including from the callback. Recovery creates a replacement WebProcess and paints
+   through the existing frame/input contract. Frame copy returns `CRTWEB_WOULD_BLOCK` after death
+   until a fresh picture is available; a separate-process WebView may keep its last composed image.
+   Reloading an inline `load_html` document's `about:blank` URL does not recreate its original HTML;
+   the application resubmits that HTML with `load_html`.
+9. **Shutdown.** View destruction detaches callbacks, cancels pending dialogs/downloads and closes
+   the page, including pending navigation/launch work. Runtime destruction tracks all owned launch
+   tokens, including cached/prewarmed WebProcesses, gives cooperative exit two seconds, then kills
+   unresponsive owned children and waits up to two more seconds for their reaper. Tokens identify a
+   launch rather than a recyclable OS PID. A shared NetworkProcess belongs to the surviving
+   runtime. `crtui` WebView shutdown also closes its owned surface-protocol socket and reaps its host.
+
 ## Scope of v1, and deliberate limits
 
 Part of v1 (Tranche 4, milestones C4-C8; the acceptance document owns the evidence): several runtimes
@@ -62,8 +78,7 @@ destination and sees progress and the result); popups (`window.open`, `window.cl
 JavaScript dialogs (alert, confirm, prompt) answered by the application; and IME (composition and
 commit of arbitrary UTF-8).
 
-Not in v1, recorded so they are decisions, not omissions: device scale other than 100 %; multi-process
-crash *recovery* (the application is told with `on_process_terminated`, Tranche 5 owns recovery);
+Not in v1, recorded so they are decisions, not omissions: device scale other than 100 %;
 authentication challenges, permission prompts (geolocation, camera, notifications), file pickers and
 context menus; a JavaScript message channel (only `crtweb_view_evaluate_script`); accessibility.
 Each is a later addition to this header, not a reason to expose a WebKit object.

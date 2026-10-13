@@ -11,6 +11,7 @@
 
 #include "../common/crtweb_test_fs.h"
 #include "../common/crtweb_test_http_server.h"
+#include "../common/crtweb_test_process.h"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImageInfo.h"
@@ -19,6 +20,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -371,9 +373,79 @@ extern "C" int main() {
             web.surface()->frame_height(), static_cast<unsigned long long>(web.frame_serial()), web.running() ? 1 : 0);
   check(resized, "frame at the new size");
 
+  /* Tranche 5: kill the actual WebProcess behind crtweb_host, receive the termination event,
+   * reload through the public control channel and compose a new frame. */
+  unsigned terminated = 0;
+  web.on_terminated = [&] { ++terminated; };
+  check(web.load_url("file://" + page_a), "recovery page URL sent");
+  check(pump_until([&] { return seen.title == "view a"; }), "recovery page loaded");
+  auto host_children = [&] {
+    std::vector<crtweb_test::Process> result;
+    for (const auto& child : crtweb_test::children())
+      if (child.name == "crtweb_host") result.push_back(child);
+    return result;
+  };
+  auto web_pids = [&](pid_t parent) {
+    std::vector<pid_t> found;
+    for (const auto& child : crtweb_test::children(parent))
+      if (child.name == "WebProcess") found.push_back(child.pid);
+    return found;
+  };
+  auto hosts = host_children();
+  check(hosts.size() == 1, "one owned host for recovery");
+  if (hosts.size() == 1) {
+    for (unsigned i = 0; i < 3; ++i) {
+      auto loads_finished = [&] {
+        unsigned count = 0;
+        for (const auto& load : seen.loads) if (load.compare(0, 2, "3:") == 0) ++count;
+        return count;
+      };
+      unsigned finished_before = loads_finished();
+      // Earlier cross-site navigation can leave cached/prewarmed WebProcesses. Terminate all Web
+      // children of this owned host so the current page, rather than an idle cached process, dies.
+      auto old = web_pids(hosts[0].pid);
+      check(!old.empty(), "WebView has a WebProcess");
+      for (pid_t pid : old) check(kill(pid, SIGKILL) == 0, "kill WebView's WebProcess");
+      check(pump_until([&] { return terminated == i + 1; }), "WebView termination callback exactly once");
+      uint64_t serial = web.frame_serial();
+      check(web.reload(), "reload after termination sent");
+      check(pump_until([&] { return loads_finished() > finished_before && web.frame_serial() > serial
+          && near_rgb(pixel(40 + 20, 20 + 20), 255, 255, 255); }), "recovered WebView repaints");
+      auto replacement = web_pids(hosts[0].pid);
+      check(!replacement.empty(), "WebView replacement WebProcess");
+      for (pid_t pid : replacement)
+        check(std::find(old.begin(), old.end(), pid) == old.end(), "WebView uses a new WebProcess PID");
+      printf("crtweb_webview_test: recovery %u terminated=%u killed=%zu replacement=%zu\n", i + 1,
+          terminated, old.size(), replacement.size());
+    }
+  }
+
   /* ---- shutdown ---- */
   web.shutdown();
   check(!web.running(), "not running after shutdown");
+  check(crtweb_test::children().empty(), "host reaped after shutdown");
+
+  /* The consumer also repeats launch/load/resize/shutdown: descriptor and SHM ownership must not
+   * accumulate in the crtui application even though each browser runtime lives in its own host. */
+  auto baseline = crtweb_test::resources();
+  for (unsigned i = 0; i < 20; ++i) {
+    check(web.launch(host, 100, 75), "repeat host launch");
+    seen.title.clear();
+    web.load_url("file://" + page_a);
+    web.resize(120, 90);
+    check(pump_until([&] { return seen.title == "view a" && web.surface()->frame_width() == 120
+        && web.surface()->frame_height() == 90; }), "repeat load/resize frame");
+    web.shutdown();
+    check(crtweb_test::children().empty(), "repeat host reaped");
+    if (failures) break;
+  }
+  auto final = crtweb_test::resources();
+  printf("crtweb_webview_test: lifecycle 20 cycles: rss=%+ld KiB threads=%+ld descriptors=%+ld\n",
+      final.memoryKiB - baseline.memoryKiB, final.threads - baseline.threads, final.descriptors - baseline.descriptors);
+  check(baseline.memoryKiB >= 0 && baseline.threads >= 0 && baseline.descriptors >= 0, "consumer resource observations available");
+  check(final.descriptors >= 0 && final.descriptors - baseline.descriptors <= 2, "consumer descriptors/handles bounded");
+  check(final.threads >= 0 && final.threads - baseline.threads <= 2, "consumer threads bounded");
+  check(final.memoryKiB >= 0 && final.memoryKiB - baseline.memoryKiB <= 24 * 1024, "consumer RSS growth bounded");
   crtui_context_destroy(scene.ui);
   unlink(page_a.c_str());
   unlink(page_b.c_str());

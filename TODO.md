@@ -127,18 +127,13 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **C8:** IME: composition, commit of arbitrary UTF-8 (Hangul), cancel.
   * [x] **C3:** replay `crtweb_api_test` and `crtweb_webview_test` (and C4-C8) on macOS/arm64
     and Windows/x64: macOS/arm64 and Windows/x64 replayed (2026-10-13).
-* [ ] **5. Multi-process lifecycle.** B4 proves the initial Linux process/IPC
-  foundation; the complete lifecycle remains.
-  * [ ] Clean shutdown, forced WebProcess termination and recovery/reload.
-  * [ ] Navigation while resizing and 100x view create/destroy with leak/resource audit.
-  * [ ] Add GPUProcess only when Tranche 9 enables the GPU path.
-* [ ] **6. Windows/x64 replay.** B1-B3 prerequisites are green.
-  * [ ] Replay B4-B7 with Windows process launch, IPC handles and shared memory.
-  * [ ] Validate fonts, basic pointer/key input, TLS and DLL boundaries.
-* [ ] **7. macOS/arm64 replay.** B1-B3 prerequisites are green.
-  * [ ] Replay B4-B7 with the same `PlatformCRT` and public API, without native
-    WebKit framework shortcuts.
-  * [ ] Validate process/IPC behavior, fonts and basic input.
+* [x] **5. Multi-process lifecycle.** Closed on Linux/x86_64 2026-10-13:
+  public API recovery, bounded teardown and 100x runtime/view cycles; evidence
+  in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`. GPUProcess joins in Tranche 9.
+* [ ] **6. Windows/x64 replay.** B4-B7 and Tranche 4 are green; replay the new
+  Tranche 5 public API/WebView lifecycle gates and their resource/Host ABI audits.
+* [ ] **7. macOS/arm64 replay.** B4-B7 and Tranche 4 are green; replay the new
+  Tranche 5 public API/WebView lifecycle gates with the same `PlatformCRT` port.
 * [ ] **8. CRT subsystem substitution.** Only after a working browser.
   * [ ] Replace the reference network backend with CRT networking.
   * [ ] Replace media playback and capture independently with `crtmedia`.
