@@ -1649,7 +1649,7 @@ Policy and rules: [`libcrtweb_api_policy.md`](../design/libcrtweb_api_policy.md)
 | **C6** (done) | Downloads: request callback with the destination decision, progress, result | a `Content-Disposition: attachment` response is saved byte-for-byte; cancel and failure are reported |
 | **C7** (done) | Popups and dialogs: `window.open`/`window.close`, alert/confirm/prompt answered by the application | a popup is vetoed or adopted as a new view; dialog results reach the page |
 | **C8** (done) | IME: composition, commit of UTF-8 text, cancel | `compositionstart/update/end` events and a committed Hangul string in an input; through `crtweb::WebView` too |
-| C3 | Host replays (C0-C8): macOS/arm64, Windows/x64 | the same tests (open) |
+| C3 | Host replays (C0-C8): macOS/arm64, Windows/x64 | the same tests: **macOS/arm64 done 2026-10-13**, Windows/x64 open |
 
 *Why the WebView is out of process.* An application that uses `crtui` links its own static C runtime,
 Skia and the host window/GPU libraries (the `-Wl,--exclude-libs,ALL` static link of the SDK examples,
@@ -1720,6 +1720,23 @@ as is, no patch. *Not in v1 (decisions in `libcrtweb_api_policy.md`):* authentic
 permission prompts, file pickers and context menus, a JavaScript message channel, device scale,
 local-storage clearing, and IME candidate-window geometry (the page's caret rectangle is not
 reported back to the application).
+
+*Tranche 4 replayed on macOS/arm64 (2026-10-13).* `tools/build_webkit_crt_port.py --webkit --run-tests` builds
+`libcrtweb.dylib`, `crtweb_host` and `crtweb_api_test` and runs the whole gate: B3-B7 unchanged, `crtweb_api_test`
+(C0-C8, with the loopback HTTP server; 5/5 runs) and the in-tree `crtweb_webview_test` (a crtui window composing the
+page and driving it through `crtweb_host`; 8/8 runs), the public-header and export firewall (`libcrtweb.dylib` exports
+`crtweb_*` only, no WebKit/WPE/GLib name in the headers), and the host ABI audit of the host and the library. Four CRT
+defects and two harness defects stood between the Linux result and that, none in WebKit and no new carried patch:
+(1) `realpath()` lost the tail of a path after a symlink (`/tmp/x`, `/var/...`, `/etc/hosts` on macOS: the
+remaining components were copied from the buffer the resolution had just overwritten), which also broke the launcher's
+`readlink("/proc/self/exe")` whenever the executable was started through `/tmp`; (2) `remove()` of a symlink to a
+directory called `rmdir` (it used `stat`); (3) the macOS curl-openssl in the web prefix had been built with
+`--disable-file` (the recipe changed for `file:` URLs on Linux; the prefix must be rebuilt: `port-rebuild-curl-openssl`);
+(4) harness: the test links AppKit/Metal, whose `/usr/lib/libc++.1.dylib` dependency is replaced by the SDK's when
+`DYLD_LIBRARY_PATH` names the SDK (matching is by leaf name), putting two C++ runtimes and heaps into one process
+and crashing at exit; the gate runs this test without a loader path (`crtweb_host` has its own rpaths); (5) the driver only enabled Tranche 4 on Linux. *Not exercised on
+macOS:* the same set as Linux, and the `ctest` entry of `crtweb_webview_test` only reports "skipped" without
+`CRTWEB_HOST` (the driver's gate is the evidence).
 
 ### 5. Multi-process lifecycle
 

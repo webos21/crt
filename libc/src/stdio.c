@@ -2535,7 +2535,8 @@ int remove(const char* path) {
   /* C standard remove() must work for both files and (empty) directories;
    * unlink() alone only handles files -- dispatch to rmdir() for a
    * directory, matching how every real libc implements remove(). */
-  if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+  if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+    /* lstat, not stat: a symlink to a directory is removed as a link, never with rmdir (ENOTDIR). */
     return rmdir(path);
   }
   result = __crt_sys_unlink(path);

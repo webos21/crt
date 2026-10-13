@@ -1217,6 +1217,15 @@ static int resolve_symlink_path(
   size_t len = 0;
   size_t target_len = strlen(target);
   size_t remaining_len = strlen(remaining);
+  char rest[PATH_MAX];
+
+  /* `remaining` points into `output` (realpath resolves in place): copy it before the target and
+   * base overwrite it, or every path with a component after a symlink loses that tail. */
+  if (remaining_len + 1 > sizeof(rest)) {
+    return (int)__set_errno(ENAMETOOLONG);
+  }
+  memcpy(rest, remaining, remaining_len + 1);
+  remaining = rest;
 
   if (path_is_absolute(target)) {
     if (target_len + 1 > size) {

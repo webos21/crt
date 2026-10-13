@@ -564,6 +564,43 @@ int main(void) {
     close(fd);
     return fail("remove realpath nested");
   }
+  /* A symlink to a directory with components after it (the tail must survive the in-place resolve):
+   * "/tmp/x" on macOS is a relative link at the root, and every path through it failed. */
+  {
+    char absolute_target[PATH_MAX];
+    char cwd[PATH_MAX];
+    int tail_fd;
+
+    if (mkdir("realpath_tail", 0777) != 0 || chmod("realpath_tail", 0700) != 0 ||
+        (tail_fd = open("realpath_tail/inner.txt", O_CREAT | O_WRONLY | O_TRUNC, 0666)) < 0) {
+      close(fd);
+      return fail("realpath tail setup");
+    }
+    close(tail_fd);
+    if (symlink("realpath_tail", "realpath_tail.rel") != 0 || getcwd(cwd, sizeof(cwd)) == 0 ||
+        snprintf(absolute_target, sizeof(absolute_target), "%s/realpath_tail", cwd) >= (int)sizeof(absolute_target) ||
+        symlink(absolute_target, "realpath_tail.abs") != 0) {
+      close(fd);
+      return fail("realpath tail links");
+    }
+    memset(resolved, 0, sizeof(resolved));
+    if (realpath("realpath_tail.rel/inner.txt", resolved) == 0 ||
+        strstr(resolved, "realpath_tail/inner.txt") == 0 || strstr(resolved, ".rel") != 0) {
+      close(fd);
+      return fail("realpath through a relative directory link keeps its tail");
+    }
+    memset(resolved, 0, sizeof(resolved));
+    if (realpath("realpath_tail.abs/inner.txt", resolved) == 0 ||
+        strstr(resolved, "realpath_tail/inner.txt") == 0 || strstr(resolved, ".abs") != 0) {
+      close(fd);
+      return fail("realpath through an absolute directory link keeps its tail");
+    }
+    if (remove("realpath_tail.rel") != 0 || remove("realpath_tail.abs") != 0 ||
+        unlink("realpath_tail/inner.txt") != 0 || rmdir("realpath_tail") != 0) {
+      close(fd);
+      return fail("remove realpath tail");
+    }
+  }
   if (remove("sample.link") != 0) {
     close(fd);
     return fail("remove symlink");

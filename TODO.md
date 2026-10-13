@@ -126,7 +126,7 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **C7:** popups (`window.open`, `window.close`) and dialogs (alert, confirm, prompt).
   * [x] **C8:** IME: composition, commit of arbitrary UTF-8 (Hangul), cancel.
   * [ ] **C3:** replay `crtweb_api_test` and `crtweb_webview_test` (and C4-C8) on macOS/arm64
-    and Windows/x64.
+    and Windows/x64. macOS/arm64 replayed (2026-10-13); Windows/x64 is open.
 * [ ] **5. Multi-process lifecycle.** B4 proves the initial Linux process/IPC
   foundation; the complete lifecycle remains.
   * [ ] Clean shutdown, forced WebProcess termination and recovery/reload.

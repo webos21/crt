@@ -11,6 +11,22 @@ substantive update.
 
 ## 2026-10-13
 
+### Web Tranche 4 replayed on macOS/arm64: `realpath` lost path tails, `remove` of a directory link, and a loader-path trap
+
+The whole gate passes (`--webkit --run-tests`): B3-B7, `crtweb_api_test` (5/5), the in-tree `crtweb_webview_test`
+(8/8) against `crtweb_host`, the `libcrtweb.dylib` export/header firewall, and the host ABI audit; `ctest` 191/191.
+Found on the way, in order: the web prefix's curl was built before `file:` was enabled (rebuild; `crtweb_api_test` failed
+at the first page); the launcher inside `crtweb_host` fell back to `./WebProcess` only when the host was started
+through `/tmp`, which was **`realpath()` dropping every component after a symlink**: `resolve_symlink_path` copied the
+tail from the buffer it was already overwriting (any path through `/tmp`, `/var`, `/etc` on macOS; Linux has the same
+code); `remove()` used `stat` and so called `rmdir` on a symlink to a directory (now `lstat`); and a crash at exit
+in the in-tree test that looked like a heap bug: the test links AppKit/Metal, `DYLD_LIBRARY_PATH` names the SDK, dyld
+matches `/usr/lib/libc++.1.dylib` by leaf name and loaded the SDK's libc++ (and its libc) under the frameworks. The
+gate now runs that test with no loader path. Tests: `file_path_test` (relative and absolute directory links with a tail,
+`remove` of both). Open: Windows/x64 replay of Tranche 4. Not analysed: `Error receiving IPC message on socket N` notices
+(one with `socket -1`, one `Function not implemented`) appeared in runs with the SDK on `DYLD_LIBRARY_PATH`; none in the
+clean runs recorded here (driver log, 8 webview and 5 API runs).
+
 ### Web Tranche 4, milestones C4-C8: several runtimes, website data, downloads, popups/dialogs, IME (Linux/x86_64)
 
 `crtweb` gained runtimes with their own website data store (ephemeral, or a data directory with a
