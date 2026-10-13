@@ -103,8 +103,9 @@ def configure_command(tree: Path, build: Path, sdk: Path, prefix: Path, arch: st
         f"-DCRT_WEBCORE_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webcore'}",
         f"-DCRT_WEBKIT_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webkit'}",
     ]
-    if target_os in ("linux", "macos"):
-        # Tranche 4 (libcrtweb, crtweb_host, crtweb_api_test): Linux/x86_64, replayed on macOS/arm64.
+    if target_os in ("linux", "macos", "windows"):
+        # Tranche 4 (libcrtweb, crtweb_host, crtweb_api_test): Linux/x86_64, replayed on macOS/arm64
+        # and Windows/x64.
         options.append(f"-DCRT_LIBCRTWEB_DIR={ROOT / 'libcrtweb'}")
     command = ["cmake", "-S", str(tree), "-B", str(build), "-G", "Ninja",
                f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'crt-toolchain.cmake'}",
@@ -504,8 +505,19 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
                         re.sub(r"/\*.*?\*/|//[^\n]*", "", header.read_text(encoding="utf-8"), flags=re.S))})
     nm = shutil.which("llvm-nm") or shutil.which("nm") or "nm"
     macos = target_os == "macos"
-    library = build / "lib" / ("libcrtweb.dylib" if macos else "libcrtweb.so")
-    if macos:
+    windows = target_os == "windows"
+    exe = ".exe" if windows else ""
+    if windows:
+        candidates = sorted((build / "bin").glob("*crtweb.dll")) + sorted((build / "lib").glob("*crtweb.dll"))
+        library = candidates[0] if candidates else build / "bin" / "libcrtweb.dll"
+    else:
+        library = build / "lib" / ("libcrtweb.dylib" if macos else "libcrtweb.so")
+    if windows:
+        # PE: the export directory, by name.
+        readobj = shutil.which("llvm-readobj") or "llvm-readobj"
+        listing = jsc.run([readobj, "--coff-exports", str(library)], capture=True).stdout.splitlines()
+        exported = [line.split("Name:", 1)[1].strip() for line in listing if line.strip().startswith("Name:")]
+    elif macos:
         # Mach-O: every external defined symbol, with the leading underscore of the C symbol removed.
         listing = jsc.run([nm, "-gU", str(library)], capture=True).stdout.splitlines()
         exported = [line.split()[-1].lstrip("_") for line in listing if line.split()]
@@ -516,14 +528,14 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
     result["header_leaks"] = leaks
     result["foreign_exports"] = foreign
     build_root = sdk.parent.parent  # <preset>/dist/05-ui -> <preset>
-    test = build_root / "libcrtweb" / "crtweb_webview_test"
+    test = build_root / "libcrtweb" / ("crtweb_webview_test" + exe)
     if not test.exists() and (build_root / "build.ninja").exists():
         jsc.run(["ninja", "-C", str(build_root), "crtweb_webview_test"], env=env, check=False)
     if not test.exists():
         result["reason"] = f"{test} was not built (ninja -C {build_root} crtweb_webview_test)"
         return result
     run_env = gate_environment(build, sdk, prefix, work, env, target_os)
-    run_env["CRTWEB_HOST"] = str(build / "bin" / "crtweb_host")
+    run_env["CRTWEB_HOST"] = str(build / "bin" / ("crtweb_host" + exe))
     runs = work / "webview-run"
     runs.mkdir(exist_ok=True)
     test_env = dict(run_env)
@@ -536,7 +548,7 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
     completed = subprocess.run([str(test)], env=test_env, cwd=runs, capture_output=True, text=True, timeout=300)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
-    host_audit = jsc.host_abi_audit(sdk, prefix, build, [build / "bin" / "crtweb_host", library], run_env, target_os)
+    host_audit = jsc.host_abi_audit(sdk, prefix, build, [build / "bin" / ("crtweb_host" + exe), library], run_env, target_os)
     result.update({"returncode": completed.returncode, "output": completed.stdout.splitlines(),
                    "host_abi": {"ok": host_audit["ok"], "violations": host_audit["violations"]}})
     result["passed"] = (completed.returncode == 0 and "crtweb_webview_test: ok" in completed.stdout
@@ -611,11 +623,11 @@ def main() -> int:
     if args.configure_only:
         return 0
     tests = ["crtweb_webcore_graph_test"] + (["crtweb_process_test"] if args.webkit else []) \
-        + (["crtweb_api_test"] if args.webkit and target_os in ("linux", "macos") else [])
+        + (["crtweb_api_test"] if args.webkit and target_os in ("linux", "macos", "windows") else [])
     if args.run_tests and not args.target:
         args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host", "crtweb_lifecycle_test"]
                                           if args.webkit else []) \
-            + (["crtweb_host"] if args.webkit and target_os in ("linux", "macos") else [])
+            + (["crtweb_host"] if args.webkit and target_os in ("linux", "macos", "windows") else [])
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -631,7 +643,7 @@ def main() -> int:
         print("B5 diff:", json.dumps(results["render_through_surface_protocol"].get("diff_against_wpe_reference")))
         results["input_through_surface_protocol"] = run_input_gate(build, sdk, prefix, work, env, target_os)
         results["lifecycle_and_host_abi"] = run_lifecycle_gate(build, sdk, prefix, work, env, target_os)
-    if args.webkit and target_os in ("linux", "macos"):
+    if args.webkit and target_os in ("linux", "macos", "windows"):
         results["webview_through_crtui"] = run_webview_gate(build, sdk, prefix, work, env, target_os)
     passed = all(r["passed"] for r in results.values())
     (work / "acceptance-b3.json").write_text(json.dumps(

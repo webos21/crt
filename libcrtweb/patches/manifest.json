@@ -603,6 +603,23 @@
       ],
       "reason": "Non-Cocoa builds have no input-method entry points in the Web process (GTK/WPE drive composition through key events with an input-method context). Three messages hand the embedder's composition state straight to the focused frame's editor: marked text, commit, and plain insertion of arbitrary UTF-8 (the US-layout key mapping of WKViewCRTHandleText cannot type Hangul).",
       "remove_when": "Upstream offers a platform-neutral composition/insertion message (WebPage SetCompositionAsync/InsertTextAsync outside PLATFORM(COCOA))."
+    },
+    {
+      "id": "0022-crt-ipc-closed-descriptor-is-not-an-error",
+      "patch": "0022-crt-ipc-closed-descriptor-is-not-an-error.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp",
+          "sha256_before": "a5f8346606190997fed86dc363c7af830a72e128d888b5936c2ccd6aeaff36ce",
+          "sha256_after": "d6daeb5a865661a7cb08eabd20a24577d4de50617400ac426c0ff693117e52d9",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "Connection::platformInvalidate() closes and releases the socket descriptor before the PlayStation-shaped socket monitor is detached; a readyReadHandler() dispatch already under way on the monitor thread then reads from a descriptor that was closed under it, fails with EBADF/ENOTSOCK while m_isConnected is still true, logs \"Error receiving IPC message on socket -1\" and reports a second didClose. Seen intermittently at runtime teardown on Windows (about one run in three of crtweb_api_test). The handler now returns when the descriptor has been released, before reading and again before reporting a read failure. Stacked on 0019, which edits the same file.",
+      "remove_when": "Upstream's PlayStation socket monitor detaches before the descriptor is released, or Connection::readyReadHandler() checks that the descriptor is still open."
     }
   ],
   "license_policy": {

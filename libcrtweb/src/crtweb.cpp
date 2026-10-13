@@ -56,7 +56,9 @@
 #include <map>
 #include <memory>
 #include <new>
+#include <ctype.h>
 #include <string>
+#include <strings.h>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -770,6 +772,25 @@ const char* crtweb_result_string(crtweb_result result)
 #define CRTWEB_HAS_FIELD(config, field) \
     ((config) && (config)->struct_size >= offsetof(std::remove_pointer_t<decltype(config)>, field) + sizeof((config)->field))
 
+// A directory the application names with a Windows host path ("C:\dir", what getcwd() returns outside a
+// rootfs) in the CRT's POSIX spelling ("/c/dir"). SQLite's unix VFS, which keeps the cookie database, takes
+// a path that does not start with '/' for a relative one and prefixes the working directory to it
+// ("/C:\dir/C:\dir/cookies.db": unable to open database file); the CRT's file API maps /c/dir to
+// C:\dir itself. Other spellings pass through.
+static std::string crtPath(const char* path)
+{
+#if defined(WTF_CRT_COFF_ASM)
+    if (isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' && (path[2] == '/' || path[2] == '\\' || !path[2])) {
+        std::string result = "/";
+        result += static_cast<char>(tolower(static_cast<unsigned char>(path[0])));
+        for (const char* c = path + 2; *c; ++c)
+            result += *c == '\\' ? '/' : *c;
+        return result;
+    }
+#endif
+    return path;
+}
+
 crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_runtime** out_runtime)
 {
     if (!out_runtime)
@@ -801,7 +822,7 @@ crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_
 
     // The website data store: ephemeral, or rooted in the data directory.
     if (CRTWEB_HAS_FIELD(config, data_directory) && config->data_directory && *config->data_directory) {
-        std::string root = config->data_directory;
+        std::string root = crtPath(config->data_directory);
         while (root.size() > 1 && (root.back() == '/' || root.back() == '\\'))
             root.pop_back();
         makeDirectory(root);
@@ -1042,12 +1063,36 @@ void crtweb_view_destroy(crtweb_view* view)
     if ((view)->destroyed || !onOwnerThread())                                               \
         return CRTWEB_ERROR_STATE
 
+// On Windows a CRT program meets host paths spelled "C:\dir" (getcwd() outside a rootfs): a `file:` URL made from
+// one reaches the network stack, a POSIX-persona libcurl, as file:///C:/dir, which that libcurl rejects as a bad
+// URL. The CRT's own spelling of a drive path is /c/dir, which its file API and libcurl both open. Rewritten
+// here, at the one boundary where the application hands over URLs; other schemes and hosts are untouched.
+static std::string localFileURL(const char* url)
+{
+#if defined(WTF_CRT_COFF_ASM)
+    if (!strncasecmp(url, "file://", 7)) {
+        const char* path = url + 7;
+        if (*path == '/')
+            ++path;
+        if (isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':' && (path[2] == '/' || path[2] == '\\')) {
+            std::string result = "file:///";
+            result += static_cast<char>(tolower(static_cast<unsigned char>(path[0])));
+            for (const char* c = path + 2; *c; ++c)
+                result += *c == '\\' ? '/' : *c;
+            return result;
+        }
+    }
+#endif
+    return url;
+}
+
 crtweb_result crtweb_view_load_url(crtweb_view* view, const char* url)
 {
     CRTWEB_CHECK_VIEW(view);
     if (!url || !*url || !hasAllowedScheme(url))
         return CRTWEB_ERROR_INVALID_ARGUMENT;
-    WKURLRef wkURL = WKURLCreateWithUTF8CString(url);
+    std::string localURL = localFileURL(url);
+    WKURLRef wkURL = WKURLCreateWithUTF8CString(localURL.c_str());
     if (!wkURL)
         return CRTWEB_ERROR_INVALID_ARGUMENT;
     view->terminatedReported = false;
@@ -1064,7 +1109,8 @@ crtweb_result crtweb_view_load_html(crtweb_view* view, const char* html, const c
     if (base_url && *base_url && !hasAllowedScheme(base_url))
         return CRTWEB_ERROR_INVALID_ARGUMENT;
     WKStringRef string = WKStringCreateWithUTF8CString(html);
-    WKURLRef base = WKURLCreateWithUTF8CString(base_url && *base_url ? base_url : "about:blank");
+    std::string localBase = base_url && *base_url ? localFileURL(base_url) : std::string("about:blank");
+    WKURLRef base = WKURLCreateWithUTF8CString(localBase.c_str());
     view->terminatedReported = false;
     WKPageLoadHTMLString(view->page, string, base);
     WKRelease(base);

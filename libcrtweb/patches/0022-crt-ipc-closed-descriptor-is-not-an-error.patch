@@ -1,0 +1,26 @@
+diff -urN a/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp b/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp
+--- a/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp
++++ b/Source/WebKit/Platform/IPC/unix/ConnectionUnix.cpp
+@@ -290,6 +290,11 @@
+ void Connection::readyReadHandler()
+ {
+     while (true) {
++        // platformInvalidate() releases the descriptor before the socket monitor is detached: a dispatch
++        // that was already under way finds -1 here, which is a closed connection and not an error.
++        if (socketDescriptor() == -1)
++            return;
++
+         ssize_t bytesRead = readBytesFromSocket(socketDescriptor(), m_readBuffer, m_fileDescriptors);
+ 
+         if (bytesRead < 0) {
+@@ -301,6 +306,10 @@
+                 connectionDidClose();
+                 return;
+             }
++
++            // The owner closed the connection while this dispatch was reading: the failure is its own close.
++            if (socketDescriptor() == -1)
++                return;
+ 
+             if (m_isConnected) {
+                 WTFLogAlways("Error receiving IPC message on socket %d in process %d: %s", socketDescriptor(), getpid(), safeStrerror(errno).data());

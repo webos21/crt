@@ -6,6 +6,7 @@
 // checks, destruction semantics, and a second runtime after the first was destroyed.
 
 #include "crtweb/crtweb.h"
+#include "../common/crtweb_test_fs.h"
 #include "../common/crtweb_test_http_server.h"
 
 #include <arpa/inet.h>
@@ -564,8 +565,7 @@ int main()
     // ---- website data, several runtimes, downloads, popups, dialogs, input method (Tranche 4) ----
     {
         std::string scratch = directory + "/crtweb_api_data";
-        std::string remove = "rm -rf '" + scratch + "'";
-        if (system(remove.c_str()) != 0)
+        if (!crtwebRemoveTree(scratch))
             fprintf(stderr, "crtweb_api_test: could not clear %s\n", scratch.c_str());
         HttpServer server;
         testWebsiteDataAndRuntimes(server, scratch);

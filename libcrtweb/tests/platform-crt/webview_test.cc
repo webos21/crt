@@ -9,6 +9,7 @@
 
 #include "crtweb/webview.h"
 
+#include "../common/crtweb_test_fs.h"
 #include "../common/crtweb_test_http_server.h"
 
 #include "include/core/SkCanvas.h"
@@ -333,8 +334,7 @@ extern "C" int main() {
           "no cookie after clearing");
     {
       std::string data = directory + "/crtweb_webview_data";
-      std::string remove = "rm -rf '" + data + "'";
-      if (system(remove.c_str()) != 0) fprintf(stderr, "crtweb_webview_test: could not clear %s\n", data.c_str());
+      if (!crtwebRemoveTree(data)) fprintf(stderr, "crtweb_webview_test: could not clear %s\n", data.c_str());
       crtweb::WebView::LaunchOptions options;
       options.data_directory = data;
       std::string title;
