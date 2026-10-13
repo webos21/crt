@@ -900,13 +900,26 @@ if [ "$target_os" = windows ]; then
       -Wl,--exclude-symbols=_crt_install_dwarf_unwind_safety_net \
       -Wl,--exclude-symbols=__emutls_get_address \
       -Wl,--exclude-symbols=__imp___emutls_get_address \
+      -Wl,--exclude-symbols=__crt_ctors_begin \
+      -Wl,--exclude-symbols=__crt_ctors_end \
+      -Wl,--exclude-symbols=__crt_dtors_begin \
+      -Wl,--exclude-symbols=__crt_dtors_end \
+      -Wl,--exclude-symbols=__crt_msvc_ctors_begin \
+      -Wl,--exclude-symbols=__crt_msvc_ctors_end \
+      -Wl,--exclude-symbols=__crt_msvc_dtors_begin \
+      -Wl,--exclude-symbols=__crt_msvc_dtors_end \
+      -Wl,--exclude-symbols=__crt_run_init_array \
+      -Wl,--exclude-symbols=__crt_run_fini_array \
       -Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld \
       "${CRT_SYSROOT}/lib/dllcrt.o" \
+      "${CRT_SYSROOT}/lib/crt1_ctors_begin.o" \
+      "${CRT_SYSROOT}/lib/crt1_ctors_walker.o" \
       "${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o" \
       "${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o" \
       "$@" "-L${CRT_SYSROOT}/lib" \
       "${CRT_SYSROOT}/lib/libc_dll.dll.a" "${CRT_SYSROOT}/lib/libm_dll.dll.a" \
       "${CRT_SYSROOT}/lib/libdl_dll.dll.a" $windows_system_libs \
+      "${CRT_SYSROOT}/lib/crt1_ctors_end.o" \
       ${CRT_WINDOWS_SDK_LIBPATH:+"-L${CRT_WINDOWS_SDK_LIBPATH}"}
   fi
   # shellcheck disable=SC2086

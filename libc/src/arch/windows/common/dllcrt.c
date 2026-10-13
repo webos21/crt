@@ -44,12 +44,62 @@ __attribute__((weak)) int _fltused = 0;
  * where that archive is linked statically. libWebKit.dll was the first DLL to need it. */
 __attribute__((weak)) void* __dso_handle = &__dso_handle;
 
+/* Static constructors and destructors of THIS DLL. An executable's crt1 walks the regions bracketed by
+ * ctors_begin.o/ctors_end.o (".ctors" of the GNU ABI, ".CRT$XCU" of the MSVC one; init_fini_array.c);
+ * a DLL has no such moment, so its global C++ objects were never constructed and the first use of a
+ * namespace-scope std::map crashed (found by libcrtweb.dll, Web Tranche 4). The tools/crt-cc and
+ * tools/crt-c++ shared links now bracket the DLL's own contributions with the same marker objects.
+ * Weak references: a DLL linked without them (libc.dll itself, a link by other means) has nothing to
+ * walk, which is the old behaviour. */
+typedef void (*crt_init_func)(void);
+extern crt_init_func __crt_ctors_begin __attribute__((weak));
+extern crt_init_func __crt_ctors_end __attribute__((weak));
+extern crt_init_func __crt_dtors_begin __attribute__((weak));
+extern crt_init_func __crt_dtors_end __attribute__((weak));
+extern crt_init_func __crt_msvc_ctors_begin __attribute__((weak));
+extern crt_init_func __crt_msvc_ctors_end __attribute__((weak));
+extern crt_init_func __crt_msvc_dtors_begin __attribute__((weak));
+extern crt_init_func __crt_msvc_dtors_end __attribute__((weak));
+
+static void dll_run_ctors(crt_init_func* begin, crt_init_func* end) {
+  crt_init_func* p;
+
+  if (begin == 0 || end == 0) {
+    return;
+  }
+  for (p = begin; p != end; ++p) {
+    if (*p != 0) {
+      (*p)();
+    }
+  }
+}
+
+static void dll_run_dtors(crt_init_func* begin, crt_init_func* end) {
+  crt_init_func* p = end;
+
+  if (begin == 0 || end == 0) {
+    return;
+  }
+  while (p != begin) {
+    --p;
+    if (*p != 0) {
+      (*p)();
+    }
+  }
+}
+
 int crtDllMainCRTStartup(void* module, unsigned long reason, void* reserved) {
   (void)module;
-  (void)reserved;
   if (reason == 1 /* DLL_PROCESS_ATTACH */) {
     _pei386_runtime_relocator();
     _crt_install_dwarf_unwind_safety_net();
+    dll_run_ctors(&__crt_ctors_begin, &__crt_ctors_end);
+    dll_run_ctors(&__crt_msvc_ctors_begin, &__crt_msvc_ctors_end);
+  } else if (reason == 0 /* DLL_PROCESS_DETACH */ && reserved == 0) {
+    /* FreeLibrary(): destructors run. At process exit (reserved != 0) the other DLLs the objects
+     * depend on may already be gone, as for every other DLL; the executable's exit() has run its own. */
+    dll_run_dtors(&__crt_dtors_begin, &__crt_dtors_end);
+    dll_run_dtors(&__crt_msvc_dtors_begin, &__crt_msvc_dtors_end);
   }
   return 1;
 }

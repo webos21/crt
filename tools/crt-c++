@@ -995,8 +995,20 @@ if [ "$target_os" = windows ]; then
       -Wl,--exclude-symbols=_crt_install_dwarf_unwind_safety_net \
       -Wl,--exclude-symbols=__emutls_get_address \
       -Wl,--exclude-symbols=__imp___emutls_get_address \
+      -Wl,--exclude-symbols=__crt_ctors_begin \
+      -Wl,--exclude-symbols=__crt_ctors_end \
+      -Wl,--exclude-symbols=__crt_dtors_begin \
+      -Wl,--exclude-symbols=__crt_dtors_end \
+      -Wl,--exclude-symbols=__crt_msvc_ctors_begin \
+      -Wl,--exclude-symbols=__crt_msvc_ctors_end \
+      -Wl,--exclude-symbols=__crt_msvc_dtors_begin \
+      -Wl,--exclude-symbols=__crt_msvc_dtors_end \
+      -Wl,--exclude-symbols=__crt_run_init_array \
+      -Wl,--exclude-symbols=__crt_run_fini_array \
       -Wl,/entry:crtDllMainCRTStartup -Wl,/DLL -Wl,/OPT:REF -fuse-ld=lld \
       "${CRT_SYSROOT}/lib/dllcrt.o" \
+      "${CRT_SYSROOT}/lib/crt1_ctors_begin.o" \
+      "${CRT_SYSROOT}/lib/crt1_ctors_walker.o" \
       "${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o" \
       "${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o" \
       "$@" "-L${CRT_SYSROOT}/lib"
@@ -1030,9 +1042,9 @@ if [ "$target_os" = windows ]; then
   fi
   # shellcheck disable=SC2086
   set -- "$@" $windows_system_libs
-  if [ "$shared_mode" -ne 1 ]; then
-    set -- "$@" "${CRT_SYSROOT}/lib/crt1_ctors_end.o"
-  fi
+  # The end marker closes the .ctors/.dtors regions of a DLL (dllcrt.c walks them) as well as an
+  # executable's.
+  set -- "$@" "${CRT_SYSROOT}/lib/crt1_ctors_end.o"
   if [ -n "$compiler_rt_builtins" ]; then
     set -- "$@" "$compiler_rt_builtins"
   fi
