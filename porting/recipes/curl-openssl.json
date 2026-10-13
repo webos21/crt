@@ -29,7 +29,6 @@
       "--disable-ldap",
       "--disable-ldaps",
       "--disable-ftp",
-      "--disable-file",
       "--disable-telnet",
       "--disable-tftp",
       "--disable-pop3",

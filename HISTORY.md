@@ -11,6 +11,24 @@ substantive update.
 
 ## 2026-10-13
 
+### Web Tranche 4: `crtweb` runtime/view API and the crtui WebView (Linux/x86_64)
+
+The public API is plain C (`libcrtweb/include/crtweb/crtweb.h`): one runtime per process, views with
+navigation, history, script, frame copy, input and callbacks, all on the owner thread and delivered from
+`crtweb_runtime_pump()`; `libcrtweb.so` (`src/crtweb.cpp`) is the only code that sees WebKit and exports
+`crtweb_*` only (policy: `docs/design/libcrtweb_api_policy.md`). The crtui WebView is *not* an in-process
+call: an application linked against the static CRT/Skia/window stack cannot share an address space with
+`libWebKit.so` (shared libc/libc++, a different Skia), so `crtweb::WebView` launches `crtweb_host`
+(built from the public API alone) and speaks the 3A protocol plus a control extension (`crtweb_surface_
+control.h`: chunked 128-byte COMMAND/EVENT messages for navigation, load/URL/history/script results).
+Gates: `crtweb_api_test` (2.3 s, public header only), the in-tree `crtweb_webview_test` (a crtui window
+composing and driving the page, 1.5 s), header and export firewall, host ABI audit of the host and
+library, all earlier B3-B7 gates from a clean recompose. Found: web curl built without FILE (now
+enabled), a stale SDK `libc.so` whose `inet_pton(AF_INET6)` returned -1 and made WebCore abort on `file:`
+URLs non-deterministically, PlayStation's `platformUserAgent` ignoring the application name (patch 0020),
+and a manifest checker that could not express stacked patches. Open: macOS/Windows replay, IME,
+downloads/popups/dialogs, cookies, GPU frames, packaged `06-web`.
+
 ### Web Tranche 3B B5-B7 replayed on macOS/arm64: one PlatformCRT defect (patch 0019)
 
 `build_webkit_crt_port.py --webkit --run-tests` runs B3-B7 on macOS: render through the surface protocol, the scripted

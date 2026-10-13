@@ -1,0 +1,21 @@
+diff -urN a/Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp b/Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp
+--- a/Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp	2026-10-13 10:44:29.063121524 +0900
++++ b/Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp	2026-10-13 10:44:29.063398453 +0900
+@@ -60,12 +60,12 @@
+     return false;
+ }
+ 
+-String WebPage::platformUserAgent(const URL& url) const
++String WebPage::platformUserAgent(const URL&) const
+ {
+-    if (url.isNull() || !m_page->settings().needsSiteSpecificQuirks())
+-        return emptyString();
+-
+-    return WebCore::standardUserAgentForURL(url);
++    // The page's own user agent, which carries the embedder's application name (crtweb_runtime_config::
++    // application_name); CRT has no per-site user agent quirks, so standardUserAgentForURL() would only
++    // discard the application name.
++    return emptyString();
+ }
+ 
+ bool WebPage::hoverSupportedByPrimaryPointingDevice() const

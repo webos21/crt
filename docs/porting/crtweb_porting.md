@@ -118,6 +118,8 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
 - `0018` clears the removed node's `m_left`/`m_right` `CheckedPtr`s in `WTF::RedBlackTree::remove`; without it the generic
   RunLoop's `ScheduledTask` destructor decrements a destroyed neighbour's count (WebProcessProxy teardown crash, B7).
   Removal: upstream fixes `remove()`.
+- `0020` makes `WebPage::platformUserAgent` (PlayStation) return the page's own user agent, so the embedder's
+  application name reaches `navigator.userAgent` (stacked on 0017, same file). Removal: upstream takes it into account.
 
 ## WebKit files of PlatformCRT (milestone B4)
 

@@ -36,6 +36,7 @@ def check(manifest: dict, tree: Path | None, repo: Path) -> list:
     if not isinstance(policy, dict) or policy.get("crt_default_license") != CRT_DEFAULT:
         problems.append("license_policy.crt_default_license must be " + CRT_DEFAULT)
     ids = set()
+    running = {}  # file -> sha256 after the patches applied so far
     for patch in manifest.get("patches", []):
         name = patch.get("id", "?")
         if name in ids:
@@ -69,8 +70,16 @@ def check(manifest: dict, tree: Path | None, repo: Path) -> list:
                 measured = scanner.classify_header(data)
                 if measured != recorded:
                     problems.append(f"{where}: header says {measured!r}, manifest records {recorded!r}")
-                if hashlib.sha256(data).hexdigest() != entry.get("sha256_before"):
-                    problems.append(f"{where}: not the upstream bytes (sha256_before)")
+                # A patch starts either from the upstream bytes (independent hunks, as 0002/0003) or from what
+                # the previous patch on the file produced (a stacked patch, as 0019 on 0010).
+                upstream = hashlib.sha256(data).hexdigest()
+                allowed = {upstream}
+                if path in running:
+                    allowed.add(running[path])
+                if entry.get("sha256_before") not in allowed:
+                    problems.append(f"{where}: sha256_before is neither the upstream bytes nor the previous "
+                                    "patch's result")
+                running[path] = entry.get("sha256_after", upstream)
     # Every file of the overlay is CRT-owned and must be declared, so none is added unreviewed.
     overlay = repo / "libcrtweb" / "port"
     declared = {entry.get("source") for entry in manifest.get("new_files", [])}

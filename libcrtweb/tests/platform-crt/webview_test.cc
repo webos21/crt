@@ -1,0 +1,236 @@
+/* Web Tranche 4, milestone C2: the crtui WebView (crtweb::WebView) against a real crtweb_host.
+ *
+ * Needs the host executable built by tools/build_webkit_crt_port.py (the PlatformCRT port), named by
+ * the CRTWEB_HOST environment variable; without it the test reports "skipped" (the in-tree CTest
+ * registration runs everywhere, the driver's webview gate runs it for real). A crtui window with a
+ * SurfaceView at (40,20) 200x150 shows the web page through the final compositor; the test drives
+ * navigation, page control events, history, script evaluation, crtui pointer input, resize and
+ * shutdown through crtweb::WebView only. */
+
+#include "crtweb/webview.h"
+
+#include "include/core/SkCanvas.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkSurface.h"
+
+#include <unistd.h>
+
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+namespace {
+
+int failures = 0;
+
+bool check(bool ok, const char* name) {
+  if (!ok) {
+    fprintf(stderr, "crtweb_webview_test: FAILED %s\n", name);
+    ++failures;
+  }
+  return ok;
+}
+
+void write_file(const std::string& path, const std::string& content) {
+  FILE* file = fopen(path.c_str(), "wb");
+  if (file == nullptr) {
+    fprintf(stderr, "crtweb_webview_test: cannot write %s\n", path.c_str());
+    exit(2);
+  }
+  fwrite(content.data(), 1, content.size(), file);
+  fclose(file);
+}
+
+struct Rgb { int r, g, b; };
+
+bool near_rgb(Rgb c, int r, int g, int b) {
+  auto near = [](int v, int e) { return v >= e - 3 && v <= e + 3; };
+  return near(c.r, r) && near(c.g, g) && near(c.b, b);
+}
+
+struct Scene {
+  crtui_context* ui = nullptr;
+  crtui_window window = CRTUI_INVALID_WIDGET;
+  crtui_widget surface = CRTUI_INVALID_WIDGET;
+};
+
+bool make_scene(Scene* scene) {
+  crtui_widget below = CRTUI_INVALID_WIDGET;
+  if (crtui_context_create(&scene->ui) != CRTUI_OK || crtui_window_create(scene->ui, &scene->window) != CRTUI_OK ||
+      crtui_window_set_size(scene->ui, scene->window, 320, 240, 1.0f) != CRTUI_OK ||
+      crtui_container_create(scene->ui, scene->window, &below) != CRTUI_OK ||
+      crtui_widget_set_bounds(scene->ui, below, 0, 0, 320, 240) != CRTUI_OK ||
+      crtui_surface_view_create(scene->ui, scene->window, &scene->surface) != CRTUI_OK ||
+      crtui_widget_set_bounds(scene->ui, scene->surface, 40, 20, 200, 150) != CRTUI_OK)
+    return false;
+  crtui_style style = {};
+  style.mask = CRTUI_STYLE_BACKGROUND;
+  style.background_rgb = 0xFF0000u;
+  return crtui_widget_set_style(scene->ui, below, &style) == CRTUI_OK;
+}
+
+crtui_rect surface_bounds(Scene* scene) {
+  crtui_surface_layer layer = {};
+  size_t count = 0;
+  crtui_rect none = {0, 0, 0, 0};
+  if (crtui_window_get_surface_layers(scene->ui, scene->window, &layer, 1, &count) != CRTUI_OK || count != 1) return none;
+  return layer.bounds;
+}
+
+}  // namespace
+
+extern "C" int main() {
+  const char* host = getenv("CRTWEB_HOST");
+  if (host == nullptr || *host == '\0') {
+    printf("crtweb_webview_test: skipped (CRTWEB_HOST is not set)\n");
+    return 0;
+  }
+  char cwd[4096];
+  if (getcwd(cwd, sizeof cwd) == nullptr) return 2;
+  const std::string directory = cwd;
+  const std::string page_a = directory + "/crtweb_webview_a.html";
+  const std::string page_b = directory + "/crtweb_webview_b.html";
+  write_file(page_a, "<!doctype html><title>view a</title><body style='margin:0;background:#00aa00'>"
+                     "<div style='width:100px;height:100px;background:#ffffff' onclick=\"document.title='clicked'\"></div>");
+  write_file(page_b, "<!doctype html><title>view b</title><body style='margin:0;background:#0000ff'>");
+
+  Scene scene;
+  if (!make_scene(&scene)) {
+    fprintf(stderr, "crtweb_webview_test: cannot build the crtui scene\n");
+    return 1;
+  }
+  sk_sp<SkSurface> target = SkSurfaces::Raster(SkImageInfo::Make(320, 240, kBGRA_8888_SkColorType, kPremul_SkAlphaType));
+  std::vector<uint8_t> pixels(320 * 240 * 4);
+  SkImageInfo readback = SkImageInfo::Make(320, 240, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+
+  crtweb::WebView web;
+  struct Seen {
+    std::vector<std::string> loads;
+    std::string title, url;
+    unsigned history = 0;
+    bool closed = false;
+  } seen;
+  web.on_load = [&](crtweb::WebView::LoadEvent event, const std::string& url, const std::string& message) {
+    seen.loads.push_back(std::to_string(static_cast<int>(event)) + ":" + url + (message.empty() ? "" : "|" + message));
+  };
+  web.on_title = [&](const std::string& title) { seen.title = title; };
+  web.on_url = [&](const std::string& url) { seen.url = url; };
+  web.on_history = [&]() { ++seen.history; };
+  web.on_closed = [&]() { seen.closed = true; };
+
+  auto has_load = [&](int event, const std::string& part) {
+    const std::string prefix = std::to_string(event) + ":";
+    for (const std::string& load : seen.loads) {
+      if (load.compare(0, prefix.size(), prefix) == 0 && load.find(part) != std::string::npos) return true;
+    }
+    return false;
+  };
+  auto compose = [&]() {
+    crtui_skia_surface_provider provider = web.surface_provider();
+    crtui_skia_compose(scene.ui, scene.window, target.get(), &provider);
+    target->readPixels(readback, pixels.data(), 320 * 4, 0, 0);
+    web.frame_presented();
+  };
+  auto pixel = [&](int x, int y) {
+    const uint8_t* p = pixels.data() + y * 320 * 4 + x * 4;
+    return Rgb{p[2], p[1], p[0]};
+  };
+  auto pump_until = [&](const std::function<bool()>& done, int timeout_ms = 20000) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (!done()) {
+      if (std::chrono::steady_clock::now() >= deadline) return false;
+      web.poll(20);
+      if (web.has_frame()) compose();
+    }
+    return true;
+  };
+
+  /* A host that cannot be started is an error, not a hang. */
+  {
+    crtweb::WebView broken;
+    check(!broken.launch("/nonexistent/crtweb_host", 200, 150, nullptr, 3000), "a missing host fails to launch");
+  }
+
+  if (!check(web.launch(host, 200, 150), "host launched and handshake completed")) return 1;
+  web.focus(true);
+  check(web.running(), "running after launch");
+
+  /* ---- load_html and composition ---- */
+  const std::string html = "<!doctype html><title>wv</title><body style='margin:0;background:#00aa00'>"
+                           "<div style='width:100px;height:100px;background:#ffffff' onclick=\"document.title='clicked'\"></div>";
+  check(web.load_html(html), "load_html sent");
+  check(pump_until([&] { return has_load(3, "about:blank") && seen.title == "wv"; }), "html finished and titled");
+  check(pump_until([&] { return web.has_frame() && near_rgb(pixel(40 + 150, 20 + 100), 0, 170, 0) && near_rgb(pixel(40 + 50, 20 + 50), 255, 255, 255); }),
+        "the page is composed under the crtui scene (white box, green page)");
+  check(near_rgb(pixel(5, 5), 255, 0, 0), "crtui below shows around the view");
+
+  /* ---- input: a crtui click lands in the page ---- */
+  {
+    crtui_input input = {};
+    input.window = scene.window;
+    input.x = 40 + 50;
+    input.y = 20 + 50;
+    input.type = CRTUI_INPUT_POINTER_MOVE;
+    check(web.forward(input, surface_bounds(&scene)), "move forwarded");
+    input.type = CRTUI_INPUT_POINTER_DOWN;
+    check(web.forward(input, surface_bounds(&scene)), "down forwarded");
+    input.type = CRTUI_INPUT_POINTER_UP;
+    check(web.forward(input, surface_bounds(&scene)), "up forwarded");
+    check(pump_until([&] { return seen.title == "clicked"; }, 10000), "the click reached the page (title callback)");
+  }
+
+  /* ---- script ---- */
+  {
+    std::string result;
+    bool error = true, got = false;
+    check(web.evaluate("6*7", [&](const std::string& value, bool is_error) { result = value; error = is_error; got = true; }), "evaluate sent");
+    check(pump_until([&] { return got; }) && result == "42" && !error, "script result");
+    got = false;
+    check(web.evaluate("throw new Error('x')", [&](const std::string&, bool is_error) { error = is_error; got = true; }), "throwing script sent");
+    check(pump_until([&] { return got; }) && error, "script error");
+  }
+
+  /* ---- navigation and history over file: URLs ---- */
+  seen.loads.clear();
+  check(web.load_url("file://" + page_a), "load page a");
+  check(pump_until([&] { return has_load(3, "crtweb_webview_a.html") && seen.title == "view a"; }), "page a loaded");
+  check(has_load(1, "crtweb_webview_a.html") && has_load(2, "crtweb_webview_a.html"), "started and committed events");
+  check(pump_until([&] { return seen.url.find("crtweb_webview_a.html") != std::string::npos; }), "url event");
+  seen.loads.clear();
+  check(web.load_url("file://" + page_b), "load page b");
+  check(pump_until([&] { return has_load(3, "crtweb_webview_b.html") && seen.title == "view b"; }), "page b loaded");
+  check(pump_until([&] { return web.can_go_back() && !web.can_go_forward(); }), "history: can go back");
+  check(pump_until([&] { return web.has_frame() && near_rgb(pixel(40 + 100, 20 + 100), 0, 0, 255); }), "page b is blue");
+  seen.loads.clear();
+  check(web.go_back(), "go back");
+  check(pump_until([&] { return has_load(3, "crtweb_webview_a.html") && seen.title == "view a"; }), "back to page a");
+  check(pump_until([&] { return web.can_go_forward(); }), "history: can go forward");
+  seen.loads.clear();
+  check(web.load_url("file:///crtweb_webview_missing.html"), "load a missing file");
+  check(pump_until([&] { return has_load(4, "missing"); }), "load failure event");
+  check(!web.load_url(std::string(2 * 1024 * 1024, 'x')), "an argument over the control limit is refused");
+
+  /* ---- resize ---- */
+  check(crtui_widget_set_bounds(scene.ui, scene.surface, 40, 20, 100, 75) == CRTUI_OK, "shrink the view");
+  web.resize(100, 75);
+  bool resized = pump_until([&] { return web.surface()->frame_width() == 100 && web.surface()->frame_height() == 75; }, 8000);
+  if (!resized)
+    fprintf(stderr, "crtweb_webview_test: frame is %ux%u serial %llu running %d\n", web.surface()->frame_width(),
+            web.surface()->frame_height(), static_cast<unsigned long long>(web.frame_serial()), web.running() ? 1 : 0);
+  check(resized, "frame at the new size");
+
+  /* ---- shutdown ---- */
+  web.shutdown();
+  check(!web.running(), "not running after shutdown");
+  crtui_context_destroy(scene.ui);
+  unlink(page_a.c_str());
+  unlink(page_b.c_str());
+  if (failures != 0) {
+    fprintf(stderr, "crtweb_webview_test: %d check(s) failed\n", failures);
+    return 1;
+  }
+  printf("crtweb_webview_test: ok\n");
+  return 0;
+}

@@ -52,4 +52,35 @@ if(TARGET crtui_skia AND TARGET crtgfx_skia AND
     TIMEOUT 120
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtweb_web_surface_test_runs)
+  # Web Tranche 4: the crtui WebView (crtweb::WebView) against a real crtweb_host. The host is built by
+  # tools/build_webkit_crt_port.py (the PlatformCRT port); without CRTWEB_HOST the test reports
+  # "skipped" and the driver's webview gate runs it with the host.
+  add_executable(crtweb_webview_test
+    ${CRT_STARTUP_OBJECTS}
+    tests/platform-crt/webview_test.cc
+  )
+  target_include_directories(crtweb_webview_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/platform")
+  target_link_libraries(crtweb_webview_test PRIVATE
+    crt_cxx_build_flags crtui_skia crtgfx_skia crtmedia)
+  target_compile_definitions(crtweb_webview_test PRIVATE
+    CRTGFX_HAVE_VULKAN=1 SK_USE_INTERNAL_VULKAN_HEADERS)
+  if(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
+    target_compile_options(crtweb_webview_test PRIVATE
+      "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
+      "-isystem${CMAKE_SOURCE_DIR}/libc/include"
+      "-isystem${CMAKE_SOURCE_DIR}/include")
+    add_dependencies(crtweb_webview_test crt-libcxx-sysroot)
+  endif()
+  crt_wire_skia_executable(crtweb_webview_test SKIP_MACOS_DEAD_STRIP)
+  crt_link_startup_end_objects(crtweb_webview_test)
+  add_dependencies(crtweb_webview_test cxx c crt1 crtui_skia crtgfx_skia)
+  add_test(NAME crtweb_webview_test_runs COMMAND crtweb_webview_test)
+  set_tests_properties(crtweb_webview_test_runs PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    PASS_REGULAR_EXPRESSION "crtweb_webview_test: (ok|skipped)"
+    TIMEOUT 180
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtweb_webview_test_runs)
 endif()

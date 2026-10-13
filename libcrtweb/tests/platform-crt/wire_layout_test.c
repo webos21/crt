@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "crtweb_surface_control.h"
 #include "crtweb_surface_wire.h"
 
 static int failures;
@@ -72,6 +73,48 @@ int main(void) {
 
   CHECK(sizeof(crtweb_wire_title) <= CRTWEB_WIRE_MAX_MESSAGE && sizeof(crtweb_wire_pointer) <= CRTWEB_WIRE_MAX_MESSAGE,
         "every message fits CRTWEB_WIRE_MAX_MESSAGE");
+
+  /* The control extension (Tranche 4): two new message types, one fixed 128-byte chunk layout. */
+  CHECK(CRTWEB_C2P_COMMAND == 0x20 && CRTWEB_P2C_EVENT == 0x120 && CRTWEB_BLOB_CHUNK == 96u &&
+            CRTWEB_BLOB_MAX_TOTAL == 1048576u,
+        "control extension constants");
+  CHECK(CRTWEB_COMMAND_LOAD_URL == 1 && CRTWEB_COMMAND_EVALUATE == 7 && CRTWEB_EVENT_LOAD_STARTED == 1 &&
+            CRTWEB_EVENT_PROCESS_TERMINATED == 8,
+        "command and event numbers");
+  SIZE(crtweb_wire_blob, 128);
+  OFFSET(crtweb_wire_blob, code, 8);
+  OFFSET(crtweb_wire_blob, total, 20);
+  OFFSET(crtweb_wire_blob, length, 28);
+  OFFSET(crtweb_wire_blob, data, 32);
+  {
+    /* Chunking round trip over the assembler, without a socket: a 250-byte argument is 3 chunks. */
+    crtweb_blob_assembler assembler = {0};
+    crtweb_wire_blob chunk;
+    char argument[251];
+    size_t offset;
+    int completed = 0;
+    for (offset = 0; offset < 250; ++offset) argument[offset] = (char)('a' + offset % 26);
+    argument[250] = '\0';
+    for (offset = 0; offset < 250; offset += CRTWEB_BLOB_CHUNK) {
+      size_t length = 250 - offset < CRTWEB_BLOB_CHUNK ? 250 - offset : CRTWEB_BLOB_CHUNK;
+      memset(&chunk, 0, sizeof chunk);
+      chunk.header.type = CRTWEB_C2P_COMMAND;
+      chunk.header.size = sizeof chunk;
+      chunk.code = CRTWEB_COMMAND_LOAD_URL;
+      chunk.id = 9;
+      chunk.total = 250;
+      chunk.offset = (uint32_t)offset;
+      chunk.length = (uint32_t)length;
+      memcpy(chunk.data, argument + offset, length);
+      completed = crtweb_blob_assembler_feed(&assembler, &chunk);
+      CHECK(completed == (offset + length == 250 ? 1 : 0), "assembler completes on the last chunk");
+    }
+    CHECK(assembler.length == 250 && memcmp(assembler.data, argument, 251) == 0 && assembler.id == 9,
+          "assembled argument");
+    chunk.offset = 7; /* does not continue anything */
+    CHECK(crtweb_blob_assembler_feed(&assembler, &chunk) == -1, "a stray chunk is rejected");
+    free(assembler.data);
+  }
 
   if (failures != 0) {
     fprintf(stderr, "wire_layout_test: %d check(s) failed\n", failures);

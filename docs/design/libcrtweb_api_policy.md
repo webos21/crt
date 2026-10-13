@@ -1,0 +1,90 @@
+# libcrtweb API Policy
+
+The public boundary of `libcrtweb` (Web Tranche 4): what an application sees of the
+`PlatformCRT` WebKit port, and what it must never see. The header is
+[`libcrtweb/include/crtweb/crtweb.h`](../../libcrtweb/include/crtweb/crtweb.h); this document
+owns the *why* and the rules, the acceptance document owns the evidence.
+
+## Decision
+
+`crtweb` is a **project-owned, plain-C, opaque-handle API** with two objects: a *runtime* and its
+*views*. It is shaped like the other CRT libraries (`crtmedia_*`, `crtui_*`): `struct_size` first
+in every struct, result codes, UTF-8 strings, no allocation exposed. WebKit's own C API
+(`WKView`, `WKPage`, ...) is the implementation language, not the contract: it is a
+PlayStation-shaped, partly deprecated surface that changes with WebKit and needs CRT extensions
+(`WKViewCRT*`) to be usable at all. Neither WebKit, WPE, GLib nor JavaScriptCore types appear in a
+public header, an exported symbol or a dependency of the SDK's consumer-facing link line.
+
+## Model
+
+- **Runtime.** At most one per process in v1. It owns the shared machinery: the Network
+  process, website data, the web event loop. Web processes start lazily with the first view.
+- **View.** One page: navigation history, size, focus, painted picture. Any number per runtime.
+- **Pumping.** WebKit's work happens on the thread that created the runtime and only while the
+  application calls `crtweb_runtime_pump()`. Every callback is delivered from inside a pump, on that
+  thread: never from another thread, never re-entrantly from another `crtweb_*` call. There is no
+  hidden thread an application must synchronise with, and nothing happens in an application that does
+  not pump (it is the application's loop that owns time: `crtui`'s frame loop, a test, a CLI).
+- **Pixels.** v1 delivers CPU pixels: `crtweb_view_copy_frame()` copies the newest complete picture
+  as premultiplied BGRA (the AR24 layout of the web surface protocol). A GPU path (Tranche 9) adds
+  a new function; it does not change this one.
+
+## Rules
+
+1. **Thread.** Every call except `crtweb_api_version`/`crtweb_result_string` must come from the
+   runtime's creating thread; others return `CRTWEB_ERROR_STATE` and do nothing.
+2. **Callbacks.** Delivered by `crtweb_runtime_pump`. An application may call any view function
+   from a callback, including `crtweb_view_destroy` (the memory is retired when the pump ends).
+   After `crtweb_view_destroy` returns no callback for that view is delivered.
+3. **Ownership.** All strings passed in are copied. Strings passed to callbacks are valid for the
+   duration of the callback only. A view must not outlive its runtime; `crtweb_runtime_destroy`
+   destroys the remaining views first.
+4. **Errors.** Functions return `crtweb_result` (negative = error, `CRTWEB_WOULD_BLOCK` = nothing
+   yet, not a failure). A failed *page load* is not an error of the call that started it: it is a
+   `CRTWEB_LOAD_FAILED` event.
+5. **Versioning.** `CRTWEB_API_VERSION` changes only with an incompatible change. Structs grow by
+   appending; a function reads only the fields inside the caller's `struct_size`.
+6. **Navigation policy.** Only `http:`, `https:`, `file:` and `about:` URLs are accepted by
+   `crtweb_view_load_url`. `on_navigation_request` may veto any main-frame navigation, including
+   those the page starts itself. Sub-frame navigations are not reported in v1.
+
+## Deliberate v1 limits
+
+Recorded so they are decisions, not omissions: one runtime per process; device scale 100 % only;
+no multi-process crash *recovery* (the application is told with `on_process_terminated`, Tranche 5
+owns recovery); no downloads, popups/new windows, permission prompts, dialogs (alert/confirm),
+authentication challenges, cookies or website-data management; no composition/IME; no JavaScript
+message channel (only `crtweb_view_evaluate_script`); no accessibility. Each is a later addition
+to this header, not a reason to expose a WebKit object.
+
+## The crtui WebView, and why it is a separate process
+
+`crtweb` is toolkit-neutral; the `crtui` WebView is `crtweb::WebView`
+(`libcrtweb/include/crtweb/webview.h`, header-only, in the style of `crtui/skia_media.h`). It does
+not call `crtweb` in-process. It launches `crtweb_host` (`libcrtweb/tools/crtweb_host.cpp`, built from
+the public `crtweb` API alone), talks to it over the web surface protocol, and exposes what `crtui`
+composes: a Skia image behind a `crtui_surface_view` through `crtui_skia_surface_provider`, input
+forwarding, resize and focus, plus page control (`load_url`, `load_html`, `go_back`, `reload`,
+`evaluate`, load/title/URL/history events). `libcrtui` itself keeps no WebKit dependency, and an
+application that shows a web page links no WebKit library.
+
+The reason is a measured constraint, not taste. A `crtui`/`crtgfx` application is linked against the
+static CRT archives (`libc.a`, `libc++.a`, Skia, FreeType) with `--exclude-libs,ALL`, because a shared
+CRT `libc.so` interposes the host's glibc symbols inside `libvulkan.so`/`libwayland-client.so`
+(the SDK examples document the collision). `libWebKit.so` needs the opposite: shared CRT libc and
+libc++ (several libraries and three processes must agree on one allocator) and its own bundled Skia,
+which is a different revision from the SDK's. One address space cannot hold both; two C runtimes and
+two Skias interpose each other's symbols. The protocol boundary is already a process boundary, so the
+WebView uses it. Applications that do not link the static window/GPU stack (a command-line tool, a
+test, `crtweb_host` itself) can use `crtweb` directly.
+
+Consequences of the protocol path, kept visible: `on_navigation_request` (a synchronous veto) exists
+only in-process; the control channel is one-way request/event. Text titles are truncated to the
+frozen 95 bytes of `TITLE`. A larger argument than 1 MiB is refused by the client.
+
+## Relationship to the 3A wire protocol
+
+The web surface protocol (`libcrtweb/platform/crtweb_surface_wire.h`) remains the contract for a
+*separate-process* producer. `crtweb` is the in-process API; it uses the same pixel layout and the
+same input vocabulary (keysym + evdev keycode, modifier bits, logical pixels) so an application can
+switch between them without changing its input mapping.

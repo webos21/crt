@@ -115,9 +115,11 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **3B-B7:** Linux/x86_64 prototype closed: 100x create/destroy flat, Host ABI audit
     (static and `/proc/maps`) clean, license scan and patch manifest rechecked (patch 0018).
     Windows/x64 and macOS/arm64 replayed (2026-10-13); Linux/aarch64 only on assembly changes (patch 0019 on macOS).
-* [ ] **4. `libcrtweb` and the WebView.** 3B-B7 is done on Linux/x86_64.
-  * [ ] Freeze and implement the CRT-owned runtime/view API and callbacks.
-  * [ ] Add `crtui` WebView integration without exposing WebKit/WPE/GLib types.
+* [ ] **4. `libcrtweb` and the WebView.** Linux/x86_64 done 2026-10-13 (`HISTORY.md`).
+  * [x] Freeze and implement the CRT-owned runtime/view API and callbacks (`crtweb.h`, `libcrtweb.so`).
+  * [x] `crtui` WebView (`crtweb::WebView` over the out-of-process `crtweb_host`) without WebKit/WPE/GLib types.
+  * [ ] Replay `crtweb_api_test` and `crtweb_webview_test` on macOS/arm64 and Windows/x64.
+  * [ ] Deferred v1 limits: IME, downloads, popups/dialogs, cookies/website data, multiple runtimes.
 * [ ] **5. Multi-process lifecycle.** B4 proves the initial Linux process/IPC
   foundation; the complete lifecycle remains.
   * [ ] Clean shutdown, forced WebProcess termination and recovery/reload.

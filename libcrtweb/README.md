@@ -5,14 +5,13 @@ plus the `crtweb` runtime/view API and the `crtui` WebView on top of it. Contrac
 tranche order and evidence: [`docs/acceptance/crtweb_acceptance.md`](../docs/acceptance/crtweb_acceptance.md);
 upstream mapping: [`docs/porting/crtweb_porting.md`](../docs/porting/crtweb_porting.md).
 
-**Status: bring-up.** Web Tranches 0-2 are closed. JavaScriptCore is accepted on
-Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64 through interpreter,
-Baseline/DFG/FTL, WebAssembly and the sampling profiler; the pristine WPE
-reference renders the accepted 640x480 frame on Linux/x86_64. Tranche 3A froze
-and proved the frame/input contract. The real `PlatformCRT` overlay has completed
-B0-B3 on all four acceptance pairs and B4 process launch/IPC on Linux/x86_64.
-B5 first render is next. The public `crtweb` API, WebView and packaged `06-web`
-SDK do not exist yet; W^X remains separate hardening.
+**Status: bring-up.** Web Tranches 0-3 are closed on Linux/x86_64, macOS/arm64 and Windows/x64
+(`PlatformCRT` renders, takes input and survives 100x create/destroy; JavaScriptCore is accepted on all
+four acceptance pairs). Tranche 4 is in progress on Linux/x86_64: the public C API `crtweb`
+(`include/crtweb/crtweb.h`, `src/crtweb.cpp` -> `libcrtweb.so`), the out-of-process `crtweb_host`
+(`tools/crtweb_host.cpp`) and the `crtui` WebView `crtweb::WebView` (`include/crtweb/webview.h`) over
+the web surface protocol and its control extension. A packaged `06-web` SDK does not exist yet
+(Tranche 10); W^X remains separate hardening.
 
 ## Layout
 
@@ -45,9 +44,13 @@ SDK do not exist yet; W^X remains separate hardening.
 
 Current and planned layout, following the tranche order:
 
-- `include/crtweb/` -- the public API. No WebKit, WPE or GLib type may appear here;
-  `tools/verify_dist.py` will enforce it for `06-web` as it does for LVGL in `05-ui`.
-- `src/` -- the runtime/view implementation over the CRT-owned platform.
+- `include/crtweb/` -- the public API: `crtweb.h` (plain C runtime/view API) and `webview.h` (the
+  header-only `crtui` WebView). No WebKit, WPE or GLib type may appear here; the driver's webview gate
+  checks the headers and `libcrtweb.so`'s exports, and `tools/verify_dist.py` will enforce it for `06-web`
+  as it does for LVGL in `05-ui`. Rules: `docs/design/libcrtweb_api_policy.md`.
+- `src/` -- the runtime/view implementation over `PlatformCRT` (`crtweb.cpp`, the only file that
+  sees WebKit); built by the port's CMake into `libcrtweb.so`.
+- `tools/` -- `crtweb_host.cpp`, one web view as a process speaking the web surface protocol.
 - `port/` -- `PlatformCRT`, the new WebKit CRT port (not a WPEPlatform backend),
   composed over the pinned full WebKit source. It is being connected to `crtgfx`,
   `crtui` external surfaces, `crtmedia` and the CRT PAL tranche by tranche.

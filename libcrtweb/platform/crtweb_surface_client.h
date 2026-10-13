@@ -13,6 +13,7 @@
  *   loop: client.poll(0);  crtui_skia_compose(..., &provider);  client.frame_presented();
  */
 
+#include "crtweb_surface_control.h"
 #include "crtweb_surface_wire.h"
 
 #include "crtui/skia.h"
@@ -27,7 +28,9 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
 
 namespace crtweb {
@@ -37,6 +40,7 @@ class SurfaceClient {
   explicit SurfaceClient(int socket_fd) : socket_(socket_fd) {}
   ~SurfaceClient() {
     image_.reset();
+    free(event_.data);
     for (Buffer& buffer : buffers_) {
       if (buffer.map != nullptr) munmap(buffer.map, buffer.size);
     }
@@ -175,6 +179,20 @@ class SurfaceClient {
     }
   }
 
+  /* Page control extension (crtweb_surface_control.h): sends a command to a crtweb host producer. */
+  bool send_command(uint32_t code, uint32_t id, const char* argument, size_t length) {
+    if (closed_ || length > CRTWEB_BLOB_MAX_TOTAL) return false; /* too long: refused, the connection is fine */
+    if (crtweb_blob_send(socket_, CRTWEB_C2P_COMMAND, code, id, 0, argument, length) != 0) {
+      if (errno != EAGAIN) closed_ = true;
+      return false;
+    }
+    return true;
+  }
+
+  /* Called from poll() for every complete producer event (CRTWEB_P2C_EVENT) of the control
+   * extension: code, id, flags and the assembled argument. */
+  std::function<void(uint32_t code, uint32_t id, uint32_t flags, const std::string& argument)> on_event;
+
   void close_connection() {
     crtweb_wire_header bye = {};
     send(CRTWEB_C2P_BYE, &bye, sizeof bye);
@@ -300,6 +318,15 @@ class SurfaceClient {
         title_.assign(title->utf8, strnlen(title->utf8, sizeof title->utf8));
         break;
       }
+      case CRTWEB_P2C_EVENT: {
+        int done = crtweb_blob_assembler_feed(&event_, static_cast<const crtweb_wire_blob*>(data));
+        if (done < 0) {
+          closed_ = true;
+        } else if (done == 1 && on_event) {
+          on_event(event_.code, event_.id, event_.flags, std::string(event_.data, event_.length));
+        }
+        break;
+      }
       case CRTWEB_P2C_BYE:
         closed_ = true;
         break;
@@ -342,6 +369,7 @@ class SurfaceClient {
   uint32_t frame_width_ = 0, frame_height_ = 0;
   uint32_t frames_ = 0;
   std::string title_;
+  crtweb_blob_assembler event_ = {};
 };
 
 }  // namespace crtweb

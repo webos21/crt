@@ -209,3 +209,32 @@ if (CRT_WEBKIT_TESTS)
     target_link_libraries(crtweb_render_test PRIVATE WebKit)
     add_dependencies(crtweb_render_test WebProcess NetworkProcess)
 endif ()
+
+# Web Tranche 4: libcrtweb, the CRT-owned runtime/view API (libcrtweb/include/crtweb/crtweb.h), built
+# over this port when the driver passes -DCRT_LIBCRTWEB_DIR=<libcrtweb>. Only crtweb_* is exported; the
+# test includes the public header alone (no WebKit header is on its include path).
+if (CRT_LIBCRTWEB_DIR)
+    add_library(crtweb SHARED ${CRT_LIBCRTWEB_DIR}/src/crtweb.cpp)
+    target_include_directories(crtweb PRIVATE
+        ${CRT_LIBCRTWEB_DIR}/include
+        $<TARGET_PROPERTY:WebKit,INCLUDE_DIRECTORIES>
+        ${WebKit_FRAMEWORK_HEADERS_DIR}
+    )
+    target_compile_definitions(crtweb PRIVATE CRTWEB_BUILD_LIBRARY=1)
+    set_target_properties(crtweb PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    target_link_libraries(crtweb PRIVATE WebKit)
+
+    # The out-of-process half of the crtui WebView: one view over the web surface protocol, built from
+    # the public API alone (and the 3A producer helper).
+    add_executable(crtweb_host ${CRT_LIBCRTWEB_DIR}/tools/crtweb_host.cpp)
+    target_include_directories(crtweb_host PRIVATE ${CRT_LIBCRTWEB_DIR}/include)
+    target_link_libraries(crtweb_host PRIVATE crtweb)
+    add_dependencies(crtweb_host WebProcess NetworkProcess)
+
+    if (CRT_WEBKIT_TESTS)
+        add_executable(crtweb_api_test ${CRT_WEBKIT_TESTS}/crtweb_api_test.cpp)
+        target_include_directories(crtweb_api_test PRIVATE ${CRT_LIBCRTWEB_DIR}/include)
+        target_link_libraries(crtweb_api_test PRIVATE crtweb)
+        add_dependencies(crtweb_api_test WebProcess NetworkProcess)
+    endif ()
+endif ()

@@ -565,3 +565,13 @@ Building fontconfig, libwpe and WebCore against the SDK showed these gaps, all f
 Covered by `random_state_test`, `shm_open_test`, `android_log_test`, the fontconfig and libwpe port
 tests and `crtweb_webcore_graph_test`.
 
+## Found by the crtui WebView and `crtweb` (Web Tranche 4; 2026-10-13)
+
+- `accept4()` is not provided (Bionic has it). `crtweb::WebView` uses `accept()` followed by
+  `fcntl(FD_CLOEXEC)`, which is race-free enough for a single-threaded launcher; `accept4` with
+  `SOCK_CLOEXEC`/`SOCK_NONBLOCK` is the proper fix when a consumer needs it.
+- `inet_pton(AF_INET6, ...)` returned -1 on Linux until the 2026-10-11 IPv6 work: callers that test the
+  result for truth (WebCore's `IPAddress::fromString` does) then read an uninitialised address, which
+  made `file:` loads abort non-deterministically in the Web process (`isIPAddressDisallowed`). The fix was
+  already in the source; the SDK `libc.so` simply predated it. A stale SDK is therefore a Web gate
+  prerequisite: rebuild `crt-ui-dist` after pulling libc changes.

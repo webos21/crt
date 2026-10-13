@@ -269,12 +269,13 @@ runtime은 다음 계층으로 나누어 설계한다.
     reference와 full product-source pin/provenance, JSC/WPE reference 검증
     (`tests/jsc`, `tests/wpe-reference`), Tranche 3A의 frame/input 계약과 Linux
     WPEPlatform `crt` prototype(`platform/`, `tests/platform-crt/`)이 있다.
-  - 실제 `PlatformCRT` overlay는 `port/`에 있으며 B0-B3가 4개 acceptance pair에서,
-    B4 UI/Web/Network process launch와 IPC가 Linux/x86_64에서 검증되었다
-    (`tests/webcore`, `tests/webkit`). B5 first render가 다음 단계이다. 공개 `crtweb`
-    API, WebView와 `06-web` 배포 stage는 아직 없다. 계약은
-    `docs/acceptance/crtweb_acceptance.md`, upstream 매핑은
-    `docs/porting/crtweb_porting.md`.
+  - 실제 `PlatformCRT` overlay는 `port/`에 있으며 B0-B7이 Linux/x86_64에서 검증되었고
+    (B1-B3은 4개 acceptance pair, B4-B7은 macOS/arm64와 Windows/x64 replay 완료), Tranche 4가
+    Linux/x86_64에서 진행 중이다: 공개 C API `include/crtweb/crtweb.h`와 구현 `src/crtweb.cpp`
+    (`libcrtweb.so`), 별도 프로세스 `tools/crtweb_host.cpp`, 그리고 그 위의 `crtui` WebView
+    `include/crtweb/webview.h`. 패키지된 `06-web` 배포 stage는 아직 없다. 규칙은
+    `docs/design/libcrtweb_api_policy.md`, 계약은 `docs/acceptance/crtweb_acceptance.md`, upstream
+    매핑은 `docs/porting/crtweb_porting.md`.
 
 ### Provenance and porting
 

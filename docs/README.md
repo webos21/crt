@@ -28,6 +28,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 - [libcrtgfx GPU Backend Object Boundary](design/libcrtgfx_gpu_backend_boundary.md)
 - [libcrtgfx Wayland Plan](design/libcrtgfx_wayland_plan.md)
 - [libcrtmedia API Policy](design/libcrtmedia_api_policy.md)
+- [libcrtweb API Policy](design/libcrtweb_api_policy.md)
 - [Linux Pthread Lifecycle Notes](design/linux_pthread_lifecycle.md)
 - [Process Fork Model](design/process_fork.md)
 - [Project Meanings](design/project_meanings.md)

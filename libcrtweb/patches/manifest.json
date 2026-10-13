@@ -557,6 +557,23 @@
       ],
       "reason": "PlatformCRT uses the PlayStation socket-monitor thread, which retains its Connection while blocked in select(). POSIX does not require close() in another thread to interrupt that select(), and macOS B7 replay reproduced one retained socket monitor and receive WorkQueue per Web process lifecycle. A bounded wait lets the monitor re-check the released descriptor and terminate without busy-spinning; readable sockets still dispatch immediately.",
       "remove_when": "PlatformCRT replaces the PlayStation-shaped monitor with an interruptible event-loop source, or WebKit explicitly wakes and joins the socket monitor during connection invalidation."
+    },
+    {
+      "id": "0020-crt-page-user-agent",
+      "patch": "0020-crt-page-user-agent.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebKit/WebProcess/WebPage/playstation/WebPagePlayStation.cpp",
+          "sha256_before": "6bba76c582c34e18d884bb67ea8c813ff00c988a6903e4069b273772ac928ae4",
+          "sha256_after": "7a081d3a117176787c2a7380a70f790de0a4eb2a5a13dee2f77d5f9f7cc99c23",
+          "license": "BSD-2-Clause"
+        }
+      ],
+      "reason": "PlayStation's WebPage::platformUserAgent always answers standardUserAgentForURL() for a page with site-specific quirks enabled, which cannot carry the embedder's application name; navigator.userAgent therefore ignored WKPageSetApplicationNameForUserAgent. Stacked on 0017, which edits the same file.",
+      "remove_when": "Upstream's PlayStation port (or CRT's user agent platform file) takes the application name into account."
     }
   ],
   "license_policy": {

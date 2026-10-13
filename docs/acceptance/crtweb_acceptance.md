@@ -1636,6 +1636,53 @@ left open (1 MiB default stack, `__tls_get_addr`) will be hit harder by the Web 
 go_forward/reload/set_size/set_focus`, and title/load/navigation callbacks,
 plus `crtui`'s web view on top. Application code sees no WebKit type.
 
+Policy and rules: [`libcrtweb_api_policy.md`](../design/libcrtweb_api_policy.md); the header is
+`libcrtweb/include/crtweb/crtweb.h`. Work is split at the ownership boundary:
+
+| Milestone | Scope | Gate |
+|---|---|---|
+| **C0** (done) | Freeze the plain-C runtime/view API and its rules; the page-control extension of the web surface protocol | policy document; header; `wire_layout_test` covers the extension's layout |
+| **C1** (done) | `libcrtweb.so` over `PlatformCRT`: runtime, views, navigation, history, script, frame copy, input, callbacks | `crtweb_api_test` includes only `<crtweb/crtweb.h>`; exports are `crtweb_*` only |
+| **C2** (done) | The `crtui` WebView: `crtweb::WebView` over the out-of-process `crtweb_host` | `crtweb_webview_test` composes the page in a crtui window and drives it through crtui input |
+| C3 | Host replays: macOS/arm64, Windows/x64 | the same two tests (open) |
+
+*Why the WebView is out of process.* An application that uses `crtui` links its own static C runtime,
+Skia and the host window/GPU libraries (the `-Wl,--exclude-libs,ALL` static link of the SDK examples,
+chosen because a shared CRT `libc.so` interposes the host's glibc inside `libvulkan.so`), while
+`libWebKit.so` needs the shared CRT libc, libc++ and its own Skia. The two cannot share an address
+space. The 3A protocol already put the page in its own process, so the WebView is that protocol plus a
+control extension (`crtweb_surface_control.h`: navigation commands in, load/URL/history/script events
+out, as chunked 128-byte messages), and `crtweb` itself is the in-process API of the host and of any
+application that links the shared runtime.
+
+*C0-C2 result (Linux/x86_64, 2026-10-13).* `libcrtweb/tests/webkit/crtweb_api_test` includes only
+`<crtweb/crtweb.h>` (no WebKit, WPE, GLib or JavaScriptCore header is on its include path) and passes
+in about 2.3 s, 4/4 runs: argument and struct-size errors, one runtime per process, owner-thread
+enforcement (another thread gets `CRTWEB_ERROR_STATE`), `file:` loads with started/committed/finished
+events, title and URL callbacks, `get_title` truncation and needed-size, canvas and background pixels
+through `copy_frame`, resize (a stale size is not served), script results (number, string, error),
+the application name in `navigator.userAgent`, a navigation veto (the vetoed load never starts), back
+/forward/reload and a failed load event, pointer click and typed text reaching the page, two views in
+one runtime with independent state, no callback after `view_destroy`, and a second runtime after
+`runtime_destroy`. `libcrtweb.so` exports only `crtweb_*`. `crtweb_webview_test` (in-tree, static
+CRT/Skia/crtui link, run by the driver's webview gate against `crtweb_host`) composes the page in a
+crtui window under and over crtui containers, forwards crtui pointer input (the click changes the
+title), evaluates script, navigates and walks history across two `file:` pages, reports a failed
+load, refuses a 2 MiB argument without losing the connection, resizes, and shuts the host down;
+1.5 s, 3/3 runs. The same driver run, from a clean `--recompose` build with patches 0018-0020 applied,
+passes every B3-B7 gate again. *Found and fixed by the run:* (1) WebKit's curl backend reported
+"Unsupported protocol" for `file:` because the web-stage curl was built `--disable-file`; the
+recipe now enables FILE (a local-content scheme; the media `curl` port is unchanged). (2) A stale SDK
+`libc.so` returned -1 from `inet_pton(AF_INET6)`, which WebCore treats as success, so the Web
+process aborted non-deterministically on a `file:` URL; the fix was in the source and the SDK was
+rebuilt (`bionic_libc_gaps.md`). (3) Patch 0020: PlayStation's `WebPage::platformUserAgent` ignored
+the application name. (4) The patch-manifest checker could not express stacked patches on one file
+(0019 on 0010, 0020 on 0017); it now accepts a patch that starts from the upstream bytes or from the
+previous patch's result. *Not done / open:* macOS/Windows replay of Tranche 4 (the driver gates it
+Linux-only), `on_navigation_request` and script callbacks across the WebView's process boundary
+beyond what the control extension carries, IME, downloads, popups and dialogs, cookies and website
+data, multiple runtimes per process, GPU frames, and a packaged `06-web` SDK (Tranche 10).
+
 ### 5. Multi-process lifecycle
 
 UIProcess with WebProcess, NetworkProcess, and GPUProcess (GPUProcess is on by default in the WPE port): launch through WebKit's `ProcessLauncher`/`AuxiliaryProcess` on CRT PAL primitives (not `WPEProcessManager`, which is Android-only), IPC, clean
