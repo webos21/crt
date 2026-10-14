@@ -50,6 +50,8 @@
 #endif
 
 #include <crtmedia/audio.h>
+#include <cstdio>
+#include <cstdlib>
 #include <crtmedia/audio_sink.h>
 #include <crtmedia/codec.h>
 #include <crtmedia/extractor.h>
@@ -210,6 +212,9 @@ void applyGain(crtmedia_audio_buffer& buffer, float gain)
 
 void MediaPlayerPrivateCRTShared::run()
 {
+    const bool traceAudio = getenv("CRTWEB_MEDIA_AUDIO_TRACE") != nullptr;
+    if (traceAudio)
+        fprintf(stderr, "CRTWEB_AUDIO worker_start\n");
     std::string localPath;
     {
         Locker locker { lock };
@@ -290,6 +295,12 @@ void MediaPlayerPrivateCRTShared::run()
     uint64_t sinkBaseFrames = 0;     // sink position when the clock was last re-based
     int64_t sinkBaseUs = 0;          // media time at that position
     uint32_t sinkRate = 0;
+    unsigned audioTraceCount = 0;
+    uint64_t sinkFramesWritten = 0;   // diagnostic: CRTWEB_MEDIA_AUDIO_TRACE reports it with the final position
+    uint32_t sinkChannels = 0;
+    uint64_t nonzeroSamplesWritten = 0;
+    uint64_t clockUpdates = 0, clockAdvances = 0, lastSinkPosition = 0;
+    unsigned writeFailures = 0;
     bool havePending = false;        // a decoded video frame waiting for its time
     crtmedia_frame pending;
     memset(&pending, 0, sizeof pending);
@@ -459,6 +470,10 @@ void MediaPlayerPrivateCRTShared::run()
                 }
                 progressed = true;
                 bool stale = buffer.timestamp_us != CRTMEDIA_AUDIO_TIMESTAMP_NONE && buffer.timestamp_us + 20000 < discardBeforeUs;
+                if (traceAudio && ++audioTraceCount <= 4)
+                    fprintf(stderr, "CRTWEB_AUDIO buffer frames=%u ts_us=%lld playing=%d stale=%d sink=%d unavailable=%d\n",
+                        static_cast<unsigned>(buffer.frame_count), static_cast<long long>(buffer.timestamp_us),
+                        playingNow ? 1 : 0, stale ? 1 : 0, sink ? 1 : 0, sinkUnavailable ? 1 : 0);
                 if (playingNow && !stale) {
                     if (!sink && !sinkUnavailable) {
                         crtmedia_audio_sink_desc desc;
@@ -468,8 +483,15 @@ void MediaPlayerPrivateCRTShared::run()
                         if (crtmedia_audio_sink_open(&desc, &sink) != CRTMEDIA_OK) {
                             sink = nullptr;
                             sinkUnavailable = true; // no output device: the wall clock paces playback
+                            if (traceAudio)
+                                fprintf(stderr, "CRTWEB_AUDIO sink_open_failed rate=%u channels=%u (wall clock paces playback)\n",
+                                    static_cast<unsigned>(desc.sample_rate), static_cast<unsigned>(desc.channels));
                         } else {
                             sinkRate = buffer.sample_rate;
+                            sinkChannels = buffer.channels;
+                            if (traceAudio)
+                                fprintf(stderr, "CRTWEB_AUDIO sink_opened rate=%u channels=%u\n",
+                                    static_cast<unsigned>(buffer.sample_rate), static_cast<unsigned>(buffer.channels));
                             uint64_t frames = 0;
                             if (crtmedia_audio_sink_get_position_frames(sink, &frames) == CRTMEDIA_OK)
                                 sinkBaseFrames = frames;
@@ -483,13 +505,49 @@ void MediaPlayerPrivateCRTShared::run()
                     }
                     if (sink) {
                         applyGain(buffer, gain);
-                        crtmedia_audio_sink_write(sink, buffer.data, buffer.frame_count);
+                        // The sink contract permits short writes; count only accepted samples.
+                        unsigned zeroWrites = 0;
+                        uint32_t offset = 0;
+                        size_t sampleBytes = buffer.format == CRTMEDIA_SAMPLE_FORMAT_S16 ? sizeof(int16_t) : sizeof(float);
+                        while (offset < buffer.frame_count) {
+                            auto* data = static_cast<const uint8_t*>(buffer.data) + offset * buffer.channels * sampleBytes;
+                            int64_t written = crtmedia_audio_sink_write(sink, data, buffer.frame_count - offset);
+                            if (written < 0 || written > buffer.frame_count - offset) {
+                                ++writeFailures;
+                                break;
+                            }
+                            if (!written) {
+                                Locker locker { lock };
+                                if (quit || ++zeroWrites >= 100) {
+                                    if (!quit)
+                                        ++writeFailures;
+                                    break;
+                                }
+                                condition.waitFor(lock, Seconds(0.001));
+                                continue;
+                            }
+                            zeroWrites = 0;
+                            sinkFramesWritten += written;
+                            if (traceAudio) {
+                                size_t count = static_cast<size_t>(written) * buffer.channels;
+                                for (size_t i = 0; i < count; ++i) {
+                                    if (buffer.format == CRTMEDIA_SAMPLE_FORMAT_S16)
+                                        nonzeroSamplesWritten += reinterpret_cast<const int16_t*>(data)[i] != 0;
+                                    else
+                                        nonzeroSamplesWritten += reinterpret_cast<const float*>(data)[i] != 0;
+                                }
+                            }
+                            offset += static_cast<uint32_t>(written);
+                        }
                         uint64_t frames = 0;
                         if (sinkRate && crtmedia_audio_sink_get_position_frames(sink, &frames) == CRTMEDIA_OK && frames >= sinkBaseFrames) {
                             int64_t mediaUs = sinkBaseUs + static_cast<int64_t>((frames - sinkBaseFrames) * 1000000ull / sinkRate);
                             Locker locker { lock };
                             anchorUs = mediaUs;
                             anchorNs = nowNs();
+                            ++clockUpdates;
+                            clockAdvances += frames > lastSinkPosition;
+                            lastSinkPosition = frames;
                         }
                     }
                 }
@@ -596,8 +654,18 @@ void MediaPlayerPrivateCRTShared::run()
 
     if (havePending)
         crtmedia_frame_release(&pending);
-    if (sink)
+    if (sink) {
+        if (traceAudio) {
+            uint64_t position = 0;
+            crtmedia_result positionResult = crtmedia_audio_sink_get_position_frames(sink, &position);
+            fprintf(stderr, "CRTWEB_AUDIO sink_closed rate=%u channels=%u written_frames=%llu nonzero_samples=%llu position_frames=%llu position_result=%d clock_updates=%llu clock_advances=%llu write_failures=%u\n",
+                static_cast<unsigned>(sinkRate), static_cast<unsigned>(sinkChannels),
+                static_cast<unsigned long long>(sinkFramesWritten), static_cast<unsigned long long>(nonzeroSamplesWritten),
+                static_cast<unsigned long long>(position), static_cast<int>(positionResult),
+                static_cast<unsigned long long>(clockUpdates), static_cast<unsigned long long>(clockAdvances), writeFailures);
+        }
         crtmedia_audio_sink_close(sink);
+    }
     if (video.codec)
         crtmedia_codec_release(video.codec);
     if (audio.codec)

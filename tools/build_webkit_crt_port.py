@@ -570,12 +570,33 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
     return result
 
 
-def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
+def audio_output_evidence(text: str) -> dict:
+    sinks = []
+    for line in text.splitlines():
+        if line.startswith("CRTWEB_AUDIO sink_closed "):
+            sinks.append({key: int(value) for key, value in re.findall(r"(\w+)=(-?\d+)", line)})
+    verified = all(sink.get("write_failures", -1) == 0 for sink in sinks) and any(
+                   sink.get("written_frames", 0) > 0 and sink.get("nonzero_samples", 0) > 0
+                   and sink.get("position_frames", 0) > 0 and sink.get("position_result", -1) == 0
+                   and sink.get("clock_advances", 0) > 0 and sink.get("write_failures", -1) == 0
+                   for sink in sinks)
+    return {"verified": verified, "sinks": sinks,
+            "fallback_count": text.count("CRTWEB_AUDIO sink_open_failed "),
+            "meaning": "nonzero PCM accepted, hardware position advanced and used to re-anchor the clock; not a listening test"}
+
+
+def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux",
+                   require_audio_output: bool = False) -> dict:
     """Tranche 8B: HTML <video>/<audio> through the CRT playback engine (crtmedia). Runs
     crtweb_media_test, then audits the Web process's mapped files: the crtmedia library is in (the
     engine really ran), no host VA-API/audio/GPU library is, and exactly one C++ runtime is mapped."""
     import subprocess
     run_env = gate_environment(build, sdk, prefix, work, env, target_os)
+    run_env["CRTWEB_MEDIA_AUDIO_TRACE"] = "1"
+    if target_os == "macos":
+        # CoreAudio brings Apple's own C++ runtime. A global loader override also rewrites the
+        # framework's library lookup; the linked RPATHs preserve the CRT/OS framework boundary.
+        run_env.pop("DYLD_LIBRARY_PATH", None)
     runs = work / "media-run"
     runs.mkdir(exist_ok=True)
     completed = subprocess.run([str(build / "bin" / "crtweb_media_test"), str(ROOT / "libcrtmedia" / "assets")],
@@ -609,14 +630,41 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
               "cxx_runtime_files": runtimes, "system_cxx_runtime_files": sorted(set(system_runtime)),
               "crtmedia_mapped": any(n.startswith("libcrtmedia") for n in names),
               "va_stub_mapped": sorted(n for n in names if n.startswith("libva")),
+              "audio_output": audio_output_evidence(completed.stderr),
               "output": completed.stdout.splitlines()}
+    (runs / "audio-output.log").write_text(completed.stderr, encoding="utf-8")
     result["passed"] = (completed.returncode == 0 and "crtweb_media_test: ok" in completed.stdout and not violations
                         and result["crtmedia_mapped"]
                         # Linux: exactly one C++ runtime (libc++ and libc++abi). macOS: exactly one CRT
                         # runtime image pair; the OS frameworks libcrtmedia reaches bring Apple's own
                         # /usr/lib libc++ and libc++abi, which are recorded and not a CRT dependency.
                         and len(runtimes) == 2 and (macos or not system_runtime))
+    if require_audio_output:
+        result["passed"] &= result["audio_output"]["verified"]
     return result
+
+
+def run_physical_camera_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
+                             target_os: str, runs: int = 3) -> dict:
+    run_env = gate_environment(build, sdk, prefix, work, env, target_os)
+    run_env.pop("CRTWEB_TEST_SYNTHETIC_CAMERA", None)
+    if target_os == "macos":
+        # Use the linked SDK RPATHs, as for the out-of-process WebView replay.
+        run_env.pop("DYLD_LIBRARY_PATH", None)
+    directory = work / "physical-camera-run"
+    directory.mkdir(exist_ok=True)
+    results = []
+    for iteration in range(runs):
+        completed = subprocess.run([str(build / "bin" / "crtweb_camera_probe"), "--allow-physical-camera", "3"],
+                                   env=run_env, cwd=directory, capture_output=True, text=True, timeout=90)
+        output = completed.stdout + completed.stderr
+        print(output, end="")
+        (directory / f"run-{iteration + 1}.log").write_text(output, encoding="utf-8")
+        results.append({"returncode": completed.returncode,
+                        "passed": completed.returncode == 0 and "crtweb_camera_probe: ok" in completed.stdout,
+                        "output": output.splitlines()})
+    return {"passed": all(run["passed"] for run in results), "source": "physical (explicit opt-in)",
+            "runs": results, "physical_camera_opened": any(run["passed"] for run in results)}
 
 
 def run_capture_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
@@ -654,14 +702,22 @@ def main() -> int:
                              "the build directory, so only files whose content changed are rebuilt")
     parser.add_argument("--webkit", action="store_true",
                         help="also build WebKit and its Web/Network process executables (milestone B4)")
+    parser.add_argument("--require-audio-output", action="store_true",
+                        help="with --webkit --run-tests: require real PCM delivery and a progressing sink clock")
+    parser.add_argument("--allow-physical-camera", action="store_true",
+                        help="with --webkit --run-tests: explicitly open the real camera in three consecutive probe runs")
     parser.add_argument("--define", action="append", default=[], help="extra -D option for cmake")
     parser.add_argument("-k", "--keep-going", action="store_true", help="ninja -k 0: collect every error")
     parser.add_argument("-j", "--jobs", type=int, default=0)
     args = parser.parse_args()
+    if (args.require_audio_output or args.allow_physical_camera) and not (args.webkit and args.run_tests):
+        parser.error("device evidence options require --webkit --run-tests")
 
     sdk, prefix, work = args.sdk_root.resolve(), args.deps_prefix.resolve(), args.work_root.resolve()
     work.mkdir(parents=True, exist_ok=True)
     target_os, arch = jsc.sdk_target(sdk)
+    if (args.require_audio_output or args.allow_physical_camera) and target_os not in ("linux", "macos"):
+        parser.error("device evidence gates are currently implemented for Linux and macOS only")
     if target_os not in ("linux", "macos", "windows"):
         raise SystemExit(f"B3 is not replayed on {target_os} (docs/acceptance/crtweb_acceptance.md)")
     candidate = prefix / "bin" / "gperf"
@@ -712,6 +768,10 @@ def main() -> int:
                                           if args.webkit else []) \
             + (["crtweb_host", "crtweb_network_test"] if args.webkit and target_os in ("linux", "macos", "windows") else []) \
             + (["crtweb_media_test", "crtweb_capture_test"] if args.webkit and target_os in ("linux", "macos") else [])
+    if args.allow_physical_camera:
+        args.target = list(args.target or DEFAULT_TARGETS)
+        if "crtweb_camera_probe" not in args.target:
+            args.target.append("crtweb_camera_probe")
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -730,8 +790,10 @@ def main() -> int:
     if args.webkit and target_os in ("linux", "macos", "windows"):
         results["webview_through_crtui"] = run_webview_gate(build, sdk, prefix, work, env, target_os)
         if target_os in ("linux", "macos"):
-            results["media_playback"] = run_media_gate(build, sdk, prefix, work, env, target_os)
+            results["media_playback"] = run_media_gate(build, sdk, prefix, work, env, target_os, args.require_audio_output)
             results["camera_capture"] = run_capture_gate(build, sdk, prefix, work, env, target_os)
+            if args.allow_physical_camera:
+                results["physical_camera"] = run_physical_camera_gate(build, sdk, prefix, work, env, target_os)
         network_program = build / "bin" / ("crtweb_network_test.exe" if target_os == "windows" else "crtweb_network_test")
         network_env = gate_environment(build, sdk, prefix, work, env, target_os)
         webview_env = dict(network_env)

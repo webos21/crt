@@ -72,7 +72,14 @@ int main(int argc, char** argv)
         return 1;
     crtweb_view_config config = { sizeof(crtweb_view_config), 320, 240, 100 };
     crtweb_view* view = nullptr;
-    crtweb_view_create(gRuntime, &config, &view);
+    if (crtweb_view_create(gRuntime, &config, &view) != CRTWEB_OK) {
+        crtweb_runtime_destroy(gRuntime);
+        return 1;
+    }
+    auto cleanup = [&] {
+        crtweb_view_destroy(view);
+        crtweb_runtime_destroy(gRuntime);
+    };
     crtweb_view_set_focus(view, 1);
 
     struct Record { unsigned requests = 0; } record;
@@ -90,11 +97,13 @@ int main(int argc, char** argv)
     crtweb_view_load_url(view, server.url("/camera").c_str());
     if (!pumpFor(15000, [&] { return js(view, "typeof window.start") == "function"; })) {
         fprintf(stderr, "crtweb_camera_probe: the page did not load\n");
+        cleanup();
         return 1;
     }
     js(view, "start(),'go'");
     if (!pumpFor(20000, [&] { return js(view, "String(window.result)") != "null"; }) || js(view, "String(window.result)") != "ok") {
         fprintf(stderr, "crtweb_camera_probe: no stream: %s\n", js(view, "String(window.result)").c_str());
+        cleanup();
         return 1;
     }
     pumpFor(seconds * 1000);
@@ -127,9 +136,8 @@ int main(int argc, char** argv)
     pumpFor(1000);
     std::string ended = js(view, "window.track.readyState");
     printf("CAMERA_PROBE readyState_after_stop=%s\n", ended.c_str());
-    crtweb_view_destroy(view);
-    crtweb_runtime_destroy(gRuntime);
-    bool ok = samples > 5 && !hashes.empty() && lit > 0 && ended == "ended";
+    cleanup();
+    bool ok = record.requests == 1 && samples > 5 && hashes.size() > 1 && lit > 0 && ended == "ended";
     printf("crtweb_camera_probe: %s\n", ok ? "ok" : "FAILED");
     return ok ? 0 : 1;
 }

@@ -2075,8 +2075,8 @@ recompose of the 23 carried patches: `crtweb_network_test` with its fifteen brow
 (3/3 runs, Web process 28 -> 23..25 threads over twelve lifetimes, no process left), `crtweb_capture_test` with the
 labelled synthetic camera (3/3), and every earlier B3-C8/Tranche 5 entry unchanged (public API lifecycle 100 cycles
 +0 KiB/+0/+0, WebView 20 cycles +0/+0/+0, internal B7 +64 KiB/+0/+0, header/export firewall, static and runtime audits).
-The physical camera was **not** opened on this host (it needs the explicit opt-in run and the OS camera prompt);
-audio *output* is also unverified (the tests do not record whether the sink or the wall clock paced playback).
+That initial combined replay used only the synthetic camera and did not record real audio output.
+The two device-evidence gaps were subsequently closed by the opt-in follow-up below.
 What differed from Linux, all fixed at the source and none in WebKit:
 
 1. **`libcrtmedia.dylib` exported FFmpeg, libcurl and mbedTLS** (3,485 symbols besides its 103 `crtmedia_*`). WebKit's
@@ -2101,6 +2101,55 @@ What differed from Linux, all fixed at the source and none in WebKit:
    the cause of item 1 was isolated). A reused CMake cache keeps `ENABLE_MEDIA_STREAM=OFF` from an earlier configure:
    pass `--define ENABLE_MEDIA_STREAM=ON` once when switching a build directory.
 6. The test observers: `crtweb_media_test` uses libproc (`proc_listchildpids`, `proc_pidinfo`) and `vmmap(1)`.
+
+**macOS/arm64 device follow-up (2026-10-14, explicit user opt-in).** The same public browser API now
+has physical-camera and real audio-output evidence on this machine:
+
+| Evidence | Observed result |
+| --- | --- |
+| Physical camera | FaceTime HD camera, negotiated 640x480 at 30 fps, through `getUserMedia`, application grant, CRT capture and the view framebuffer |
+| Consecutive camera executions | 3/3 pass; 20 sampled frames each, 19/18/19 distinct picture hashes; one application permission request each |
+| Stop and reopen | `track.readyState=ended` after stop in every run; runtime destroyed and device reopened by the next probe |
+| Audio output device | Default built-in MacBook Pro speakers (`system_profiler -json SPAudioDataType`, build-host observation) |
+| HTML MP3 -> CoreAudio | 8000 Hz mono; 5184 accepted frames and nonzero samples; position 4693 frames; nine clock queries applied, seven with advancing position |
+| Output errors/fallback | Zero write failures and zero sink-open/wall-clock fallbacks in the media run |
+| Runtime mapping | `libcrtmedia` mapped, one CRT `libc++`/`libc++abi` image pair, Apple's framework runtime separately recorded; no mapping violation |
+| Final combined gate | 12/12 pass, including the optional physical-camera entry; network trust, synthetic capture, header/export firewall and static/runtime audits pass |
+| Lifecycle regression | Public API 100 cycles +16 KiB/+1 thread/+0 fd (within bounds), internal B7 +80 KiB/+0/+0, WebView 20 cycles +0/+0/+0; media threads 28 -> 24; no leftover work-tree processes |
+
+The player emits `CRTWEB_AUDIO sink_closed` summaries under `CRTWEB_MEDIA_AUDIO_TRACE=1`. Counts use
+the actual sink return value, retry short writes and bounded zero writes, and count nonzero PCM after
+volume/mute processing. Clock counters increment only where a successful sink-position query actually
+re-anchors the player clock. `media_playback.audio_output` records these fields in `acceptance-b3.json`.
+Silence alone, decode-only output, a wall-clock fallback or failed writes cannot satisfy the real-output
+requirement. This proves PCM delivery and a progressing device clock, not acoustic loopback, speaker
+volume or a human listening result. The player still interpolates wall time between sink-clock anchors.
+
+Reproduce after building the `05-ui` SDK and the web dependencies, using an existing composed work tree:
+
+```sh
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root out/macos-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/macos-host-ninja-debug/port-tests/install \
+  --work-root /private/tmp/webB3f --webkit --run-tests --reuse-tree \
+  --require-audio-output --allow-physical-camera -j 8
+```
+
+The explicit camera flag builds/runs `crtweb_camera_probe --allow-physical-camera 3` three times,
+removes the synthetic-camera setting and records `physical-camera-run/run-{1,2,3}.log`; no images are
+written. Without this flag the automated capture gate remains synthetic. The audio log is
+`media-run/audio-output.log`. On macOS these device runs clear `DYLD_LIBRARY_PATH` and use the linked
+SDK/port RPATHs: forcing a global loader override reproduced a typed-operator-new initialization
+abort at CoreAudio entry, whereas the RPATH execution passes and retains both CRT and framework runtime
+boundaries in its mapping audit. The media test reads its trace environment in `main()`, after CRT startup,
+rather than in a Mach-O static initializer. The initial empty environment had previously hidden diagnostics.
+
+Camera access was already available to the ordinary process on this host; no new TCC prompt appeared.
+This does not remove the OS permission requirement on a fresh machine (the signed LaunchServices bundle
+procedure in `crtmedia_encode_capture_acceptance.md` may still be required there). The three executions
+prove stop/teardown/reopen but do not measure same-process physical-camera RSS/thread/fd growth, device
+busy state independently, microphone capture or permission revocation at the OS level. Windows replay
+and physical-camera evidence, Linux real-audio evidence, and that camera resource stress remain open.
 
 ### 9. GPU integration
 

@@ -24,7 +24,7 @@
 
 static int failures;
 
-static bool gTrace = getenv("CRTWEB_MEDIA_TRACE") != nullptr;
+static bool gTrace;
 
 static long long elapsedMs()
 {
@@ -270,6 +270,8 @@ static long threadsOf(pid_t pid)
 
 int main(int argc, char** argv)
 {
+    // CRT startup supplies envp before main, but after Mach-O static initializers.
+    gTrace = getenv("CRTWEB_MEDIA_TRACE") != nullptr;
     if (argc != 2) {
         fprintf(stderr, "usage: %s assets-directory\n", argv[0]);
         return 2;

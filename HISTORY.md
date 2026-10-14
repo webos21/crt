@@ -11,6 +11,37 @@ substantive update.
 
 ## 2026-10-14
 
+### Web Tranche 8 macOS device evidence: physical camera and CoreAudio output
+
+The explicitly opted-in `crtweb_camera_probe` passes three consecutive ordinary executions on
+macOS/arm64: FaceTime HD camera, 640x480 at 30 fps, one application permission request per run,
+20 frame samples with 19/18/19 distinct pictures in the final combined replay, `readyState=ended` after `track.stop()`, then
+successful reopening in the next process. No images are saved. The probe now requires changing
+pictures and cleans up the runtime even when load/capture fails. No new OS permission prompt was
+required on this machine; other hosts may require one.
+
+The HTML MP3 test delivers nonzero PCM through the installed `libcrtmedia` CoreAudio sink to the
+default built-in MacBook Pro speakers: 8000 Hz mono, 5184 accepted frames/nonzero samples, position
+4693 frames, seven progressing sink-clock updates, zero write failures or sink-open fallbacks in
+the run. This is API/device-clock evidence, not microphone loopback or a human listening test.
+The player now honors sink short writes and records actual accepted frames, nonzero samples,
+position and clock updates under `CRTWEB_MEDIA_AUDIO_TRACE`. The test's global `getenv()` ran
+before CRT startup and initialized an empty environment; moving it into `main()` lets the diagnostic
+setting reach the Web process. A global `DYLD_LIBRARY_PATH` caused a typed-operator-new initialization
+abort when entering CoreAudio (and in the camera probe); the device tests use linked RPATHs instead,
+as the existing WebView replay already does. The mapping audit still requires one CRT C++ image
+pair and separately records Apple's framework runtime.
+
+The driver records this evidence in `acceptance-b3.json`; `--require-audio-output` makes real output
+mandatory, and the explicit `--allow-physical-camera` adds three hardware runs. Normal automated
+gates still use the labelled synthetic camera. The final combined gate passes 12/12: public API
+100 cycles +16 KiB/+1 thread/+0 fd within bounds, internal B7 +80 KiB/+0/+0, WebView 20 cycles
++0/+0/+0, media Web process 28 -> 24 threads, static/runtime audits clean and no leftover work-tree
+process. Four evidence-parser tests, fifteen licensing tests and the manifest check pass; the probe
+also refuses execution without opt-in. Reproduction and limits are in
+`docs/acceptance/crtweb_acceptance.md`, 8C device follow-up.
+Windows 8A-8C replay, Linux audio-output evidence and same-process camera resource-delta stress remain open.
+
 ### Web Tranche 8 replayed on macOS/arm64: libcrtmedia exported its internals and bound libc to the host
 
 8A (network trust), 8B (playback engine over crtmedia) and 8C (camera permission lifecycle, synthetic source) pass on
@@ -21,8 +52,8 @@ stalls) and then reading the Mach-O bindings of libWebKit (`dyld_info -fixups`: 
 FFmpeg/libcurl/mbedTLS (now `crtmedia_*` only), bound its libc symbols to libSystem because libc.dylib came after the
 frameworks on the link line (FFmpeg's `pthread_once` bus error in the Web process; libc.dylib first now), and the SDK
 carried `libc++.dylib` as a second regular file of the same install name (the dist copier dereferenced symlinks; they
-are kept). Audit policy now names the OS media frameworks as libcrtmedia's PAL. Not done on this host: the physical camera
-(explicit opt-in run), audio output evidence. Details: `docs/acceptance/crtweb_acceptance.md`, Tranche 8C.
+are kept). Audit policy now names the OS media frameworks as libcrtmedia's PAL. Physical-camera and audio-output
+evidence were completed in the device follow-up above. Details: `docs/acceptance/crtweb_acceptance.md`, Tranche 8C.
 
 ### Web Tranche 8, gate 8C: camera permission lifecycle and capture (Linux/x86_64, synthetic source)
 
