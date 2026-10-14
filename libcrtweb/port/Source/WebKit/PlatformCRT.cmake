@@ -154,6 +154,7 @@ endif ()
 
 list(APPEND WebKit_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBKIT_DIR}/WebProcess/WebPage/crt"
+    "${WEBKIT_DIR}/WebProcess/crt"
 )
 
 list(APPEND WebKit_LIBRARIES
@@ -267,6 +268,18 @@ if (CRT_LIBCRTWEB_DIR)
         target_include_directories(crtweb_media_test PRIVATE ${CRT_LIBCRTWEB_DIR}/include)
         target_link_libraries(crtweb_media_test PRIVATE crtweb)
         add_dependencies(crtweb_media_test WebProcess NetworkProcess)
+
+        # Tranche 8C: camera permission lifecycle and capture (synthetic source; public header only).
+        add_executable(crtweb_capture_test ${CRT_WEBKIT_TESTS}/crtweb_capture_test.cpp)
+        target_include_directories(crtweb_capture_test PRIVATE ${CRT_LIBCRTWEB_DIR}/include)
+        target_link_libraries(crtweb_capture_test PRIVATE crtweb)
+        add_dependencies(crtweb_capture_test WebProcess NetworkProcess)
+
+        # The physical-camera probe: explicitly opt-in, never run by the gate.
+        add_executable(crtweb_camera_probe ${CRT_WEBKIT_TESTS}/crtweb_camera_probe.cpp)
+        target_include_directories(crtweb_camera_probe PRIVATE ${CRT_LIBCRTWEB_DIR}/include)
+        target_link_libraries(crtweb_camera_probe PRIVATE crtweb)
+        add_dependencies(crtweb_camera_probe WebProcess NetworkProcess)
 
         add_executable(crtweb_api_lifecycle_test ${CRT_WEBKIT_TESTS}/crtweb_api_lifecycle_test.cpp)
         target_include_directories(crtweb_api_lifecycle_test PRIVATE ${CRT_LIBCRTWEB_DIR}/include)

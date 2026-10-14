@@ -32,12 +32,15 @@
 #include <WebKit/WKPageConfigurationRef.h>
 #include <WebKit/WKPageNavigationClient.h>
 #include <WebKit/WKPageUIClient.h>
+#include <WebKit/WKPreferencesRef.h>
 #include <WebKit/WKRunLoop.h>
 #include <WebKit/WKString.h>
 #include <WebKit/WKType.h>
 #include <WebKit/WKURL.h>
 #include <WebKit/WKURLRequest.h>
+#include <WebKit/WKSecurityOriginRef.h>
 #include <WebKit/WKURLResponse.h>
+#include <WebKit/WKUserMediaPermissionRequest.h>
 #include <WebKit/WKView.h>
 #include <WebKit/WKViewClient.h>
 #include <WebKit/WKViewCRT.h>
@@ -115,6 +118,15 @@ struct crtweb_dialog {
     bool completed { false };
 };
 
+struct crtweb_media_permission {
+    crtweb_view* view;
+    WKTypeRef request; // retained
+    WKTypeRef videoDevices; // retained WKArray of device UID strings
+    bool requiresMicrophone;
+    bool requiresDisplay;
+    bool completed { false };
+};
+
 struct crtweb_view {
     crtweb_runtime* runtime { nullptr };
     WKViewRef view { nullptr };
@@ -133,6 +145,11 @@ struct crtweb_view {
     std::string url;
     std::vector<ScriptRequest*> scripts;
     std::vector<crtweb_dialog*> dialogs;
+    std::vector<crtweb_media_permission*> mediaRequests;
+    // Resolved tokens stay allocated until the view is released, so a late or duplicate completion is
+    // answered with an error instead of touching freed memory.
+    std::vector<crtweb_media_permission*> retiredMediaRequests;
+    std::vector<crtweb_dialog*> retiredDialogs;
 };
 
 namespace {
@@ -452,8 +469,9 @@ void completeDialog(crtweb_dialog* dialog, bool accepted, const std::string* tex
     if (crtweb_view* view = dialog->view) {
         auto& list = view->dialogs;
         list.erase(std::remove(list.begin(), list.end(), dialog), list.end());
-    }
-    delete dialog;
+        view->retiredDialogs.push_back(dialog);
+    } else
+        delete dialog;
 }
 
 void showDialog(crtweb_view* view, DialogType type, WKTypeRef listener, const std::string& message, const std::string& defaultText)
@@ -503,6 +521,66 @@ void runBeforeUnloadConfirmPanel(WKPageRef, WKStringRef message, WKFrameRef, WKP
         showDialog(view, DialogType::BeforeUnload, listener, toUTF8(message), std::string());
     else
         WKPageRunBeforeUnloadConfirmPanelResultListenerCall(listener, true);
+}
+
+// ---- media permission (Tranche 8C) -------------------------------------------------------------------
+
+void resolveMediaPermission(crtweb_media_permission* permission, bool grant, uint32_t cameraIndex)
+{
+    if (permission->completed)
+        return;
+    permission->completed = true;
+    auto request = static_cast<WKUserMediaPermissionRequestRef>(permission->request);
+    bool allowed = false;
+    if (grant && !permission->requiresMicrophone && !permission->requiresDisplay && permission->videoDevices) {
+        auto devices = static_cast<WKArrayRef>(permission->videoDevices);
+        if (cameraIndex < WKArrayGetSize(devices)) {
+            WKStringRef video = static_cast<WKStringRef>(WKArrayGetItemAtIndex(devices, cameraIndex));
+            WKStringRef none = WKStringCreateWithUTF8CString("");
+            WKUserMediaPermissionRequestAllow(request, none, video);
+            WKRelease(none);
+            allowed = true;
+        }
+    }
+    if (!allowed)
+        WKUserMediaPermissionRequestDeny(request, kWKPermissionDenied);
+    WKRelease(permission->request);
+    if (permission->videoDevices)
+        WKRelease(permission->videoDevices);
+    permission->request = nullptr;
+    permission->videoDevices = nullptr;
+    if (crtweb_view* view = permission->view) {
+        auto& list = view->mediaRequests;
+        list.erase(std::remove(list.begin(), list.end(), permission), list.end());
+        view->retiredMediaRequests.push_back(permission);
+    } else
+        delete permission;
+}
+
+void decidePolicyForUserMediaPermissionRequest(WKPageRef, WKFrameRef, WKSecurityOriginRef documentOrigin, WKSecurityOriginRef topOrigin, WKUserMediaPermissionRequestRef request, const void* clientInfo)
+{
+    crtweb_view* view = viewFrom(clientInfo);
+    if (!view || !view->callbacks.on_media_permission) {
+        WKUserMediaPermissionRequestDeny(request, kWKPermissionDenied); // no callback: deny
+        return;
+    }
+    auto* permission = new crtweb_media_permission { view, WKRetain(request), nullptr,
+        WKUserMediaPermissionRequestRequiresMicrophoneCapture(request), WKUserMediaPermissionRequestRequiresDisplayCapture(request) };
+    if (WKArrayRef devices = WKUserMediaPermissionRequestVideoDeviceUIDs(request))
+        permission->videoDevices = WKRetain(devices);
+    view->mediaRequests.push_back(permission);
+    gActivity = true;
+    std::string requesting = takeString(WKSecurityOriginCopyToString(documentOrigin));
+    std::string topLevel = takeString(WKSecurityOriginCopyToString(topOrigin));
+    crtweb_media_permission_info info = { };
+    info.struct_size = sizeof info;
+    info.requesting_origin_utf8 = requesting.c_str();
+    info.top_level_origin_utf8 = topLevel.c_str();
+    info.kinds = (WKUserMediaPermissionRequestRequiresCameraCapture(request) ? CRTWEB_MEDIA_KIND_CAMERA : 0)
+        | (permission->requiresMicrophone ? CRTWEB_MEDIA_KIND_MICROPHONE : 0)
+        | (permission->requiresDisplay ? CRTWEB_MEDIA_KIND_DISPLAY : 0);
+    info.camera_count = permission->videoDevices ? static_cast<uint32_t>(WKArrayGetSize(static_cast<WKArrayRef>(permission->videoDevices))) : 0;
+    view->callbacks.on_media_permission(view, permission, &info, view->callbacks.user_data);
 }
 
 void closePage(WKPageRef, const void* clientInfo)
@@ -583,6 +661,7 @@ void installClients(crtweb_view* view)
     uiClient.runJavaScriptConfirm = runJavaScriptConfirm;
     uiClient.runJavaScriptPrompt = runJavaScriptPrompt;
     uiClient.runBeforeUnloadConfirmPanel = runBeforeUnloadConfirmPanel;
+    uiClient.decidePolicyForUserMediaPermissionRequest = decidePolicyForUserMediaPermissionRequest;
     WKPageSetPageUIClient(view->page, &uiClient.base);
 }
 
@@ -697,6 +776,10 @@ void detach(crtweb_view* view)
     std::vector<crtweb_dialog*> dialogs = view->dialogs;
     for (crtweb_dialog* dialog : dialogs)
         completeDialog(dialog, false, nullptr);
+    // Pending camera requests are denied: nothing may be granted to a view that is going away.
+    std::vector<crtweb_media_permission*> mediaRequests = view->mediaRequests;
+    for (crtweb_media_permission* permission : mediaRequests)
+        resolveMediaPermission(permission, false, 0);
     for (auto& entry : gDownloads) {
         if (entry.second.view == view) {
             entry.second.view = nullptr;
@@ -709,6 +792,10 @@ void detach(crtweb_view* view)
 
 void release(crtweb_view* view)
 {
+    for (crtweb_media_permission* permission : view->retiredMediaRequests)
+        delete permission;
+    for (crtweb_dialog* dialog : view->retiredDialogs)
+        delete dialog;
     WKRelease(view->view);
     if (view->pageConfiguration)
         WKRelease(view->pageConfiguration);
@@ -1123,6 +1210,12 @@ crtweb_result crtweb_view_create(crtweb_runtime* runtime, const crtweb_view_conf
     view->pageConfiguration = WKPageConfigurationCreate();
     WKPageConfigurationSetContext(view->pageConfiguration, runtime->context);
     WKPageConfigurationSetWebsiteDataStore(view->pageConfiguration, runtime->dataStore);
+    // Camera capture is enabled in the engine (Tranche 8C); every request still needs the application's
+    // explicit grant (on_media_permission), and without a callback it is denied.
+    WKPreferencesRef preferences = WKPreferencesCreate();
+    WKPreferencesSetMediaDevicesEnabled(preferences, true);
+    WKPageConfigurationSetPreferences(view->pageConfiguration, preferences);
+    WKRelease(preferences);
     view->view = WKViewCreate(view->pageConfiguration);
     if (!view->view) {
         WKRelease(view->pageConfiguration);
@@ -1435,6 +1528,28 @@ crtweb_result crtweb_view_set_callbacks(crtweb_view* view, const crtweb_view_cal
         memcpy(&view->callbacks, callbacks, size);
         view->callbacks.struct_size = sizeof(crtweb_view_callbacks);
     }
+    return CRTWEB_OK;
+}
+
+crtweb_result crtweb_media_permission_complete(crtweb_media_permission* request, int grant, uint32_t camera_index)
+{
+    if (!request || request->completed)
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    if (!onOwnerThread())
+        return CRTWEB_ERROR_STATE;
+    bool unsupported = grant && (request->requiresMicrophone || request->requiresDisplay);
+    resolveMediaPermission(request, grant != 0 && !unsupported, camera_index);
+    return unsupported ? CRTWEB_ERROR_UNSUPPORTED : CRTWEB_OK;
+}
+
+crtweb_result crtweb_view_revoke_media(crtweb_view* view)
+{
+    CRTWEB_CHECK_VIEW(view);
+    // Pending requests are denied; active tracks end and their sources are released.
+    std::vector<crtweb_media_permission*> mediaRequests = view->mediaRequests;
+    for (crtweb_media_permission* permission : mediaRequests)
+        resolveMediaPermission(permission, false, 0);
+    WKViewCRTStopMediaCapture(view->view);
     return CRTWEB_OK;
 }
 

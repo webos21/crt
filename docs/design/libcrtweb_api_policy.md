@@ -117,7 +117,7 @@ authentication challenges, other permission prompts (geolocation, notifications)
 context menus; a JavaScript message channel (only `crtweb_view_evaluate_script`); accessibility.
 Each is a later addition to this header, not a reason to expose a WebKit object.
 
-## Camera permissions (Tranche 8C target contract, implementation pending)
+## Camera permissions (Tranche 8C)
 
 Video camera capture is an explicitly approved extension of the browser target, not of WebRTC,
 microphone or display capture. Use WebKit's secure-context and frame/Permissions Policy checks;
@@ -147,11 +147,14 @@ worker owns the CRT capture handle and transfers owned CPU frames, with finite d
 generation checks so stop/navigation cannot publish stale frames. No FFmpeg, V4L2, AVFoundation,
 Media Foundation or private Skia type may cross the public API.
 
-Implementation order is permission lifecycle -> CRT video source/device factory -> MediaStream
-video display over the CPU playback path -> physical-host replay. Synthetic/test sources must be
+Implementation order was permission lifecycle -> CRT video source/device factory -> MediaStream
+video display over the CPU playback path -> physical-host replay (the last still pending). Synthetic/test sources must be
 test-only and must never be reported as physical camera evidence. Automated default gates prove
 denial and lifecycle without activating a camera; physical-camera validation is explicitly opt-in.
-Acceptance requirements live in [Tranche 8C](../acceptance/crtweb_acceptance.md#8c-capture-separate-from-playback).
+The public surface is `on_media_permission` / `crtweb_media_permission_complete` / `crtweb_view_revoke_media`
+(and their `crtweb::WebView` forms). Within one document WebKit keeps a granted frame's access after
+`track.stop()` (what getUserMedia's specification allows); only a revocation, navigation, document
+replacement or view destruction resets it. Acceptance requirements live in [Tranche 8C](../acceptance/crtweb_acceptance.md#8c-capture-separate-from-playback).
 
 ## The crtui WebView, and why it is a separate process
 

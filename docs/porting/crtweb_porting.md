@@ -126,6 +126,7 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
 - `0021` adds three WebPage messages (`SetCompositionCRT`, `ConfirmCompositionCRT`, `InsertTextCRT`) for the embedder's
   input method: non-Cocoa builds have no composition entry point in the Web process. Removal: upstream offers a
   platform-neutral composition/insertion message.
+- `0023` includes `VideoFrame.h` in `RealtimeMediaSource.cpp` (only Cocoa/GStreamer headers brought it). Removal: upstream includes it.
 
 ## Playback engine (Tranche 8B)
 

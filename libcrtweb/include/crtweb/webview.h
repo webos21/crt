@@ -89,6 +89,14 @@ class WebView {
                      std::function<void(bool accepted, const std::string& text)> complete)>
       on_dialog;
 
+  /* getUserMedia (video camera only): the application decides. Call `complete(grant, camera_index)`
+   * exactly once, from the callback or later; without a callback every request is denied. kinds is a
+   * bit set (camera 1, microphone 2, display 4); a grant of a request that needs the microphone or the
+   * screen is refused by the host, and the request is denied. */
+  std::function<void(const std::string& requesting_origin, const std::string& top_level_origin, uint32_t kinds,
+                     uint32_t camera_count, std::function<void(bool grant, uint32_t camera_index)> complete)>
+      on_media_permission;
+
   /* Settings of the host's runtime, fixed at launch. */
   struct LaunchOptions {
     std::string data_directory;   /* empty: ephemeral website data */
@@ -286,6 +294,9 @@ class WebView {
   bool ime_commit(const std::string& text) { return command(CRTWEB_COMMAND_IME_COMMIT, 0, text); }
   bool ime_cancel() { return command(CRTWEB_COMMAND_IME_CANCEL, 0, std::string()); }
 
+  /* Ends this page's camera access (tracks end, the device is released); further requests ask again. */
+  bool revoke_media() { return command(CRTWEB_COMMAND_MEDIA_REVOKE, 0, std::string()); }
+
   /* ---- website data ---- */
   static constexpr uint32_t kDataCookies = 1u;
   static constexpr uint32_t kDataCache = 2u;
@@ -376,6 +387,19 @@ class WebView {
           on_dialog(static_cast<DialogKind>(flags), first, second, answer);
         else
           answer(flags == 1u || flags == 4u, std::string());
+        break;
+      }
+      case CRTWEB_EVENT_MEDIA_PERMISSION: {
+        std::vector<std::string> fields = split_fields(argument);
+        auto answer = [this, id](bool grant, uint32_t index) {
+          std::string text = std::to_string(index);
+          if (client_) client_->send_command(CRTWEB_COMMAND_MEDIA_PERMISSION_RESULT, id, text.data(), text.size(), grant ? 1u : 0u);
+        };
+        uint32_t count = fields.size() > 2 ? static_cast<uint32_t>(strtoul(fields[2].c_str(), nullptr, 10)) : 0;
+        if (on_media_permission)
+          on_media_permission(fields.size() > 0 ? fields[0] : std::string(), fields.size() > 1 ? fields[1] : std::string(), flags, count, answer);
+        else
+          answer(false, 0);
         break;
       }
       case CRTWEB_EVENT_DATA_CLEARED: {

@@ -48,6 +48,7 @@ bool gDecisionArrived;
 bool gDecisionAccept;
 std::string gDecisionPath;
 std::map<uint32_t, crtweb_dialog*> gDialogs;
+std::map<uint32_t, crtweb_media_permission*> gMediaRequests;
 
 void sendEvent(crtweb_event event, uint32_t id, uint32_t flags, const std::string& argument)
 {
@@ -154,6 +155,16 @@ void onDialog(crtweb_view*, crtweb_dialog* dialog, crtweb_dialog_kind kind, cons
         std::string(message ? message : "") + std::string(1, '\0') + (defaultText ? defaultText : ""));
 }
 
+void onMediaPermission(crtweb_view*, crtweb_media_permission* request, const crtweb_media_permission_info* info, void*)
+{
+    static uint32_t nextId;
+    uint32_t id = ++nextId;
+    gMediaRequests[id] = request;
+    std::string argument = std::string(info->requesting_origin_utf8) + std::string(1, '\0') + info->top_level_origin_utf8
+        + std::string(1, '\0') + std::to_string(info->camera_count);
+    sendEvent(CRTWEB_EVENT_MEDIA_PERMISSION, id, info->kinds, argument);
+}
+
 void onDataCleared(crtweb_runtime*, crtweb_result, void* data)
 {
     sendEvent(CRTWEB_EVENT_DATA_CLEARED, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(data)), 0, std::string());
@@ -213,6 +224,19 @@ void runCommand(const crtweb_blob_assembler& command)
         }
         break;
     }
+    case CRTWEB_COMMAND_MEDIA_PERMISSION_RESULT: {
+        auto found = gMediaRequests.find(command.id);
+        if (found != gMediaRequests.end()) {
+            crtweb_media_permission_complete(found->second, (command.flags & 1u) != 0,
+                static_cast<uint32_t>(strtoul(argument.c_str(), nullptr, 10)));
+            gMediaRequests.erase(found);
+        }
+        break;
+    }
+    case CRTWEB_COMMAND_MEDIA_REVOKE:
+        crtweb_view_revoke_media(gView);
+        gMediaRequests.clear(); // every pending request was denied by the revocation
+        break;
     case CRTWEB_COMMAND_DOWNLOAD_DECISION:
         if (command.id == gDecisionFor) {
             gDecisionAccept = (command.flags & 1u) != 0;
@@ -382,6 +406,7 @@ int main(int argc, char** argv)
     callbacks.on_popup_request = onPopupRequest;
     callbacks.on_close_requested = onCloseRequested;
     callbacks.on_dialog = onDialog;
+    callbacks.on_media_permission = onMediaPermission;
     crtweb_view_set_callbacks(gView, &callbacks);
     crtweb_view_set_focus(gView, 1);
     if (initialURL)

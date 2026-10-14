@@ -272,6 +272,23 @@ typedef enum crtweb_dialog_kind {
   CRTWEB_DIALOG_BEFORE_UNLOAD = 4 /* the "leave this page?" confirmation */
 } crtweb_dialog_kind;
 
+/* A pending camera/microphone permission request (Tranche 8C). The request is a one-shot token: it is
+ * resolved exactly once by crtweb_media_permission_complete(), and is cancelled (denied) by document
+ * replacement, view destruction or process loss. No grant exists unless the application gives one. */
+typedef struct crtweb_media_permission crtweb_media_permission;
+
+#define CRTWEB_MEDIA_KIND_CAMERA 0x1u
+#define CRTWEB_MEDIA_KIND_MICROPHONE 0x2u
+#define CRTWEB_MEDIA_KIND_DISPLAY 0x4u
+
+typedef struct crtweb_media_permission_info {
+  uint32_t struct_size;
+  const char* requesting_origin_utf8; /* the document that called getUserMedia */
+  const char* top_level_origin_utf8;  /* the page's top-level origin */
+  uint32_t kinds;                     /* CRTWEB_MEDIA_KIND_* the request needs */
+  uint32_t camera_count;              /* camera devices a grant can pick from (opaque, privacy-filtered) */
+} crtweb_media_permission_info;
+
 /* A pending JavaScript dialog. The page is blocked until crtweb_dialog_complete() is called, from
  * inside the callback or later. */
 typedef struct crtweb_dialog crtweb_dialog;
@@ -317,7 +334,24 @@ typedef struct crtweb_view_callbacks {
    * alert is dismissed, a confirm and a prompt are cancelled and a beforeunload allows leaving. */
   void (*on_dialog)(crtweb_view* view, crtweb_dialog* dialog, crtweb_dialog_kind kind, const char* message_utf8,
                     const char* default_text_utf8, void* user_data);
+
+  /* getUserMedia needs the application's decision (Tranche 8C; video camera only). Answer with
+   * crtweb_media_permission_complete(). Without this callback every request is denied. A request for
+   * the microphone or the screen is never granted by this API: grant fails with
+   * CRTWEB_ERROR_UNSUPPORTED and the request is denied. */
+  void (*on_media_permission)(crtweb_view* view, crtweb_media_permission* request,
+                              const crtweb_media_permission_info* info, void* user_data);
 } crtweb_view_callbacks;
+
+/* Resolves a media permission request once. grant: non-zero allows the camera `camera_index` of the
+ * request (0 is the first); zero denies. A second completion, or one after the request was cancelled,
+ * returns CRTWEB_ERROR_INVALID_ARGUMENT. */
+CRTWEB_API crtweb_result crtweb_media_permission_complete(crtweb_media_permission* request, int grant,
+                                                          uint32_t camera_index);
+
+/* Revokes camera access of this view: every track it holds ends and its capture source is released;
+ * another view's authorization is untouched. Further requests ask the application again. */
+CRTWEB_API crtweb_result crtweb_view_revoke_media(crtweb_view* view);
 
 /* Completes a dialog exactly once. accepted: OK/true (alert: ignored); text_utf8: a prompt's answer
  * (NULL means empty). Destroying the view completes its pending dialogs as cancelled. */

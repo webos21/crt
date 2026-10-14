@@ -39,6 +39,7 @@
 #include "WebsiteDataStore.h"
 #include "NetworkProcessProxy.h"
 #include <WebCore/IntRect.h>
+#include <WebCore/MediaProducer.h>
 #include <WebCore/Region.h>
 #include <string.h>
 #include <time.h>
@@ -338,4 +339,14 @@ void WKViewCRTConfirmCompositionWithText(WKViewRef view, const char* utf8)
 void WKViewCRTCancelComposition(WKViewRef view)
 {
     sendToPage(view, Messages::WebPage::SetCompositionCRT(String(), 0, 0));
+}
+
+void WKViewCRTStopMediaCapture(WKViewRef viewRef)
+{
+    auto* view = WebKit::toImpl(viewRef);
+    if (!view || !view->page())
+        return;
+#if ENABLE(MEDIA_STREAM)
+    view->page()->stopMediaCapture(WebCore::MediaProducerMediaCaptureKind::EveryKind);
+#endif
 }

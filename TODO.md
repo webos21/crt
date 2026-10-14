@@ -140,8 +140,9 @@ uses the host replay order stated below and in the acceptance document.
     Linux accepted 2026-10-14; macOS/Windows replay pending (`HISTORY.md`, acceptance).
   * [ ] **8B playback:** CRT engine over `crtmedia` (CPU video/audio) accepted on Linux 2026-10-14;
     audio output needs a physical host; macOS/Windows replay pending (`HISTORY.md`, acceptance).
-  * [ ] **8C capture:** video camera + explicit permission API scope approved 2026-10-14;
-    default deny, revocation/teardown and physical-host gates pending; microphone remains deferred.
+  * [ ] **8C capture:** video camera + explicit permission API accepted on Linux with the labelled synthetic
+    source 2026-10-14; physical-camera run needs the user's opt-in (`crtweb_camera_probe`); macOS/Windows
+    replay of 8A-8C pending (`HISTORY.md`, acceptance).
 * [ ] **9. GPU integration.**
   * [ ] Present WebKit's private Skia output through the CRT external-surface path.
   * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one

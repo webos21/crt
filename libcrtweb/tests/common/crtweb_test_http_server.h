@@ -117,6 +117,16 @@ private:
                     "<div id=b style='width:100px;height:100px;background:#fff' onclick=\"window.open('/popup-target')\"></div>");
             else if (path == "/popup-target")
                 response = page("<!doctype html><title>popup</title><body style='background:#0a0'>popup");
+            else if (path == "/camera")
+                response = page("<!doctype html><title>camera</title><body style='margin:0;background:#000'>"
+                    "<video id=v autoplay muted playsinline style='display:block;width:320px;height:240px'></video>"
+                    "<script>window.log=[];window.result=null;"
+                    "window.start=function(c){window.result=null;navigator.mediaDevices.getUserMedia(c||{video:true}).then(function(s){"
+                    "window.stream=s;document.getElementById('v').srcObject=s;window.track=s.getVideoTracks()[0];"
+                    "if(window.track)window.track.addEventListener('ended',function(){window.log.push('ended');});"
+                    "window.log.push('granted:'+s.getVideoTracks().length+':'+s.getAudioTracks().length);window.result='ok';}).catch(function(e){"
+                    "window.log.push('error:'+e.name);window.result='error:'+e.name;});return 'started';};"
+                    "</script>");
             else if (path == "/ime")
                 response = page("<!doctype html><title>ime</title><body style='margin:0'>"
                     "<input id=t style='position:absolute;left:0;top:0;width:180px;font:20px sans-serif'>"

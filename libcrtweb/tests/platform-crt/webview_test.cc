@@ -95,6 +95,9 @@ extern "C" int main() {
   char cwd[4096];
   if (getcwd(cwd, sizeof cwd) == nullptr) return 2;
   const std::string directory = cwd;
+  // Test-only (Tranche 8C): hosts launched below list a labelled synthetic camera and record its lifecycle.
+  setenv("CRTWEB_TEST_SYNTHETIC_CAMERA", "1", 1);
+  setenv("CRTWEB_TEST_CAMERA_STATE", (directory + "/crtweb_webview_camera_state.txt").c_str(), 1);
   const std::string page_a = directory + "/crtweb_webview_a.html";
   const std::string page_b = directory + "/crtweb_webview_b.html";
   write_file(page_a, "<!doctype html><title>view a</title><body style='margin:0;background:#00aa00'>"
@@ -350,6 +353,83 @@ extern "C" int main() {
     check(pump_until([&] { return evaluate_string(web, "document.getElementById('t').value") == "\xED\x95\x9C\xEA\xB8\x80"; }),
           "the committed Hangul is the field value");
     check(evaluate_string(web, "window.log.join('|')").find("compositionend") != std::string::npos, "composition events reached the page");
+
+    // Camera capture over the protocol (Tranche 8C): a synthetic, labelled camera stands in for hardware.
+    {
+      const std::string state = directory + "/crtweb_webview_camera_state.txt";
+      unlink(state.c_str());
+      auto state_has = [&](const char* event) {
+        if (FILE* file = fopen(state.c_str(), "r")) {
+          char line[64];
+          bool found = false;
+          while (fgets(line, sizeof line, file)) found = found || strncmp(line, event, strlen(event)) == 0;
+          fclose(file);
+          return found;
+        }
+        return false;
+      };
+      auto start_camera = [&](crtweb::WebView& view) {
+        auto spin = [&](const std::function<bool()>& done, int timeout_ms = 15000) {
+          auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+          while (!done()) {
+            if (std::chrono::steady_clock::now() >= deadline) return false;
+            view.poll(10);
+            if (&view != &web) web.poll(0);
+          }
+          return true;
+        };
+        bool started = false;
+        view.evaluate("start(),'go'", [&](const std::string&, bool) { started = true; });
+        spin([&] { return started; });
+        std::string result = "null";
+        spin([&] {
+          bool got = false;
+          view.evaluate("String(window.result)", [&](const std::string& value, bool) {
+            result = value;
+            got = true;
+          });
+          spin([&] { return got; }, 5000);
+          return result != "null";
+        });
+        return result;
+      };
+      // A host without an on_media_permission callback denies.
+      {
+        crtweb::WebView denied;
+        std::string denied_title;
+        denied.on_title = [&](const std::string& title) { denied_title = title; };
+        check(denied.launch(host, 200, 150, nullptr, 60000), "host for the default denial");
+        denied.load_url(server.url("/camera"));
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (denied_title != "camera" && std::chrono::steady_clock::now() < deadline) denied.poll(20);
+        check(denied_title == "camera", "camera page loaded");
+        std::string denial = start_camera(denied);
+        if (getenv("CRTWEB_WEBVIEW_TEST_TRACE")) fprintf(stderr, "trace: default denial -> %s\n", denial.c_str());
+        check(denial == "error:NotAllowedError", "no permission callback denies over the protocol");
+        denied.shutdown();
+        check(!state_has("open"), "no device opened without a grant");
+      }
+      // A grant, then a revocation.
+      std::vector<std::string> asked;
+      web.on_media_permission = [&](const std::string& requesting, const std::string& top, uint32_t kinds, uint32_t cameras,
+                                    std::function<void(bool, uint32_t)> complete) {
+        asked.push_back(requesting + "|" + top + "|" + std::to_string(kinds) + "|" + std::to_string(cameras));
+        complete(true, 0);
+      };
+      check(load_titled(web, seen.title, server.url("/camera"), "camera"), "camera page in the WebView");
+      check(start_camera(web) == "ok", "granted stream over the protocol");
+      check(asked.size() == 1 && asked[0].find("127.0.0.1") != std::string::npos && asked[0].find("|1|1") != std::string::npos,
+            "the application saw one camera request with origins");
+      check(pump_until([&] { return state_has("start"); }), "camera started after the grant");
+      check(pump_until([&] {
+              if (!web.has_frame()) return false;
+              return near_rgb(pixel(40 + 20, 20 + 20), 255, 0, 0) && near_rgb(pixel(40 + 170, 20 + 20), 0, 255, 0);
+            }, 15000),
+            "camera pixels are composed under crtui (red and green quadrants)");
+      check(web.revoke_media(), "revoke sent");
+      check(pump_until([&] { return state_has("stop") && state_has("close"); }), "revocation releases the camera");
+      unlink(state.c_str());
+    }
 
     // Website data: ephemeral by default; a data directory persists cookies across host restarts; clearing works.
     check(load_titled(web, seen.title, server.url("/set"), "set"), "cookie set (ephemeral host)");

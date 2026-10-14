@@ -2020,6 +2020,52 @@ Gate sequence (after the CPU playback seam of 8B):
    frame/pixel evidence and repeated-lifetime resource deltas. Synthetic/no-device passes do not
    close the physical gate. No device is opened by the current 8A implementation.
 
+
+**Linux/x86_64 evidence, steps 1-3 (2026-10-14; synthetic source).** MediaStream is enabled in the CRT
+build (`ENABLE_MEDIA_STREAM`) with no WebRTC, microphone or display capture. `crtweb_capture_test`
+(public header only, 1.3 s, 3/3 runs, plus the combined gate entry `camera_capture`) uses a
+*labelled synthetic camera* ("CRT test camera (synthetic)", selected by `CRTWEB_TEST_SYNTHETIC_CAMERA`,
+lifecycle recorded in `CRTWEB_TEST_CAMERA_STATE`) so no physical device is opened. It proves: a secure
+context from loopback HTTP; **no callback denies** and the device is never opened; an explicit denial;
+the request carries requesting and top-level origins, the camera kind and device count; audio-only and
+camera+microphone requests fail honestly (`OverconstrainedError` here, no grantable request reaches the
+application); a grant yields one video track and no audio track whose frames reach a `<video>` and the view
+(four known quadrant colours, a live sweeping bar); the source is opened and started only after the grant;
+`track.stop()` stops and closes it; a completed request cannot be completed again; application
+revocation ends the track and releases the source, and the next request asks the application again;
+navigating replaces the document, releases the source and asks again; a second view asks on its own and
+is not granted by the first view's grant; a request pending on a destroyed view is already denied. The
+same pipeline over the separate-process WebView (host without a callback denies; grant; camera pixels
+composed under crtui; revoke releases the device) is in `crtweb_webview_test`. The whole gate (eleven
+entries) passes.
+
+*Design and findings.* The capture source is `CRTVideoCaptureSource` over `crtmedia/capture.h`
+(`libcrtweb/port/Source/WebCore/platform/mediastream/crt`): a `RealtimeVideoCaptureSource`, a device
+manager that only enumerates metadata, a worker owning the capture handle with generation-checked stop, and
+`VideoFrameCRT` CPU frames; `MediaPlayerPrivateCRT::load(MediaStreamPrivate&)` shows the track. Device
+lists and constraint validation run in the UI process (WebKit's non-GLib path), so no capture IPC
+supplement exists. Enabling MediaStream on a port with neither Cocoa nor GStreamer needed: patch 0023
+(`RealtimeMediaSource.cpp` never includes `VideoFrame.h` outside those ports), exclusion of the stale
+generic mock capture sources (explicit failure stubs), and a `UserMediaCaptureManager.h` for
+`WebProcess.cpp`. WebKit scopes a grant to the frame: after `track.stop()` the same document is not asked
+again, a revocation resets that.
+
+**Not closed (honest status).**
+
+- **Physical camera, Linux.** A `/dev/video0` exists on this host but no run opened it: that needs the
+  user's explicit opt-in. The probe is `crtweb_camera_probe --allow-physical-camera [seconds]` (it refuses
+  without the flag and when the synthetic camera is selected); it prints the exposed label, negotiated
+  `getSettings()`, distinct pictures, lit pixels, permission count and `readyState` after stop. Run it,
+  with the web stage's library path (as `tools/build_webkit_crt_port.py` sets it), and attach the output.
+- **macOS/arm64 and Windows/x64 replay.** Not executed: this session had only the Linux host. What a
+  replay must do: lift the Linux-only guards in `OptionsCRT.cmake`/the driver for the engine, capture
+  gates and `crtweb_media_test`/`crtweb_capture_test`; the VA-API stubs and the `libc++.so` alias are
+  Linux packaging only; the capture backends already exist in `libcrtmedia` (AVFoundation, Media
+  Foundation); replace `/proc` and POSIX-socket helpers in the tests (`crtweb_media_test`'s process
+  scan, the HTTP server header) with the replay hosts' equivalents, and run 8A, 8B and 8C gates plus a
+  physical-camera probe on each host. The same applies to the 8A network gates and 8B playback gate.
+- Microphone, display capture and WebRTC remain out of scope; the synthetic device is a test facility.
+
 ### 9. GPU integration
 
 Start with WebKit's Skia output to an external surface consumed by CRT's Skia.

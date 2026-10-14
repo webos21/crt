@@ -44,6 +44,7 @@
 namespace WebCore {
 
 class MediaPlayerPrivateCRTShared;
+class CRTStreamBridge;
 class PlatformMediaResource;
 
 class MediaPlayerPrivateCRT final
@@ -71,7 +72,8 @@ public:
     void load(const URL&, const LoadOptions&, MediaSourcePrivateClient&) final { }
 #endif
 #if ENABLE(MEDIA_STREAM)
-    void load(MediaStreamPrivate&) final { }
+    // Tranche 8C: a MediaStream (a camera track) is shown by observing its video frames.
+    void load(MediaStreamPrivate&) final;
 #endif
     void cancelLoad() final;
 
@@ -115,6 +117,7 @@ public:
 
     // Called on the main thread by the worker's dispatch.
     void workerEvent();
+    void streamEnded();
 
 private:
     friend class MediaPlayerFactoryCRT;
@@ -131,6 +134,8 @@ private:
     RefPtr<MediaPlayerPrivateCRTShared> m_shared;
     RefPtr<PlatformMediaResource> m_resource;
     String m_temporaryPath;
+    bool m_isStream { false };
+    RefPtr<CRTStreamBridge> m_stream;
     int m_temporaryHandle { -1 };
 
     MediaPlayer::NetworkState m_networkState { MediaPlayer::NetworkState::Empty };

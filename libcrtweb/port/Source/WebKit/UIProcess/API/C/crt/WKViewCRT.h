@@ -90,6 +90,11 @@ WK_EXPORT void WKViewCRTConfirmComposition(WKViewRef view);
 WK_EXPORT void WKViewCRTConfirmCompositionWithText(WKViewRef view, const char* utf8);
 WK_EXPORT void WKViewCRTCancelComposition(WKViewRef view);
 
+// Tranche 8C: ends every camera/microphone/screen track of this page and releases its capture
+// sources (the page's granted access is reset, so a new request asks the embedder again). Other pages
+// are untouched.
+WK_EXPORT void WKViewCRTStopMediaCapture(WKViewRef view);
+
 #ifdef __cplusplus
 }
 #endif

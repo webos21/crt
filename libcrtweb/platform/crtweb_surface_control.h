@@ -44,7 +44,9 @@ typedef enum crtweb_command {
   CRTWEB_COMMAND_IME_CANCEL,
   CRTWEB_COMMAND_DIALOG_RESULT, /* id: the dialog id of the event; flags bit 0: accepted; arg: a prompt's text */
   CRTWEB_COMMAND_DOWNLOAD_DECISION, /* id: the download id; flags bit 0: accept; arg: destination path */
-  CRTWEB_COMMAND_CLEAR_DATA     /* id: request id; flags: CRTWEB_DATA_* bits (cookies 1, cache 2) */
+  CRTWEB_COMMAND_CLEAR_DATA,    /* id: request id; flags: CRTWEB_DATA_* bits (cookies 1, cache 2) */
+  CRTWEB_COMMAND_MEDIA_PERMISSION_RESULT, /* id: the permission id of the event; flags bit 0: grant; arg: camera index (decimal) */
+  CRTWEB_COMMAND_MEDIA_REVOKE   /* end this page's camera access */
 } crtweb_command;
 
 typedef enum crtweb_event {
@@ -64,7 +66,10 @@ typedef enum crtweb_event {
   CRTWEB_EVENT_CLOSE_REQUESTED,    /* window.close() */
   CRTWEB_EVENT_DIALOG,             /* id: dialog id; flags: 1 alert, 2 confirm, 3 prompt, 4 beforeunload;
                                       arg: message NUL default text; answered with CRTWEB_COMMAND_DIALOG_RESULT */
-  CRTWEB_EVENT_DATA_CLEARED        /* id: the CLEAR_DATA request id */
+  CRTWEB_EVENT_DATA_CLEARED,       /* id: the CLEAR_DATA request id */
+  CRTWEB_EVENT_MEDIA_PERMISSION    /* id: permission id; flags: CRTWEB_MEDIA_KIND_* bits (camera 1, microphone 2, display 4);
+                                      arg: requesting origin NUL top-level origin NUL camera count (decimal);
+                                      answered with CRTWEB_COMMAND_MEDIA_PERMISSION_RESULT */
 } crtweb_event;
 
 typedef struct crtweb_wire_blob {

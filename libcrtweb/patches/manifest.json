@@ -620,6 +620,23 @@
       ],
       "reason": "Connection::platformInvalidate() closes and releases the socket descriptor before the PlayStation-shaped socket monitor is detached; a readyReadHandler() dispatch already under way on the monitor thread then reads from a descriptor that was closed under it, fails with EBADF/ENOTSOCK while m_isConnected is still true, logs \"Error receiving IPC message on socket -1\" and reports a second didClose. Seen intermittently at runtime teardown on Windows (about one run in three of crtweb_api_test). The handler now returns when the descriptor has been released, before reading and again before reporting a read failure. Stacked on 0019, which edits the same file.",
       "remove_when": "Upstream's PlayStation socket monitor detaches before the descriptor is released, or Connection::readyReadHandler() checks that the descriptor is still open."
+    },
+    {
+      "id": "0023-mediastream-include-videoframe",
+      "patch": "0023-mediastream-include-videoframe.patch",
+      "targets": [
+        "crt-port"
+      ],
+      "files": [
+        {
+          "file": "Source/WebCore/platform/mediastream/RealtimeMediaSource.cpp",
+          "sha256_before": "9ea1d3552fe7984c1025c1ff6e6348e03b38209a40a26f4ebfec3c197cc4ca15",
+          "sha256_after": "0702c87a7c9f50f72f35af469a6b3c85c24a9fa77580733bc9ffa18acf9f5eb7",
+          "license": "BSD-3-Clause"
+        }
+      ],
+      "reason": "RealtimeMediaSource.cpp uses VideoFrame and VideoFrameRotation but only gets them through Cocoa or GStreamer platform headers; a MediaStream build for another port (PlatformCRT) fails with incomplete types.",
+      "remove_when": "Upstream includes VideoFrame.h unconditionally."
     }
   ],
   "license_policy": {
@@ -777,6 +794,34 @@
       "origin": "crt",
       "license": "BSD-2-Clause",
       "purpose": "CRT playback engine (Tranche 8B): worker-thread demux/decode/audio over crtmedia, CPU frames to Skia"
+    },
+    {
+      "file": "Source/WebCore/platform/mediastream/crt/CRTVideoCaptureSource.h",
+      "source": "libcrtweb/port/Source/WebCore/platform/mediastream/crt/CRTVideoCaptureSource.h",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "CRT video capture source (Tranche 8C): RealtimeVideoCaptureSource over crtmedia capture, VideoFrameCRT"
+    },
+    {
+      "file": "Source/WebCore/platform/mediastream/crt/CRTVideoCaptureSource.cpp",
+      "source": "libcrtweb/port/Source/WebCore/platform/mediastream/crt/CRTVideoCaptureSource.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "CRT video capture source (Tranche 8C): device manager, worker, factories (audio/display unsupported)"
+    },
+    {
+      "file": "Source/WebCore/platform/mediastream/crt/MockRealtimeSourcesCRT.cpp",
+      "source": "libcrtweb/port/Source/WebCore/platform/mediastream/crt/MockRealtimeSourcesCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "explicit failure for the stale generic mock capture sources (not compiled in the CRT port)"
+    },
+    {
+      "file": "Source/WebKit/WebProcess/crt/UserMediaCaptureManager.h",
+      "source": "libcrtweb/port/Source/WebKit/WebProcess/crt/UserMediaCaptureManager.h",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "the supplement type WebProcess names for MediaStream; PlatformCRT captures in the Web process and registers no capture IPC"
     }
   ]
 }

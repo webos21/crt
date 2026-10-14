@@ -42,6 +42,13 @@
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
 
+#if ENABLE(MEDIA_STREAM)
+#include "CRTVideoCaptureSource.h"
+#include "MediaStreamPrivate.h"
+#include "MediaStreamTrackPrivate.h"
+#include "RealtimeMediaSource.h"
+#endif
+
 #include <crtmedia/audio.h>
 #include <crtmedia/audio_sink.h>
 #include <crtmedia/codec.h>
@@ -598,6 +605,115 @@ void MediaPlayerPrivateCRTShared::run()
     crtmedia_extractor_release(extractor);
 }
 
+#if ENABLE(MEDIA_STREAM)
+// Shows a MediaStream's camera track: its VideoFrameCRT frames are copied into the player's shared frame
+// (observer callbacks run on the capture thread; the player is notified on the main thread).
+class CRTStreamBridge final : public RefCounted<CRTStreamBridge>, public MediaStreamTrackPrivateObserver, public RealtimeMediaSource::VideoFrameObserver {
+public:
+    static Ref<CRTStreamBridge> create(MediaStreamTrackPrivate& track, Ref<MediaPlayerPrivateCRTShared>&& shared) { return adoptRef(*new CRTStreamBridge(track, WTF::move(shared))); }
+    ~CRTStreamBridge() { detach(); }
+
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+    void detach()
+    {
+        RefPtr protectedTrack = std::exchange(m_track, nullptr);
+        if (!protectedTrack)
+            return;
+        protectedTrack->removeObserver(*this);
+        protectedTrack->source().removeVideoFrameObserver(*this);
+    }
+
+private:
+    CRTStreamBridge(MediaStreamTrackPrivate& track, Ref<MediaPlayerPrivateCRTShared>&& shared)
+        : m_track(&track)
+        , m_shared(WTF::move(shared))
+    {
+        track.addObserver(*this);
+        track.source().addVideoFrameObserver(*this);
+    }
+
+    // May run on the capture thread.
+    void videoFrameAvailable(VideoFrame& frame, VideoFrameTimeMetadata) final
+    {
+        if (!VideoFrameCRT::isInstance(frame))
+            return;
+        auto& crtFrame = static_cast<VideoFrameCRT&>(frame);
+        IntSize size = crtFrame.presentationSize();
+        auto pixels = crtFrame.pixels();
+        {
+            Locker locker { m_shared->lock };
+            m_shared->frame.assign(pixels.begin(), pixels.end());
+            m_shared->frameWidth = size.width();
+            m_shared->frameHeight = size.height();
+            m_shared->width = size.width();
+            m_shared->height = size.height();
+            m_shared->hasVideo = true;
+            m_shared->opened = true;
+            m_shared->prerolled = true;
+            ++m_shared->frameSerial;
+        }
+        m_shared->post();
+    }
+
+    void trackEnded(MediaStreamTrackPrivate&) final { clearAndNotify(); }
+    void trackMutedChanged(MediaStreamTrackPrivate&) final { }
+    void trackSettingsChanged(MediaStreamTrackPrivate&) final { }
+    void trackEnabledChanged(MediaStreamTrackPrivate&) final { }
+
+    void clearAndNotify()
+    {
+        {
+            Locker locker { m_shared->lock };
+            m_shared->frame.clear();
+            m_shared->frameWidth = 0;
+            m_shared->frameHeight = 0;
+            ++m_shared->frameSerial;
+            m_shared->ended = true;
+        }
+        m_shared->post();
+    }
+
+    RefPtr<MediaStreamTrackPrivate> m_track;
+    Ref<MediaPlayerPrivateCRTShared> m_shared;
+};
+
+void MediaPlayerPrivateCRT::load(MediaStreamPrivate& stream)
+{
+    cancelLoad();
+    m_hasVideo = m_hasAudio = false;
+    m_duration = MediaTime::invalidTime();
+    m_naturalSize = { };
+    m_buffered = { };
+    m_lastFrameSerial = 0;
+    m_isStream = true;
+    RefPtr<MediaStreamTrackPrivate> videoTrack;
+    for (auto& track : stream.tracks()) {
+        if (track->isVideo() && !track->ended()) {
+            videoTrack = track.ptr();
+            break;
+        }
+    }
+    if (!videoTrack) {
+        setNetworkState(MediaPlayer::NetworkState::FormatError);
+        return;
+    }
+    m_shared = MediaPlayerPrivateCRTShared::create();
+    m_shared->owner = this;
+    m_stream = CRTStreamBridge::create(*videoTrack, *m_shared);
+    setNetworkState(MediaPlayer::NetworkState::Loading);
+}
+
+void MediaPlayerPrivateCRT::streamEnded()
+{
+    if (auto player = m_player.get())
+        player->timeChanged();
+}
+#else
+void MediaPlayerPrivateCRT::streamEnded() { }
+#endif // ENABLE(MEDIA_STREAM)
+
 // ---- the player ------------------------------------------------------------------------------------
 
 MediaPlayerPrivateCRT::MediaPlayerPrivateCRT(MediaPlayer& player)
@@ -642,6 +758,11 @@ void MediaPlayerPrivateCRT::cancelLoad()
         m_resource->setClient(nullptr);
         m_resource = nullptr;
     }
+#if ENABLE(MEDIA_STREAM)
+    if (RefPtr stream = std::exchange(m_stream, nullptr))
+        stream->detach();
+#endif
+    m_isStream = false;
     if (m_shared) {
         m_shared->owner = nullptr;
         m_shared->stopAndJoin();
@@ -904,9 +1025,10 @@ void MediaPlayerPrivateCRT::workerEvent()
     if (opened && m_duration.isInvalid()) {
         m_hasVideo = hasVideo;
         m_hasAudio = hasAudio;
-        m_duration = MediaTime(durationUs, 1000000);
+        m_duration = m_isStream ? MediaTime::positiveInfiniteTime() : MediaTime(durationUs, 1000000);
         m_naturalSize = FloatSize(width, height);
-        m_buffered.add(MediaTime::zeroTime(), m_duration);
+        if (!m_isStream)
+            m_buffered.add(MediaTime::zeroTime(), m_duration);
         player->characteristicChanged();
         player->durationChanged();
         if (hasVideo)
@@ -916,6 +1038,10 @@ void MediaPlayerPrivateCRT::workerEvent()
     if (prerolled && m_readyState < MediaPlayer::ReadyState::HaveEnoughData && opened) {
         setReadyState(MediaPlayer::ReadyState::HaveEnoughData);
         setNetworkState(MediaPlayer::NetworkState::Loaded);
+    }
+    if (m_isStream && width && height && FloatSize(width, height) != m_naturalSize) {
+        m_naturalSize = FloatSize(width, height);
+        player->sizeChanged();
     }
     if (serial != m_lastFrameSerial) {
         m_lastFrameSerial = serial;
@@ -928,8 +1054,10 @@ void MediaPlayerPrivateCRT::workerEvent()
             promise->resolve(MediaTime(seekUs, 1000000));
         player->timeChanged();
     }
-    if (ended)
+    if (ended && !m_isStream)
         player->timeChanged();
+    if (ended && m_isStream)
+        streamEnded();
 }
 
 // ---- painting --------------------------------------------------------------------------------------
@@ -998,6 +1126,12 @@ void MediaPlayerPrivateCRT::getSupportedTypes(HashSet<String>& types)
 
 MediaPlayer::SupportsType MediaPlayerPrivateCRT::supportsType(const MediaEngineSupportParameters& parameters)
 {
+#if ENABLE(MEDIA_STREAM)
+    if (parameters.platformType == PlatformMediaDecodingType::MediaStream)
+        return MediaPlayer::SupportsType::IsSupported;
+#endif
+    if (parameters.platformType != PlatformMediaDecodingType::FileOrHLS)
+        return MediaPlayer::SupportsType::IsNotSupported;
     String container = parameters.type.containerType();
     if (container.isEmpty())
         return MediaPlayer::SupportsType::IsNotSupported;

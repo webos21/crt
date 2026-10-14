@@ -11,6 +11,17 @@ substantive update.
 
 ## 2026-10-14
 
+### Web Tranche 8, gate 8C: camera permission lifecycle and capture (Linux/x86_64, synthetic source)
+
+MediaStream is compiled in (no WebRTC/microphone/display). `crtweb` gained `on_media_permission`,
+`crtweb_media_permission_complete` and `crtweb_view_revoke_media`, carried over the WebView control channel;
+the default is denial. `CRTVideoCaptureSource` (a `RealtimeVideoCaptureSource` over `crtmedia` capture)
+opens a device only after a grant; frames reach `<video>` through `MediaPlayerPrivateCRT::load(MediaStream)`.
+Enabling MediaStream on this port needed patch 0023 (missing `VideoFrame.h`), an exclusion of the stale
+generic mock capture sources and a `UserMediaCaptureManager.h`. `crtweb_capture_test` (labelled synthetic
+camera, device never physical) and the WebView camera case pass; the gate has eleven entries. Not done: a
+physical-camera run (explicit opt-in via `crtweb_camera_probe`) and the macOS/Windows replays of 8A-8C.
+
 ### Web Tranche 8, gate 8B: the CRT playback engine over crtmedia (Linux/x86_64)
 
 `MediaPlayerPrivateCRT` (WebCore overlay, no WebKit patch) registers once per Web process and plays

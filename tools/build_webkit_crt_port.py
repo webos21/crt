@@ -606,6 +606,26 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) 
     return result
 
 
+def run_capture_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+    """Tranche 8C: camera permission lifecycle and capture. Runs crtweb_capture_test with the labelled
+    synthetic camera (no physical device is opened) and records that fact; a physical-camera run is a
+    separate, explicitly opt-in procedure and is never produced by this gate."""
+    import subprocess
+    run_env = dict(env)
+    run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
+    run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+    runs = work / "capture-run"
+    runs.mkdir(exist_ok=True)
+    completed = subprocess.run([str(build / "bin" / "crtweb_capture_test")], env=run_env, cwd=runs,
+                               capture_output=True, text=True, timeout=300)
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    return {"passed": completed.returncode == 0 and "crtweb_capture_test: ok" in completed.stdout,
+            "returncode": completed.returncode, "source": "synthetic (test-only, labelled)",
+            "physical_camera_opened": False, "output": completed.stdout.splitlines()}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--recipe", type=Path, default=ROOT / "libcrtweb/third_party/webkit/recipe.json")
@@ -681,7 +701,7 @@ def main() -> int:
         args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host", "crtweb_lifecycle_test"]
                                           if args.webkit else []) \
             + (["crtweb_host", "crtweb_network_test"] if args.webkit and target_os in ("linux", "macos", "windows") else []) \
-            + (["crtweb_media_test"] if args.webkit and target_os == "linux" else [])
+            + (["crtweb_media_test", "crtweb_capture_test"] if args.webkit and target_os == "linux" else [])
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -701,6 +721,7 @@ def main() -> int:
         results["webview_through_crtui"] = run_webview_gate(build, sdk, prefix, work, env, target_os)
         if target_os == "linux":
             results["media_playback"] = run_media_gate(build, sdk, prefix, work, env)
+            results["camera_capture"] = run_capture_gate(build, sdk, prefix, work, env)
         network_program = build / "bin" / ("crtweb_network_test.exe" if target_os == "windows" else "crtweb_network_test")
         network_env = gate_environment(build, sdk, prefix, work, env, target_os)
         webview_env = dict(network_env)

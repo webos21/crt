@@ -127,6 +127,24 @@ if (CRT_ENABLE_CRTMEDIA_PLAYER)
     list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
         platform/graphics/crt/MediaPlayerPrivateCRT.h
     )
+    # Tranche 8C: the CRT video capture source (compiled when MediaStream is enabled).
+    if (ENABLE_MEDIA_STREAM)
+        list(APPEND WebCore_SOURCES
+            platform/mediastream/crt/CRTVideoCaptureSource.cpp
+            platform/mediastream/crt/MockRealtimeSourcesCRT.cpp
+        )
+        # The generic branch of the mock capture sources does not build (see MockRealtimeSourcesCRT.cpp).
+        list(APPEND WebCore_UNIFIED_SOURCE_EXCLUDES
+            "platform/mock/MockRealtimeAudioSource.cpp"
+            "platform/mock/MockRealtimeVideoSource.cpp"
+        )
+        list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+            "${WEBCORE_DIR}/platform/mediastream/crt"
+        )
+        list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+            platform/mediastream/crt/CRTVideoCaptureSource.h
+        )
+    endif ()
     list(APPEND WebCore_LIBRARIES ${CRT_CRTMEDIA_LIBRARY})
 endif ()
 
