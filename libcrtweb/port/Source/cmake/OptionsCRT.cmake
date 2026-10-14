@@ -111,8 +111,9 @@ else ()
     find_package(ZLIB 1.2.11 REQUIRED)
 
     # The CRT playback engine (Tranche 8B) consumes the installed crtmedia public C API. It is Linux
-    # only until its host replays, and needs the driver's libcrtweb directory for the VA-API stub.
-    if (NOT WIN32 AND NOT APPLE AND CRT_LIBCRTWEB_DIR)
+    # and macOS (the persona clears APPLE); Windows replays later. It needs the driver's libcrtweb
+    # directory (Linux: for the VA-API stub).
+    if (NOT WIN32 AND NOT APPLE AND CRT_LIBCRTWEB_DIR AND NOT CRT_DISABLE_CRTMEDIA_PLAYER)
         find_library(CRT_CRTMEDIA_LIBRARY NAMES crtmedia PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH)
         if (CRT_CRTMEDIA_LIBRARY)
             set(CRT_ENABLE_CRTMEDIA_PLAYER ON)

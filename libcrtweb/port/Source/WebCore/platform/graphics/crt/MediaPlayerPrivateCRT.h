@@ -135,7 +135,9 @@ private:
     RefPtr<PlatformMediaResource> m_resource;
     String m_temporaryPath;
     bool m_isStream { false };
+#if ENABLE(MEDIA_STREAM)
     RefPtr<CRTStreamBridge> m_stream;
+#endif
     int m_temporaryHandle { -1 };
 
     MediaPlayer::NetworkState m_networkState { MediaPlayer::NetworkState::Empty };

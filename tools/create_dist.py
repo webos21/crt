@@ -64,6 +64,15 @@ def copy_libcxx(install: Path, destination: Path, target_os: str) -> None:
     for item in libraries.iterdir():
         if item.is_file() and item.name.startswith(("libc++", "libunwind", "unwind")):
             copied_item = destination / "lib" / item.name
+            if target_os == "macos" and item.is_symlink() and "/" not in os.readlink(item):
+                # libc++.dylib -> libc++.1.dylib -> libc++.1.0.dylib: a dereferenced copy is a second file
+                # with the same install name, which dyld loads as a second image (and a consumer that
+                # recorded @rpath/libc++.dylib, like libcrtmedia, then maps two C++ runtimes). Keep the link.
+                if copied_item.is_symlink() or copied_item.exists():
+                    copied_item.unlink()
+                os.symlink(os.readlink(item), copied_item)
+                copied += 1
+                continue
             shutil.copy2(item, copied_item)
             if target_os == "linux":
                 remove_absolute_runtime_paths(copied_item, require_origin=True)

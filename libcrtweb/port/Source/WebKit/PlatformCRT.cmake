@@ -168,22 +168,29 @@ list(APPEND WebKit_LIBRARIES
 if (CRT_ENABLE_CRTMEDIA_PLAYER)
     set_source_files_properties(${WEBKIT_DIR}/WebProcess/WebPage/crt/DrawingAreaCRT.cpp PROPERTIES
         COMPILE_DEFINITIONS CRT_HAS_CRTMEDIA_PLAYER=1)
-    set(CRT_VA_STUB_DIR "${CRT_LIBCRTWEB_DIR}/platform/va-stub")
-    foreach (stub IN ITEMS va va-drm)
-        string(REPLACE "-" "_" stub_target "crt_${stub}_stub")
-        add_library(${stub_target} SHARED ${CRT_VA_STUB_DIR}/crt_va_stub.c)
-        set_target_properties(${stub_target} PROPERTIES
-            OUTPUT_NAME ${stub}
-            SUFFIX ".so.2"
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-            LINK_FLAGS "-Wl,-soname,lib${stub}.so.2 -Wl,--version-script=${CRT_VA_STUB_DIR}/va.map")
-    endforeach ()
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-    file(CREATE_LINK "${CMAKE_SYSROOT}/lib/libc++.so.1" "${CMAKE_BINARY_DIR}/lib/libc++.so" SYMBOLIC)
-    list(APPEND WebKit_LIBRARIES
-        "-Wl,-rpath-link,${CMAKE_BINARY_DIR}/lib"
-        crt_va_stub crt_va_drm_stub
-        ${CRT_CRTMEDIA_LIBRARY})
+    if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+        # macOS: libcrtmedia's backends are AVFoundation/AudioToolbox/VideoToolbox, reached only through
+        # libcrtmedia (the OS media PAL, mapped from the dyld shared cache); there is no VA-API to stub.
+        # Its unversioned libc++.dylib is the same install name as libc++.1.dylib (one image).
+        list(APPEND WebKit_LIBRARIES ${CRT_CRTMEDIA_LIBRARY})
+    else ()
+        set(CRT_VA_STUB_DIR "${CRT_LIBCRTWEB_DIR}/platform/va-stub")
+        foreach (stub IN ITEMS va va-drm)
+            string(REPLACE "-" "_" stub_target "crt_${stub}_stub")
+            add_library(${stub_target} SHARED ${CRT_VA_STUB_DIR}/crt_va_stub.c)
+            set_target_properties(${stub_target} PROPERTIES
+                OUTPUT_NAME ${stub}
+                SUFFIX ".so.2"
+                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+                LINK_FLAGS "-Wl,-soname,lib${stub}.so.2 -Wl,--version-script=${CRT_VA_STUB_DIR}/va.map")
+        endforeach ()
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+        file(CREATE_LINK "${CMAKE_SYSROOT}/lib/libc++.so.1" "${CMAKE_BINARY_DIR}/lib/libc++.so" SYMBOLIC)
+        list(APPEND WebKit_LIBRARIES
+            "-Wl,-rpath-link,${CMAKE_BINARY_DIR}/lib"
+            crt_va_stub crt_va_drm_stub
+            ${CRT_CRTMEDIA_LIBRARY})
+    endif ()
 endif ()
 
 list(APPEND WebKit_PUBLIC_FRAMEWORK_HEADERS

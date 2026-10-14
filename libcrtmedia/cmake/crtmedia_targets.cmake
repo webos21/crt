@@ -297,4 +297,17 @@ function(crt_add_crtmedia_targets)
       ARCHIVE_OUTPUT_NAME crtmedia_dll
     )
   endif()
+  if(CRT_TARGET_OS STREQUAL "macos")
+    # Mach-O exports every global by default (an ELF consumer is protected by link order and soname
+    # rules, two-level namespace binds to the first dylib that defines the name): restrict to the API.
+    # Two-level namespace binds an undefined symbol to the FIRST dylib on the link line that defines it.
+    # CMake orders libc.dylib after the frameworks (its dependents come first), and the frameworks
+    # re-export libSystem, so FFmpeg's pthread_once/pthread_mutex_* bound to libsystem_pthread: a Darwin
+    # function writing into a Bionic-layout pthread_once_t (bus error in avcodec_find_decoder_by_name).
+    # The CRT libc goes first, so every libc symbol of libcrtmedia is the CRT's.
+    target_link_options(crtmedia_shared BEFORE PRIVATE "$<TARGET_FILE:c_shared>")
+    set(_crtmedia_exports "${CRTMEDIA_ROOT}/cmake/crtmedia_exports_macos.txt")
+    target_link_options(crtmedia_shared PRIVATE "LINKER:-exported_symbols_list,${_crtmedia_exports}")
+    set_property(TARGET crtmedia_shared APPEND PROPERTY LINK_DEPENDS "${_crtmedia_exports}")
+  endif()
 endfunction()

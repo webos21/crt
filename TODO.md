@@ -137,12 +137,12 @@ uses the host replay order stated below and in the acceptance document.
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Sequential gates in `docs/acceptance/crtweb_acceptance.md`.
   * [ ] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy implemented;
-    Linux accepted 2026-10-14; macOS/Windows replay pending (`HISTORY.md`, acceptance).
+    Linux accepted 2026-10-14, macOS/arm64 replayed 2026-10-14; Windows replay pending (`HISTORY.md`, acceptance).
   * [ ] **8B playback:** CRT engine over `crtmedia` (CPU video/audio) accepted on Linux 2026-10-14;
-    audio output needs a physical host; macOS/Windows replay pending (`HISTORY.md`, acceptance).
+    audio output needs a physical host; macOS/arm64 replayed 2026-10-14, Windows pending (`HISTORY.md`, acceptance).
   * [ ] **8C capture:** video camera + explicit permission API accepted on Linux with the labelled synthetic
     source 2026-10-14; one opt-in Linux physical-camera run passed (640x480@30, `crtweb_camera_probe`);
-    macOS/Windows replay of 8A-8C and a physical repeated-lifetime run pending (`HISTORY.md`, acceptance).
+    macOS/arm64 replay of 8A-8C done with the synthetic source; Windows replay and physical-camera runs (macOS, Windows, repeated lifetimes) pending (`HISTORY.md`, acceptance).
 * [ ] **9. GPU integration.**
   * [ ] Present WebKit's private Skia output through the CRT external-surface path.
   * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one

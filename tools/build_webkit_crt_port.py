@@ -454,7 +454,8 @@ def run_lifecycle_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: di
         # vmmap lists the dyld shared-cache closure of every process. Direct Mach-O dependencies are
         # held to libSystem by the static audit below; what is mapped outside the OS-owned cache must be
         # the CRT SDK, the port prefix or this build.
-        if target_os == "macos" and (path.startswith(("/usr/lib/", "/System/Library/"))
+        if target_os == "macos" and (path.startswith(("/usr/lib/", "/System/", "/usr/share/", "/Library/Apple/",
+                                                      "/private/var/db/", "/usr/libexec/"))
                                      or path == "/usr/bin/vmmap" or "/*/" in path):
             continue
         if not any(Path(path).resolve().is_relative_to(root) for root in allowed):
@@ -569,15 +570,12 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
     return result
 
 
-def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
     """Tranche 8B: HTML <video>/<audio> through the CRT playback engine (crtmedia). Runs
     crtweb_media_test, then audits the Web process's mapped files: the crtmedia library is in (the
     engine really ran), no host VA-API/audio/GPU library is, and exactly one C++ runtime is mapped."""
     import subprocess
-    run_env = dict(env)
-    run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
-        [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
-    run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+    run_env = gate_environment(build, sdk, prefix, work, env, target_os)
     runs = work / "media-run"
     runs.mkdir(exist_ok=True)
     completed = subprocess.run([str(build / "bin" / "crtweb_media_test"), str(ROOT / "libcrtmedia" / "assets")],
@@ -588,33 +586,45 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) 
              work.resolve()]
     mapped = [line.split(" ", 2)[2] for line in completed.stdout.splitlines() if line.startswith("MAPPED WebProcess ")]
     violations = []
+    macos = target_os == "macos"
+    system_runtime = []
     for path in mapped:
         name = Path(path).name
         if name.startswith("ld-linux"):
             continue
+        if macos and (path.startswith(("/usr/lib/", "/System/", "/usr/share/", "/Library/Apple/",
+                                       "/private/var/db/", "/usr/libexec/")) or path == "/usr/bin/vmmap"):
+            # The OS media frameworks libcrtmedia reaches (AVFoundation, AudioToolbox, VideoToolbox) and
+            # what they pull in (their ICU data, their log caches, the shared cache's iOSSupport
+            # volume, which vmmap lists): the OS's own, not a CRT dependency. Only a second C++ runtime
+            # matters.
+            if name.startswith(("libc++", "libc++abi")):
+                system_runtime.append(path)
+            continue
         if not any(Path(path).resolve().is_relative_to(root) for root in roots):
             violations.append(f"WebProcess maps {path}")
-    names = {Path(path).name for path in mapped}
-    runtimes = sorted(n for n in names if n.startswith(("libc++.so", "libc++abi")))
+    names = {Path(path).name for path in mapped if not (macos and path.startswith(("/usr/lib/", "/System/")))}
+    runtimes = sorted(n for n in names if n.startswith(("libc++.so", "libc++abi", "libc++.1", "libc++.dylib")))
     result = {"returncode": completed.returncode, "mapped_files": len(mapped), "violations": violations,
-              "cxx_runtime_files": runtimes,
+              "cxx_runtime_files": runtimes, "system_cxx_runtime_files": sorted(set(system_runtime)),
               "crtmedia_mapped": any(n.startswith("libcrtmedia") for n in names),
               "va_stub_mapped": sorted(n for n in names if n.startswith("libva")),
               "output": completed.stdout.splitlines()}
     result["passed"] = (completed.returncode == 0 and "crtweb_media_test: ok" in completed.stdout and not violations
-                        and result["crtmedia_mapped"] and len(runtimes) == 2)
+                        and result["crtmedia_mapped"]
+                        # Linux: exactly one C++ runtime (libc++ and libc++abi). macOS: exactly one CRT
+                        # runtime image pair; the OS frameworks libcrtmedia reaches bring Apple's own
+                        # /usr/lib libc++ and libc++abi, which are recorded and not a CRT dependency.
+                        and len(runtimes) == 2 and (macos or not system_runtime))
     return result
 
 
-def run_capture_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+def run_capture_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
     """Tranche 8C: camera permission lifecycle and capture. Runs crtweb_capture_test with the labelled
     synthetic camera (no physical device is opened) and records that fact; a physical-camera run is a
     separate, explicitly opt-in procedure and is never produced by this gate."""
     import subprocess
-    run_env = dict(env)
-    run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
-        [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
-    run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+    run_env = gate_environment(build, sdk, prefix, work, env, target_os)
     runs = work / "capture-run"
     runs.mkdir(exist_ok=True)
     completed = subprocess.run([str(build / "bin" / "crtweb_capture_test")], env=run_env, cwd=runs,
@@ -701,7 +711,7 @@ def main() -> int:
         args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host", "crtweb_lifecycle_test"]
                                           if args.webkit else []) \
             + (["crtweb_host", "crtweb_network_test"] if args.webkit and target_os in ("linux", "macos", "windows") else []) \
-            + (["crtweb_media_test", "crtweb_capture_test"] if args.webkit and target_os == "linux" else [])
+            + (["crtweb_media_test", "crtweb_capture_test"] if args.webkit and target_os in ("linux", "macos") else [])
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -719,9 +729,9 @@ def main() -> int:
         results["lifecycle_and_host_abi"] = run_lifecycle_gate(build, sdk, prefix, work, env, target_os)
     if args.webkit and target_os in ("linux", "macos", "windows"):
         results["webview_through_crtui"] = run_webview_gate(build, sdk, prefix, work, env, target_os)
-        if target_os == "linux":
-            results["media_playback"] = run_media_gate(build, sdk, prefix, work, env)
-            results["camera_capture"] = run_capture_gate(build, sdk, prefix, work, env)
+        if target_os in ("linux", "macos"):
+            results["media_playback"] = run_media_gate(build, sdk, prefix, work, env, target_os)
+            results["camera_capture"] = run_capture_gate(build, sdk, prefix, work, env, target_os)
         network_program = build / "bin" / ("crtweb_network_test.exe" if target_os == "windows" else "crtweb_network_test")
         network_env = gate_environment(build, sdk, prefix, work, env, target_os)
         webview_env = dict(network_env)

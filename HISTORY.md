@@ -11,6 +11,19 @@ substantive update.
 
 ## 2026-10-14
 
+### Web Tranche 8 replayed on macOS/arm64: libcrtmedia exported its internals and bound libc to the host
+
+8A (network trust), 8B (playback engine over crtmedia) and 8C (camera permission lifecycle, synthetic source) pass on
+macOS in the combined gate, eleven entries, with the public API lifecycle (+0/+0/+0), WebView lifecycle and B7 flat. The
+first run stalled every `file:` load; the cause was found by bisecting the configuration (player off passes, player on
+stalls) and then reading the Mach-O bindings of libWebKit (`dyld_info -fixups`: `_curl_multi_init` bound to
+`libcrtmedia`, not libcurl). Three defects in the CRT's own libraries followed: libcrtmedia.dylib exported its
+FFmpeg/libcurl/mbedTLS (now `crtmedia_*` only), bound its libc symbols to libSystem because libc.dylib came after the
+frameworks on the link line (FFmpeg's `pthread_once` bus error in the Web process; libc.dylib first now), and the SDK
+carried `libc++.dylib` as a second regular file of the same install name (the dist copier dereferenced symlinks; they
+are kept). Audit policy now names the OS media frameworks as libcrtmedia's PAL. Not done on this host: the physical camera
+(explicit opt-in run), audio output evidence. Details: `docs/acceptance/crtweb_acceptance.md`, Tranche 8C.
+
 ### Web Tranche 8, gate 8C: camera permission lifecycle and capture (Linux/x86_64, synthetic source)
 
 MediaStream is compiled in (no WebRTC/microphone/display). `crtweb` gained `on_media_permission`,

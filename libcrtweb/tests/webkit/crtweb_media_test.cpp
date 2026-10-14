@@ -11,6 +11,7 @@
 #include "../common/crtweb_test_http_server.h"
 
 #include <dirent.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,6 +136,66 @@ static bool logHas(const char* event)
     return js("window.log.indexOf('" + std::string(event) + "') >= 0") == "true";
 }
 
+#if defined(CRT_TARGET_OS_MACOS) || defined(WTF_CRT_MACHO_ASM)
+// macOS has no /proc: libSystem's libproc lists children and reads the task info, and the files the Web
+// process has mapped come from vmmap(1) (declared here; none of this is part of the target ABI).
+extern "C" int proc_listchildpids(pid_t, void*, int);
+extern "C" int proc_name(int, void*, uint32_t);
+extern "C" int proc_pidinfo(int, int, uint64_t, void*, int);
+
+struct TaskInfo {
+    uint64_t virtualSize, residentSize, totalUser, totalSystem, threadsUser, threadsSystem;
+    int32_t policy, faults, pageIns, copyOnWriteFaults, messagesSent, messagesReceived,
+        machCalls, unixCalls, switches, threads, runningThreads, priority;
+};
+
+static std::vector<pid_t> childrenNamed(const char* name)
+{
+    std::vector<pid_t> result;
+    pid_t pids[256] { };
+    int count = proc_listchildpids(getpid(), pids, sizeof pids); // a number of pids, not of bytes
+    for (int i = 0; i < count && i < 256; ++i) {
+        char comm[256] { };
+        if (pids[i] > 0 && proc_name(pids[i], comm, sizeof comm) > 0 && strstr(comm, name))
+            result.push_back(pids[i]);
+    }
+    return result;
+}
+
+static void printMappedFiles(pid_t pid)
+{
+    std::vector<std::string> files;
+    std::string command = "/usr/bin/vmmap " + std::to_string(pid) + " 2>/dev/null";
+    if (FILE* maps = popen(command.c_str(), "r")) {
+        char line[4096];
+        while (fgets(line, sizeof line, maps)) {
+            // The mapped file is the absolute path at the end of a region line, after a space.
+            const char* name = strstr(line, " /");
+            if (!name)
+                continue;
+            std::string file(name + 1, strcspn(name + 1, "\n"));
+            if (file.find("/*/") != std::string::npos)
+                continue;
+            bool known = false;
+            for (const std::string& each : files)
+                known = known || each == file;
+            if (!known)
+                files.push_back(file);
+        }
+        pclose(maps);
+    }
+    for (const std::string& file : files)
+        printf("MAPPED WebProcess %s\n", file.c_str());
+}
+
+static long threadsOf(pid_t pid)
+{
+    TaskInfo info { };
+    if (proc_pidinfo(pid, 4 /* PROC_PIDTASKINFO */, 0, &info, sizeof info) != static_cast<int>(sizeof info))
+        return -1;
+    return info.threads;
+}
+#else
 static std::vector<pid_t> childrenNamed(const char* name)
 {
     std::vector<pid_t> result;
@@ -204,6 +265,8 @@ static long threadsOf(pid_t pid)
     }
     return threads;
 }
+
+#endif
 
 int main(int argc, char** argv)
 {

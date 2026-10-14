@@ -1,0 +1,4 @@
+# libcrtmedia.dylib exports only the public crtmedia C API (include/crtmedia/*.h). FFmpeg, libcurl and
+# mbedTLS are linked into it privately: left exported, a consumer that links libcrtmedia before its own
+# libcurl (WebKit's PlatformCRT: OpenSSL-backed curl) binds curl_* to the embedded mbedTLS copy.
+_crtmedia_*

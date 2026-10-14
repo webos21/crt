@@ -816,6 +816,22 @@ def jsc_library(build: Path, target_os: str) -> Path:
 # /usr/lib or /System (frameworks, libc++, libobjc, ICU) is a host ABI leak.
 MACOS_ALLOWED_SYSTEM_LIBRARIES = {"/usr/lib/libSystem.B.dylib"}
 
+# libcrtmedia.dylib is the CRT-owned media boundary: its macOS backends are the OS media frameworks
+# (AVFoundation capture and demux helpers, AudioToolbox output, VideoToolbox decode), and the C API
+# in include/crtmedia hides them. They are the media PAL of the host, the way libcrtgfx's window
+# backend is AppKit, so they are accepted as dependencies of libcrtmedia.dylib and of nothing else, and
+# listed under known_host_libraries (the Linux audit does the same for VA-API).
+MACOS_CRTMEDIA_SYSTEM_LIBRARIES = {
+    "/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox",
+    "/System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox",
+    "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo",
+    "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia",
+    "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+    "/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation",
+    "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+    "/usr/lib/libobjc.A.dylib",
+}
+
 
 def host_abi_audit_macos(sdk: Path, deps: Path, build: Path, binaries) -> dict:
     """Mach-O twin of the Linux audit, from `otool -L` on every binary and the libraries they
@@ -824,6 +840,7 @@ def host_abi_audit_macos(sdk: Path, deps: Path, build: Path, binaries) -> dict:
     allowed = [sdk.resolve(), deps.resolve(), build.resolve()]
     search = [build / "lib", deps / "lib", sdk / "lib"]
     violations, inventory, pending, seen = [], {}, [Path(b) for b in binaries], set()
+    known = {}
     while pending:
         binary = pending.pop()
         if binary in seen:
@@ -837,6 +854,9 @@ def host_abi_audit_macos(sdk: Path, deps: Path, build: Path, binaries) -> dict:
                 continue
             libraries.append(Path(name).name)
             if name in MACOS_ALLOWED_SYSTEM_LIBRARIES:
+                continue
+            if binary.name == "libcrtmedia.dylib" and name in MACOS_CRTMEDIA_SYSTEM_LIBRARIES:
+                known.setdefault(Path(name).name, []).append(binary.name)
                 continue
             if name.startswith(("@rpath/", "@loader_path/", "@executable_path/")):
                 leaf = Path(name).name
@@ -852,7 +872,8 @@ def host_abi_audit_macos(sdk: Path, deps: Path, build: Path, binaries) -> dict:
                 continue
             violations.append(f"{binary.name}: {name} is a host library")
         inventory[binary.name] = sorted(set(libraries))
-    return {"ok": not violations, "violations": violations, "known_host_libraries": {},
+    return {"ok": not violations, "violations": violations,
+            "known_host_libraries": {name: sorted(set(users)) for name, users in known.items()},
             "libraries": inventory}
 
 

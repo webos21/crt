@@ -33,7 +33,9 @@
 #include "WebPageCreationParameters.h"
 #include "WebPageInlines.h"
 #include <WebCore/GraphicsContext.h>
+#if defined(CRT_HAS_CRTMEDIA_PLAYER)
 #include <WebCore/MediaPlayerPrivateCRT.h>
+#endif
 #include <WebCore/Page.h>
 #include <WebCore/Settings.h>
 #include <WebCore/ShareableBitmap.h>

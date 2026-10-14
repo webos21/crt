@@ -2070,6 +2070,38 @@ again, a revocation resets that.
   physical-camera probe on each host. The same applies to the 8A network gates and 8B playback gate.
 - Microphone, display capture and WebRTC remain out of scope; the synthetic device is a test facility.
 
+**macOS/arm64 replay of 8A, 8B and 8C (2026-10-14).** The combined gate (now eleven entries) passes from a clean
+recompose of the 23 carried patches: `crtweb_network_test` with its fifteen browser/WebView trust cases, `crtweb_media_test`
+(3/3 runs, Web process 28 -> 23..25 threads over twelve lifetimes, no process left), `crtweb_capture_test` with the
+labelled synthetic camera (3/3), and every earlier B3-C8/Tranche 5 entry unchanged (public API lifecycle 100 cycles
++0 KiB/+0/+0, WebView 20 cycles +0/+0/+0, internal B7 +64 KiB/+0/+0, header/export firewall, static and runtime audits).
+The physical camera was **not** opened on this host (it needs the explicit opt-in run and the OS camera prompt);
+audio *output* is also unverified (the tests do not record whether the sink or the wall clock paced playback).
+What differed from Linux, all fixed at the source and none in WebKit:
+
+1. **`libcrtmedia.dylib` exported FFmpeg, libcurl and mbedTLS** (3,485 symbols besides its 103 `crtmedia_*`). WebKit's
+   `curl_*` calls were linked to the embedded mbedTLS copy because libcrtmedia comes first on the link line (two-level
+   namespace binds to the first dylib that defines the name): every `file:` load stalled after the response, and TLS would
+   not have worked either. The dylib now exports `crtmedia_*` only (`libcrtmedia/cmake/crtmedia_exports_macos.txt`).
+2. **libcrtmedia bound libc to the host.** CMake places `libc.dylib` after the frameworks, which re-export libSystem, so
+   FFmpeg's `pthread_once`, `pthread_mutex_*` and friends were libsystem_pthread's and wrote into Bionic-layout objects
+   (bus error in `avcodec_find_decoder_by_name` in the Web process). The CRT libc is first on its link line now;
+   146 libc and 43 libm bindings are the CRT's, five libSystem ones remain.
+3. **Two `libc++` images from the SDK.** `libc++.dylib` was a regular copy of `libc++.1.dylib` (the dist copier
+   dereferenced the symlinks) with the same install name, so dyld mapped a second runtime for the consumers that recorded
+   `@rpath/libc++.dylib` (libcrtmedia, libcrtui). `tools/create_dist.py` keeps the symlinks on macOS.
+4. **Audit policy.** The OS media frameworks are libcrtmedia's PAL: accepted as dependencies of `libcrtmedia.dylib` and of
+   nothing else, listed under `known_host_libraries`; the Web process also maps Apple's own `/usr/lib/libc++.1.dylib` and
+   `libc++abi` through them, which the gate records (`system_cxx_runtime_files`) and does not count as a CRT runtime; the
+   dyld shared cache (including its iOSSupport volume that `vmmap` lists), the frameworks' ICU data and log caches are
+   OS-owned paths.
+5. Overlay defects that only a macOS-shaped configuration exposed: `DrawingAreaCRT.cpp` included the player header
+   unconditionally, `MediaPlayerPrivateCRT.h` declared the MediaStream bridge member without `ENABLE(MEDIA_STREAM)`;
+   `CRT_DISABLE_CRTMEDIA_PLAYER` is a new configure knob (player off, stream off passes the Tranche 4/5 gates, which is how
+   the cause of item 1 was isolated). A reused CMake cache keeps `ENABLE_MEDIA_STREAM=OFF` from an earlier configure:
+   pass `--define ENABLE_MEDIA_STREAM=ON` once when switching a build directory.
+6. The test observers: `crtweb_media_test` uses libproc (`proc_listchildpids`, `proc_pidinfo`) and `vmmap(1)`.
+
 ### 9. GPU integration
 
 Start with WebKit's Skia output to an external surface consumed by CRT's Skia.
