@@ -24,8 +24,8 @@ named, not a commitment.
 | Process launch | `WPEProcessManager`/`WPEProcessLaunchOptions` exist but are compiled **only for Android** (`Source/WebKit/WPEPlatform/CMakeLists.txt`: `if (ANDROID)`); on Linux/WPE WebKit's own `ProcessLauncher`/`AuxiliaryProcess` uses Unix IPC | `ProcessLauncherCRT.cpp` on CRT PAL process, pipe and shared-memory primitives | The same launcher is used on Linux, Windows and macOS. It registers unique launch tokens until `waitpid` reaps each child. Runtime teardown tracks the whole pool and late session-cleanup launches while excluding sibling/shared launches; rules and evidence are owned by the [API policy](../design/libcrtweb_api_policy.md) and [Tranche 5 acceptance](../acceptance/crtweb_acceptance.md). |
 | IPC | WebKit's own IPC between UI, web, network and GPU processes. The pinned 2.54.0 tarball has `Platform/IPC/{unix,glib,darwin,android}` backends only, and **no Windows backend and no `PlatformWin.cmake`** | Reuse WebKit's Unix IPC message/connection implementation over CRT PAL sockets and descriptor transport where that contract is available; add a CRT transport only where a host replay proves it necessary | **B4 result:** Linux/x86_64 reuses `Platform/IPC/unix` unchanged over CRT `socketpair()`/descriptor semantics and passes process IPC. Windows/macOS transport is deliberately undecided until Tranches 6/7 exercise B4; it is not yet valid to claim a separate `Platform/IPC/crt` backend. |
 | Build | CMake with Ninja only (the Makefile generator is unsupported). The native WPE baseline additionally confirmed GLib/GioUnix, libsoup 3, ICU, fontconfig/FreeType, HarfBuzz, GStreamer, image codecs, EGL/epoxy and libdrm as reference dependencies | CRT sysroot toolchain driven by Ninja | Matches the CRT default generator. Release process binaries use compiled-in install paths, so the reference tool uses a private CMake install prefix rather than relying on `WEBKIT_EXEC_PATH` |
-| Network | libsoup | CRT networking | Keep upstream first; substitute in Tranche 8 |
-| Media | GStreamer | `crtmedia` | Native WPE build confirmed GStreamer is part of the supported Video/WebCodecs configuration. Keep upstream first; substitute in Tranche 8 |
+| Network | libsoup (WPE reference); Curl/OpenSSL (PlayStation-shaped product) | WebKit Curl semantics over CRT-owned curl/OpenSSL and PAL sockets, with CRT explicit trust policy | Product never links libsoup/GLib. Tranche 8A adopts the CRT trust contract; evidence and remaining gates are in the acceptance document. |
+| Media | GStreamer (WPE reference) | `crtmedia` behind a WebCore media engine | Product compiles HTML video but has no registered playback engine or GStreamer. Playback and capture are separate Tranche 8 gates. |
 | Fonts / text | fontconfig / FreeType / HarfBuzz | CRT-controlled FreeType/font layer | Confirmed by the native WPE configure/build; substitution remains later port work |
 | JavaScriptCore | JSCOnly / WPE build (`Source/cmake/OptionsJSCOnly.cmake`: needs Threads and **ICU >= 70.1** `data i18n uc`; default `EVENT_LOOP_TYPE=Generic`, so no GLib; Ruby, Perl and Python as build-host tools; gperf only once WebCore is enabled) | CRT libc/libc++ build against the installed SDK, interpreter first (JIT off), then JIT | Tranche 1. ICU and gperf are CRT ports (`porting/recipes/icu.json`, `gperf.json`), not host libraries, so the `06-web` SDK stays self-contained; Ruby, Perl and Python are build-host tools. Surfaces threads, TLS, executable memory and signal gaps in the lower runtime |
 | Event loop | GLib main loop (WPE); `Generic` for JSCOnly | Generic run loop for `PlatformCRT` | B3/B4 follow the PlayStation-shaped non-GLib port. Linux/x86_64 process launch and IPC pass with the generic run loop; host replays remain part of Tranches 6/7. |
@@ -43,7 +43,7 @@ the tranche that touches it reads the source. Not yet decided means blank.
 | `Source/cmake/OptionsJSCOnly.cmake` | used as is for Tranche 1 | reuse |
 | `Source/WebKit/UIProcess/wpe`, `WPEPlatform` | `UIProcess/crt`; WPEPlatform only as the Linux prototype boundary | replace (prototype: wrap) |
 | `Source/WebKit/WebProcess/wpe` | `WebProcess/crt` | replace |
-| `Source/WebKit/NetworkProcess/soup` | upstream first; CRT backend in Tranche 8 | defer |
+| `Source/WebKit/NetworkProcess/soup` | product uses upstream `NetworkProcess/curl` over CRT dependencies; `CurlSSLHandleCRT` owns explicit trust | replace reference backend; reuse product browser request semantics |
 | `Source/WebKit/Platform/IPC/{unix,glib}` | Unix IPC over CRT PAL first; a `Platform/IPC/crt` replacement only if a host replay requires it | reuse on Linux; verify on Windows/macOS |
 | `GPUProcess` (ON by default for WPE) | `PlatformCRT` path | replace |
 | Skia compositor (`Shared/skia`, m154) | kept as WebKit's private copy | reuse |
@@ -126,6 +126,14 @@ that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
 - `0021` adds three WebPage messages (`SetCompositionCRT`, `ConfirmCompositionCRT`, `InsertTextCRT`) for the embedder's
   input method: non-Cocoa builds have no composition entry point in the Web process. Removal: upstream offers a
   platform-neutral composition/insertion message.
+
+## Playback engine (Tranche 8B)
+
+`WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.{h,cpp}` is a CRT-owned `MediaPlayerPrivate` registered at Web process
+start-up from `DrawingAreaCRT` through `MediaPlayerFactorySupport::callRegisterMediaEngine` (no `MediaPlayer.cpp` patch). It
+uses the `MediaFoundation` engine/player identity slot, which no CRT host can otherwise produce. Build wiring: `OptionsCRT.cmake`
+finds the installed `libcrtmedia`, `WebCore/PlatformCRT.cmake` adds the engine, `WebKit/PlatformCRT.cmake` builds the `libva` /
+`libva-drm` stubs (`libcrtweb/platform/va-stub`), the `libc++.so` alias and links `libcrtmedia`. Linux only until its replays.
 
 ## WebKit files of PlatformCRT (milestone B4)
 

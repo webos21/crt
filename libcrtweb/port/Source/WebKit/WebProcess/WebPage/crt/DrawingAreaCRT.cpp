@@ -33,6 +33,7 @@
 #include "WebPageCreationParameters.h"
 #include "WebPageInlines.h"
 #include <WebCore/GraphicsContext.h>
+#include <WebCore/MediaPlayerPrivateCRT.h>
 #include <WebCore/Page.h>
 #include <WebCore/Settings.h>
 #include <WebCore/ShareableBitmap.h>
@@ -46,6 +47,11 @@ DrawingAreaCRT::DrawingAreaCRT(WebPage& webPage, const WebPageCreationParameters
     , m_displayTimer(RunLoop::mainSingleton(), "DrawingAreaCRT::DisplayTimer"_s, this, &DrawingAreaCRT::displayTimerFired)
     , m_isPaintingSuspended(!(parameters.activityState & ActivityState::IsVisible))
 {
+#if ENABLE(VIDEO) && defined(CRT_HAS_CRTMEDIA_PLAYER)
+    // The Web process registers the crtmedia playback engine (Tranche 8B) before any page can ask for
+    // a media player; the registration is once per process.
+    MediaPlayerPrivateCRT::ensureRegistered();
+#endif
 }
 
 DrawingAreaCRT::~DrawingAreaCRT() = default;

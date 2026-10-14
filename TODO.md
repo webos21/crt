@@ -135,9 +135,13 @@ uses the host replay order stated below and in the acceptance document.
   evidence and fixes are in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
 * [x] **7. macOS/arm64 replay.** Done 2026-10-13: B3-B7, Tranche 4 and the Tranche 5
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
-* [ ] **8. CRT subsystem substitution.** Only after a working browser.
-  * [ ] Replace the reference network backend with CRT networking.
-  * [ ] Replace media playback and capture independently with `crtmedia`.
+* [ ] **8. CRT subsystem substitution.** Sequential gates in `docs/acceptance/crtweb_acceptance.md`.
+  * [ ] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy implemented;
+    Linux accepted 2026-10-14; macOS/Windows replay pending (`HISTORY.md`, acceptance).
+  * [ ] **8B playback:** CRT engine over `crtmedia` (CPU video/audio) accepted on Linux 2026-10-14;
+    audio output needs a physical host; macOS/Windows replay pending (`HISTORY.md`, acceptance).
+  * [ ] **8C capture:** video camera + explicit permission API scope approved 2026-10-14;
+    default deny, revocation/teardown and physical-host gates pending; microphone remains deferred.
 * [ ] **9. GPU integration.**
   * [ ] Present WebKit's private Skia output through the CRT external-surface path.
   * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one

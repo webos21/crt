@@ -1,0 +1,10 @@
+VA_API_0.33.0 {
+  global:
+    vaCreateSurfaces;
+};
+VA_API_0.31.0 {
+  global:
+    va*;
+  local:
+    *;
+};

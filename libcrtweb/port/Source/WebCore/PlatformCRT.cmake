@@ -116,6 +116,20 @@ list(APPEND WebCore_LIBRARIES
     Threads::Threads
 )
 
+# Tranche 8B: the playback engine over the installed crtmedia library (public C API only).
+if (CRT_ENABLE_CRTMEDIA_PLAYER)
+    list(APPEND WebCore_SOURCES
+        platform/graphics/crt/MediaPlayerPrivateCRT.cpp
+    )
+    list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
+        "${WEBCORE_DIR}/platform/graphics/crt"
+    )
+    list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+        platform/graphics/crt/MediaPlayerPrivateCRT.h
+    )
+    list(APPEND WebCore_LIBRARIES ${CRT_CRTMEDIA_LIBRARY})
+endif ()
+
 # WebKit's OpenSSL crypto sources are written against OpenSSL 1.1/BoringSSL, where
 # EVP_PKEY_get0_RSA() returns a mutable RSA*; OpenSSL 3 (the CRT port) returns const RSA*.
 # A force-included header restores the old signature for that file only (no source patch).

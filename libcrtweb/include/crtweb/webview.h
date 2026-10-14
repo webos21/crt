@@ -93,6 +93,10 @@ class WebView {
   struct LaunchOptions {
     std::string data_directory;   /* empty: ephemeral website data */
     uint32_t cookie_policy = 0;   /* 0 accept all, 1 none, 2 first party only */
+    /* The host reads/copies this PEM bundle before creating its runtime. Empty: HTTPS fails closed.
+     * This is a target CRT path, not a build-host path. Never a host certificate-store fallback. */
+    std::string ca_pem_file;
+    bool insecure_skip_verify_for_local_development = false;
   };
 
   WebView() = default;
@@ -139,9 +143,13 @@ class WebView {
 
     std::string data_option = "--data-dir=" + options.data_directory;
     std::string policy_option = "--cookie-policy=" + std::to_string(options.cookie_policy);
+    std::string ca_option = "--ca-pem-file=" + options.ca_pem_file;
     std::vector<char*> argv = {const_cast<char*>(host_path), const_cast<char*>(path.c_str())};
     if (!options.data_directory.empty()) argv.push_back(const_cast<char*>(data_option.c_str()));
     if (options.cookie_policy != 0) argv.push_back(const_cast<char*>(policy_option.c_str()));
+    if (!options.ca_pem_file.empty()) argv.push_back(const_cast<char*>(ca_option.c_str()));
+    if (options.insecure_skip_verify_for_local_development)
+      argv.push_back(const_cast<char*>("--insecure-skip-verify-for-local-development"));
     if (initial_url != nullptr) argv.push_back(const_cast<char*>(initial_url));
     argv.push_back(nullptr);
     pid_t child = 0;

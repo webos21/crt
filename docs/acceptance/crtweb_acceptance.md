@@ -2,7 +2,7 @@
 
 **Status: in progress. Tranches 0-7 are closed, including the public `crtweb`
 API and `crtui` WebView plus public-API/process lifecycle acceptance on
-Linux/x86_64, macOS/arm64 and Windows/x64. Tranche 8 is next; a packaged
+Linux/x86_64, macOS/arm64 and Windows/x64. Tranche 8 is in progress; a packaged
 `06-web` SDK follows in Tranche 10.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
@@ -39,9 +39,11 @@ or GLib type appears in a public header.
 ## Scope
 
 Required for v1: HTML, CSS, DOM, JavaScript, navigation, HTTP/HTTPS, images,
-fonts/text, mouse/keyboard, scrolling, Canvas 2D, basic cookies/storage.
+fonts/text, mouse/keyboard, scrolling, Canvas 2D, basic cookies/storage. Video camera capture with
+application-owned permission decisions is an approved extension (2026-10-14), gated independently
+in Tranche 8C; it is not implemented or accepted yet.
 
-Deferred: WebRTC, WebGPU, WebXR, EME/DRM, camera/microphone, printing,
+Deferred: WebRTC, WebGPU, WebXR, EME/DRM, microphone/display capture, printing,
 extensions, full accessibility, downloads.
 
 **Version and licensing.** Frozen reference: WPE WebKit 2.54.0 (the stable
@@ -1711,8 +1713,8 @@ adds three WebPage messages (`SetCompositionCRT`, `ConfirmCompositionCRT`, `Inse
 `Editor::setComposition/confirmComposition/insertText`; (2) `Editor::cancelComposition` left the marked
 text in the field, so cancel replaces it with nothing and confirms; (3) the shared
 `WKContextSetDownloadClient` path (`WKContextDownloadClient`) and `WKPageUIClientV9` work on `PlatformCRT`
-as is, no patch. *Not in v1 (decisions in `libcrtweb_api_policy.md`):* authentication challenges,
-permission prompts, file pickers and context menus, a JavaScript message channel, device scale,
+as is, no patch. *Not accepted by Tranche 4 (decisions in `libcrtweb_api_policy.md`):* authentication challenges,
+permission prompts (camera is now planned in Tranche 8C), file pickers and context menus, a JavaScript message channel, device scale,
 local-storage clearing, and IME candidate-window geometry (the page's caret rectangle is not
 reported back to the application).
 
@@ -1877,11 +1879,146 @@ patch is re-applied. *Not exercised on macOS:* GPUProcess (Tranche 9), and a run
 
 ### 8. CRT subsystem substitution
 
-Only after a working browser. Replace, one at a time, the components WPE
-brought with it: WebKit's network backend -> CRT networking; WebCore's media
-backend -> `crtmedia`; capture -> `crtmedia` capture. Do not remove
-GLib/libsoup/GStreamer in one step; that mixes a browser port with subsystem
-rewrites.
+Replace subsystems one at a time, after the working browser/lifecycle gates. The **WPE reference**
+uses GLib/libsoup/GStreamer, but the **PlatformCRT product** is PlayStation-shaped and already uses
+WebKit Curl over CRT-built OpenSSL/libcurl and CRT PAL sockets. It does not link GLib/libsoup or
+GStreamer. HTML video is compiled (`ENABLE_VIDEO=ON`) but no real playback engine is registered;
+capture/MediaStream are disabled. Removing nonexistent product dependencies is not an acceptance
+item. Keep the reference unchanged for comparisons.
+
+#### 8A. Network ownership and explicit trust
+
+Adopt the CRT network trust policy at the product's actual boundary, retaining WebKit's browser
+request scheduling, cookies, cache, same-origin/CORS, redirects and downloads. The private media
+HTTP range/GET transport cannot replace a browser's arbitrary methods, headers and cookie policy.
+WebKit's OpenSSL certificate verifier and WebCrypto also prevent simply substituting the media
+mbedTLS build of Curl. Reuse the existing CRT-owned Curl/OpenSSL ports, not host libcurl/SSL.
+The public contract and process-wide trust decision are owned by
+[libcrtweb API policy](../design/libcrtweb_api_policy.md#network-trust-tranche-8a).
+
+Acceptance requires actual **browser** loads (not just Curl port smoke), both accepted and rejected:
+
+- Default HTTP succeeds; default/explicit-empty HTTPS fails even with ambient CA/trust variables.
+- A copied explicit PEM CA accepts its server; unrelated CA, invalid PEM, expired certificate and
+  wrong IP SAN each fail through `CRTWEB_LOAD_FAILED`.
+- The loudly named development-only opt-out permits the wrong-SAN server, only when explicit.
+- An accepted load follows a main-frame 302, loads an external script, makes a POST with an
+  application header through a 307 redirect, and round-trips the HTTP-only cookie/body/method.
+- Bad config size/boolean and oversized bundle are rejected; caller memory may be overwritten
+  after configure; NULL resets defaults before creation; mutation after runtime creation/destruction
+  is rejected.
+- The separate-process WebView proves default denial, explicit CA acceptance, wrong SAN rejection,
+  explicit insecure acceptance and startup failure for a missing CA file; every host is reaped.
+- The existing API, lifecycle, rendering/input and static/runtime Host ABI gates remain green.
+
+Implementation: `crtweb_network_configure`, `CurlSSLHandleCRT`, and separate-process WebView/host
+launch options. `crtweb_network_test` includes only the public header, and the combined driver
+records `crt_network_trust` alongside the existing eight entries in `acceptance-b3.json`.
+`tools/test_crtweb_network.py` is a **build-host-only** fixture: Python HTTP/TLS server, OpenSSL
+CLI supporting `req -addext`/`ca` for fresh per-run PKI, no Internet or committed private
+keys. Run fixture unit tests with `python3 tools/test_crtweb_network_fixture.py`; they are not the
+browser acceptance result. The Windows target path conversion is in the driver; new policy code
+is shared across hosts, but **macOS/Windows replay is still required**.
+
+**Linux/x86_64 evidence (2026-10-14).** The final combined run passes all nine entries, including
+ten public-API network cases and five separate-host WebView cases. The public API's 100 lifecycle
+cycles finish at +128 KiB RSS, +0 threads, +0 descriptors; WebView's twenty cycles finish at
+0/0/0. Static Host ABI checks cover fifteen binaries, runtime mapping covers 123 files across
+UI/Web/Network processes, both with no violation; the header/export firewall remains clean.
+Fixture unit tests (3), licensing tests (15), driver tests (3) and the 22-patch/18-overlay-file
+license manifest gate pass. This is **8A Linux acceptance**, not closure of all Tranche 8.
+
+Reproduce from the installed `05-ui` SDK and web dependency prefix:
+
+```sh
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root out/linux-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/linux-host-ninja-debug/port-tests/install \
+  --work-root out/web-crt-webcore --reuse-tree --webkit --run-tests -j 8
+```
+
+Machine-readable result: `out/web-crt-webcore/acceptance-b3.json` (`crt_network_trust.cases`,
+alongside the existing regression/ABI entries). The latest verification log is
+`out/web-crt-webcore/tranche8a-gate-final.log`; these are generated, not committed artifacts.
+
+#### 8B. Playback
+
+Register a CRT-owned WebCore `MediaPlayerPrivate` engine consuming only installed `crtmedia`
+public extractor/codec/frame/audio-sink C APIs. FFmpeg and host audio types stay private to
+`libcrtmedia`. First acceptance is CPU H.264/AAC MP4, MP3 and PCM WAV from local files and the
+browser's own HTTP loader: `canPlayType`, metadata, play/pause/seek/ended, volume/mute, frame pixels
+and clock progression. One worker thread per player owns every crtmedia handle (blocking demux, decode,
+audio write); the WebCore main thread owns notifications and painting. Unsupported, missing and garbage
+sources are reported as `MEDIA_ERR_SRC_NOT_SUPPORTED`; repeated lifetimes are bounded.
+
+Design decisions, kept visible:
+
+- **Browser loader, not a second HTTP stack.** The private `crtmedia` HTTP transport (Curl/mbedTLS)
+  is not linked into the Web process's OpenSSL/Curl closure. For `http(s):` the engine asks WebKit's own
+  resource loader (so TLS policy from 8A, cookies, cache and redirects are the browser's) and spools the
+  body to a temporary file that `crtmedia` plays. A consequence: playback starts when the transfer has
+  finished; seeking inside an unfinished transfer and progressive start are **not** in this gate.
+- **Engine identity.** WebCore's engine and player enumerations have no neutral CRT value; the engine
+  uses the `MediaFoundation` slot (unused on every CRT host) rather than carrying a patch through the
+  enumeration, the GPU-process serializers and `MediaPlayerPrivateRemote`.
+- **CPU only.** Software decode (`prefer-hardware-decode` is off) and RGBA frames copied into WebKit's own
+  Skia; no GPU decode or presentation (Tranche 9). MSE, WebCodecs, WebAudio, DRM and text/audio/video
+  track objects are not enabled by this engine; the rate is 1x.
+- **Host libraries stay out of the Web process.** `libcrtmedia.so` is linked against VA-API for its
+  hardware decoder. The web stage builds `libva.so.2`/`libva-drm.so.2` *stubs* (every call fails with
+  `VA_STATUS_ERROR_UNIMPLEMENTED`, `libcrtweb/platform/va-stub`) so no host driver library is mapped. The
+  SDK's `libcrtmedia.so`/`libcrtui.so` also record the C++ runtime as an unversioned `libc++.so` that is
+  a *separate file* from `libc++.so.1`; left alone, the loader would map two runtimes. The build tree
+  therefore holds a `libc++.so` symlink to the SDK's `libc++.so.1`, and the gate asserts exactly one
+  C++ runtime is mapped. Both are packaging defects of the SDK to fix at the source (Tranche 10).
+
+**Linux/x86_64 evidence (2026-10-14).** `crtweb_media_test` (public header only; 11 s, 3/3 runs, plus
+the combined gate) passes: `canPlayType` (supported, unknown type, unsupported codec), metadata and
+`loadeddata`, duration ~1 s and 64x64, paused at zero, the first frame in the view, `play` moves the clock and
+`pause` stops it, a later frame and a seeked frame differ from the first (view pixels), `seeked` and
+`currentTime`, `ended`, volume/mute reflected, MP3 and WAV metadata/duration/ended, a garbage MP4
+and a missing file both end in `MEDIA_ERR_SRC_NOT_SUPPORTED`, HTTP playback through the browser
+loader, twelve load/play/reset lifetimes with the Web process at 17 -> 14 threads, and every web process
+gone after the runtime. The combined gate (now eleven entries with `media_playback`) is green; the
+Web process maps 36 files with no Host ABI violation, `libcrtmedia.so` and the two stubs mapped, one
+C++ runtime. **Not verified:** audio *output*. This host has no sound card, so every run used the wall
+clock fallback (`crtmedia_audio_sink_open` failed and was reported by falling back); the audio-clock
+path and real PCM delivery need a physical-host run. Also unverified: other codecs than the test assets'
+(H.264 Constrained Baseline, AAC, MP3, PCM) and A/V sync over long clips.
+
+This is **8B Linux acceptance**, not closure of Tranche 8: macOS/Windows replay of 8A and 8B and the 8C
+capture gate remain.
+
+#### 8C. Capture (separate from playback)
+
+**Scope approved 2026-10-14:** add video camera capture and explicit application-owned permissions
+to the browser target. Microphone, display capture and WebRTC remain deferred; `crtmedia/capture.h`
+provides video capture only. This approval is not implementation/acceptance evidence and does not
+enable devices or `MEDIA_STREAM` by itself. The permission/security design is owned by
+[libcrtweb API policy](../design/libcrtweb_api_policy.md#camera-permissions-tranche-8c-target-contract-implementation-pending).
+
+Gate sequence (after the CPU playback seam of 8B):
+
+1. **Permission lifecycle.** Public C callback/completion and separate WebView messages, default
+   denial, requesting/top-level origins, one-shot tokens, asynchronous pump delivery. Test no
+   callback, denial, explicit grant, duplicate/late decisions, application revocation, frame/document
+   replacement, view destruction and process/host death. A grant must not leak between views or
+   runtime data stores. Host/platform denial is not overridden by the application.
+2. **CRT source/device adapter.** Register a CRT video-capture factory behind WebCore's
+   `RealtimeMediaSourceCenter`; consume only public CRT capture/frame types. Preserve secure
+   contexts, frame policy and device-ID/label privacy. Device discovery must not start streaming;
+   capture open/start follows explicit permission. Test unsupported audio/display requests,
+   constraints, no device, busy/denied devices, negotiated format/rate, finite dequeue/cancellation
+   and failure propagation; do not pretend that a grant guarantees available hardware.
+3. **Browser frames and release.** `{video: true, audio: false}` produces a real video track and
+   actual camera pixels through a `<video>` element and the CPU frame/WebView compositor contract.
+   Test `track.stop()`, clones/last-owner release, revoke, navigation, unplug and process loss: end
+   tracks, stop/release the CRT source, join workers, reject stale generation frames and avoid leaks.
+4. **Physical-host replay.** Linux/x86_64 first, then macOS/arm64 and Windows/x64. Default automated
+   gates never activate a camera; synthetic sources are test-only and labelled as such. Physical
+   runs require explicit opt-in and record host, opaque device selection, negotiated format/rate,
+   frame/pixel evidence and repeated-lifetime resource deltas. Synthetic/no-device passes do not
+   close the physical gate. No device is opened by the current 8A implementation.
 
 ### 9. GPU integration
 

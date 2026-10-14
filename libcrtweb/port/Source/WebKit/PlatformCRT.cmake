@@ -160,6 +160,31 @@ list(APPEND WebKit_LIBRARIES
     WPE::libwpe
 )
 
+# Tranche 8B: the crtmedia shared library needs VA-API (its hardware decoder) and records the C++
+# runtime under its unversioned name. The web stage keeps host libraries out of the Web process, so:
+#  - libva.so.2 / libva-drm.so.2 are CRT stubs that fail every call (software decode only);
+#  - libc++.so in the build tree aliases the SDK's libc++.so.1 so the loader sees one runtime, not two.
+if (CRT_ENABLE_CRTMEDIA_PLAYER)
+    set_source_files_properties(${WEBKIT_DIR}/WebProcess/WebPage/crt/DrawingAreaCRT.cpp PROPERTIES
+        COMPILE_DEFINITIONS CRT_HAS_CRTMEDIA_PLAYER=1)
+    set(CRT_VA_STUB_DIR "${CRT_LIBCRTWEB_DIR}/platform/va-stub")
+    foreach (stub IN ITEMS va va-drm)
+        string(REPLACE "-" "_" stub_target "crt_${stub}_stub")
+        add_library(${stub_target} SHARED ${CRT_VA_STUB_DIR}/crt_va_stub.c)
+        set_target_properties(${stub_target} PROPERTIES
+            OUTPUT_NAME ${stub}
+            SUFFIX ".so.2"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+            LINK_FLAGS "-Wl,-soname,lib${stub}.so.2 -Wl,--version-script=${CRT_VA_STUB_DIR}/va.map")
+    endforeach ()
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+    file(CREATE_LINK "${CMAKE_SYSROOT}/lib/libc++.so.1" "${CMAKE_BINARY_DIR}/lib/libc++.so" SYMBOLIC)
+    list(APPEND WebKit_LIBRARIES
+        "-Wl,-rpath-link,${CMAKE_BINARY_DIR}/lib"
+        crt_va_stub crt_va_drm_stub
+        ${CRT_CRTMEDIA_LIBRARY})
+endif ()
+
 list(APPEND WebKit_PUBLIC_FRAMEWORK_HEADERS
     Shared/API/c/playstation/WKBasePlayStation.h
     Shared/API/c/playstation/WKEventPlayStation.h
@@ -237,9 +262,20 @@ if (CRT_LIBCRTWEB_DIR)
         target_link_libraries(crtweb_api_test PRIVATE crtweb)
         add_dependencies(crtweb_api_test WebProcess NetworkProcess)
 
+        # Tranche 8B: HTML media through the crtmedia playback engine (public header only).
+        add_executable(crtweb_media_test ${CRT_WEBKIT_TESTS}/crtweb_media_test.cpp)
+        target_include_directories(crtweb_media_test PRIVATE ${CRT_LIBCRTWEB_DIR}/include)
+        target_link_libraries(crtweb_media_test PRIVATE crtweb)
+        add_dependencies(crtweb_media_test WebProcess NetworkProcess)
+
         add_executable(crtweb_api_lifecycle_test ${CRT_WEBKIT_TESTS}/crtweb_api_lifecycle_test.cpp)
         target_include_directories(crtweb_api_lifecycle_test PRIVATE ${CRT_LIBCRTWEB_DIR}/include)
         target_link_libraries(crtweb_api_lifecycle_test PRIVATE crtweb)
         add_dependencies(crtweb_api_lifecycle_test WebProcess NetworkProcess)
+
+        add_executable(crtweb_network_test ${CRT_WEBKIT_TESTS}/crtweb_network_test.cpp)
+        target_include_directories(crtweb_network_test PRIVATE ${CRT_LIBCRTWEB_DIR}/include)
+        target_link_libraries(crtweb_network_test PRIVATE crtweb)
+        add_dependencies(crtweb_network_test WebProcess NetworkProcess)
     endif ()
 endif ()

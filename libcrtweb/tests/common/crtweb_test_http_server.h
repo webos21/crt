@@ -5,6 +5,7 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -58,6 +59,9 @@ public:
     }
 
     std::string url(const char* path) const { return "http://127.0.0.1:" + std::to_string(m_port) + path; }
+
+    // Serves files of `directory` under /media/<name> (media tests): whole-file 200 responses.
+    void setMediaDirectory(const std::string& directory) { m_mediaDirectory = directory; }
 
 private:
     static void sendAll(int fd, const std::string& data)
@@ -119,7 +123,23 @@ private:
                     "<script>var t=document.getElementById('t');window.log=[];"
                     "['compositionstart','compositionupdate','compositionend'].forEach(function(n){t.addEventListener(n,function(e){window.log.push(n+':'+e.data);});});"
                     "t.focus();</script>");
-            else
+            else if (path.compare(0, 7, "/media/") == 0 && !m_mediaDirectory.empty() && path.find("..") == std::string::npos) {
+                std::string body;
+                if (FILE* file = fopen((m_mediaDirectory + "/" + path.substr(7)).c_str(), "rb")) {
+                    char chunk[8192];
+                    size_t length;
+                    while ((length = fread(chunk, 1, sizeof chunk, file)) > 0)
+                        body.append(chunk, length);
+                    fclose(file);
+                }
+                const char* type = path.size() > 4 && path.compare(path.size() - 4, 4, ".mp4") == 0 ? "video/mp4"
+                    : path.size() > 4 && path.compare(path.size() - 4, 4, ".mp3") == 0 ? "audio/mpeg" : "application/octet-stream";
+                if (body.empty())
+                    response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                else
+                    response = std::string("HTTP/1.1 200 OK\r\nContent-Type: ") + type + "\r\nContent-Length: " + std::to_string(body.size())
+                        + "\r\nAccept-Ranges: none\r\nConnection: close\r\n\r\n" + body;
+            } else
                 response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             sendAll(fd, response);
             close(fd);
@@ -128,6 +148,7 @@ private:
 
     int m_listener { -1 };
     uint16_t m_port { 0 };
+    std::string m_mediaDirectory;
     std::atomic<bool> m_stop { false };
     std::thread m_thread;
 };

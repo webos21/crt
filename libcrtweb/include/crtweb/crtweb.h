@@ -56,6 +56,27 @@ typedef struct crtweb_view crtweb_view;
 CRTWEB_API uint32_t crtweb_api_version(void);
 CRTWEB_API const char* crtweb_result_string(crtweb_result result);
 
+/* ---- network trust ------------------------------------------------------------------------- */
+
+#define CRTWEB_NETWORK_CA_PEM_MAX_SIZE 16384u
+
+typedef struct crtweb_network_config {
+  uint32_t struct_size;
+  /* NUL-terminated PEM CA bundle, copied by configure. NULL/empty: no trust anchors; HTTPS fails
+   * closed. Neither the host certificate store nor CURL_CA_BUNDLE/SSL_CERT_FILE is used. Maximum
+   * 16384 bytes excluding NUL (CRT's portable child-process launch configuration budget). */
+  const char* ca_pem;
+  /* Only 0 or 1. Explicit, unsafe, development-only opt-out of chain AND hostname verification. */
+  int insecure_skip_verify_for_local_development;
+} crtweb_network_config;
+
+/* Call on the future runtime owner's thread, before the first runtime_create. NULL restores the
+ * defaults. Configuration is process-wide: WebKit can share a NetworkProcess between data stores.
+ * Once runtime_create initializes the engine it is immutable (even if creation subsequently fails),
+ * including after every runtime was destroyed (CRTWEB_ERROR_STATE). Calls must be externally
+ * serialized with runtime creation. */
+CRTWEB_API crtweb_result crtweb_network_configure(const crtweb_network_config* config);
+
 /* ---- runtime ------------------------------------------------------------------------------- */
 
 typedef struct crtweb_runtime_config {

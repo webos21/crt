@@ -33,7 +33,7 @@ public header, an exported symbol or a dependency of the SDK's consumer-facing l
 
 ## Rules
 
-1. **Thread.** Every call except `crtweb_api_version`/`crtweb_result_string` must come from the
+1. **Thread.** Every runtime/view call except `crtweb_api_version`/`crtweb_result_string` must come from the
    runtime's creating thread; others return `CRTWEB_ERROR_STATE` and do nothing.
 2. **Callbacks.** Delivered by `crtweb_runtime_pump`. An application may call any view function
    from a callback, including `crtweb_view_destroy` (the memory is retired when the pump ends).
@@ -69,6 +69,36 @@ public header, an exported symbol or a dependency of the SDK's consumer-facing l
    launch rather than a recyclable OS PID. A shared NetworkProcess belongs to the surviving
    runtime. `crtui` WebView shutdown also closes its owned surface-protocol socket and reaps its host.
 
+## Network trust (Tranche 8A)
+
+The product uses WebKit's Curl request scheduler over the CRT-owned OpenSSL/libcurl ports and
+CRT PAL sockets, not WPE's libsoup/GLib backend. Keep browser semantics (redirects, cache, cookies,
+authentication challenges, same-origin/CORS, downloads and cancellation) inside WebKit; the media
+HTTP range transport is not a general browser request API. OpenSSL remains WebKit's private
+certificate-verifier/WebCrypto dependency. This is not a replacement of every Curl implementation
+file with a new CRT HTTP client.
+
+`crtweb_network_configure()` takes a copied PEM bundle and an explicitly named development-only
+verification opt-out, matching `crtmedia`'s trust policy without exporting its or Curl's types.
+No CA is the default: HTTPS fails closed, HTTP is unaffected. Neither host root stores nor ambient
+`CURL_CA_BUNDLE`/`SSL_CERT_FILE` grant trust. An invalid bundle, untrusted chain, expired certificate
+or hostname mismatch fails the asynchronous page load. The insecure opt-out disables both chain
+and hostname verification; it must never be the production default.
+
+Trust is **process-wide, immutable once runtime creation initializes WebKit** (even if a later
+creation step fails), including after all runtimes are destroyed. WebKit shares a NetworkProcess across isolated data stores; pretending
+that a per-runtime trust option is isolated would be misleading. Configure on the future owner's
+thread and externally serialize it with runtime creation. NULL resets defaults before creation.
+The copied bundle is limited to 16 KiB to bound the portable child-process environment. Internal
+launch variables are implementation details; applications must not mutate them. Runtime creation
+clears ambient internal overrides if the configure API was not used.
+
+The separate `crtui` WebView has its own host process and therefore its own trust configuration.
+`WebView::LaunchOptions::ca_pem_file` supplies a target-side CRT path; the host reads and copies
+the bundle before runtime creation, failing startup on an unreadable, empty or oversized file.
+`insecure_skip_verify_for_local_development` is false by default. Direct host equivalents are
+`--ca-pem-file=FILE` and `--insecure-skip-verify-for-local-development`.
+
 ## Scope of v1, and deliberate limits
 
 Part of v1 (Tranche 4, milestones C4-C8; the acceptance document owns the evidence): several runtimes
@@ -78,10 +108,50 @@ destination and sees progress and the result); popups (`window.open`, `window.cl
 JavaScript dialogs (alert, confirm, prompt) answered by the application; and IME (composition and
 commit of arbitrary UTF-8).
 
+Planned v1 extension, approved 2026-10-14 but **not implemented**: video camera capture and the
+application-owned camera permission contract below (Tranche 8C). Microphone capture remains
+deferred; enabling video must not imply support for `audio: true`.
+
 Not in v1, recorded so they are decisions, not omissions: device scale other than 100 %;
-authentication challenges, permission prompts (geolocation, camera, notifications), file pickers and
+authentication challenges, other permission prompts (geolocation, notifications), file pickers and
 context menus; a JavaScript message channel (only `crtweb_view_evaluate_script`); accessibility.
 Each is a later addition to this header, not a reason to expose a WebKit object.
+
+## Camera permissions (Tranche 8C target contract, implementation pending)
+
+Video camera capture is an explicitly approved extension of the browser target, not of WebRTC,
+microphone or display capture. Use WebKit's secure-context and frame/Permissions Policy checks;
+do not install a script-level `getUserMedia` substitute or treat an application grant as a bypass
+of those browser checks. Requests requiring unsupported microphone/display capture must fail
+honestly, never return an empty or fake audio track.
+
+The application owns camera permission decisions through a plain-C callback/completion boundary
+and the separate `crtui` WebView control channel. Callback delivery follows the existing pump/owner
+thread rules. Expose a request token and trustworthy requesting/top-level origins, not WebKit
+objects or host camera handles. No callback, no explicit grant, or a cancelled request means deny.
+A decision resolves once; late/duplicate completions are rejected. No blocking synchronous prompt
+on a capture worker and no automatic grant because playback was allowed.
+
+The initial grant is request-scoped: no implicit persistence in cookies, website data or a shared
+NetworkProcess, and no reuse by another view/origin. Pending requests are cancelled on document
+replacement, frame removal, view/runtime destruction or process loss. The application must also be
+able to revoke active camera access; revocation ends affected tracks and releases their capture
+lease without disturbing another view's separately authorized work. `track.stop()` and the last
+track release must also close the source. Callbacks stop after view/host destruction.
+
+Device metadata discovery must not start capture; browser device IDs/labels retain WebKit's
+permission privacy filtering. `crtmedia_capture_open/start` and frame production follow an
+explicit grant. Negotiated dimensions/rate and unsupported constraints must be reported honestly;
+missing, busy, denied-by-host or unplugged devices are real failures, not synthetic success. The
+worker owns the CRT capture handle and transfers owned CPU frames, with finite dequeue waits and
+generation checks so stop/navigation cannot publish stale frames. No FFmpeg, V4L2, AVFoundation,
+Media Foundation or private Skia type may cross the public API.
+
+Implementation order is permission lifecycle -> CRT video source/device factory -> MediaStream
+video display over the CPU playback path -> physical-host replay. Synthetic/test sources must be
+test-only and must never be reported as physical camera evidence. Automated default gates prove
+denial and lifecycle without activating a camera; physical-camera validation is explicitly opt-in.
+Acceptance requirements live in [Tranche 8C](../acceptance/crtweb_acceptance.md#8c-capture-separate-from-playback).
 
 ## The crtui WebView, and why it is a separate process
 

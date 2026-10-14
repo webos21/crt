@@ -110,13 +110,24 @@ else ()
     find_package(WebP REQUIRED COMPONENTS demux)
     find_package(ZLIB 1.2.11 REQUIRED)
 
+    # The CRT playback engine (Tranche 8B) consumes the installed crtmedia public C API. It is Linux
+    # only until its host replays, and needs the driver's libcrtweb directory for the VA-API stub.
+    if (NOT WIN32 AND NOT APPLE AND CRT_LIBCRTWEB_DIR)
+        find_library(CRT_CRTMEDIA_LIBRARY NAMES crtmedia PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH)
+        if (CRT_CRTMEDIA_LIBRARY)
+            set(CRT_ENABLE_CRTMEDIA_PLAYER ON)
+            message(STATUS "CRT playback engine: ${CRT_CRTMEDIA_LIBRARY}")
+        endif ()
+    endif ()
+
     WEBKIT_OPTION_BEGIN()
 
     WEBKIT_OPTION_DEFINE(ENABLE_STATIC_JSC "Control whether to build a non-shared JSC" PUBLIC ON)
 
     WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_ISO_MALLOC PRIVATE OFF)
 
-    # CPU painting only until Tranche 9 (GPU buffers); no media, WebRTC, WebGL or WebGPU.
+    # CPU painting only until Tranche 9 (GPU buffers). HTML video is compiled, but the crtmedia
+    # playback engine is a separate Tranche 8B gate; no WebRTC, WebGL or WebGPU.
     WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SKIA PRIVATE ON)
     WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SKIA_ENCODERS PRIVATE OFF)
     WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GPU_PROCESS PRIVATE OFF)

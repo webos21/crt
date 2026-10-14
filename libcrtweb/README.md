@@ -28,6 +28,8 @@ the process/recovery contract and measured results are owned by Web acceptance.
 - `tests/platform-crt/` -- `surface_probe.c` (CRT-built consumer), `wpe_crt_host.c` (native
   WebKitWebView on the `crt` display), `crt_surface.html`, and `web_surface_test.cc` (the
   hermetic `crtui` SurfaceView test run by CTest). Driver: `tools/build_webkit_wpe_crt.py`.
+- `tests/webkit/crtweb_media_test.cpp` -- HTML media through the CRT playback engine (Tranche 8B); `platform/va-stub/` -- the
+  VA-API stubs that keep a host driver library out of the Web process.
 - `tests/webcore/` and `tests/webkit/` -- product-port graph/paint/text and
   multi-process acceptance programs used by B3 and B4. Driver:
   `tools/build_webkit_crt_port.py`.

@@ -291,9 +291,12 @@ int main(int argc, char** argv)
 {
     std::string dataDirectory;
     uint32_t cookiePolicy = 0;
+    std::string caFile, caPEM;
+    bool insecureTLS = false;
     const char* initialURL = nullptr;
     if (argc < 2) {
-        fprintf(stderr, "usage: %s consumer-socket [--data-dir=DIR] [--cookie-policy=N] [initial-url]\n", argv[0]);
+        fprintf(stderr, "usage: %s consumer-socket [--data-dir=DIR] [--cookie-policy=N] [--ca-pem-file=FILE] "
+            "[--insecure-skip-verify-for-local-development] [initial-url]\n", argv[0]);
         return 2;
     }
     for (int i = 2; i < argc; ++i) {
@@ -301,8 +304,42 @@ int main(int argc, char** argv)
             dataDirectory = argv[i] + 11;
         else if (!strncmp(argv[i], "--cookie-policy=", 16))
             cookiePolicy = static_cast<uint32_t>(atoi(argv[i] + 16));
+        else if (!strncmp(argv[i], "--ca-pem-file=", 14))
+            caFile = argv[i] + 14;
+        else if (!strcmp(argv[i], "--insecure-skip-verify-for-local-development"))
+            insecureTLS = true;
+        else if (!strncmp(argv[i], "--", 2)) {
+            fprintf(stderr, "crtweb_host: unknown option %s\n", argv[i]);
+            return 2;
+        }
         else
             initialURL = argv[i];
+    }
+    if (!caFile.empty()) {
+        FILE* file = fopen(caFile.c_str(), "rb");
+        if (!file) {
+            fprintf(stderr, "crtweb_host: cannot open CA bundle\n");
+            return 2;
+        }
+        char buffer[4096];
+        size_t count;
+        while ((count = fread(buffer, 1, sizeof buffer, file)) && caPEM.size() <= CRTWEB_NETWORK_CA_PEM_MAX_SIZE)
+            caPEM.append(buffer, count);
+        bool invalid = ferror(file) || caPEM.empty() || caPEM.size() > CRTWEB_NETWORK_CA_PEM_MAX_SIZE
+            || caPEM.find('\0') != std::string::npos;
+        fclose(file);
+        if (invalid) {
+            fprintf(stderr, "crtweb_host: CA bundle is unreadable, empty or too large\n");
+            return 2;
+        }
+    }
+    crtweb_network_config networkConfig = { };
+    networkConfig.struct_size = sizeof networkConfig;
+    networkConfig.ca_pem = caPEM.empty() ? nullptr : caPEM.c_str();
+    networkConfig.insecure_skip_verify_for_local_development = insecureTLS;
+    if (crtweb_network_configure(&networkConfig) != CRTWEB_OK) {
+        fprintf(stderr, "crtweb_host: cannot configure network trust\n");
+        return 1;
     }
     gProducer.on_message = onMessage;
     if (crtweb_producer_connect(&gProducer, argv[1], gWidth, gHeight, 100) != 0) {

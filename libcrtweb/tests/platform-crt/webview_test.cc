@@ -158,6 +158,31 @@ extern "C" int main() {
     check(!broken.launch("/nonexistent/crtweb_host", 200, 150, nullptr, 3000), "a missing host fails to launch");
   }
 
+  // Short mode used by the Tranche 8A loopback fixture: exercise launch-option propagation through
+  // the actual separate host rather than accidentally configuring a WebKit instance in this UI.
+  if (const char* url = getenv("CRTWEB_WEBVIEW_TLS_URL")) {
+    crtweb::WebView::LaunchOptions options;
+    if (const char* ca = getenv("CRTWEB_WEBVIEW_TLS_CA_FILE")) options.ca_pem_file = ca;
+    options.insecure_skip_verify_for_local_development = getenv("CRTWEB_WEBVIEW_TLS_INSECURE") != nullptr;
+    bool success = getenv("CRTWEB_WEBVIEW_TLS_EXPECT_SUCCESS") != nullptr;
+    bool started = web.launch(host, 200, 150, nullptr, 5000, options);
+    if (getenv("CRTWEB_WEBVIEW_TLS_EXPECT_START_FAILURE")) {
+      check(!started, "invalid CA file fails host startup");
+    } else if (check(started, "TLS-configured host launched")) {
+      check(web.load_url(url), "TLS URL submitted");
+      check(pump_until([&] { return has_load(4, "") || (has_load(3, "") && seen.title == "network:ok"); }),
+          "TLS request reached an expected terminal state");
+      check(success ? (has_load(3, "") && seen.title == "network:ok" && !has_load(4, ""))
+                    : (has_load(4, "") && !has_load(3, "")), "TLS trust outcome through WebView");
+    }
+    web.shutdown();
+    check(crtweb_test::children().empty(), "TLS WebView host reaped");
+    crtui_context_destroy(scene.ui);
+    if (failures) return 1;
+    printf("crtweb_webview_test: ok\n");
+    return 0;
+  }
+
   if (!check(web.launch(host, 200, 150), "host launched and handshake completed")) return 1;
   web.focus(true);
   check(web.running(), "running after launch");

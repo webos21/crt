@@ -140,6 +140,7 @@ namespace {
 std::vector<crtweb_runtime*> gRuntimes;
 std::thread::id gOwner;
 bool gRunLoopInitialized;
+bool gNetworkConfigured;
 bool gPumping;
 bool gActivity;
 std::vector<crtweb_view*> gDoomed; // destroyed from inside a pump: freed when the pump ends
@@ -822,6 +823,30 @@ static std::string crtPath(const char* path)
     return path;
 }
 
+crtweb_result crtweb_network_configure(const crtweb_network_config* config)
+{
+    if (gRunLoopInitialized)
+        return CRTWEB_ERROR_STATE;
+    if (config && config->struct_size < offsetof(crtweb_network_config, insecure_skip_verify_for_local_development)
+        + sizeof(config->insecure_skip_verify_for_local_development))
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    const char* ca = config && config->ca_pem ? config->ca_pem : "";
+    int insecure = config ? config->insecure_skip_verify_for_local_development : 0;
+    if (strnlen(ca, CRTWEB_NETWORK_CA_PEM_MAX_SIZE + 1) > CRTWEB_NETWORK_CA_PEM_MAX_SIZE
+        || (insecure != 0 && insecure != 1))
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
+    // CRT's process launcher forwards the CRT environment on all hosts. These are private launch
+    // parameters, not ambient user-facing overrides: runtime_create resets them unless this API was
+    // used. Copy before returning; CurlSSLHandle in each child takes its own certificate snapshot.
+    if (setenv("CRTWEB_INTERNAL_CA_PEM", ca, 1)
+        || setenv("CRTWEB_INTERNAL_INSECURE_TLS", insecure ? "1" : "0", 1)) {
+        gNetworkConfigured = false;
+        return CRTWEB_ERROR_PLATFORM;
+    }
+    gNetworkConfigured = true;
+    return CRTWEB_OK;
+}
+
 crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_runtime** out_runtime)
 {
     if (!out_runtime)
@@ -831,6 +856,11 @@ crtweb_result crtweb_runtime_create(const crtweb_runtime_config* config, crtweb_
         return CRTWEB_ERROR_INVALID_ARGUMENT;
     if (!gRuntimes.empty() && !onOwnerThread())
         return CRTWEB_ERROR_STATE;
+    if (!gRunLoopInitialized && !gNetworkConfigured) {
+        crtweb_result status = crtweb_network_configure(nullptr);
+        if (status != CRTWEB_OK)
+            return status;
+    }
 
     if (CRTWEB_HAS_FIELD(config, process_directory) && config->process_directory && *config->process_directory) {
 #if defined(_WIN32)

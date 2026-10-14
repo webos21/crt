@@ -763,6 +763,20 @@
       "origin": "crt",
       "license": "BSD-2-Clause",
       "purpose": "system font shorthands: generic sans-serif at 13/11 px (PlayStation's file returns the standard family and logs)"
+    },
+    {
+      "file": "Source/WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.h",
+      "source": "libcrtweb/port/Source/WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.h",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "CRT playback engine (Tranche 8B): the MediaPlayerPrivate over the crtmedia public API"
+    },
+    {
+      "file": "Source/WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.cpp",
+      "source": "libcrtweb/port/Source/WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.cpp",
+      "origin": "crt",
+      "license": "BSD-2-Clause",
+      "purpose": "CRT playback engine (Tranche 8B): worker-thread demux/decode/audio over crtmedia, CPU frames to Skia"
     }
   ]
 }

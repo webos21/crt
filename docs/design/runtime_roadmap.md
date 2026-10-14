@@ -105,8 +105,11 @@ benchmark once the lower contracts have stable evidence:
   longer a prerequisite of anything.
 - **QuickJS** — deferred unless a non-WebKit lightweight JavaScript runtime
   becomes an actual product requirement; not a stage.
-- **WebGPU, EME/DRM, WebXR, camera/microphone in the web runtime, and JS-native
+- **WebGPU, EME/DRM, WebXR, microphone in the web runtime, and JS-native
   application bindings.**
+- Video camera capture and application-owned camera permissions are now part of the `06-web`
+  target, approved 2026-10-14. They are a separate Tranche 8C gate after playback, not an implicit
+  side effect of media support; contract/evidence: [crtweb acceptance](../acceptance/crtweb_acceptance.md#8c-capture-separate-from-playback).
 - Graphite, V8, Chromium/Ozone, Gecko, a full compositor/desktop environment,
   Android framework or APK compatibility, and unmodified glibc binary
   compatibility.

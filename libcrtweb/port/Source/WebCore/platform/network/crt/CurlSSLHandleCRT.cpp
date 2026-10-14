@@ -25,16 +25,24 @@
 
 #include "config.h"
 #include "CurlSSLHandle.h"
+#include <cstdlib>
+#include <cstring>
 
 namespace WebCore {
 
-// The platform hook of the libcurl backend. The PlayStation and Windows ports fill it from a system
-// certificate store; the CRT has none, and the CA bundle is deliberately unset (TLS verification
-// configuration belongs to the embedder, Tranche 8). Defined here because the symbol is referenced
-// by CurlSSLHandle's constructor on every host; ELF links drop the unused reference with
-// --gc-sections, a COFF link reports it.
+// CRT trust policy, not a host certificate-store adapter. The public libcrtweb configure API freezes
+// these launch parameters before WebKit starts; each process copies the PEM into Curl's CA blob.
+// An empty bundle intentionally supplies invalid certificate data rather than letting libcurl fall
+// back to a build-time CA path. The CRT curl port also disables default CA bundle/path discovery.
 void CurlSSLHandle::platformInitialize()
 {
+    const char* ca = std::getenv("CRTWEB_INTERNAL_CA_PEM");
+    if (!ca || !*ca)
+        ca = "CRT: no trust anchors configured";
+    auto bytes = std::span(reinterpret_cast<const uint8_t*>(ca), std::strlen(ca));
+    setCACertData(CertificateInfo::makeCertificate(bytes));
+    const char* insecure = std::getenv("CRTWEB_INTERNAL_INSECURE_TLS");
+    setIgnoreSSLErrors(insecure && !std::strcmp(insecure, "1"));
 }
 
 } // namespace WebCore

@@ -11,6 +11,58 @@ substantive update.
 
 ## 2026-10-14
 
+### Web Tranche 8, gate 8B: the CRT playback engine over crtmedia (Linux/x86_64)
+
+`MediaPlayerPrivateCRT` (WebCore overlay, no WebKit patch) registers once per Web process and plays
+H.264/AAC MP4, MP3 and WAV through the installed `crtmedia` C API: a worker thread owns demux/decode/audio
+write, the main thread owns notifications and painting; frames are copied RGBA into WebKit's Skia.
+`http(s):` goes through WebKit's own resource loader into a temporary file (no second HTTP stack in the
+Web process; playback starts when the transfer completes). Packaging defects found and handled in the web
+stage: `libcrtmedia.so` needs host VA-API (replaced by failing `libva` stubs so no host library is
+mapped) and records `libc++.so` (a distinct file from `libc++.so.1`; aliased by a symlink so one runtime
+is mapped). `crtweb_media_test` and the whole gate pass (`media_playback`: 36 mapped files, no
+violation); the Linux host has no sound card, so audio output is unverified. Open: audio on a physical
+host, progressive HTTP, macOS/Windows replay of 8A/8B, 8C capture.
+
+### Web Tranche 8A: CRT network trust adopted and accepted on Linux/x86_64
+
+The actual PlatformCRT product already uses WebKit's Curl request scheduler over CRT-owned
+OpenSSL/libcurl ports and CRT PAL sockets, not WPE's libsoup/GLib backend. The porting map and
+Tranche 8 contract now distinguish that product from the WPE reference rather than planning to
+remove libraries the product never linked. Browser request semantics remain in WebKit; the media
+HTTP range/GET transport is not substituted for arbitrary browser methods, headers or cookies.
+
+`crtweb_network_configure()` copies explicit PEM trust anchors, defaults to rejecting HTTPS when
+there are none, and exposes only a loudly named development-only verification opt-out. Trust is
+process-wide and frozen once WebKit initializes because NetworkProcess can be shared between
+runtime data stores. Ambient host roots/CA variables do not grant trust; invalid PEM, unrelated CA,
+expired certificates and wrong SAN fail the page load. The portable launch bundle budget is
+16 KiB, with explicit rejection rather than truncation. Public C API version remains 1; no existing
+runtime config layout changes. Separate `crtui` WebView hosts receive a CA-file option or explicit
+insecure option, read/copy the file before initialization, and fail startup on invalid files.
+
+The new public-header-only `crtweb_network_test` and build-host-only loopback Python/OpenSSL PKI
+fixture test ten API cases (including default-reset, copying, configuration errors and immutability)
+and five real separate-host WebView cases. Accepted pages follow a 302, load an external script,
+POST through a 307 preserving the body/header/method and round-trip an HTTP-only cookie. No
+Internet or checked-in private keys are used; no capture device is opened. The fixture initially
+used negative `openssl x509 -days` for expiry, which the host CLI rejects; it now signs the fresh
+expired fixture through `openssl ca` with explicit relative start/end dates.
+
+The final combined driver passes **all nine entries**, including all fifteen network cases,
+B3-C8, rendering/input, public API/WebView lifecycle and Host ABI checks. Public API 100 cycles:
+**+128 KiB RSS, +0 threads, +0 descriptors**; WebView 20 cycles: **0/0/0**. The static audit covers
+15 binaries and the runtime audit 123 mapped files across UIProcess/WebProcess/NetworkProcess,
+with no violation. The public header/export firewall, three fixture unit tests, fifteen licensing
+tests, three driver tests and the 22-patch/18-overlay-file manifest gate also pass.
+
+Reproduction and the generated `out/web-crt-webcore/acceptance-b3.json` evidence are owned by
+[Tranche 8A acceptance](docs/acceptance/crtweb_acceptance.md#8a-network-ownership-and-explicit-trust).
+macOS/Windows network replay, `crtmedia` playback (8B) and capture (8C) remain open; **Tranche 8
+is not closed**. The user subsequently approved video camera and explicit permissions for 8C
+(2026-10-14); its target contract is in the API policy/acceptance documents, not an implemented
+capture claim. Microphone remains deferred. `STATUS.md` is intentionally unchanged.
+
 ### Web Tranche 6 closed on Windows/x64: lifecycle recovery, handle ownership and PE audit
 
 The Windows/x64 replay of `tools/build_webkit_crt_port.py --webkit --run-tests`

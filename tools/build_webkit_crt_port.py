@@ -25,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import build_webkit_jsc as jsc  # noqa: E402  (shared compose/patch/environment helpers)
+import test_crtweb_network  # noqa: E402 (build-host-only TLS fixture)
 
 DEFAULT_TARGETS = ("PAL", "WebCore")
 
@@ -568,6 +569,43 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
     return result
 
 
+def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> dict:
+    """Tranche 8B: HTML <video>/<audio> through the CRT playback engine (crtmedia). Runs
+    crtweb_media_test, then audits the Web process's mapped files: the crtmedia library is in (the
+    engine really ran), no host VA-API/audio/GPU library is, and exactly one C++ runtime is mapped."""
+    import subprocess
+    run_env = dict(env)
+    run_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        [str(build / "lib"), str(prefix / "curl-openssl" / "lib"), str(sdk / "lib"), str(prefix / "lib")])
+    run_env["FONTCONFIG_FILE"] = str(work / "fonts.conf")
+    runs = work / "media-run"
+    runs.mkdir(exist_ok=True)
+    completed = subprocess.run([str(build / "bin" / "crtweb_media_test"), str(ROOT / "libcrtmedia" / "assets")],
+                               env=run_env, cwd=runs, capture_output=True, text=True, timeout=300)
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    roots = [sdk.resolve(), prefix.resolve(), build.resolve(), (ROOT / "libcrtgfx" / "assets" / "fonts").resolve(),
+             work.resolve()]
+    mapped = [line.split(" ", 2)[2] for line in completed.stdout.splitlines() if line.startswith("MAPPED WebProcess ")]
+    violations = []
+    for path in mapped:
+        name = Path(path).name
+        if name.startswith("ld-linux"):
+            continue
+        if not any(Path(path).resolve().is_relative_to(root) for root in roots):
+            violations.append(f"WebProcess maps {path}")
+    names = {Path(path).name for path in mapped}
+    runtimes = sorted(n for n in names if n.startswith(("libc++.so", "libc++abi")))
+    result = {"returncode": completed.returncode, "mapped_files": len(mapped), "violations": violations,
+              "cxx_runtime_files": runtimes,
+              "crtmedia_mapped": any(n.startswith("libcrtmedia") for n in names),
+              "va_stub_mapped": sorted(n for n in names if n.startswith("libva")),
+              "output": completed.stdout.splitlines()}
+    result["passed"] = (completed.returncode == 0 and "crtweb_media_test: ok" in completed.stdout and not violations
+                        and result["crtmedia_mapped"] and len(runtimes) == 2)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--recipe", type=Path, default=ROOT / "libcrtweb/third_party/webkit/recipe.json")
@@ -578,7 +616,8 @@ def main() -> int:
     parser.add_argument("--target", action="append", help="ninja target (default: PAL WebCore)")
     parser.add_argument("--configure-only", action="store_true")
     parser.add_argument("--run-tests", action="store_true",
-                        help="build and run crtweb_webcore_graph_test, then audit it (the B3 gate)")
+                        help="run the WebCore gate; with --webkit also run browser/API/lifecycle, "
+                             "render/input, WebView, network trust and Host ABI gates")
     parser.add_argument("--reuse-tree", action="store_true", help="keep the composed tree and build directory")
     parser.add_argument("--recompose", action="store_true",
                         help="with --reuse-tree: compose the source tree again (a patch or the pin changed) but keep "
@@ -641,7 +680,8 @@ def main() -> int:
     if args.run_tests and not args.target:
         args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host", "crtweb_lifecycle_test"]
                                           if args.webkit else []) \
-            + (["crtweb_host"] if args.webkit and target_os in ("linux", "macos", "windows") else [])
+            + (["crtweb_host", "crtweb_network_test"] if args.webkit and target_os in ("linux", "macos", "windows") else []) \
+            + (["crtweb_media_test"] if args.webkit and target_os == "linux" else [])
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -659,6 +699,23 @@ def main() -> int:
         results["lifecycle_and_host_abi"] = run_lifecycle_gate(build, sdk, prefix, work, env, target_os)
     if args.webkit and target_os in ("linux", "macos", "windows"):
         results["webview_through_crtui"] = run_webview_gate(build, sdk, prefix, work, env, target_os)
+        if target_os == "linux":
+            results["media_playback"] = run_media_gate(build, sdk, prefix, work, env)
+        network_program = build / "bin" / ("crtweb_network_test.exe" if target_os == "windows" else "crtweb_network_test")
+        network_env = gate_environment(build, sdk, prefix, work, env, target_os)
+        webview_env = dict(network_env)
+        webview_env["CRTWEB_HOST"] = str(build / "bin" / ("crtweb_host.exe" if target_os == "windows" else "crtweb_host"))
+        if target_os == "macos":
+            webview_env.pop("DYLD_LIBRARY_PATH", None)
+        network = test_crtweb_network.run_gate(
+            network_program, network_env, work, path_for_target=crt_path if target_os == "windows" else str,
+            webview_program=sdk.parent.parent / "libcrtweb" / ("crtweb_webview_test.exe" if target_os == "windows" else "crtweb_webview_test"),
+            webview_env=webview_env)
+        network["audit"] = (audit_program_native(network_program, sdk, prefix, build, target_os)
+                            if target_os in ("macos", "windows")
+                            else audit_program(network_program, sdk, prefix, env, build))
+        network["passed"] &= network["audit"]["ok"]
+        results["crt_network_trust"] = network
     passed = all(r["passed"] for r in results.values())
     (work / "acceptance-b3.json").write_text(json.dumps(
         {"passed": passed, "programs": results}, indent=2) + "\n", encoding="utf-8")
