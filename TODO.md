@@ -136,16 +136,16 @@ uses the host replay order stated below and in the acceptance document.
 * [x] **7. macOS/arm64 replay.** Done 2026-10-13: B3-B7, Tranche 4 and the Tranche 5
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Sequential gates in `docs/acceptance/crtweb_acceptance.md`.
-  Windows/x64 automatic replay is complete; remaining gates are real audio/device evidence,
+  Windows/x64 automatic and explicit device replay pass; remaining gates are Linux real audio,
   Linux/macOS replay of the common permission-token lifetime fix, and camera resource stress.
   Investigation/reproduction: [`Windows Tranche 8 checkpoint`](docs/bringup/crtweb_windows_tranche8.md).
   * [x] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy accepted on
     Linux/x86_64, macOS/arm64 and Windows/x64 (acceptance).
-  * [ ] **8B playback:** CPU playback replay accepted on all three hosts; macOS real output accepted.
-    Linux and Windows real-output evidence remains; Windows needs an available default render endpoint.
-  * [ ] **8C capture:** synthetic replay accepted on all three hosts; Linux/macOS physical-camera
+  * [ ] **8B playback:** CPU playback replay accepted on all three hosts; macOS and Windows output
+    evidence accepted (Windows Remote Audio endpoint, not a local-speaker listening test). Linux output remains.
+  * [ ] **8C capture:** synthetic replay accepted on all three hosts; Linux/macOS/Windows physical-camera
     evidence recorded. Replay the strengthened token-lifetime regression on Linux/macOS, then perform
-    explicitly opted-in Windows physical-camera and same-process physical-camera resource-delta tests.
+    same-process physical-camera resource-delta tests.
 * [ ] **9. GPU integration.**
   * [ ] Present WebKit's private Skia output through the CRT external-surface path.
   * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one

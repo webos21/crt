@@ -2162,8 +2162,8 @@ This does not remove the OS permission requirement on a fresh machine (the signe
 procedure in `crtmedia_encode_capture_acceptance.md` may still be required there). The three executions
 prove stop/teardown/reopen but do not measure same-process physical-camera RSS/thread/fd growth, device
 busy state independently, microphone capture or permission revocation at the OS level. Windows automatic
-replay is recorded below; Windows physical-camera/real-audio evidence, Linux real-audio evidence,
-and that camera resource stress remain open.
+and subsequent explicit device replay are recorded below; Linux real-audio evidence,
+common permission-fix replay and that camera resource stress remain open.
 
 **Windows/x64 automatic Tranche 8 replay (2026-10-15).** The FFmpeg-enabled cumulative
 `05-ui` SDK and the same `PlatformCRT` port pass the combined automatic gate. FFmpeg
@@ -2227,12 +2227,52 @@ Generated evidence: `C:/crtw/b3w/acceptance-b3.json`,
 `capture-run/capture-output.log` under that work root. Real output requires an
 available default render endpoint and `--require-audio-output`; no sink was
 started in the separate three-role endpoint probe. The current machine cannot
-close that gate. Browser physical-camera access requires explicit authorization
-and `--allow-physical-camera`; it was not run here. The inadvertently selected
+close that gate at the automatic-replay checkpoint. Browser physical-camera access requires explicit authorization
+and `--allow-physical-camera`; it was not run in that checkpoint. The inadvertently selected
 earlier native media device test is preserved in the investigation, not counted
-as browser permission/camera acceptance. Tranche 8 remains open for these device
-gates, Linux/macOS replay of the common token fix and same-process physical-camera
-resource stress.
+as browser permission/camera acceptance. At that checkpoint Tranche 8 remained
+open for these device gates; subsequent Windows device evidence follows below.
+
+**Windows/x64 explicit device follow-up (2026-10-15).** The user subsequently
+requested real output and physical-camera verification. The default render
+endpoint now exists as **Remote Audio** (Windows endpoint observation); all
+three default roles return success. This is an OS render endpoint, not proof
+of the local physical speakers or a human listening result.
+
+The first strict-output run still failed: WASAPI `Initialize` returned
+`0x88890008` for mono float 44100/8000 Hz and mono S16 8000 Hz, while stereo S16
+44100 Hz opened. The media PAL now enables documented shared-engine PCM
+channel/rate conversion and its default-quality resampler, without exposing
+native formats in the public API. The existing audio-sink CTest includes
+write/drain regressions for those three decoded mono formats when Windows has
+a working endpoint; the no-device path remains explicit. All four format
+probes and that CTest pass, and `01-c` through `05-ui` SDK verification passes.
+
+| Device evidence (focused and final combined replay) | Observed result |
+| --- | --- |
+| HTML MP3 -> WASAPI Remote Audio | 8000 Hz mono; 5184 accepted frames/nonzero samples; position 5184 frames; nine clock updates, five advancing |
+| Output errors/fallback | Zero write failures and zero sink-open/wall-clock fallbacks; strict `require_audio_output=True` passes |
+| Media lifetime | Same WebProcess PID across 24 measured lifetimes; 25 -> 27 threads, within unchanged +3 bound |
+| Physical camera | QuickCam for Notebooks Deluxe; browser permission -> CRT capture -> video/view pixels; 640x480 at 30 fps |
+| Three camera executions | 3/3 pass; 20 samples and 20 distinct pictures each; one application permission request per run |
+| Stop/reopen | `readyState=ended` after every stop, successful reopen in the next process; no images saved |
+| Final combined gate | 12/12 with output required and physical camera explicitly enabled; network trust 15/15 |
+| Lifecycle regression | Public API 100 cycles -28 KiB/-3 threads/+0 handles; internal B7 -64 KiB/-3/+0; WebView 20 cycles -16 KiB/-2/+0 |
+| ABI mapping | 18 static binaries, 140 runtime mapped files across UI/Web/Network roles; media maps 67 files with one CRT C++ pair, no violations |
+| Cleanup | No remaining work-tree browser test processes |
+
+The initial failed audio run is preserved in `out/web-windows-tranche8-devices.json`
+and `.log`, not relabelled as a pass. Corrected focused output evidence is
+`out/web-windows-audio-required.json` and `.log`. The final combined device replay
+passes with both `--require-audio-output --allow-physical-camera` appended to
+the Windows reproduction command above. Its evidence is
+`C:/crtw/b3w/acceptance-b3.json`, `out/web-windows-tranche8-hardware-final.log`,
+`media-run/audio-output.log` and `physical-camera-run/run-{1,2,3}.log` under the work root.
+Camera runs do not yet establish same-process RSS/thread/handle bounds or an
+independent device-busy check. Microphone, OS-level permission revocation and
+acoustic loopback remain outside this evidence.
+Tranche 8 remains open for Linux real-audio evidence, Linux/macOS replay of the
+common permission-token fix and same-process physical-camera resource stress.
 
 ### 9. GPU integration
 

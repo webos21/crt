@@ -63,6 +63,8 @@ typedef GUID* LPGUID;
 #define CRTMEDIA_CLSCTX_INPROC_SERVER 0x1
 #define CRTMEDIA_COINIT_MULTITHREADED 0x0
 #define CRTMEDIA_AUDCLNT_SHAREMODE_SHARED 0
+#define CRTMEDIA_AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000u
+#define CRTMEDIA_AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000u
 #define CRTMEDIA_WAVE_FORMAT_PCM 0x0001
 #define CRTMEDIA_WAVE_FORMAT_IEEE_FLOAT 0x0003
 #define CRTMEDIA_E_RENDER 0  /* EDataFlow::eRender */
@@ -290,7 +292,15 @@ crtmedia_result crtmedia_audio_sink_open(const crtmedia_audio_sink_desc* desc, c
    * caller). hnsPeriodicity == 0 is the documented "let the shared-mode
    * engine pick" value. */
   hr = audio_client->lpVtbl->Initialize(
-      audio_client, CRTMEDIA_AUDCLNT_SHAREMODE_SHARED, 0, 3000000, 0, &wfx, NULL);
+      audio_client, CRTMEDIA_AUDCLNT_SHAREMODE_SHARED,
+      /* The public sink accepts the decoded PCM format, not the device mix
+       * format. Let WASAPI's shared engine perform channel/rate conversion;
+       * otherwise mono float MP3/WAV fails with AUDCLNT_E_UNSUPPORTED_FORMAT
+       * on a stereo endpoint (including Remote Audio). Values above match
+       * AudioSessionTypes.h; no host headers or types enter the public ABI.
+       * https://learn.microsoft.com/en-us/windows/win32/coreaudio/audclnt-streamflags-xxx-constants */
+      CRTMEDIA_AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | CRTMEDIA_AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+      3000000, 0, &wfx, NULL);
   if (FAILED(hr)) {
     crtmedia_wasapi_trace_failure("Initialize", hr);
     audio_client->lpVtbl->Release(audio_client);

@@ -188,7 +188,34 @@ no violations. The earlier failed full replay remains a failed historical run,
 not the evidence used for this final result. Final measurements and reproduction
 belong to the Windows replay section of the acceptance document.
 
-No browser physical-camera probe was run. Browser hardware runs remain explicitly
+At the automatic-replay checkpoint, no browser physical-camera probe was run. Browser hardware runs remain explicitly
 opt-in and cannot be inferred from the synthetic camera test or the unintended
 earlier libcrtmedia device test. Real audio needs an available default render
 endpoint and a passing `--require-audio-output` replay; that gate stays open.
+
+## Explicit device request on 2026-10-15
+
+The user subsequently requested both hardware checks. The default render endpoint
+is now Remote Audio; all three endpoint roles succeed. Actual browser output still
+failed until shared-mode PCM conversion was enabled: `Initialize` rejected mono
+float 44100/8000 Hz and mono S16 8000 Hz with `0x88890008`, while stereo S16
+44100 Hz opened. The corrected backend accepts all four formats; the audio-sink
+CTest writes/drains the three converted formats when an endpoint is available.
+The SDK refresh verifies `01-c` through `05-ui`.
+
+Focused strict-output playback now passes: 5184 nonzero MP3 PCM samples accepted,
+advancing endpoint position used by the playback clock, zero errors/fallbacks,
+same WebProcess PID and 25 -> 27 threads within the existing bound. Separately,
+three explicit browser physical-camera executions pass (QuickCam for Notebooks
+Deluxe, 640x480@30, 20 changing samples each, stop/teardown/reopen). Images are not
+saved. The initial audio failure is retained in `out/web-windows-tranche8-devices.json`
+and `.log`; corrected output is in `out/web-windows-audio-required.json` and `.log`.
+The final combined gate with both device options passes 12/12. Strict output
+again records 5184 nonzero PCM samples, nine clock updates/five advancing,
+zero errors/fallbacks and same-PID media threads 25 -> 27; camera 3/3 passes
+with 20 distinct pictures each. Static audit covers 18 binaries and runtime
+audit 140 mapped files without violations, and no browser test process remains.
+Evidence: `out/web-windows-tranche8-hardware-final.log` and
+`C:/crtw/b3w/acceptance-b3.json`. The acceptance document owns final measurements
+and reproduction. Remote Audio is endpoint/clock evidence, not a local-speaker
+listening result; camera same-process resource bounds remain separate work.

@@ -11,6 +11,50 @@ substantive update.
 
 ## 2026-10-15
 
+### Windows Web physical-camera replay and WASAPI PCM-format correction
+
+The explicitly requested browser camera probe passes three consecutive ordinary
+executions: QuickCam for Notebooks Deluxe, 640x480 at 30 fps, twenty samples and
+twenty distinct picture hashes in each run, one application permission request
+each, `readyState=ended` after stop, and reopening in the next process. Images
+are not saved. This is browser permission/capture evidence, not a claim of
+same-process camera resource bounds or independent device-busy checking.
+
+The previously missing default render endpoint is now available as Windows
+"Remote Audio". Initial strict-output playback still fails: stereo S16 44100 Hz
+opens, but mono float 44100/8000 Hz and mono S16 8000 Hz are rejected at WASAPI
+`Initialize` with `0x88890008`. The backend now requests the documented shared-mode
+PCM channel/rate conversion and default-quality resampler, leaving the public
+format contract and native-type boundary unchanged. All four format probes open;
+the existing audio-sink CTest now also writes/drains the three converted formats
+when a Windows endpoint is available and passes. No-device CI retains its skip.
+The focused strict-output browser replay passes after the corrected cumulative
+SDK is refreshed and verified through `05-ui`: HTML MP3 delivers 5,184 accepted
+nonzero PCM frames at 8000 Hz mono, position reaches 5,184 frames, nine clock
+queries re-anchor playback with five advancing updates, and zero write errors
+or sink-open fallbacks. The same WebProcess PID is retained across twenty-four
+measured lifetimes; threads 25 -> 27 remain within the unchanged +3 bound.
+Source of the PAL flags:
+[Microsoft WASAPI stream flags](https://learn.microsoft.com/en-us/windows/win32/coreaudio/audclnt-streamflags-xxx-constants).
+
+The initial failed strict-output run is retained in
+`out/web-windows-tranche8-devices.json` and `.log`; it must not be presented as
+an audio pass. Generated format/build evidence: `out/web-windows-wasapi-conversion-build.log`.
+Focused strict-output evidence: `out/web-windows-audio-required.json` and `.log`;
+SDK verification: `out/web-windows-wasapi-sdk-refresh.log`. The final combined
+gate with `--require-audio-output --allow-physical-camera` passes 12/12, including
+three more physical-camera executions and strict output with the same MP3/clock
+metrics and 25 -> 27 media threads. Public API 100 cycles: -28 KiB RSS/-3 threads/
++0 handles; internal B7: -64 KiB/-3/+0; WebView 20 cycles: -16 KiB/-2/+0.
+Network trust passes 15/15; static audit covers 18 binaries and runtime audit
+140 files without violations. No remaining work-tree browser test process.
+Existing base-media CTests pass 5/5, path tests 2/2, ABI policy 6/6, device evidence
+4/4, licensing 15/15 and the 23-patch manifest check passes. Final evidence:
+`C:/crtw/b3w/acceptance-b3.json` and `out/web-windows-tranche8-hardware-final.log`;
+the acceptance document owns detailed reproduction and limits.
+Remote Audio acceptance means PCM/device-clock delivery, not a listening test
+or evidence of this host's local physical speakers.
+
 ### Web media permission tokens survive view teardown without stale grants
 
 Windows synthetic-capture repeats reproduced a common-code use-after-free:

@@ -142,6 +142,35 @@ int main(void) {
     }
 
     crtmedia_audio_sink_close(sink); // a real drain -- expected to block briefly, not hang
+
+#if defined(CRT_TARGET_OS_WINDOWS)
+    // A working shared-mode endpoint must also accept decoded mono PCM,
+    // even when its mix format is stereo/44.1kHz. This catches the missing
+    // WASAPI auto-conversion flags; no-device CI still skips device work.
+    const crtmedia_audio_sink_desc converted[] = {
+        {CRTMEDIA_SAMPLE_FORMAT_FLT, 44100, 1},
+        {CRTMEDIA_SAMPLE_FORMAT_FLT, 8000, 1},
+        {CRTMEDIA_SAMPLE_FORMAT_S16, 8000, 1},
+    };
+    static float float_silence[882];
+    static int16_t mono_silence[160];
+    for (unsigned i = 0; i < sizeof(converted) / sizeof(converted[0]); ++i) {
+      sink = NULL;
+      crtmedia_result result = crtmedia_audio_sink_open(&converted[i], &sink);
+      CHECK(result == CRTMEDIA_OK && sink != NULL, "available Windows endpoint accepts converted mono PCM");
+      if (result == CRTMEDIA_OK && sink != NULL) {
+        const void* samples = converted[i].format == CRTMEDIA_SAMPLE_FORMAT_FLT
+            ? (const void*)float_silence : (const void*)mono_silence;
+        uint32_t frames = converted[i].sample_rate / 50; // 20ms, real write and drain
+        int64_t n = crtmedia_audio_sink_write(sink, samples, frames);
+        CHECK(n > 0 && (uint64_t)n <= frames, "converted PCM reaches the real render buffer");
+        uint64_t position = 0;
+        CHECK(crtmedia_audio_sink_get_position_frames(sink, &position) == CRTMEDIA_OK,
+              "converted PCM retains client-frame position reporting");
+        crtmedia_audio_sink_close(sink);
+      }
+    }
+#endif
   }
 
   if (failures != 0) {
