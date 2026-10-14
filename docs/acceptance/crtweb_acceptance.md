@@ -2052,11 +2052,15 @@ again, a revocation resets that.
 
 **Not closed (honest status).**
 
-- **Physical camera, Linux.** A `/dev/video0` exists on this host but no run opened it: that needs the
-  user's explicit opt-in. The probe is `crtweb_camera_probe --allow-physical-camera [seconds]` (it refuses
-  without the flag and when the synthetic camera is selected); it prints the exposed label, negotiated
-  `getSettings()`, distinct pictures, lit pixels, permission count and `readyState` after stop. Run it,
-  with the web stage's library path (as `tools/build_webkit_crt_port.py` sets it), and attach the output.
+- **Physical camera, Linux: run 2026-10-14 (opt-in, `crtweb_camera_probe --allow-physical-camera 3`).**
+  Host Linux/x86_64, one UVC webcam ("USB Camera (046d:08d8)", V4L2 through `crtmedia` capture). The
+  browser path ran end to end: one permission request from `http://127.0.0.1:<port>`, a grant for this run,
+  `getSettings()` = 640x480 at 30 fps with hashed device/group ids, 20 samples of the view over two seconds
+  all distinct pictures with every pixel lit, and `readyState` = `ended` after `track.stop()`. The probe
+  exited 0. *Limits:* one run on one device; the negotiated format was the default request (no constraint
+  matrix); source release was observed through the track state and a clean process exit, not by an
+  independent device-busy check; repeated-lifetime resource deltas for the physical device were not
+  measured (the synthetic device's lifecycle is gated, the physical one is a single run).
 - **macOS/arm64 and Windows/x64 replay.** Not executed: this session had only the Linux host. What a
   replay must do: lift the Linux-only guards in `OptionsCRT.cmake`/the driver for the engine, capture
   gates and `crtweb_media_test`/`crtweb_capture_test`; the VA-API stubs and the `libc++.so` alias are
