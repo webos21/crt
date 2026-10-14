@@ -171,6 +171,27 @@ __declspec(dllimport) void CRTMEDIA_WINAPI Sleep(DWORD milliseconds);
 __declspec(dllimport) HANDLE CRTMEDIA_WINAPI GetProcessHeap(void);
 __declspec(dllimport) void* CRTMEDIA_WINAPI HeapAlloc(HANDLE heap, DWORD flags, size_t bytes);
 __declspec(dllimport) BOOL CRTMEDIA_WINAPI HeapFree(HANDLE heap, DWORD flags, void* mem);
+__declspec(dllimport) DWORD CRTMEDIA_WINAPI GetEnvironmentVariableA(const char* name, char* buffer, DWORD size);
+__declspec(dllimport) HANDLE CRTMEDIA_WINAPI GetStdHandle(DWORD kind);
+__declspec(dllimport) BOOL CRTMEDIA_WINAPI WriteFile(HANDLE file, const void* data, DWORD size, DWORD* written, void* overlapped);
+
+/* Opt-in PAL diagnostics, without exposing native types through the public API. */
+static void crtmedia_wasapi_trace_failure(const char* stage, HRESULT hr) {
+  char enabled[8];
+  char message[128];
+  const char* prefix = "CRTMEDIA_WASAPI ";
+  const char* digits = "0123456789abcdef";
+  size_t length = 0;
+  DWORD written = 0;
+  if (GetEnvironmentVariableA("CRTMEDIA_AUDIO_SINK_TRACE", enabled, sizeof(enabled)) == 0) return;
+  while (*prefix) message[length++] = *prefix++;
+  while (*stage && length < 100) message[length++] = *stage++;
+  prefix = " failed hr=0x";
+  while (*prefix) message[length++] = *prefix++;
+  for (int shift = 28; shift >= 0; shift -= 4) message[length++] = digits[((uint32_t)hr >> shift) & 15];
+  message[length++] = '\n';
+  WriteFile(GetStdHandle((DWORD)-12), message, (DWORD)length, &written, NULL);
+}
 
 struct crtmedia_audio_sink {
   crtmedia_iaudio_client* audio_client;
@@ -216,6 +237,7 @@ crtmedia_result crtmedia_audio_sink_open(const crtmedia_audio_sink_desc* desc, c
    * other component on this same thread already chose apartment-threaded)
    * is a real failure worth degrading gracefully for. */
   if (FAILED(hr)) {
+    crtmedia_wasapi_trace_failure("CoInitializeEx", hr);
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
   int com_initialized = 1;
@@ -225,6 +247,7 @@ crtmedia_result crtmedia_audio_sink_open(const crtmedia_audio_sink_desc* desc, c
       &crtmedia_clsid_mmdevice_enumerator, NULL, CRTMEDIA_CLSCTX_INPROC_SERVER, &crtmedia_iid_immdevice_enumerator,
       (void**)&enumerator);
   if (FAILED(hr) || enumerator == NULL) {
+    crtmedia_wasapi_trace_failure("CoCreateInstance", hr);
     if (com_initialized) {
       CoUninitialize();
     }
@@ -235,6 +258,7 @@ crtmedia_result crtmedia_audio_sink_open(const crtmedia_audio_sink_desc* desc, c
   hr = enumerator->lpVtbl->GetDefaultAudioEndpoint(enumerator, CRTMEDIA_E_RENDER, CRTMEDIA_E_CONSOLE, (void**)&device);
   enumerator->lpVtbl->Release(enumerator);
   if (FAILED(hr) || device == NULL) {
+    crtmedia_wasapi_trace_failure("GetDefaultAudioEndpoint", hr);
     CoUninitialize();
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
@@ -244,6 +268,7 @@ crtmedia_result crtmedia_audio_sink_open(const crtmedia_audio_sink_desc* desc, c
       device, &crtmedia_iid_iaudio_client, CRTMEDIA_CLSCTX_INPROC_SERVER, NULL, (void**)&audio_client);
   device->lpVtbl->Release(device);
   if (FAILED(hr) || audio_client == NULL) {
+    crtmedia_wasapi_trace_failure("Activate", hr);
     CoUninitialize();
     return CRTMEDIA_ERROR_UNSUPPORTED;
   }
@@ -267,6 +292,7 @@ crtmedia_result crtmedia_audio_sink_open(const crtmedia_audio_sink_desc* desc, c
   hr = audio_client->lpVtbl->Initialize(
       audio_client, CRTMEDIA_AUDCLNT_SHAREMODE_SHARED, 0, 3000000, 0, &wfx, NULL);
   if (FAILED(hr)) {
+    crtmedia_wasapi_trace_failure("Initialize", hr);
     audio_client->lpVtbl->Release(audio_client);
     CoUninitialize();
     return CRTMEDIA_ERROR_UNSUPPORTED;

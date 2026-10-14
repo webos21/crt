@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests of the build-host fixture, separate from the CRT browser acceptance gate."""
 import http.client
+import os
 import subprocess
 import tempfile
 import threading
@@ -72,6 +73,18 @@ class FixtureTest(unittest.TestCase):
         self.assertTrue(commands[11][1]["CRTWEB_WEBVIEW_TLS_CA_FILE"].endswith("ca.pem"))
         self.assertEqual(commands[13][1]["CRTWEB_WEBVIEW_TLS_INSECURE"], "1")
         self.assertEqual(commands[14][1]["CRTWEB_WEBVIEW_TLS_EXPECT_START_FAILURE"], "1")
+
+    def test_configuration_is_local_and_caller_environment_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {"OPENSSL_CONF": "absent-global-config"}), \
+                patch("test_crtweb_network.subprocess.run") as run:
+            root = Path(directory).resolve()
+            fixture.make_pki(root, "openssl")
+            self.assertTrue((root / "openssl.cnf").is_file())
+            for call in run.call_args_list:
+                self.assertEqual(call.kwargs["env"]["OPENSSL_CONF"], str(root / "openssl.cnf"))
+                self.assertEqual(call.kwargs["cwd"], root)
+            self.assertEqual(os.environ["OPENSSL_CONF"], "absent-global-config")
 
 
 if __name__ == "__main__":

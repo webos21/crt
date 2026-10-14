@@ -110,12 +110,30 @@ else ()
     find_package(WebP REQUIRED COMPONENTS demux)
     find_package(ZLIB 1.2.11 REQUIRED)
 
-    # The CRT playback engine (Tranche 8B) consumes the installed crtmedia public C API. It is Linux
-    # and macOS (the persona clears APPLE); Windows replays later. It needs the driver's libcrtweb
-    # directory (Linux: for the VA-API stub).
-    if (NOT WIN32 AND NOT APPLE AND CRT_LIBCRTWEB_DIR AND NOT CRT_DISABLE_CRTMEDIA_PLAYER)
-        find_library(CRT_CRTMEDIA_LIBRARY NAMES crtmedia PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH)
+    # The CRT playback engine (Tranche 8B) consumes the installed crtmedia public C API.
+    # The WebKit persona clears APPLE/WIN32, so the host-specific link boundary is selected below.
+    if (CRT_LIBCRTWEB_DIR AND NOT CRT_DISABLE_CRTMEDIA_PLAYER)
+        if (CMAKE_HOST_WIN32)
+            set(CRT_CRTMEDIA_LINK_NAME crtmedia_dll)
+        else ()
+            set(CRT_CRTMEDIA_LINK_NAME crtmedia)
+        endif ()
+        find_library(CRT_CRTMEDIA_LIBRARY NAMES ${CRT_CRTMEDIA_LINK_NAME}
+            PATHS "${CMAKE_SYSROOT}/lib" NO_DEFAULT_PATH)
         if (CRT_CRTMEDIA_LIBRARY)
+            if (CMAKE_HOST_WIN32)
+                # The import library also exists in FFmpeg-OFF SDKs. Reject that predecessor
+                # before compiling WebCore; refreshing the DLL at the same path must retry this check.
+                include(CheckLibraryExists)
+                unset(CRT_CRTMEDIA_HAS_EXTRACTOR CACHE)
+                set(_CRT_SAVED_TRY_COMPILE_TARGET_TYPE "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
+                set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+                check_library_exists("${CRT_CRTMEDIA_LIBRARY}" crtmedia_extractor_create "" CRT_CRTMEDIA_HAS_EXTRACTOR)
+                set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_CRT_SAVED_TRY_COMPILE_TARGET_TYPE}")
+                if (NOT CRT_CRTMEDIA_HAS_EXTRACTOR)
+                    message(FATAL_ERROR "CRT playback requires an installed SDK with CRTMEDIA_ENABLE_FFMPEG=ON (crtmedia_extractor_create is missing)")
+                endif ()
+            endif ()
             set(CRT_ENABLE_CRTMEDIA_PLAYER ON)
             message(STATUS "CRT playback engine: ${CRT_CRTMEDIA_LIBRARY}")
         endif ()

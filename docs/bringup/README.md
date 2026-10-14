@@ -7,6 +7,8 @@ they are not a current support matrix.
   the original limited sysroot. Its commands and limitations are historical.
 - [Windows fork investigation](windows_fork_emulation_history.md): rejected
   approaches, cause/fix sequences, benchmarks, and reproduction evidence.
+- [Web Tranche 8 Windows replay](crtweb_windows_tranche8.md): SDK prerequisites,
+  CRT build-tool observations and the current replay checkpoint; acceptance owns final evidence.
 
 Current policy lives in [project scope](../design/project_meanings.md),
 [stack choices](../design/project_stacks.md),

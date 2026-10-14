@@ -274,7 +274,10 @@ typedef enum crtweb_dialog_kind {
 
 /* A pending camera/microphone permission request (Tranche 8C). The request is a one-shot token: it is
  * resolved exactly once by crtweb_media_permission_complete(), and is cancelled (denied) by document
- * replacement, view destruction or process loss. No grant exists unless the application gives one. */
+ * replacement, view destruction or process loss. No grant exists unless the application gives one.
+ * The library owns token storage until its runtime is destroyed: do not free a token, and discard
+ * application-held tokens when destroying that runtime. A late completion after view destruction
+ * is safely rejected while the owning runtime is still alive. */
 typedef struct crtweb_media_permission crtweb_media_permission;
 
 #define CRTWEB_MEDIA_KIND_CAMERA 0x1u

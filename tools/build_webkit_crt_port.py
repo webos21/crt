@@ -82,7 +82,7 @@ def configure_command(tree: Path, build: Path, sdk: Path, prefix: Path, arch: st
         flags = flags + ["-D__unix__=1"]
         cxx_flags = list(flags)
         link_flags = ["-Wl,--enable-auto-import"]
-        platform_options = [f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}",
+        platform_options = [f"-DCMAKE_PROJECT_INCLUDE={(ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake').as_posix()}",
                             # A WebCore compile line (several hundred -I and -D, and the precompiled-header
                             # one) is longer than the 8,191 characters cmd.exe passes to the .cmd compiler
                             # wrappers: defines, includes and flags go through a response file. Some
@@ -94,10 +94,10 @@ def configure_command(tree: Path, build: Path, sdk: Path, prefix: Path, arch: st
         # off, and the Baseline JIT gets Apple Silicon W^X through JavaScriptCore's own extension
         # point. __unix__ completes the persona for eglplatform.h (real Linux defines both).
         flags = flags + ["-D__unix__=1"]
-        cxx_flags = flags + ["-include", str(ROOT / "libcrtweb" / "cmake" / "crt_webkit_jit_permissions.h")]
-        platform_options = [f"-DCMAKE_C_COMPILER={sdk / 'tools' / 'crt-cc'}",
-                            f"-DCMAKE_CXX_COMPILER={sdk / 'tools' / 'crt-c++'}",
-                            f"-DCMAKE_PROJECT_INCLUDE={ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake'}"]
+        cxx_flags = flags + ["-include", (ROOT / "libcrtweb" / "cmake" / "crt_webkit_jit_permissions.h").as_posix()]
+        platform_options = [f"-DCMAKE_C_COMPILER={(sdk / 'tools' / 'crt-cc').as_posix()}",
+                            f"-DCMAKE_CXX_COMPILER={(sdk / 'tools' / 'crt-c++').as_posix()}",
+                            f"-DCMAKE_PROJECT_INCLUDE={(ROOT / 'libcrtweb' / 'cmake' / 'crt_webkit_platform.cmake').as_posix()}"]
     options = [
         "-DPORT=CRT", "-DCRT_ENABLE_WEBCORE=ON", "-DCMAKE_BUILD_TYPE=Release",
         "-DUSE_HEADER_MAPS=OFF", "-DENABLE_API_TESTS=OFF", "-DDEVELOPER_MODE=OFF",
@@ -105,19 +105,21 @@ def configure_command(tree: Path, build: Path, sdk: Path, prefix: Path, arch: st
         # Same JIT configuration as the accepted B1 build.
         "-DENABLE_JIT=ON", "-DENABLE_C_LOOP=OFF", "-DENABLE_DFG_JIT=ON", "-DENABLE_FTL_JIT=ON",
         "-DENABLE_WEBASSEMBLY=ON", "-DENABLE_SAMPLING_PROFILER=OFF",
-        f"-DCRT_WEBCORE_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webcore'}",
-        f"-DCRT_WEBKIT_TESTS={ROOT / 'libcrtweb' / 'tests' / 'webkit'}",
+        # WebKit evaluates some source lists as CMake code. Native Windows
+        # backslashes in an untyped -D path become escapes (notably C:\\Users).
+        f"-DCRT_WEBCORE_TESTS={(ROOT / 'libcrtweb' / 'tests' / 'webcore').as_posix()}",
+        f"-DCRT_WEBKIT_TESTS={(ROOT / 'libcrtweb' / 'tests' / 'webkit').as_posix()}",
     ]
     if target_os in ("linux", "macos", "windows"):
         # Tranche 4 (libcrtweb, crtweb_host, crtweb_api_test): Linux/x86_64, replayed on macOS/arm64
         # and Windows/x64.
-        options.append(f"-DCRT_LIBCRTWEB_DIR={ROOT / 'libcrtweb'}")
+        options.append(f"-DCRT_LIBCRTWEB_DIR={(ROOT / 'libcrtweb').as_posix()}")
     command = ["cmake", "-S", str(tree), "-B", str(build), "-G", "Ninja",
-               f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'crt-toolchain.cmake'}",
-               f"-DCMAKE_PREFIX_PATH={prefix}", f"-DICU_ROOT={prefix}",
-               f"-DEGL_INCLUDE_DIRS={tree / 'Source' / 'ThirdParty' / 'ANGLE' / 'include'}",
-               f"-DOpenGLES2_INCLUDE_DIR={tree / 'Source' / 'ThirdParty' / 'ANGLE' / 'include'}",
-               f"-DCURL_ROOT={prefix / 'curl-openssl'}",
+               f"-DCMAKE_TOOLCHAIN_FILE={(sdk / 'crt-toolchain.cmake').as_posix()}",
+               f"-DCMAKE_PREFIX_PATH={prefix.as_posix()}", f"-DICU_ROOT={prefix.as_posix()}",
+               f"-DEGL_INCLUDE_DIRS={(tree / 'Source' / 'ThirdParty' / 'ANGLE' / 'include').as_posix()}",
+               f"-DOpenGLES2_INCLUDE_DIR={(tree / 'Source' / 'ThirdParty' / 'ANGLE' / 'include').as_posix()}",
+               f"-DCURL_ROOT={(prefix / 'curl-openssl').as_posix()}",
                f"-DCMAKE_C_FLAGS={' '.join(flags)}", f"-DCMAKE_CXX_FLAGS={' '.join(cxx_flags)}"]
     if link_flags:
         command += [f"-DCMAKE_EXE_LINKER_FLAGS={' '.join(link_flags)}",
@@ -593,13 +595,16 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
     import subprocess
     run_env = gate_environment(build, sdk, prefix, work, env, target_os)
     run_env["CRTWEB_MEDIA_AUDIO_TRACE"] = "1"
+    if target_os == "windows":
+        run_env["CRTMEDIA_AUDIO_SINK_TRACE"] = "1"
     if target_os == "macos":
         # CoreAudio brings Apple's own C++ runtime. A global loader override also rewrites the
         # framework's library lookup; the linked RPATHs preserve the CRT/OS framework boundary.
         run_env.pop("DYLD_LIBRARY_PATH", None)
     runs = work / "media-run"
     runs.mkdir(exist_ok=True)
-    completed = subprocess.run([str(build / "bin" / "crtweb_media_test"), str(ROOT / "libcrtmedia" / "assets")],
+    exe = ".exe" if target_os == "windows" else ""
+    completed = subprocess.run([str(build / "bin" / ("crtweb_media_test" + exe)), str(ROOT / "libcrtmedia" / "assets")],
                                env=run_env, cwd=runs, capture_output=True, text=True, timeout=300)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
@@ -608,7 +613,10 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
     mapped = [line.split(" ", 2)[2] for line in completed.stdout.splitlines() if line.startswith("MAPPED WebProcess ")]
     violations = []
     macos = target_os == "macos"
+    windows = target_os == "windows"
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve() if windows else None
     system_runtime = []
+    os_runtime = []
     for path in mapped:
         name = Path(path).name
         if name.startswith("ld-linux"):
@@ -622,12 +630,19 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
             if name.startswith(("libc++", "libc++abi")):
                 system_runtime.append(path)
             continue
+        if windows:
+            resolved = Path(path).resolve()
+            if resolved.is_relative_to(system_root) and resolved.suffix.lower() == ".dll":
+                os_runtime.append(resolved.name.lower())
+                continue
         if not any(Path(path).resolve().is_relative_to(root) for root in roots):
             violations.append(f"WebProcess maps {path}")
-    names = {Path(path).name for path in mapped if not (macos and path.startswith(("/usr/lib/", "/System/")))}
-    runtimes = sorted(n for n in names if n.startswith(("libc++.so", "libc++abi", "libc++.1", "libc++.dylib")))
+    names = {Path(path).name.lower() if windows else Path(path).name
+             for path in mapped if not (macos and path.startswith(("/usr/lib/", "/System/")))}
+    runtimes = sorted(n for n in names if n.startswith(("libc++.so", "libc++abi", "libc++.1", "libc++.dylib", "libc++.dll")))
     result = {"returncode": completed.returncode, "mapped_files": len(mapped), "violations": violations,
               "cxx_runtime_files": runtimes, "system_cxx_runtime_files": sorted(set(system_runtime)),
+              "os_runtime_dlls": sorted(set(os_runtime)),
               "crtmedia_mapped": any(n.startswith("libcrtmedia") for n in names),
               "va_stub_mapped": sorted(n for n in names if n.startswith("libva")),
               "audio_output": audio_output_evidence(completed.stderr),
@@ -654,8 +669,9 @@ def run_physical_camera_gate(build: Path, sdk: Path, prefix: Path, work: Path, e
     directory = work / "physical-camera-run"
     directory.mkdir(exist_ok=True)
     results = []
+    exe = ".exe" if target_os == "windows" else ""
     for iteration in range(runs):
-        completed = subprocess.run([str(build / "bin" / "crtweb_camera_probe"), "--allow-physical-camera", "3"],
+        completed = subprocess.run([str(build / "bin" / ("crtweb_camera_probe" + exe)), "--allow-physical-camera", "3"],
                                    env=run_env, cwd=directory, capture_output=True, text=True, timeout=90)
         output = completed.stdout + completed.stderr
         print(output, end="")
@@ -675,8 +691,10 @@ def run_capture_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
     run_env = gate_environment(build, sdk, prefix, work, env, target_os)
     runs = work / "capture-run"
     runs.mkdir(exist_ok=True)
-    completed = subprocess.run([str(build / "bin" / "crtweb_capture_test")], env=run_env, cwd=runs,
+    exe = ".exe" if target_os == "windows" else ""
+    completed = subprocess.run([str(build / "bin" / ("crtweb_capture_test" + exe))], env=run_env, cwd=runs,
                                capture_output=True, text=True, timeout=300)
+    (runs / "capture-output.log").write_text(completed.stdout + completed.stderr, encoding="utf-8")
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     return {"passed": completed.returncode == 0 and "crtweb_capture_test: ok" in completed.stdout,
@@ -716,8 +734,8 @@ def main() -> int:
     sdk, prefix, work = args.sdk_root.resolve(), args.deps_prefix.resolve(), args.work_root.resolve()
     work.mkdir(parents=True, exist_ok=True)
     target_os, arch = jsc.sdk_target(sdk)
-    if (args.require_audio_output or args.allow_physical_camera) and target_os not in ("linux", "macos"):
-        parser.error("device evidence gates are currently implemented for Linux and macOS only")
+    if (args.require_audio_output or args.allow_physical_camera) and target_os not in ("linux", "macos", "windows"):
+        parser.error("device evidence gates are implemented for Linux, macOS and Windows")
     if target_os not in ("linux", "macos", "windows"):
         raise SystemExit(f"B3 is not replayed on {target_os} (docs/acceptance/crtweb_acceptance.md)")
     candidate = prefix / "bin" / "gperf"
@@ -767,7 +785,7 @@ def main() -> int:
         args.target = list(tests) + (["WebProcess", "NetworkProcess", "crtweb_render_test", "crtweb_surface_host", "crtweb_lifecycle_test"]
                                           if args.webkit else []) \
             + (["crtweb_host", "crtweb_network_test"] if args.webkit and target_os in ("linux", "macos", "windows") else []) \
-            + (["crtweb_media_test", "crtweb_capture_test"] if args.webkit and target_os in ("linux", "macos") else [])
+            + (["crtweb_media_test", "crtweb_capture_test"] if args.webkit and target_os in ("linux", "macos", "windows") else [])
     if args.allow_physical_camera:
         args.target = list(args.target or DEFAULT_TARGETS)
         if "crtweb_camera_probe" not in args.target:
@@ -789,7 +807,7 @@ def main() -> int:
         results["lifecycle_and_host_abi"] = run_lifecycle_gate(build, sdk, prefix, work, env, target_os)
     if args.webkit and target_os in ("linux", "macos", "windows"):
         results["webview_through_crtui"] = run_webview_gate(build, sdk, prefix, work, env, target_os)
-        if target_os in ("linux", "macos"):
+        if target_os in ("linux", "macos", "windows"):
             results["media_playback"] = run_media_gate(build, sdk, prefix, work, env, target_os, args.require_audio_output)
             results["camera_capture"] = run_capture_gate(build, sdk, prefix, work, env, target_os)
             if args.allow_physical_camera:

@@ -136,15 +136,16 @@ uses the host replay order stated below and in the acceptance document.
 * [x] **7. macOS/arm64 replay.** Done 2026-10-13: B3-B7, Tranche 4 and the Tranche 5
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Sequential gates in `docs/acceptance/crtweb_acceptance.md`.
-  * [ ] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy implemented;
-    Linux accepted 2026-10-14, macOS/arm64 replayed 2026-10-14; Windows replay pending (`HISTORY.md`, acceptance).
-  * [ ] **8B playback:** CRT engine over `crtmedia` (CPU video/audio) accepted on Linux 2026-10-14;
-    macOS/arm64 real CoreAudio output and sink-clock evidence accepted 2026-10-14;
-    Linux audio-output evidence and Windows replay pending (`HISTORY.md`, acceptance).
-  * [ ] **8C capture:** video camera + explicit permission API accepted on Linux with the labelled synthetic
-    source 2026-10-14; one opt-in Linux physical-camera run passed (640x480@30, `crtweb_camera_probe`);
-    macOS/arm64 replay plus three consecutive physical-camera open/stop/reopen runs passed 2026-10-14;
-    Windows replay/physical camera and same-process physical-camera resource-delta tests pending (`HISTORY.md`, acceptance).
+  Windows/x64 automatic replay is complete; remaining gates are real audio/device evidence,
+  Linux/macOS replay of the common permission-token lifetime fix, and camera resource stress.
+  Investigation/reproduction: [`Windows Tranche 8 checkpoint`](docs/bringup/crtweb_windows_tranche8.md).
+  * [x] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy accepted on
+    Linux/x86_64, macOS/arm64 and Windows/x64 (acceptance).
+  * [ ] **8B playback:** CPU playback replay accepted on all three hosts; macOS real output accepted.
+    Linux and Windows real-output evidence remains; Windows needs an available default render endpoint.
+  * [ ] **8C capture:** synthetic replay accepted on all three hosts; Linux/macOS physical-camera
+    evidence recorded. Replay the strengthened token-lifetime regression on Linux/macOS, then perform
+    explicitly opted-in Windows physical-camera and same-process physical-camera resource-delta tests.
 * [ ] **9. GPU integration.**
   * [ ] Present WebKit's private Skia output through the CRT external-surface path.
   * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one
@@ -156,6 +157,9 @@ uses the host replay order stated below and in the acceptance document.
     host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
   * [ ] Package `libcrtweb` and a browser sample; pass `verify_dist.py`, dependency,
     RPATH/install-name and Host ABI audits on Linux, Windows and macOS.
+  * [ ] Restrict Windows `libcrtmedia.dll` exports to its owned API: the FFmpeg-enabled
+    SDK exports 5,981 names (only 90 `crtmedia_*`); a clean PE import audit is not export hygiene.
+    Keep FFmpeg/SDK GUID symbols private, as the macOS export boundary already does.
   * [ ] Publish provenance, notices, source correspondence, SBOM and CVE/advisory state.
 
 Web follow-up (not a gate): `tools/check_webkit_security.py` -- compare the pinned
@@ -321,16 +325,17 @@ These are real remaining limitations, but none blocks the completed
 `libcrtgfx` CPU-raster milestone. Promote one into active work when a consumer
 or host investigation supplies the required evidence.
 
+- Measure CRT mksh/Make scaling during FFmpeg configure, including an optimized-build comparison,
+  before changing allocator search/coalescing; evidence in [Windows Tranche 8 investigation](docs/bringup/crtweb_windows_tranche8.md).
 - macOS shared libraries bind libc symbols to Apple's `libSystem`, not the CRT's
   `libc.dylib`: `crt_configure_shared_runtime()` leaves `-lSystem` ahead of
   `libc.dylib` and two-level namespace binding takes the first definer. Code
   compiled against the CRT's 40-byte `pthread_mutex_t` therefore calls Apple's
   64-byte `pthread_mutex_init()`. `libcrtui.dylib` hit this as a heap overflow
-  (fixed for crtui only, in `libcrtui/CMakeLists.txt`, with
-  `crtui_contract_shared_test_runs` as the guard). `libcrtgfx.dylib`,
-  `libcrtmedia.dylib` and the other CRT dylibs have the same binding
-  (`nm -m` shows `_pthread_mutex_init (from libSystem)`); crtmedia embeds a
-  mutex in its transport structs, so it is exposed too, just not crashing so far.
+  (fixed for crtui in `libcrtui/CMakeLists.txt`, with
+  `crtui_contract_shared_test_runs` as the guard; crtmedia fixed and replayed
+  2026-10-14, `HISTORY.md`). `libcrtgfx.dylib` and the other CRT dylibs still need
+  the common binding audit (`nm -m` shows `_pthread_mutex_init (from libSystem)`).
   Decide whether to fix `crt_configure_shared_runtime()` for all of them and
   add a dylib-linked test per library. Found 2026-09-30
   (`docs/acceptance/crtui_acceptance.md`, Tranche 3 macOS replay).

@@ -263,9 +263,38 @@ int main()
     CHECK(pumpUntil([&] { return otherRecord.requests == 1; }, 10000), "the second view asked on its own");
     CHECK(record.requests == asked + 1, "the first view's grant did not leak to the second");
     crtweb_media_permission* pending = otherRecord.last;
+    if (getenv("CRTWEB_CAPTURE_TEST_TRACE"))
+        fprintf(stderr, "trace: destroying view with pending permission\n");
     crtweb_view_destroy(other);
+    if (getenv("CRTWEB_CAPTURE_TEST_TRACE"))
+        fprintf(stderr, "trace: completing cancelled permission after view destruction\n");
+    // Churn freed storage so a use-after-free cannot rely on old bytes staying intact.
+    std::vector<void*> churn;
+    for (int i = 0; i < 64; ++i) {
+        void* memory = malloc(4 * sizeof(void*));
+        CHECK(memory, "permission lifetime allocation churn");
+        if (memory) memset(memory, 0, 4 * sizeof(void*));
+        churn.push_back(memory);
+    }
     CHECK(crtweb_media_permission_complete(pending, 1, 0) == CRTWEB_ERROR_INVALID_ARGUMENT, "a request pending on a destroyed view is already denied");
+    for (void* memory : churn) free(memory);
     crtweb_runtime_pump(gRuntime, 100);
+
+    crtweb_view* replacement = nullptr;
+    CHECK(crtweb_view_create(gRuntime, &config, &replacement) == CRTWEB_OK, "replacement permission view");
+    PermissionRecord replacementRecord;
+    auto replacementCallbacks = callbacksFor(replacementRecord);
+    crtweb_view_set_callbacks(replacement, &replacementCallbacks);
+    CHECK(loadCameraPage(replacement), "replacement view page");
+    js(replacement, "start(),'pending'");
+    CHECK(pumpUntil([&] { return replacementRecord.requests == 1; }, 10000), "replacement view asks independently");
+    CHECK(replacementRecord.last != pending, "cancelled token address is not reused within the runtime");
+    CHECK(crtweb_media_permission_complete(pending, 1, 0) == CRTWEB_ERROR_INVALID_ARGUMENT, "old token cannot grant the replacement request");
+    CHECK(crtweb_media_permission_complete(replacementRecord.last, 0, 0) == CRTWEB_OK, "replacement request denied independently");
+    crtweb_view_destroy(replacement);
+    CHECK(crtweb_media_permission_complete(replacementRecord.last, 1, 0) == CRTWEB_ERROR_INVALID_ARGUMENT, "resolved token survives view destruction as invalid");
+    CHECK(crtweb_media_permission_complete(reinterpret_cast<crtweb_media_permission*>(static_cast<uintptr_t>(1)), 1, 0)
+        == CRTWEB_ERROR_INVALID_ARGUMENT, "unknown token rejected before dereference");
 
     // 10. Nothing leaked: the source is closed and the runtime ends cleanly.
     crtweb_view_destroy(view);

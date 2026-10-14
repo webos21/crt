@@ -9,7 +9,89 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-15
+
+### Web media permission tokens survive view teardown without stale grants
+
+Windows synthetic-capture repeats reproduced a common-code use-after-free:
+`crtweb_view_destroy()` freed a resolved permission token, but the public contract
+required a delayed completion to return `CRTWEB_ERROR_INVALID_ARGUMENT` safely.
+Resolved tokens now move to inert runtime-owned storage on view release, without
+retaining WebKit request/device references, and are freed at runtime destruction.
+Completion validates ownership before dereferencing; reserved token addresses
+prevent stale grants from aliasing a new request within that runtime. The public
+header and API policy clarify application ownership and the runtime lifetime limit.
+
+The strengthened capture regression adds allocation churn, completion after
+view destruction, replacement-request identity and rejection of an unknown
+opaque handle. Five consecutive Windows synthetic runs pass; three subsequent
+combined media/capture repetitions and the final full replay pass. This is not
+Linux/macOS validation of the fix: those replays remain in `TODO.md`.
+
+### Windows Web Tranche 8 automatic replay complete; hardware gates remain explicit
+
+The final combined Windows/x64 gate passes 11/11 with the FFmpeg-enabled `05-ui`
+predecessor: public API/process lifecycle, B5/B6, B7 Host ABI, WebView,
+CPU playback, synthetic permission/capture and all fifteen browser/WebView
+network trust cases. Windows playback uses twelve representative warm-ups and
+twenty-four measured lifetimes with the unchanged +3 thread bound, positive
+Toolhelp observations and the same WebProcess PID. Each cycle waits for decoded
+media readiness and requires playback-clock progress; early-play/loading-race
+coverage is not inferred. Final threads are 23 -> 15; focused repeats are
+23 -> 22, 23 -> 15 and 22 -> 15. Earlier intermittent failures and their causes
+remain in `docs/bringup/crtweb_windows_tranche8.md` rather than being erased.
+
+The PKI fixture owns an OpenSSL configuration in its subprocess environment,
+fixing the host executable's missing compiled-in config path without changing
+the caller's environment. Fixture tests pass 4/4, CMake path tests 2/2, ABI
+policy 6/6, device evidence 4/4, licensing 15/15 and the 23-patch manifest
+check passes. Static audit covers 17 binaries; runtime audit covers 140 mapped
+files across UI/Web/Network processes with no violations. No work-tree browser
+test processes remain after the gate. Detailed measurements, reproduction and
+limits are in `docs/acceptance/crtweb_acceptance.md`, Windows Tranche 8 replay;
+generated evidence is `C:/crtw/b3w/acceptance-b3.json` and
+`out/web-windows-tranche8-ready-final.log`.
+
+No browser physical-camera run was requested/performed. Real audio is not
+verified: all default render endpoint roles return WASAPI `0x80070490`, and
+the automatic run records 39 sink-open fallbacks and no PCM output. The opt-in
+PAL diagnostic names the failed API/HRESULT without exposing native types.
+Forty-eight fresh-thread open/close probes stay at four threads. Real Linux/
+Windows output, explicit Windows camera evidence, common-fix replay and
+same-process physical-camera resource stress remain open; Tranche 8 is not
+closed. Windows media DLL export hygiene remains separately queued in Tranche 10.
+
 ## 2026-10-14
+
+### Windows Web Tranche 8 predecessor: CRT-tool FFmpeg build and SDK install dependency
+
+The installed `05-ui` media DLL had been built with FFmpeg disabled, so the
+Tranche 8 playback link lacked `crtmedia_extractor_create` and codec APIs.
+FFmpeg 8.1.2 now configures, builds (`-j8`) and installs with CRT mksh and
+CRT-built GNU Make, not Git Bash/MSYS Make. Debug build-tool timings are
+1744.6 s configure, 473.4 s build and 237.0 s install; the recipe has no
+standalone tests and these timings are not an optimized performance baseline.
+
+Refreshing the cumulative SDK exposed an independent install-order gap:
+`crt-media` installs `crtmedia_player_demo` when FFmpeg is enabled, but
+`crt-media-build` did not build it. The aggregate now conditionally depends
+on that executable. A fresh Windows preset configuration preserving the CRT
+options and `crt-ui-dist` pass, including `verify_dist` for `01-c` through
+`05-ui`. The new import library exports extractor/codec APIs; twelve CPU/base
+media CTests pass (frame, GPU-frame ownership, format, player, audio sink,
+WAV/video/MP3/malformed demux, extractor/codec, software encode/mux and timing).
+
+Generated evidence: `out/web-windows-ffmpeg-crt.log`,
+`out/web-windows-sdk-fresh-configure.log`, `out/web-windows-sdk-build-fixed.log`
+and `out/web-windows-media-cpu-regression.log`. The interrupted restricted-launcher
+run and the mistakenly selected hardware-dependent media test are documented in
+`docs/bringup/crtweb_windows_tranche8.md`. Neither closes browser device acceptance.
+The Windows core test preset also passes 155/155 (`out/web-windows-core-regression.log`).
+WebKit's fresh configure links the extractor prerequisite successfully; driver
+CMake paths now use forward slashes to avoid an invalid `\U` escape under source-list
+evaluation (two path regression tests pass). ABI policy tests pass 6/6, device
+evidence parser 4/4, licensing 15/15 and the 23-patch manifest check passes.
+Windows WebKit 8A-8C replay remains open pending its combined runtime/ABI gate.
 
 ### Web Tranche 8 macOS device evidence: physical camera and CoreAudio output
 

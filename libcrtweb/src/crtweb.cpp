@@ -81,6 +81,9 @@ struct crtweb_runtime {
     std::string applicationName;
     std::vector<crtweb_view*> views;
     std::vector<DataOperation*> operations;
+    // Inert permission tokens outlive their view, but never their runtime.
+    // Keeping their addresses reserved also prevents stale-token ABA grants.
+    std::vector<crtweb_media_permission*> retiredMediaRequests;
     std::vector<uint64_t> processTokens;
     uint32_t nextDownloadId { 0 };
 };
@@ -792,8 +795,10 @@ void detach(crtweb_view* view)
 
 void release(crtweb_view* view)
 {
-    for (crtweb_media_permission* permission : view->retiredMediaRequests)
-        delete permission;
+    for (crtweb_media_permission* permission : view->retiredMediaRequests) {
+        permission->view = nullptr;
+        view->runtime->retiredMediaRequests.push_back(permission);
+    }
     for (crtweb_dialog* dialog : view->retiredDialogs)
         delete dialog;
     WKRelease(view->view);
@@ -1186,6 +1191,8 @@ void crtweb_runtime_destroy(crtweb_runtime* runtime)
         }
         if (running()) fprintf(stderr, "crtweb: child reaping exceeded shutdown deadline\n");
     }
+    for (crtweb_media_permission* permission : runtime->retiredMediaRequests)
+        delete permission;
     delete runtime;
 }
 
@@ -1533,10 +1540,24 @@ crtweb_result crtweb_view_set_callbacks(crtweb_view* view, const crtweb_view_cal
 
 crtweb_result crtweb_media_permission_complete(crtweb_media_permission* request, int grant, uint32_t camera_index)
 {
-    if (!request || request->completed)
+    if (!request)
         return CRTWEB_ERROR_INVALID_ARGUMENT;
     if (!onOwnerThread())
         return CRTWEB_ERROR_STATE;
+    // Compare opaque handles against owned storage before dereferencing.
+    // A cancelled view can be gone, including after its deferred pump release.
+    bool known = false;
+    for (crtweb_runtime* runtime : gRuntimes) {
+        known |= std::find(runtime->retiredMediaRequests.begin(), runtime->retiredMediaRequests.end(), request)
+            != runtime->retiredMediaRequests.end();
+        for (crtweb_view* view : runtime->views) {
+            known |= std::find(view->mediaRequests.begin(), view->mediaRequests.end(), request) != view->mediaRequests.end();
+            known |= std::find(view->retiredMediaRequests.begin(), view->retiredMediaRequests.end(), request)
+                != view->retiredMediaRequests.end();
+        }
+    }
+    if (!known || request->completed)
+        return CRTWEB_ERROR_INVALID_ARGUMENT;
     bool unsupported = grant && (request->requiresMicrophone || request->requiresDisplay);
     resolveMediaPermission(request, grant != 0 && !unsupported, camera_index);
     return unsupported ? CRTWEB_ERROR_UNSUPPORTED : CRTWEB_OK;

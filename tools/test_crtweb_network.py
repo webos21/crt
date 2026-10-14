@@ -67,8 +67,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def make_pki(directory, openssl):
+    # Some native OpenSSL installations retain an absent build-machine
+    # OPENSSLDIR. This fixture owns its configuration as well as its keys;
+    # never depend on (or change) the caller's global OpenSSL configuration.
+    directory = Path(directory).resolve()
+    config = directory / "openssl.cnf"
+    config.write_text("[req]\ndistinguished_name=names\n[names]\n", encoding="utf-8")
+    tool_env = dict(os.environ, OPENSSL_CONF=str(config))
     def run(*args):
-        subprocess.run([openssl, *args], cwd=directory, check=True, capture_output=True, timeout=60)
+        try:
+            subprocess.run([openssl, *args], cwd=directory, env=tool_env,
+                           check=True, capture_output=True, timeout=60)
+        except subprocess.CalledProcessError as error:
+            detail = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr or ""
+            raise RuntimeError(f"OpenSSL fixture {args[0]} failed: {detail[-4096:]}") from error
     for name in ("ca", "other"):
         run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", name + ".key",
             "-out", name + ".pem", "-days", "2", "-subj", "/CN=CRT test " + name,

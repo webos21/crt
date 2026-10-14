@@ -879,8 +879,8 @@ def host_abi_audit_macos(sdk: Path, deps: Path, build: Path, binaries) -> dict:
 
 def windows_system_dlls() -> set:
     """The OS DLLs a CRT process may import: the canonical Windows runtime contract of the
-    distribution (tools/crt_dist_prerequisites.py), lower-cased; the api-ms-win-* API-set
-    family is allowed by prefix at the call site."""
+    distribution (tools/crt_dist_prerequisites.py), lower-cased; OS API sets are allowed
+    by prefix at the call site, excluding the host C-runtime API-set family."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from crt_dist_prerequisites import external_prerequisites_for
     names = set()
@@ -888,6 +888,14 @@ def windows_system_dlls() -> set:
         if item.get("kind") == "os-runtime":
             names.update(name.lower() for name in item["components"])
     return names
+
+
+def windows_crtmedia_system_dlls() -> set:
+    """Media PAL imports belong to libcrtmedia alone, from the stage's declared contract."""
+    from crt_dist_prerequisites import external_prerequisites_for
+    return {name.lower() for item in external_prerequisites_for("windows", "04-gfx-media")
+            if item.get("kind") == "os-runtime" and "media" in item.get("required_for", [])
+            for name in item["components"]}
 
 
 def host_abi_audit_windows(sdk: Path, deps: Path, build: Path, binaries) -> dict:
@@ -901,8 +909,9 @@ def host_abi_audit_windows(sdk: Path, deps: Path, build: Path, binaries) -> dict
     if objdump is None:
         raise SystemExit("llvm-objdump is required for the Windows host ABI audit")
     system = windows_system_dlls()
+    media_system = windows_crtmedia_system_dlls()
     search = [build / "bin", build / "lib", deps / "bin", deps / "lib", sdk / "bin", sdk / "lib"]
-    violations, inventory, pending, seen = [], {}, [Path(b) for b in binaries], set()
+    violations, inventory, pending, seen, known = [], {}, [Path(b) for b in binaries], set(), {}
     while pending:
         binary = pending.pop()
         if binary in seen:
@@ -916,13 +925,17 @@ def host_abi_audit_windows(sdk: Path, deps: Path, build: Path, binaries) -> dict
             resolved = next((directory / name for directory in search if (directory / name).is_file()), None)
             if resolved is not None:
                 pending.append(resolved.resolve())
-            elif lowered in system or lowered.startswith("api-ms-win-"):
+            elif binary.name.lower() == "libcrtmedia.dll" and lowered in media_system:
+                known.setdefault(lowered, []).append(binary.name)
+            elif lowered in system or (lowered.startswith("api-ms-win-")
+                                       and not lowered.startswith("api-ms-win-crt-")):
                 continue
             else:
                 violations.append(f"{binary.name}: imports {name}, which is neither a CRT artifact nor "
                                   f"an OS runtime DLL of the distribution contract")
         inventory[binary.name] = sorted(set(imports))
-    return {"ok": not violations, "violations": violations, "known_host_libraries": {},
+    return {"ok": not violations, "violations": violations,
+            "known_host_libraries": {name: sorted(set(users)) for name, users in known.items()},
             "libraries": inventory}
 
 

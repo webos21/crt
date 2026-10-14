@@ -41,7 +41,8 @@ or GLib type appears in a public header.
 Required for v1: HTML, CSS, DOM, JavaScript, navigation, HTTP/HTTPS, images,
 fonts/text, mouse/keyboard, scrolling, Canvas 2D, basic cookies/storage. Video camera capture with
 application-owned permission decisions is an approved extension (2026-10-14), gated independently
-in Tranche 8C; it is not implemented or accepted yet.
+in Tranche 8C. Its synthetic-source path is accepted on Linux/x86_64 and replayed on macOS/arm64;
+physical-host acceptance remains open as recorded below.
 
 Deferred: WebRTC, WebGPU, WebXR, EME/DRM, microphone/display capture, printing,
 extensions, full accessibility, downloads.
@@ -138,6 +139,12 @@ kept apart from the start.
   pthread/libc/libc++, ICU (`data`, `uc`, `i18n`, >= 70.1), JavaScriptCore and
   later WebCore/WebKit. ICU comes from the CRT port `porting/recipes/icu.json`,
   never the host ICU (fast on Linux, wrong on Windows/macOS).
+
+For target dependencies built with `configure`/Make, record the shell and Make identities as well.
+A native build-host shell/Make run can establish target-library behavior when the CRT toolchain
+and ABI audits pass, but does not verify the CRT shell/Make or Windows SDK self-hosting. Those
+claims require a successful CRT mksh/Make replay; an alternate-tool comparison cannot close a
+failure observed in that path.
 
 Today host and target are the same machine and architecture, so the ports are
 ordinary CRT executables that run during the build. That does not survive a cross
@@ -1951,6 +1958,11 @@ and clock progression. One worker thread per player owns every crtmedia handle (
 audio write); the WebCore main thread owns notifications and painting. Unsupported, missing and garbage
 sources are reported as `MEDIA_ERR_SRC_NOT_SUPPORTED`; repeated lifetimes are bounded.
 
+The installed predecessor SDK must contain FFmpeg-enabled `libcrtmedia`
+(`CRTMEDIA_ENABLE_FFMPEG=ON`) and export its extractor/codec APIs. Headers and a media DLL alone
+are insufficient: the options-OFF Windows SDK omits those symbols. Windows links the SDK's
+`libcrtmedia_dll.dll.a` import library; Linux VA-API stubs are not part of that host path.
+
 Design decisions, kept visible:
 
 - **Browser loader, not a second HTTP stack.** The private `crtmedia` HTTP transport (Curl/mbedTLS)
@@ -1995,7 +2007,7 @@ capture gate remain.
 to the browser target. Microphone, display capture and WebRTC remain deferred; `crtmedia/capture.h`
 provides video capture only. This approval is not implementation/acceptance evidence and does not
 enable devices or `MEDIA_STREAM` by itself. The permission/security design is owned by
-[libcrtweb API policy](../design/libcrtweb_api_policy.md#camera-permissions-tranche-8c-target-contract-implementation-pending).
+[libcrtweb API policy](../design/libcrtweb_api_policy.md#camera-permissions-tranche-8c).
 
 Gate sequence (after the CPU playback seam of 8B):
 
@@ -2061,8 +2073,9 @@ again, a revocation resets that.
   matrix); source release was observed through the track state and a clean process exit, not by an
   independent device-busy check; repeated-lifetime resource deltas for the physical device were not
   measured (the synthetic device's lifecycle is gated, the physical one is a single run).
-- **macOS/arm64 and Windows/x64 replay.** Not executed: this session had only the Linux host. What a
-  replay must do: lift the Linux-only guards in `OptionsCRT.cmake`/the driver for the engine, capture
+- **macOS/arm64 and Windows/x64 replay plan at the Linux acceptance point.** The macOS replay is now
+  recorded below, followed by the Windows automatic replay and its remaining device limits.
+  The original replay work included lifting host guards for the engine, capture
   gates and `crtweb_media_test`/`crtweb_capture_test`; the VA-API stubs and the `libc++.so` alias are
   Linux packaging only; the capture backends already exist in `libcrtmedia` (AVFoundation, Media
   Foundation); replace `/proc` and POSIX-socket helpers in the tests (`crtweb_media_test`'s process
@@ -2148,8 +2161,78 @@ Camera access was already available to the ordinary process on this host; no new
 This does not remove the OS permission requirement on a fresh machine (the signed LaunchServices bundle
 procedure in `crtmedia_encode_capture_acceptance.md` may still be required there). The three executions
 prove stop/teardown/reopen but do not measure same-process physical-camera RSS/thread/fd growth, device
-busy state independently, microphone capture or permission revocation at the OS level. Windows replay
-and physical-camera evidence, Linux real-audio evidence, and that camera resource stress remain open.
+busy state independently, microphone capture or permission revocation at the OS level. Windows automatic
+replay is recorded below; Windows physical-camera/real-audio evidence, Linux real-audio evidence,
+and that camera resource stress remain open.
+
+**Windows/x64 automatic Tranche 8 replay (2026-10-15).** The FFmpeg-enabled cumulative
+`05-ui` SDK and the same `PlatformCRT` port pass the combined automatic gate. FFmpeg
+8.1.2 was configured, built and installed using CRT mksh and CRT-built GNU Make;
+Git Bash/MSYS tools are not the self-host evidence. The SDK was freshly configured
+and `verify_dist` passed for `01-c` through `05-ui`; core CTests pass 155/155 and
+twelve CPU/base-media CTests pass. These are prerequisite checks, not browser
+hardware acceptance.
+
+| Evidence | Final automatic result |
+| --- | --- |
+| Combined gate | 11/11: WebCore graph, process/API/lifecycle, B5/B6/B7, WebView, playback, synthetic capture and network |
+| Network trust | 15/15 browser/WebView HTTP/TLS policy cases; PKI fixture uses its own subprocess-local OpenSSL config |
+| Public API lifecycle | 100 cycles after warm-up: +4 KiB RSS, -3 threads, +0 handles |
+| Internal B7 lifecycle | 100 iterations: -36 KiB RSS, -3 threads, +0 handles; at most two children |
+| WebView lifecycle | 20 cycles: +16 KiB RSS, -2 threads, +0 handles; header/export firewall empty |
+| CPU playback | Video/MP3/WAV, error cases, HTTP loader, playback/seek/pause/end; 24 measured lifetimes after 12 representative warm-ups |
+| Media process | Same WebProcess PID before/after measurement; 23 -> 15 threads under the unchanged +3 bound |
+| Media mapping | 54 files, `libcrtmedia.dll` present, one CRT `libc++.dll`/`libc++abi.dll` pair; no mapping violations |
+| Static/runtime Host ABI | 17 binaries and 140 mapped files across UI/Web/Network roles; no violations |
+| Synthetic capture | Permission grant/deny/cancellation plus token teardown, allocation churn, stale-token identity and unknown-handle rejection pass; no physical browser camera opened |
+| Real audio output | Not verified: zero output sinks, 39 sink-open fallbacks; default render endpoint unavailable (`0x80070490`) |
+| Cleanup | No remaining browser test processes from the work tree |
+
+Toolhelp observations must be positive within a bounded interval, and the PID must
+remain the same across measured playback lifetimes. Each playback cycle waits for
+numeric `readyState >= 3` and requires clock progress. Three additional sequential
+media/synthetic-capture runs pass with 23 -> 22, 23 -> 15 and 22 -> 15 threads.
+Neither the representative warm-up nor media-readiness wait raises the resource
+bound; this is not exhaustive early-play/loading-race coverage. Earlier transient
+snapshot, cold-baseline and stalled-playback failures remain documented in
+[`Windows investigation`](../bringup/crtweb_windows_tranche8.md).
+
+The capture repetitions found a common permission-token use-after-free after
+view destruction. Resolved tokens now retain inert storage in their runtime,
+without WebKit request/device references, until runtime destruction. Completion
+checks ownership before dereferencing; token addresses are not reused within
+that runtime. Applications never free tokens and discard them at runtime teardown
+(`libcrtweb_api_policy.md`). Five strengthened synthetic runs pass on Windows;
+Linux/macOS must replay this changed regression before accepting the common fix.
+
+Declared OLE32/Media Foundation imports are allowed only at `libcrtmedia.dll`'s
+media PAL boundary. A direct host-CRT import in a CRT artifact still fails the
+static audit. Native Media Foundation components transitively map SystemRoot
+`ucrtbase`/`msvcrt`/`msvcp_win`; those OS runtime mappings are separately recorded,
+not described as CRT-owned C++ images or as an absence of all host runtimes.
+The clean import audit does not establish export privacy: Windows media DLL
+export narrowing remains Tranche 10 work.
+
+Reproduce after refreshing the FFmpeg-enabled `05-ui` SDK and web dependencies:
+
+```powershell
+python tools/build_webkit_crt_port.py `
+  --sdk-root out/windows-host-ninja-debug/dist/05-ui `
+  --deps-prefix out/windows-host-ninja-debug/port-tests/install `
+  --work-root C:/crtw/b3w --reuse-tree --webkit --run-tests -j 8
+```
+
+Generated evidence: `C:/crtw/b3w/acceptance-b3.json`,
+`out/web-windows-tranche8-ready-final.log`, `media-run/audio-output.log` and
+`capture-run/capture-output.log` under that work root. Real output requires an
+available default render endpoint and `--require-audio-output`; no sink was
+started in the separate three-role endpoint probe. The current machine cannot
+close that gate. Browser physical-camera access requires explicit authorization
+and `--allow-physical-camera`; it was not run here. The inadvertently selected
+earlier native media device test is preserved in the investigation, not counted
+as browser permission/camera acceptance. Tranche 8 remains open for these device
+gates, Linux/macOS replay of the common token fix and same-process physical-camera
+resource stress.
 
 ### 9. GPU integration
 

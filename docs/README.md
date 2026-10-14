@@ -67,7 +67,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 ## Historical material
 
 - [Monthly history](history/README.md): decisions, causes, evidence, and original-log recovery.
-- [Bring-up notes](bringup/README.md): early platform work and detailed fork investigation.
+- [Bring-up notes](bringup/README.md): platform and upper-runtime investigations and reproduction records.
 
 Choose a destination by the document’s primary purpose. Acceptance documents own
 gates and measured host evidence; design documents own contracts and rationale;

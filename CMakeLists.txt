@@ -1616,6 +1616,11 @@ if(Python3_Interpreter_FOUND)
     crtmedia_player_test
     crtmedia_audio_sink_test
   )
+  if(TARGET crtmedia_player_demo)
+    # The FFmpeg-enabled crt-media install ships this executable. A clean
+    # cumulative SDK build must produce it before create_dist invokes install.
+    add_dependencies(crt-media-build crtmedia_player_demo)
+  endif()
   add_custom_target(crt-media-test
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtmedia_.*_runs"
     DEPENDS crt-media-build

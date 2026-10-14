@@ -86,6 +86,24 @@ static void writeFile(const std::string& path, const std::string& content)
     fclose(file);
 }
 
+static std::string fileURLFor(const std::string& path)
+{
+    std::string normalized = path;
+    for (char& c : normalized)
+        if (c == '\\')
+            c = '/';
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(WTF_CRT_COFF_ASM)
+    // WebKit uses its POSIX persona; the CRT exposes a Windows drive as /c/..., as getcwd does.
+    if (normalized.size() > 2 && normalized[1] == ':') {
+        char drive = normalized[0];
+        if (drive >= 'A' && drive <= 'Z')
+            drive += 'a' - 'A';
+        normalized = std::string("/") + drive + normalized.substr(2);
+    }
+#endif
+    return "file://" + normalized;
+}
+
 static bool loadPage(const std::string& url)
 {
     // A unique query makes every navigation a new document, so the readiness checks below cannot be
@@ -136,7 +154,98 @@ static bool logHas(const char* event)
     return js("window.log.indexOf('" + std::string(event) + "') >= 0") == "true";
 }
 
-#if defined(CRT_TARGET_OS_MACOS) || defined(WTF_CRT_MACHO_ASM)
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(WTF_CRT_COFF_ASM)
+// Acceptance-only process observations. Win32 types stay out of the public CRT surface.
+extern "C" {
+struct ProcessEntry {
+    unsigned size, usage, pid;
+    uintptr_t heap;
+    unsigned module, threads, parent;
+    int priority;
+    unsigned flags;
+    char executable[260];
+};
+struct ModuleEntry {
+    unsigned size, module, pid, globalUsage, processUsage;
+    unsigned char* base;
+    unsigned baseSize;
+    void* handle;
+    char name[256];
+    char path[260];
+};
+void* __stdcall CreateToolhelp32Snapshot(unsigned, unsigned);
+int __stdcall Process32First(void*, ProcessEntry*);
+int __stdcall Process32Next(void*, ProcessEntry*);
+int __stdcall Module32First(void*, ModuleEntry*);
+int __stdcall Module32Next(void*, ModuleEntry*);
+void* __stdcall OpenProcess(unsigned, int, unsigned);
+unsigned __stdcall WaitForSingleObject(void*, unsigned);
+int __stdcall CloseHandle(void*);
+}
+
+static std::vector<pid_t> childrenNamed(const char* name)
+{
+    std::vector<pid_t> result;
+    void* snapshot = CreateToolhelp32Snapshot(0x2 /* TH32CS_SNAPPROCESS */, 0);
+    if (snapshot == reinterpret_cast<void*>(-1))
+        return result;
+    ProcessEntry entry { };
+    entry.size = sizeof entry;
+    for (int more = Process32First(snapshot, &entry); more; more = Process32Next(snapshot, &entry)) {
+        if (entry.parent != static_cast<unsigned>(getpid()) || !strstr(entry.executable, name))
+            continue;
+        void* process = OpenProcess(0x00100000 /* SYNCHRONIZE */, 0, entry.pid);
+        bool alive = process && WaitForSingleObject(process, 0) != 0;
+        if (process)
+            CloseHandle(process);
+        if (alive)
+            result.push_back(static_cast<pid_t>(entry.pid));
+    }
+    CloseHandle(snapshot);
+    return result;
+}
+
+static void printMappedFiles(pid_t pid)
+{
+    void* snapshot = CreateToolhelp32Snapshot(0x8 | 0x10 /* TH32CS_SNAPMODULE | SNAPMODULE32 */, pid);
+    if (snapshot == reinterpret_cast<void*>(-1))
+        return;
+    std::vector<std::string> files;
+    ModuleEntry entry { };
+    entry.size = sizeof entry;
+    for (int more = Module32First(snapshot, &entry); more; more = Module32Next(snapshot, &entry)) {
+        std::string path = entry.path;
+        for (char& c : path)
+            if (c == '\\')
+                c = '/';
+        bool known = false;
+        for (const std::string& file : files)
+            known = known || file == path;
+        if (!known)
+            files.push_back(path);
+    }
+    CloseHandle(snapshot);
+    for (const std::string& file : files)
+        printf("MAPPED WebProcess %s\n", file.c_str());
+}
+
+static long threadsOf(pid_t pid)
+{
+    long result = -1;
+    void* snapshot = CreateToolhelp32Snapshot(0x2 /* TH32CS_SNAPPROCESS */, 0);
+    if (snapshot == reinterpret_cast<void*>(-1))
+        return result;
+    ProcessEntry entry { };
+    entry.size = sizeof entry;
+    for (int more = Process32First(snapshot, &entry); more; more = Process32Next(snapshot, &entry))
+        if (entry.pid == static_cast<unsigned>(pid)) {
+            result = entry.threads;
+            break;
+        }
+    CloseHandle(snapshot);
+    return result;
+}
+#elif defined(CRT_TARGET_OS_MACOS) || defined(WTF_CRT_MACHO_ASM)
 // macOS has no /proc: libSystem's libproc lists children and reads the task info, and the files the Web
 // process has mapped come from vmmap(1) (declared here; none of this is part of the target ABI).
 extern "C" int proc_listchildpids(pid_t, void*, int);
@@ -281,7 +390,7 @@ int main(int argc, char** argv)
     if (!getcwd(cwd, sizeof cwd))
         return 2;
     std::string directory = cwd;
-    std::string fileURL = "file://" + assets;
+    std::string assetURL = fileURLFor(assets);
 
     crtweb_runtime_config config = { };
     config.struct_size = sizeof config;
@@ -292,8 +401,8 @@ int main(int argc, char** argv)
 
     // ---- video: metadata, play, pause, seek, ended ----
     writeFile(directory + "/crtweb_media_video.html",
-        pageFor("<video id=m muted style='width:320px;height:240px' src='" + fileURL + "/test_video.mp4'></video>", ""));
-    CHECK(loadPage("file://" + directory + "/crtweb_media_video.html"), "video page");
+        pageFor("<video id=m muted style='width:320px;height:240px' src='" + assetURL + "/test_video.mp4'></video>", ""));
+    CHECK(loadPage(fileURLFor(directory + "/crtweb_media_video.html")), "video page");
     CHECK(js("document.createElement('video').canPlayType('video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"')") != "", "canPlayType h264+aac");
     CHECK(js("document.createElement('video').canPlayType('video/x-unknown')") == "", "canPlayType unknown");
     CHECK(js("document.createElement('video').canPlayType('video/mp4; codecs=\"vp09\"')") == "", "canPlayType unsupported codec");
@@ -345,25 +454,25 @@ int main(int argc, char** argv)
     CHECK(js("String(m.volume) + ',' + String(m.muted)") == "0.25,true", "volume and mute reflected");
 
     // ---- audio-only: MP3 and WAV ----
-    writeFile(directory + "/crtweb_media_audio.html", pageFor("<audio id=m src='" + fileURL + "/test_tone.mp3'></audio>", ""));
-    CHECK(loadPage("file://" + directory + "/crtweb_media_audio.html"), "audio page");
+    writeFile(directory + "/crtweb_media_audio.html", pageFor("<audio id=m src='" + assetURL + "/test_tone.mp3'></audio>", ""));
+    CHECK(loadPage(fileURLFor(directory + "/crtweb_media_audio.html")), "audio page");
     CHECK(pumpUntil([&] { return logHas("loadedmetadata"); }, 15000), "audio metadata");
     CHECK(num("m.duration") > 0.8 && num("m.duration") < 1.3, "audio duration");
     CHECK(js("typeof m.videoWidth") == "undefined" || js("String(m.videoWidth)") == "0", "no video size for audio");
     js("m.play(),'a'");
     CHECK(pumpUntil([&] { return logHas("ended"); }, 10000), "audio plays to the end");
-    writeFile(directory + "/crtweb_media_wav.html", pageFor("<audio id=m src='" + fileURL + "/test_tone.wav'></audio>", ""));
-    CHECK(loadPage("file://" + directory + "/crtweb_media_wav.html") && pumpUntil([&] { return logHas("loadedmetadata"); }, 15000), "wav metadata");
+    writeFile(directory + "/crtweb_media_wav.html", pageFor("<audio id=m src='" + assetURL + "/test_tone.wav'></audio>", ""));
+    CHECK(loadPage(fileURLFor(directory + "/crtweb_media_wav.html")) && pumpUntil([&] { return logHas("loadedmetadata"); }, 15000), "wav metadata");
     CHECK(num("m.duration") > 0.2 && num("m.duration") < 0.4, "wav duration (0.25 s)");
 
     // ---- sources that cannot play ----
     writeFile(directory + "/crtweb_media_bad.mp4", "this is not an mp4 file");
-    writeFile(directory + "/crtweb_media_bad.html", pageFor("<video id=m src='file://" + directory + "/crtweb_media_bad.mp4'></video>", ""));
-    CHECK(loadPage("file://" + directory + "/crtweb_media_bad.html"), "bad media page");
+    writeFile(directory + "/crtweb_media_bad.html", pageFor("<video id=m src='" + fileURLFor(directory + "/crtweb_media_bad.mp4") + "'></video>", ""));
+    CHECK(loadPage(fileURLFor(directory + "/crtweb_media_bad.html")), "bad media page");
     CHECK(pumpUntil([&] { return logHas("error"); }, 15000), "garbage reports an error");
     CHECK(js("m.error ? String(m.error.code) : 'none'") == "4", "MEDIA_ERR_SRC_NOT_SUPPORTED for garbage");
     writeFile(directory + "/crtweb_media_missing.html", pageFor("<video id=m src='file:///crtweb_media_missing_file.mp4'></video>", ""));
-    CHECK(loadPage("file://" + directory + "/crtweb_media_missing.html"), "missing media page");
+    CHECK(loadPage(fileURLFor(directory + "/crtweb_media_missing.html")), "missing media page");
     CHECK(pumpUntil([&] { return logHas("error"); }, 15000), "a missing file reports an error");
 
     // ---- through the browser's own HTTP loader ----
@@ -371,7 +480,7 @@ int main(int argc, char** argv)
         HttpServer server;
         server.setMediaDirectory(assets);
         writeFile(directory + "/crtweb_media_http.html", pageFor("<video id=m muted src='" + server.url("/media/test_video.mp4") + "'></video>", ""));
-        CHECK(loadPage("file://" + directory + "/crtweb_media_http.html"), "http media page");
+        CHECK(loadPage(fileURLFor(directory + "/crtweb_media_http.html")), "http media page");
         CHECK(pumpUntil([&] { return logHas("loadeddata"); }, 20000), "metadata and first frame over HTTP");
         CHECK(num("m.duration") > 0.8 && num("m.videoWidth") == 64, "http duration and size");
         js("m.play(),'h'");
@@ -379,22 +488,61 @@ int main(int argc, char** argv)
     }
 
     // ---- repeated lifetimes: no thread growth in the Web process ----
-    CHECK(loadPage("file://" + directory + "/crtweb_media_video.html"), "page for lifetimes");
-    auto processes = childrenNamed("WebProcess");
-    long baseline = processes.empty() ? -1 : threadsOf(processes[0]);
-    for (int i = 0; i < 12; ++i) {
-        CHECK(loadPage("file://" + directory + "/crtweb_media_video.html"), "lifetime page");
-        js("m.play(),'x'");
-        pumpUntil([&] { return num("m.currentTime") > 0.1; }, 8000);
+    CHECK(loadPage(fileURLFor(directory + "/crtweb_media_video.html")), "page for lifetimes");
+    auto playbackCycle = [&](int i) {
+        CHECK(loadPage(fileURLFor(directory + "/crtweb_media_video.html")), "lifetime page");
+        CHECK(pumpUntil([&] { return num("m.readyState") >= 3; }, 15000), "lifetime media is ready");
+        js("window.playResult='pending';m.play().then(function(){window.playResult='resolved'},function(e){window.playResult=e.name}),'x'");
+        bool advanced = pumpUntil([&] { return num("m.currentTime") > 0.1; }, 8000);
+        if (!advanced || gTrace)
+            fprintf(stderr, "trace: lifetime %d advanced=%d state=%s\n", i, advanced,
+                js("JSON.stringify({ready:m.readyState,paused:m.paused,time:m.currentTime,error:m.error?m.error.code:0,play:window.playResult,log:window.log})").c_str());
+        CHECK(advanced, "lifetime playback advances");
         if (i % 2)
             js("m.pause(),m.removeAttribute('src'),m.load(),'r'");
-    }
+    };
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(WTF_CRT_COFF_ASM)
+    // Take the baseline after representative playback, not a paused page.
+    // Then measure twice the original cycle count with the SAME +3 bound:
+    // a per-player leak must still fail; lazy process-wide pools may settle.
+    for (int i = 0; i < 12; ++i)
+        playbackCycle(i);
+    constexpr int lifetimeCycles = 24;
+#else
+    constexpr int lifetimeCycles = 12;
+#endif
+    crtweb_runtime_pump(gRuntime, 500);
+    auto processes = childrenNamed("WebProcess");
+    long baseline = processes.empty() ? -1 : threadsOf(processes[0]);
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(WTF_CRT_COFF_ASM)
+    // Toolhelp's process and thread observations are separate snapshots.
+    // Require a positive observation within a bounded interval, never treat
+    // an absent/transient snapshot (-1) as a valid resource baseline.
+    CHECK(pumpUntil([&] {
+        processes = childrenNamed("WebProcess");
+        baseline = processes.empty() ? -1 : threadsOf(processes[0]);
+        return baseline > 0;
+    }, 3000), "baseline WebProcess/thread observation");
+    pid_t baselinePid = processes.empty() ? -1 : processes[0];
+#endif
+    for (int i = 0; i < lifetimeCycles; ++i)
+        playbackCycle(i);
     crtweb_runtime_pump(gRuntime, 500);
     processes = childrenNamed("WebProcess");
+    long after = processes.empty() ? -1 : threadsOf(processes[0]);
+#if defined(CRT_TARGET_OS_WINDOWS) || defined(WTF_CRT_COFF_ASM)
+    CHECK(pumpUntil([&] {
+        processes = childrenNamed("WebProcess");
+        after = processes.empty() ? -1 : threadsOf(processes[0]);
+        return after > 0;
+    }, 3000), "final WebProcess/thread observation");
+    CHECK(!processes.empty() && baselinePid == processes[0], "same WebProcess across measured lifetimes");
+    fprintf(stdout, "crtweb_media_test: observed process %ld -> %ld\n", static_cast<long>(baselinePid),
+        static_cast<long>(processes.empty() ? -1 : processes[0]));
+#endif
     if (!processes.empty())
         printMappedFiles(processes[0]);
-    long after = processes.empty() ? -1 : threadsOf(processes[0]);
-    fprintf(stdout, "crtweb_media_test: web process threads %ld -> %ld\n", baseline, after);
+    fprintf(stdout, "crtweb_media_test: %d measured lifetimes; web process threads %ld -> %ld\n", lifetimeCycles, baseline, after);
     CHECK(baseline > 0 && after > 0 && after <= baseline + 3, "threads do not grow over repeated playback lifetimes");
 
     // ---- teardown ----

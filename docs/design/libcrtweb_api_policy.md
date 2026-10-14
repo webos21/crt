@@ -131,6 +131,11 @@ thread rules. Expose a request token and trustworthy requesting/top-level origin
 objects or host camera handles. No callback, no explicit grant, or a cancelled request means deny.
 A decision resolves once; late/duplicate completions are rejected. No blocking synchronous prompt
 on a capture worker and no automatic grant because playback was allowed.
+The runtime owns token storage, including inert tokens of destroyed views, until
+runtime destruction. Applications discard held tokens when destroying that runtime.
+Completion validates ownership before reading token state; addresses are not reused
+for a different request within that runtime, so a stale decision cannot grant a new
+request. The retained bookkeeping contains no WebKit request/device reference after resolution.
 
 The initial grant is request-scoped: no implicit persistence in cookies, website data or a shared
 NetworkProcess, and no reuse by another view/origin. Pending requests are cancelled on document

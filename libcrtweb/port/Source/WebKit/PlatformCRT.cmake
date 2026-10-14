@@ -168,10 +168,9 @@ list(APPEND WebKit_LIBRARIES
 if (CRT_ENABLE_CRTMEDIA_PLAYER)
     set_source_files_properties(${WEBKIT_DIR}/WebProcess/WebPage/crt/DrawingAreaCRT.cpp PROPERTIES
         COMPILE_DEFINITIONS CRT_HAS_CRTMEDIA_PLAYER=1)
-    if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-        # macOS: libcrtmedia's backends are AVFoundation/AudioToolbox/VideoToolbox, reached only through
-        # libcrtmedia (the OS media PAL, mapped from the dyld shared cache); there is no VA-API to stub.
-        # Its unversioned libc++.dylib is the same install name as libc++.1.dylib (one image).
+    if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_HOST_WIN32)
+        # macOS and Windows use their native media PAL through libcrtmedia; neither needs Linux's
+        # VA-API stubs. macOS's unversioned libc++.dylib shares libc++.1.dylib's install name.
         list(APPEND WebKit_LIBRARIES ${CRT_CRTMEDIA_LIBRARY})
     else ()
         set(CRT_VA_STUB_DIR "${CRT_LIBCRTWEB_DIR}/platform/va-stub")

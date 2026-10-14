@@ -636,6 +636,12 @@ See `porting/recipes/freetype.json`'s own notes for the full trail and
 
 ## ffmpeg
 
+Windows/x64 predecessor refresh (2026-10-14): the pinned recipe configured,
+built (`-j8`) and installed with CRT mksh and CRT-built GNU Make. No Git Bash/MSYS
+Make was used in that final run. The recipe declares no standalone tests; this
+install result does not replace libcrtmedia/WebKit runtime or shared-library
+verification. Investigation: [Windows Tranche 8 checkpoint](../bringup/crtweb_windows_tranche8.md).
+
 - Version: `8.1.2`
 - Recipe: `porting/recipes/ffmpeg.json`
 - Build system: `configure`
