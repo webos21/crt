@@ -9,6 +9,44 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-16
+
+### Web Tranche 9A: Windows D3D12 final-compositor replay
+
+Replayed `332e904` on Windows/x64: offscreen **3/3** and native D3D12/Ganesh
+presentation **3/3**, each live execution displaying **5/5** frames. The real
+browser's CPU-shared-memory image remains a CPU-upload source, not GPU-buffer
+IPC, zero-copy or GPU WebCore rendering. Pixels, UI ordering/ancestor clipping/
+opacity, input, resize/old-image retention, twenty updates, producer loss/
+replacement and teardown pass with the original bounds. No audio or physical
+camera was opened. Measurements and log locations belong to
+[Windows 9A acceptance](docs/acceptance/crtweb_acceptance.md#9a-windowsx64-replay-2026-10-1516).
+
+The initial fresh combined SDK/consumer build exposed a real publisher/reader
+race: `crt-libcxx-dist` replaced `02-cxx` while Web consumers read libc++ headers.
+Order all three consumers after that publisher. A second fresh configure and
+the same parallel `-j 8` aggregate build pass; cumulative SDKs `01-c` through
+`05-ui` verify. The failed build is retained, not counted as acceptance.
+
+Added acceptance-only Windows Toolhelp module observations and strict parser
+coverage: all three browser roles are required; unknown libraries and native
+final-compositor GPU clients fail, while CRT GL link stubs and OS-transitive
+DLLs remain distinct from direct imports checked by the static PE audit.
+Failure-only child PID/name diagnostics identified an artificial
+`CREATE_NO_WINDOW` repetition launcher creating `conhost`. Corrected that local
+launcher to match the checked-in driver; preserved both failed checkpoints
+without changing cleanup assertions, deadlines or resource bounds.
+
+The existing CPU WebView's three recoveries/twenty lifetimes, B7's hundred
+lifetimes and full static/runtime Host ABI audits pass. Wire/CPU-surface CTest
+passes 3/3, GPU evidence/maps 11/11, backend boundary 7/7, existing device
+evidence 18/18, source closure 7/7, licensing 15/15, driver/JSC helpers 2/2 and
+6/6, and the unchanged 23-patch manifest pass. GPU-OFF still registers CPU
+consumers only; no-host GPU CTest skips and strict/invalid-argument negative
+controls fail as required. This closes the Windows replay slice, not macOS 9A
+or the 9B/9C resource/GPUProcess gates. No public ABI or WebKit patch changed;
+`STATUS.md` is intentionally untouched.
+
 ## 2026-10-15
 
 ### Web Tranche 9A: Linux GPU final composition (CPU-upload path)

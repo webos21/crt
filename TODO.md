@@ -140,7 +140,10 @@ uses the host replay order stated below and in the acceptance document.
   `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
 * [ ] **9. GPU integration.**
   * [ ] **9A GPU final composition:** CPU-shared-memory WebView upload into the CRT
-    GPU compositor accepted on Linux; macOS/Windows replay remains (Web acceptance).
+    GPU compositor; evidence stays in Web acceptance.
+    * [x] Linux/x86_64 Vulkan baseline.
+    * [x] Windows/x64 D3D12 replay, CPU WebView/wire/lifecycle regressions and native Host ABI audit.
+    * [ ] macOS/arm64 Metal replay and native browser Host ABI evidence.
   * [ ] **9B GPU resources:** separately negotiated shared/zero-copy GPU-buffer import,
     actual GPU synchronization and producer/GPUProcess ownership; no private Skia ABI across IPC.
   * [ ] **9C closure:** device/process loss, bounded resource reuse and three-host replay.

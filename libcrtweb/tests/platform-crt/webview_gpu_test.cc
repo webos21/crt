@@ -20,6 +20,22 @@
 #include <vector>
 
 namespace {
+#if defined(_WIN32)
+// Acceptance observer only, matching the existing Windows lifecycle probe.
+// Native declarations never enter the CRT public surface or the GPU companion.
+extern "C" {
+struct GpuModuleEntry {
+  unsigned size, module, pid, globalUsage, processUsage;
+  unsigned char* base;
+  unsigned baseSize;
+  void* handle;
+  char name[256];
+  char path[260];
+};
+int __stdcall Module32First(void*, GpuModuleEntry*);
+int __stdcall Module32Next(void*, GpuModuleEntry*);
+}
+#endif
 int failures = 0;
 bool check(bool ok, const char* name) {
   if (!ok) { fprintf(stderr, "crtweb_webview_gpu_test: FAILED %s\n", name); ++failures; }
@@ -85,7 +101,23 @@ bool source_is(crtweb::WebView& web, bool magenta) {
 }
 
 void report_browser_maps() {
-#if defined(__linux__) && !defined(_WIN32)
+#if defined(_WIN32)
+  auto report = [](pid_t pid, const char* role) {
+    void* snapshot = crtweb_test::CreateToolhelp32Snapshot(0x8 | 0x10, static_cast<unsigned>(pid));
+    if (!check(snapshot != reinterpret_cast<void*>(-1), "browser module snapshot")) return;
+    std::set<std::string> files;
+    GpuModuleEntry entry = {};
+    entry.size = sizeof entry;
+    for (int more = Module32First(snapshot, &entry); more; more = Module32Next(snapshot, &entry)) {
+      std::string path = entry.path;
+      for (char& c : path) if (c == '\\') c = '/';
+      files.insert(path);
+    }
+    crtweb_test::CloseHandle(snapshot);
+    check(!files.empty(), "browser modules observed");
+    for (const auto& file : files) printf("MAPPED %s %s\n", role, file.c_str());
+  };
+#elif defined(__linux__)
   auto report = [](pid_t pid, const char* role) {
     std::string name = "/proc/" + std::to_string(pid) + "/maps";
     FILE* maps = fopen(name.c_str(), "r");
@@ -110,6 +142,8 @@ void report_browser_maps() {
     fclose(maps);
     for (const auto& file : files) printf("MAPPED %s %s\n", role, file.c_str());
   };
+#endif
+#if defined(_WIN32) || defined(__linux__)
   for (const auto& host : crtweb_test::children()) {
     if (host.name != "crtweb_host") continue;
     report(host.pid, "HostProcess");
@@ -267,7 +301,11 @@ bool run(const char* host, crtgfx_gpu_device* device, GrDirectContext* context, 
   context->flushAndSubmit(GrSyncCpu::kYes);
   target.reset(); raster.reset();
   web.shutdown();
-  check(!web.running() && crtweb_test::children().empty(), "browser children reaped");
+  auto remaining = crtweb_test::children();
+  for (const auto& child : remaining)
+    fprintf(stderr, "crtweb_webview_gpu_test: remaining child pid=%ld name=%s\n",
+        static_cast<long>(child.pid), child.name.c_str());
+  check(!web.running() && remaining.empty(), "browser children reaped");
   return ok && failures == 0;
 }
 }  // namespace

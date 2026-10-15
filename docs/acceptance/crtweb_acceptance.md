@@ -2961,9 +2961,9 @@ It refreshes the in-tree consumer, builds the real host and writes a separate
 `acceptance-gpu.json`. A missing GPU/host returns 77 in ordinary CTest (an actual
 skip); the driver passes `--require-gpu` and fails instead. The evidence parser
 requires the expected native backend, all checks, exact live frame count and
-the `source=cpu-shm interop=cpu-upload` classification. Native runtime mapping
-observation is currently Linux-only; other hosts report it as pending, not a
-clean empty audit, and still need native replay before closing 9A globally.
+the `source=cpu-shm interop=cpu-upload` classification. This first implementation
+observed native browser mappings on Linux only; the Windows extension and replay
+are recorded below. macOS still reports pending, not a clean empty runtime audit.
 
 Strict negative controls fail for a missing host and a child-scoped unusable
 Vulkan ICD selection (both exit 1); missing host without strict mode exits 77,
@@ -2999,8 +2999,93 @@ That checkpoint is retained in `tranche9-map-checkpoint-failed.json` and
 `tranche9-gpu-final-offscreen-1.log`.
 
 GPU-buffer IPC, native producer/consumer GPU fences, accelerated WebCore,
-GPUProcess/device-loss acceptance and macOS/Windows replay remain open. The
+GPUProcess/device-loss acceptance and macOS replay remain open. The
 existing CPU surface contract and fallback are not replaced by this first slice.
+
+#### 9A Windows/x64 replay (2026-10-15..16)
+
+Replayed `332e904` plus the Windows observer/build-order changes.
+This is the same CPU-shared-memory upload path, now targeting D3D12/Ganesh;
+it does not request audio or physical camera capture. macOS replay, 9B and 9C
+remain independent open gates.
+
+The initial fresh combined `-j 8` SDK/consumer build failed: the release-grade
+`02-cxx` publisher replaced its directory while the GPU/CPU-surface consumers
+read libc++ headers, producing `cstddef` not found. The three Web consumers now
+wait for `crt-libcxx-dist`, not just its earlier lightweight sysroot writer.
+A second fresh configuration and the same combined `-j 8` command succeed;
+all cumulative SDKs `01-c` through `05-ui` verify. The failed checkpoint remains
+`out/web-windows-tranche9a-sdk-consumer-build.log`; corrected configuration/build
+logs have `-final` suffixes. This is target ordering, not a `-j 1` workaround.
+
+The acceptance-only Windows Toolhelp observer lists modules separately for the
+browser Host/Web/Network processes. Missing roles fail rather than returning
+an unobserved audit. Runtime roots/OS DLL closure and CRT EGL/GLES link stubs
+are classified separately; direct host-runtime imports remain subject to the
+existing static PE audit. Final-compositor D3D12/shader compiler, Vulkan and
+native GL clients are rejected in the CPU browser path. The existing desktop/
+media D3D11/DXGI contract is not evidence of accelerated WebCore rendering.
+GPU evidence/map tests pass 11/11. Wire/CPU-surface CTest passes 3/3; a separate
+no-host GPU CTest is explicitly skipped, strict no-host returns 1 and invalid
+live frame count returns 2, not GPU acceptance.
+
+**Windows GPU result:** offscreen **3/3**, live D3D12/Ganesh **3/3**, each live
+execution presenting **5/5** frames. All six pass pixel readback, UI ordering,
+ancestor clipping/opacity, input-driven pixel change, fresh viewport/target
+resize, retained old-image immutability, twenty alternating updates, producer
+termination/replacement and child cleanup. Twenty-update RSS deltas are
+**+128/+144/+140 KiB** offscreen and **+136/+112/+128 KiB** live, each **+0 threads,
++0 handles**. The unchanged bounds remain +24 MiB/+2/+2. These are application
+working-set observations, not device-memory or native-fence lifetime evidence.
+Every run observes 141 module records across Host/Web/Network, both CRT-owned
+GL stubs and zero runtime/static browser Host ABI violations. OS-transitive
+`msvcrt.dll`, `ucrtbase.dll` and `msvcp_win.dll` mappings are recorded separately;
+they do not waive the static prohibition on direct host-runtime imports.
+
+The existing CPU WebView replay also passes: three producer recoveries and
+twenty host/load/resize/shutdown lifetimes, final **-4 KiB RSS/-2 threads/+0
+handles**, settling 0ms. A separate fresh GPU-OFF configuration registers CPU
+WebView/surface targets but no GPU consumer. No browser/media implementation,
+public API, wire field or WebKit patch was changed for this replay.
+
+The refreshed B7 gate passes all **100** view lifetimes: after ten warmups,
+**-52 KiB RSS/-3 threads/+0 handles**, at most one Web and one Network process
+alive together. Its static PE audit covers **18** binaries, and its UI/Web/
+Network runtime audit observes **140** module records, both with zero violations.
+Evidence: `out/web-windows-tranche9a-lifecycle.{json,log}`.
+
+The first local repetition used a generated launcher with `CREATE_NO_WINDOW`.
+Its CRT relaunch created a `conhost` child, so the unchanged all-children cleanup
+assertion failed although rendering and the map audit passed. A diagnostic
+repeat identified that exact child; neither failed run is accepted evidence.
+The corrected launcher matches the checked-in driver's inherited-console
+subprocess invocation. No child-name exclusion, teardown sleep or resource-bound
+relaxation was added; failure-only PID/name diagnostics remain in the test.
+
+Public strict entry point after the predecessor refresh:
+
+```powershell
+python tools/build_webkit_crt_port.py --sdk-root out/windows-host-ninja-debug/dist/05-ui --deps-prefix out/windows-host-ninja-debug/port-tests/install --work-root C:/crtw/b3w --reuse-tree --webkit --run-gpu-tests -j 8
+# Add --gpu-window-frames 5 for the bounded native presentation replay.
+```
+
+The generated `out/web_windows_tranche9a_replay.py` runs the already-built binary
+sequentially, using the checked-in strict evidence/map predicates and a static
+audit of the same browser artifacts. Its six measurements have no concurrent
+build. Evidence: `out/web-windows-tranche9a-replay-final/summary.json`, each
+`{offscreen,window}-{1,2,3}/{result.json,stdout.log,stderr.log}` and
+`cpu/{stdout,stderr}.log`; aggregate output is
+`out/web-windows-tranche9a-replay-final.log`. The failed generated-launcher
+checkpoints remain in `out/web-windows-tranche9a-replay/` and
+`out/web-windows-tranche9a-replay-diagnostic/`. The initial public strict
+offscreen run passes independently (`out/web-windows-tranche9a-driver-offscreen-initial.log`).
+The final public strict CLI with `--gpu-window-frames 5` also passes, including
+5/5 presentations and the native browser map audit:
+`out/web-windows-tranche9a-driver-live-final.log` and
+`C:/crtw/b3w/acceptance-gpu.json`. This closes Windows 9A replay, not the macOS
+replay or any GPU-resource/GPUProcess gate.
+Wire/negative-control logs are `out/web-windows-tranche9a-wire-negative.log`;
+GPU-OFF configuration/target logs have the `web-windows-tranche9a-gpu-off-` prefix.
 
 ### 10. Distribution and security closure
 

@@ -625,18 +625,40 @@ def gpu_composition_evidence(text: str, target_os: str, window_frames: int = 0) 
 
 def gpu_browser_map_evidence(text: str, sdk: Path, prefix: Path, build: Path, work: Path,
                              target_os: str) -> dict:
-    # Linux records browser roles separately from the application which owns
-    # the native GPU driver. Other hosts need their native observer on replay;
+    # Record browser roles separately from the application which owns the
+    # native GPU driver. Other hosts need their native observer on replay;
     # do not silently present absent observations as a clean runtime audit.
-    if target_os != "linux":
+    if target_os not in ("linux", "windows"):
         return {"verified": None, "scope": "native runtime observation pending", "violations": []}
     roots = [path.resolve() for path in (sdk, prefix, build, work, ROOT / "libcrtgfx/assets/fonts")]
-    mapped = re.findall(r"^MAPPED (HostProcess|WebProcess|NetworkProcess) (/.*)$", text, re.M)
+    mapped = re.findall(r"^MAPPED (HostProcess|WebProcess|NetworkProcess) (.+)$", text, re.M)
     violations = []
-    stub_files = {(prefix / "lib" / name).resolve() for name in ("libEGL.so", "libGLESv2.so")}
+    windows = target_os == "windows"
+    stub_names = ("libEGL.dll", "libGLESv2.dll") if windows else ("libEGL.so", "libGLESv2.so")
+    stub_files = {(prefix / "lib" / name).resolve() for name in stub_names}
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve() if windows else None
+    os_runtime = set()
     stubs = set()
     for role, path in mapped:
         resolved = Path(path).resolve()
+        if windows:
+            name = resolved.name.lower()
+            if resolved in stub_files:
+                stubs.add(resolved.name)
+            elif name.startswith(("d3d12", "d3dcompiler", "vulkan-", "libvulkan", "opengl32",
+                                  "libegl", "libgles", "libglx", "libgl.")):
+                violations.append(f"{role}: GPU loader entered CPU browser path: {path}")
+            if any(resolved.is_relative_to(root) for root in roots):
+                continue
+            # As in B7, Windows' transitive OS DLL closure is recorded, not a
+            # host-libc waiver. Direct imports are held to the static PE audit.
+            # D3D11/DXGI are already part of the desktop/media PAL contract;
+            # their presence does not prove that the browser rendered on a GPU.
+            if resolved.is_relative_to(system_root) and resolved.suffix.lower() == ".dll":
+                os_runtime.add(name)
+                continue
+            violations.append(f"{role}: maps {path}")
+            continue
         if resolved.name.startswith("ld-linux"):
             continue
         if not any(resolved.is_relative_to(root) for root in roots):
@@ -646,8 +668,11 @@ def gpu_browser_map_evidence(text: str, sdk: Path, prefix: Path, build: Path, wo
         elif resolved.name.startswith(("libvulkan", "libEGL", "libGLES", "libGLX", "libGL.so")):
             violations.append(f"{role}: GPU loader entered CPU browser path: {path}")
     roles = sorted({role for role, _ in mapped})
-    return {"verified": roles == ["HostProcess", "NetworkProcess", "WebProcess"] and not violations,
-            "roles": roles, "mapped_files": len(mapped), "violations": violations, "crt_gl_stubs": sorted(stubs)}
+    result = {"verified": roles == ["HostProcess", "NetworkProcess", "WebProcess"] and not violations,
+              "roles": roles, "mapped_files": len(mapped), "violations": violations, "crt_gl_stubs": sorted(stubs)}
+    if windows:
+        result["os_runtime_dlls"] = sorted(os_runtime)
+    return result
 
 
 def run_gpu_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,

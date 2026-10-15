@@ -1495,6 +1495,18 @@ if(Python3_Interpreter_FOUND)
     # publisher add its recipe/archive/verification metadata.
     add_dependencies(crt-libcxx-dist crt-libcxx-sysroot)
 
+    if(CRT_USE_IMPORTED_LIBCXX)
+      # Web consumers compile/link against dist/02-cxx. When requested beside
+      # crt-ui-dist, waiting only for the lightweight sysroot leaves them free
+      # to read headers/libraries while crt-libcxx-dist replaces that directory.
+      # Windows 9A replay reproduced a missing cstddef in the GPU/surface tests.
+      foreach(crt_web_consumer IN ITEMS crtweb_web_surface_test crtweb_webview_test crtweb_webview_gpu_test)
+        if(TARGET ${crt_web_consumer})
+          add_dependencies(${crt_web_consumer} crt-libcxx-dist)
+        endif()
+      endforeach()
+    endif()
+
     # Backend-boundary Tranche 6: one bounded, cross-host acceptance entry
     # point for PR CI and local release checks. crt-libcxx-dist supplies a
     # freshly generated and verify_dist.py-audited 02-cxx SDK (including

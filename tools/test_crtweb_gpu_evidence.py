@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Strict GPU composition evidence is not a skip, CPU target or zero-copy claim."""
 import unittest
+from unittest import mock
 from pathlib import Path
 import build_webkit_crt_port as port
 
@@ -63,8 +64,36 @@ class BrowserMapTests(unittest.TestCase):
         self.assertEqual(evidence["crt_gl_stubs"], ["libEGL.so"])
 
     def test_other_hosts_are_explicitly_unobserved_not_clean(self):
-        for host in ("macos", "windows"):
-            self.assertIsNone(self.evidence("", host)["verified"])
+        self.assertIsNone(self.evidence("", "macos")["verified"])
+
+    def test_windows_requires_all_browser_roles(self):
+        self.assertFalse(self.evidence("", "windows")["verified"])
+        maps = self.maps().replace(".so", ".dll")
+        self.assertTrue(self.evidence(maps, "windows")["verified"])
+        self.assertFalse(self.evidence(maps.replace("MAPPED NetworkProcess", "IGNORED NetworkProcess"),
+                                       "windows")["verified"])
+
+    @mock.patch.dict(port.os.environ, {"SystemRoot": "/os/Windows"})
+    def test_windows_os_closure_and_crt_stubs(self):
+        maps = self.maps().replace(".so", ".dll")
+        maps += ("MAPPED HostProcess /os/Windows/System32/KERNEL32.DLL\n"
+                 "MAPPED WebProcess /os/Windows/System32/ucrtbase.dll\n"
+                 "MAPPED WebProcess /os/Windows/System32/d3d11.dll\n"
+                 "MAPPED WebProcess /os/Windows/System32/dxgi.dll\n"
+                 "MAPPED WebProcess /deps/lib/libGLESv2.dll\n")
+        result = self.evidence(maps, "windows")
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["crt_gl_stubs"], ["libGLESv2.dll"])
+        self.assertIn("ucrtbase.dll", result["os_runtime_dlls"])
+        self.assertIn("d3d11.dll", result["os_runtime_dlls"])
+
+    @mock.patch.dict(port.os.environ, {"SystemRoot": "/os/Windows"})
+    def test_windows_foreign_and_final_compositor_clients_rejected(self):
+        maps = self.maps().replace(".so", ".dll")
+        for path in ("/foreign/ucrtbase.dll", "/sdk/lib/d3d12.dll", "/os/Windows/System32/D3D12Core.dll",
+                     "/os/Windows/System32/D3DCOMPILER_47.dll", "/os/Windows/System32/vulkan-1.dll",
+                     "/os/Windows/System32/opengl32.dll", "/sdk/lib/libEGL.dll"):
+            self.assertFalse(self.evidence(maps + f"MAPPED WebProcess {path}\n", "windows")["verified"], path)
 
 
 if __name__ == "__main__":
