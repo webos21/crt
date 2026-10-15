@@ -61,6 +61,7 @@
 #include <objbase.h>
 
 #include "capture_internal.h"
+#include "capture_mf_queue.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -77,15 +78,6 @@
  * mfenc.c (libcrtmedia/CMakeLists.txt's own comment on those two import
  * libraries), so this file needs no INITGUID/`__declspec(selectany)`
  * duplicate-definition story of its own. */
-
-#define CRTMEDIA_MF_QUEUE_CAPACITY 4u
-
-typedef struct crtmedia_mf_queued_frame {
-  uint8_t* storage; /* owned Y+U+V packed YUV420P bytes */
-  uint32_t width;
-  uint32_t height;
-  int64_t timestamp_us;
-} crtmedia_mf_queued_frame;
 
 typedef struct crtmedia_mf_capture {
   IMFMediaSource* source;
@@ -333,10 +325,9 @@ static void* reader_thread_main(void* argument) {
     capture->last_timestamp_us = timestamp_us;
 
     if (capture->queue_count == CRTMEDIA_MF_QUEUE_CAPACITY) {
-      uint32_t oldest = capture->queue_head;
-      free(capture->queue[oldest].storage);
-      capture->queue_head = (capture->queue_head + 1u) % CRTMEDIA_MF_QUEUE_CAPACITY;
-      --capture->queue_count;
+      crtmedia_mf_queued_frame dropped = crtmedia_mf_queue_take(
+          capture->queue, &capture->queue_head, &capture->queue_count);
+      free(dropped.storage);
     }
     {
       uint32_t slot = (capture->queue_head + capture->queue_count) % CRTMEDIA_MF_QUEUE_CAPACITY;
@@ -386,9 +377,7 @@ static void release_backend(crtmedia_mf_capture* capture) {
     IMFMediaSource_Shutdown(capture->source);
     IMFMediaSource_Release(capture->source);
   }
-  for (uint32_t index = 0; index < CRTMEDIA_MF_QUEUE_CAPACITY; ++index) {
-    free(capture->queue[(capture->queue_head + index) % CRTMEDIA_MF_QUEUE_CAPACITY].storage);
-  }
+  crtmedia_mf_queue_discard(capture->queue, &capture->queue_head, &capture->queue_count, free);
   pthread_cond_destroy(&capture->not_empty);
   pthread_mutex_destroy(&capture->lock);
   if (capture->mf_started) {
@@ -692,9 +681,7 @@ crtmedia_result crtmedia_capture_backend_dequeue(void* backend, int timeout_ms, 
     pthread_mutex_unlock(&capture->lock);
     return CRTMEDIA_WOULD_BLOCK;
   }
-  queued = capture->queue[capture->queue_head];
-  capture->queue_head = (capture->queue_head + 1u) % CRTMEDIA_MF_QUEUE_CAPACITY;
-  --capture->queue_count;
+  queued = crtmedia_mf_queue_take(capture->queue, &capture->queue_head, &capture->queue_count);
   pthread_mutex_unlock(&capture->lock);
 
   out_frame->format = CRTMEDIA_PIXEL_FORMAT_YUV420P;

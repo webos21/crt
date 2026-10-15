@@ -136,18 +136,19 @@ uses the host replay order stated below and in the acceptance document.
 * [x] **7. macOS/arm64 replay.** Done 2026-10-13: B3-B7, Tranche 4 and the Tranche 5
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Sequential gates in `docs/acceptance/crtweb_acceptance.md`.
-  Linux token, real ALSA output and four-mode physical-camera resource gates pass.
-  macOS complete-fixture playback and repeated physical capture now pass (acceptance).
-  Windows replay of the current shared playback/capture fixes remains pending.
+  Windows/x64 current replay is complete, including strict output and same-process camera stress.
+  Remaining: Linux/macOS focused replay of the new common output-drain fix and Linux native
+  allocator/fork regressions. Preserve earlier failed checkpoints in the acceptance record.
   Investigation/reproduction: [`Windows Tranche 8 checkpoint`](docs/bringup/crtweb_windows_tranche8.md).
   * [x] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy accepted on
     Linux/x86_64, macOS/arm64 and Windows/x64 (acceptance).
   * [ ] **8B playback:** complete 14,400-frame PCM fixture and paused-preroll/backpressure fixes
-    accepted on Linux and macOS (2026-10-15); current Windows replay pending.
-  * [ ] **8C capture:** synthetic replay accepted on all three hosts; Linux/macOS/Windows physical-camera
-    evidence recorded; Linux and macOS same-process resource/restart gates pass.
-    Windows current replay pending; replay the common allocator change's native allocator/fork
-    regressions on Linux/Windows before claiming updated cross-host acceptance.
+    accepted on all three hosts; Windows output-drain/clock correction passes. Replay that
+    common correction and the device-free frame test on Linux/macOS before closing this gate.
+  * [x] **8C capture:** synthetic and physical-camera evidence plus same-process four-mode resource/
+    restart gates accepted on Linux, macOS and Windows. Windows MF queue ownership fix verified.
+  * [ ] **Shared allocator regression:** macOS and Windows native allocator/fork replay pass;
+    Linux native execution remains before claiming the updated cross-host runtime baseline.
 * [ ] **9. GPU integration.**
   * [ ] Present WebKit's private Skia output through the CRT external-surface path.
   * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one

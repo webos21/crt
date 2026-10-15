@@ -356,6 +356,20 @@ void MediaPlayerPrivateCRTShared::run()
         sinkBaseUs = mediaUs;
     };
 
+    auto updateSinkClock = [&](uint64_t& frames) {
+        if (!sink || !sinkRate || crtmedia_audio_sink_get_position_frames(sink, &frames) != CRTMEDIA_OK
+            || frames < sinkBaseFrames)
+            return false;
+        int64_t mediaUs = sinkBaseUs + static_cast<int64_t>((frames - sinkBaseFrames) * 1000000ull / sinkRate);
+        Locker locker { lock };
+        anchorUs = mediaUs;
+        anchorNs = nowNs();
+        ++clockUpdates;
+        clockAdvances += frames > lastSinkPosition;
+        lastSinkPosition = frames;
+        return true;
+    };
+
     for (;;) {
         bool playingNow;
         bool doSeek = false;
@@ -591,15 +605,7 @@ void MediaPlayerPrivateCRTShared::run()
                             offset += static_cast<uint32_t>(written);
                         }
                         uint64_t frames = 0;
-                        if (sinkRate && crtmedia_audio_sink_get_position_frames(sink, &frames) == CRTMEDIA_OK && frames >= sinkBaseFrames) {
-                            int64_t mediaUs = sinkBaseUs + static_cast<int64_t>((frames - sinkBaseFrames) * 1000000ull / sinkRate);
-                            Locker locker { lock };
-                            anchorUs = mediaUs;
-                            anchorNs = nowNs();
-                            ++clockUpdates;
-                            clockAdvances += frames > lastSinkPosition;
-                            lastSinkPosition = frames;
-                        }
+                        updateSinkClock(frames);
                     }
                 }
                 crtmedia_audio_buffer_release(&buffer);
@@ -680,9 +686,18 @@ void MediaPlayerPrivateCRTShared::run()
             }
         }
 
-        // The end: every decoder drained.
+        // Decoder EOF is not output EOF: a short clip may fit entirely in
+        // the device buffer before its first position advance. Keep applying
+        // its clock and pumping commands until accepted PCM has played out.
+        bool sinkDrained = true;
+        if (playingNow && sink) {
+            uint64_t frames = 0;
+            if (updateSinkClock(frames))
+                sinkDrained = frames >= sinkFramesWritten;
+        }
+        // The end: every decoder and the audio device drained.
         if (!ended && extractorEof && (!video.present || video.outputEnded) && (!audio.present || audio.outputEnded)
-            && !havePending && pendingAudio.empty()) {
+            && !havePending && pendingAudio.empty() && sinkDrained) {
             ended = true;
             {
                 Locker locker { lock };

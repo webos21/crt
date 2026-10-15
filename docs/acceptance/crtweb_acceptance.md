@@ -2587,6 +2587,96 @@ python3 tools/build_webkit_crt_port.py \
   --require-audio-output --allow-physical-camera -j 8
 ```
 
+**Windows/x64 current shared-code checkpoint (`d3687a9`, 2026-10-15): initial 10/12.**
+The runtime and `05-ui` SDK were rebuilt after a fresh Windows preset configuration;
+`01-c` through `05-ui` verification, core CTest 155/155, base-media CTest 5/5,
+seed-42 allocator baseline through 1M operations and all eight contention cases
+pass. Native allocator/fork evidence and limits belong to
+[allocator acceptance](allocator_baseline.md#web-camera-follow-up-2026-10-15).
+
+The initial combined replay is **not** a Windows closure. All earlier API,
+network, mapping and synthetic-capture gates pass, but strict complete-fixture
+output and physical-camera stress fail. The 48kHz stereo fixture delivers all
+14,400 frames/28,320 nonzero samples with zero write errors/fallbacks, yet its
+four sink-clock queries contain zero advances: decoder EOF was posted while
+the entire short clip still fit in the device queue. Three ordinary physical
+camera runs pass, but the first same-process stress fails at warm-up iteration
+four (`clone-after-stop`), before any measured resource gate can be accepted.
+The failed JSON and logs are retained as `out/web-windows-current-initial-failed.json`,
+`out/web-windows-current-replay.log`, `out/web-windows-current-audio-initial-failed.log`
+and `out/web-windows-current-camera-initial-failed.log`.
+
+The CRT player now continues applying the sink clock until accepted PCM has
+drained instead of equating decoder EOF with output EOF. Focused strict output
+passes with all 14,400 frames/28,320 nonzero samples, position 14,400, 28 clock
+updates/20 advances and zero errors/fallbacks; same-PID media threads 17 -> 19
+remain within the existing +3 bound. No fixture duration, output counter or
+acceptance threshold was changed. This shared player change requires focused
+Linux/macOS replay; earlier results do not validate this new revision.
+
+Camera investigation finds a Windows MF ring ownership defect: dequeue left a
+storage pointer in its old slot, and teardown freed every slot rather than only
+the still-queued range. A consumer could already have freed or reused that
+storage. The private ring now clears transferred slots and discards only active
+entries. A device-free regression in the existing frame test covers wrapped
+indices, caller-held frames, inactive stale entries and repeated drain; it passes.
+The corrected SDK focused physical gate passes three ordinary runs and twenty
+measured lifetimes after four warmups in the same WebProcess (PID 6668). All
+four release modes pass. Peak UI RSS/thread/handle deltas are +32 KiB/+0/+0;
+peak Web deltas +1,212 KiB/+1/+2, final Web +1,196 KiB/+0/+0; settling is 0ms
+throughout. Windows native camera-handle identity is unavailable (`-1`), not
+reported as zero; total process handle counts remain bounded. Source include
+closure passes 7/7 after bundling the portable private helper for every OS.
+Evidence: `out/web-windows-current-focused-camera.json` and
+`out/web-windows-current-camera-after-queue.log`. The final result follows below.
+Early LLDB attach runs and focused
+failures are diagnostic artifacts, not resource/camera acceptance; the original
+limits and twenty measured cycles remain unchanged. No camera images are saved.
+
+**Windows/x64 current replay closure (2026-10-15): final combined gate 12/12.**
+The corrected queue backend, uninstrumented capture source and output-drain
+player pass the complete driver with `--require-audio-output --allow-physical-camera`.
+The initial 10/12 failure remains separate; it is not relabelled as acceptance.
+
+| Final Windows evidence | Measured result |
+| --- | --- |
+| Complete PCM output | 48kHz stereo, 14,400 accepted frames/28,320 nonzero samples; position 14,400; 28 applied clock updates/18 advancing |
+| Output errors/fallback | 0/0; Remote Audio endpoint, not local-speaker listening or acoustic loopback |
+| Playback lifecycle | 24 measured lifetimes after twelve warmups, same PID; Web threads 25 -> 19, unchanged +3 bound |
+| Ordinary physical camera | QuickCam for Notebooks Deluxe, 640x480@30; 3/3, twenty samples/twenty distinct pictures per run, ended after stop |
+| Same-process camera stress | 4 warmups + 20 measured lifetimes, WebProcess PID 17388 unchanged; stop/revoke/navigation/last-clone release; 25 permission requests |
+| Camera UI baseline / final delta | 18,240 KiB/16 threads/245 handles; -24 KiB/-3 threads/+0 handles |
+| Camera Web baseline / final delta | 42,192 KiB/24 threads/291 handles; +876 KiB/-2 threads/-4 handles |
+| Peak measured camera deltas | UI +12 KiB RSS, no thread/handle growth; Web +876 KiB RSS, no thread/handle growth; maximum settling 0ms |
+| Freshness and ownership | At least three fresh frame serials/two distinct hashes per measured cycle; native camera handle identity unavailable (`-1`), total handles bounded |
+| API/B7/WebView lifecycle | 100/100/20 cycles; RSS -4/-36/+4 KiB, threads -3/-3/-2, handles +0 throughout |
+| Host ABI | 18 static binaries, 140 mapped files across UI/Web/Network; media maps 67 files, one CRT C++ image pair; no violation; header/export firewall clean |
+| Network and cleanup | All fifteen browser/WebView trust cases pass; no remaining work-tree browser test process |
+
+The +24 MiB/+2 thread/+2 handle camera limits and 2,000ms settling budget are
+unchanged. Separate-process probes cannot substitute for the twenty same-PID
+lifetimes. No camera images are saved and no microphone capture is requested.
+The existing Windows B5 pixel-diff reference remains unavailable; successful
+surface transport does not establish a new native-WPE pixel comparison.
+
+Evidence: `C:/crtw/b3w/acceptance-b3.json`, `out/web-windows-current-final.log`,
+`media-run/audio-output.log`, `physical-camera-run/run-{1,2,3}.log` and
+`physical-camera-run/stress.log` under that work root. Reproduce with the
+Windows driver command above, adding both explicit device options after an
+FFmpeg-enabled `05-ui` refresh. Core/allocator, source-closure and software
+regressions are recorded in `HISTORY.md` and allocator acceptance.
+The final artifact refresh verifies `01-c` through `05-ui`, includes the new
+private header in the 04 source archive and passes the five base-media tests
+(`out/web-windows-current-artifacts-final.log`, `out/web-windows-current-media-final.log`).
+
+Windows Tranche 8 replay is complete. Cross-host closure still requires focused
+Linux/macOS playback of the common device-drain correction (including the
+complete PCM fixture and device-free frame regression), and native Linux
+allocator/fork execution of the indexed allocator. The earlier Linux/macOS
+captures remain accepted; the MF ownership fix is Windows-specific. Packaging,
+Windows media export narrowing and GPU integration remain their existing
+Tranche 10/9 work, not implicitly completed by this replay.
+
 ### 9. GPU integration
 
 Start with WebKit's Skia output to an external surface consumed by CRT's Skia.

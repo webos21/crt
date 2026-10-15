@@ -167,6 +167,9 @@ STAGES = {
             "libcrtmedia/src/gpu_frame.c",
             "libcrtmedia/src/capture.c",
             "libcrtmedia/src/capture_internal.h",
+            # Portable MF ring ownership helpers are also tested by frame_test
+            # on every host; bundle the private header for all stage assets.
+            "libcrtmedia/src/arch/windows/capture_mf_queue.h",
             "libcrtmedia/src/capture_v4l2_test_control.h",
             # capture_avfoundation.c's own private test hook header (Tranche
             # 4A) -- same real gap the comment on the tests list further

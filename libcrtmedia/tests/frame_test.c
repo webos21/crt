@@ -9,6 +9,7 @@
 // file does not attempt.
 
 #include "crtmedia/frame.h"
+#include "../src/arch/windows/capture_mf_queue.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -224,7 +225,45 @@ static void test_convert_invalid(void) {
         "convert rejects a width mismatch");
 }
 
+static unsigned queue_releases[4];
+static uint8_t queue_storage[4];
+
+static void record_queue_release(void* storage) {
+  for (unsigned i = 0; i < 4; ++i) {
+    if (storage == &queue_storage[i]) {
+      ++queue_releases[i];
+      return;
+    }
+  }
+  CHECK(0, "queue releases only owned storage");
+}
+
+static void test_capture_queue_ownership(void) {
+  crtmedia_mf_queued_frame queue[CRTMEDIA_MF_QUEUE_CAPACITY] = {{0}};
+  uint32_t head = 3, count = 3; // active slots wrap around: 3, 0, 1
+  for (unsigned i = 0; i < 4; ++i) {
+    queue[i].storage = &queue_storage[i];
+    queue_releases[i] = 0;
+  }
+  crtmedia_mf_queued_frame held = crtmedia_mf_queue_take(queue, &head, &count);
+  CHECK(held.storage == &queue_storage[3] && queue[3].storage == NULL,
+        "dequeue clears the transferred slot");
+  CHECK(head == 0 && count == 2, "ring dequeue preserves remaining ownership");
+  crtmedia_mf_queue_discard(queue, &head, &count, record_queue_release);
+  CHECK(queue_releases[0] == 1 && queue_releases[1] == 1,
+        "source teardown releases active queued frames exactly once");
+  CHECK(queue_releases[2] == 0 && queue_releases[3] == 0,
+        "teardown does not free inactive or caller-owned storage");
+  record_queue_release(held.storage);
+  CHECK(queue_releases[3] == 1 && count == 0,
+        "only the frame consumer releases transferred storage");
+  crtmedia_mf_queue_discard(queue, &head, &count, record_queue_release);
+  CHECK(queue_releases[0] == 1 && queue_releases[1] == 1,
+        "a second drain cannot release old ring entries");
+}
+
 int main(void) {
+  test_capture_queue_ownership();
   test_describe_planes_packed();
   test_describe_planes_yuv420p();
   test_describe_planes_invalid();

@@ -109,8 +109,8 @@ Rationale:
 
 - Run the focused allocator CTest selection on Windows/aarch64 when that host
   is available.
-- Replay the indexed-free-list change on Linux/Windows with their native
-  allocator/fork regressions; macOS replay is recorded below.
+- Replay the indexed-free-list change on Linux with native allocator/fork
+  regressions; macOS and Windows/x64 replay are recorded below.
 - Promote Scudo only if a repeatable blocker appears in the current allocator
   and the reproducer is preserved.
 
@@ -141,5 +141,18 @@ passes all eight private/shared 1/8/16/32-thread cases. Generated one-off report
 are under `out/macos-host-ninja-debug/tranche8-replay-20261015/allocator-{baseline,contention}/`.
 These runs overlapped SDK build activity and are correctness/envelope evidence,
 not a controlled throughput comparison against the September data. Native
-Linux/Windows execution of the common change remains a separate replay;
-cross-target compile checks are not substitutes for it.
+Linux execution of the common change remains a separate replay; Windows/x64
+execution is recorded below. Cross-target compile checks are not substitutes.
+
+Windows/x64 now passes native core CTest 155/155 after a fresh configuration
+and runtime rebuild, including ordinary/diagnostic allocator, fault, fork,
+runtime-reset and fragmented many-region fork tests. The seed-42 baseline
+passes four tiers through 1M operations (12 OS regions), and the private/shared
+1/8/16/32-thread sweep passes all eight cases. Generated reports are under
+`out/web-windows-current-allocator/{baseline,contention}/`; logs are
+`out/web-windows-current-core-ctest.log` and
+`out/web-windows-current-allocator-{baseline,contention}.log`.
+SDK work overlapped these runs: they establish correctness, not controlled
+throughput comparisons. The runner's raw host-RSS counters have not been
+independently reconciled with Windows startup relaunch and are not used as
+memory-envelope evidence here. No allocator policy or resource bound changed.

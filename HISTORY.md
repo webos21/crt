@@ -11,6 +11,72 @@ substantive update.
 
 ## 2026-10-15
 
+### Windows Web replay fixes: output EOF and MF frame-ring ownership
+
+The first current shared-code replay passes 10/12; its failed checkpoint is
+retained in `docs/acceptance/crtweb_acceptance.md`. The complete 300ms PCM clip
+fit in WASAPI's buffer before any position advance, yet the player posted
+decoder EOF as playback end. The CRT player now keeps applying the device clock
+until accepted PCM drains. Focused strict output delivers 14,400 frames/28,320
+nonzero samples, 28 clock updates/20 advances and zero errors/fallbacks; media
+threads 17 -> 19 remain within the existing bound. This common player change
+still requires Linux/macOS focused replay.
+
+Windows physical-camera stress exposed a pre-existing MF ring ownership bug:
+dequeue left the transferred storage address in its old slot and teardown
+freed all capacity slots, including frames already freed/reused by consumers.
+The private ring clears transferred slots and drains only its active range.
+The existing device-free frame test covers wraparound, caller-held frames,
+inactive stale slots and repeated drain. Its portable helper is included in
+all stage-source assets; include-closure checks pass 7/7. Temporary capture
+tracing was removed. The corrected focused physical gate passes three ordinary
+probes plus twenty same-PID lifetimes after four warmups, rotating all four
+release modes under unchanged limits. Peak UI delta is +32 KiB/+0 threads/+0
+handles; peak Web delta +1,212 KiB/+1/+2; final Web +1,196 KiB/+0/+0; all settling
+is 0ms.
+
+Final combined Windows replay passes **12/12** with both device options enabled:
+all 14,400 fixture frames and 28,320 nonzero samples reach Remote Audio, position
+14,400, 28 applied clock updates/18 advances and zero errors/fallbacks. Three
+ordinary camera runs pass with twenty distinct pictures each; twenty measured
+lifetimes use one WebProcess, four warmups and all four release modes. Peak
+Web RSS delta is +876 KiB with no thread/handle growth; final +876 KiB/-2 threads/
+-4 handles, settling 0ms. Media lifetimes keep one PID (25 -> 19 threads).
+Public API/B7/WebView lifecycle and fifteen network trust cases pass; eighteen
+static binaries and 140 runtime mapped files have no audit violation. No
+remaining work-tree browser process. Final evidence:
+`C:/crtw/b3w/acceptance-b3.json`, `out/web-windows-current-final.log` and the
+work-root media/camera logs; detailed measurements and reproduction belong to
+`docs/acceptance/crtweb_acceptance.md`. Final SDK/source-asset refresh verifies
+`01-c` through `05-ui` and the generated 04 source archive contains the private
+queue header; base-media tests pass 5/5. Evidence/parser tests pass 17/17,
+stage-source closure 7/7, CMake paths 2/2, ABI policy 6/6, TLS fixture 4/4,
+licensing 15/15 and the 23-patch manifest gate. Artifact/software logs are
+`out/web-windows-current-artifacts-final.log` and
+`out/web-windows-current-media-final.log`. This closes Windows replay, not the
+new common output-drain fix's Linux/macOS replay or Linux native allocator
+regressions. Remote Audio is endpoint/clock evidence, not local-speaker listening.
+
+### Windows native replay of the indexed allocator
+
+Rebuilt the current runtime and cumulative SDK from `d3687a9` after a fresh
+Windows preset configuration preserving the existing CRT options; `01-c`
+through `05-ui` verification passes. Core CTest passes 155/155, including
+ordinary/diagnostic allocator, fault/canary, contention and native Windows
+fork/runtime-reset/many-region regressions. Seed-42 baseline correctness passes
+all four tiers through 1M operations (12 OS regions at 1M); all eight
+private/shared 1/8/16/32-thread contention cases pass. This is native x64
+execution, not a cross-target compile or replay of pre-change executables.
+
+Evidence: `out/web-windows-current-fresh-configure.log`,
+`out/web-windows-current-sdk-build.log`, `out/web-windows-current-core-ctest.log`,
+`out/web-windows-current-allocator-{baseline,contention}.log` and reports under
+`out/web-windows-current-allocator/`. These one-off runs overlap SDK work and
+are correctness evidence, not controlled throughput comparisons; host-RSS
+provenance across Windows startup relaunch was not independently revalidated,
+so the raw runner RSS fields are not used for memory-envelope acceptance.
+Linux native replay of this allocator revision remains separate work.
+
 ### macOS Web 8C: allocator latency and native lifetime scoping
 
 The final combined gate passes **12/12**, closing macOS/arm64 Tranche 8C. It includes three ordinary

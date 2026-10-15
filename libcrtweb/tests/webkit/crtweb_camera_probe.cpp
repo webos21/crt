@@ -149,7 +149,11 @@ static bool stressCamera(crtweb_view* view, unsigned cycles, const std::string& 
             js(view, "window.clone=window.track.clone();window.track.stop();document.getElementById('v').srcObject=new MediaStream([window.clone]);'cloned'");
             if (js(view, "window.clone.readyState") != "live") return fail("clone-live");
             pumpFor(300);
-            if (js(view, "window.clone.readyState") != "live") return fail("clone-after-stop");
+            if (js(view, "window.clone.readyState") != "live") {
+                fprintf(stderr, "CAMERA_STRESS clone_state=%s\n", js(view,
+                    "JSON.stringify({clone:window.clone.readyState,original:window.track.readyState,result:window.result})").c_str());
+                return fail("clone-after-stop");
+            }
             js(view, "window.clone.stop();window.clone=null;'last-owner-stopped'");
         }
         if (mode != 2 && !pumpFor(5000, [&] { return js(view, "window.track.readyState") == "ended"; })) return fail("track-ended");
