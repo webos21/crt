@@ -108,8 +108,8 @@ destination and sees progress and the result); popups (`window.open`, `window.cl
 JavaScript dialogs (alert, confirm, prompt) answered by the application; and IME (composition and
 commit of arbitrary UTF-8).
 
-Planned v1 extension, approved 2026-10-14 but **not implemented**: video camera capture and the
-application-owned camera permission contract below (Tranche 8C). Microphone capture remains
+Video camera capture and the application-owned camera permission contract below are implemented
+as the Tranche 8C extension approved 2026-10-14; host acceptance belongs to the acceptance document. Microphone capture remains
 deferred; enabling video must not imply support for `audio: true`.
 
 Not in v1, recorded so they are decisions, not omissions: device scale other than 100 %;
@@ -137,8 +137,9 @@ Completion validates ownership before reading token state; addresses are not reu
 for a different request within that runtime, so a stale decision cannot grant a new
 request. The retained bookkeeping contains no WebKit request/device reference after resolution.
 
-The initial grant is request-scoped: no implicit persistence in cookies, website data or a shared
-NetworkProcess, and no reuse by another view/origin. Pending requests are cancelled on document
+The grant is scoped to the requesting frame/document: no implicit persistence in cookies, website data or a shared
+NetworkProcess, and no reuse by another view/origin. Within that scope WebKit may reuse the grant,
+as described below; `track.stop()` alone is not permission revocation. Pending requests are cancelled on document
 replacement, frame removal, view/runtime destruction or process loss. The application must also be
 able to revoke active camera access; revocation ends affected tracks and releases their capture
 lease without disturbing another view's separately authorized work. `track.stop()` and the last
@@ -153,7 +154,7 @@ generation checks so stop/navigation cannot publish stale frames. No FFmpeg, V4L
 Media Foundation or private Skia type may cross the public API.
 
 Implementation order was permission lifecycle -> CRT video source/device factory -> MediaStream
-video display over the CPU playback path -> physical-host replay (the last still pending). Synthetic/test sources must be
+video display over the CPU playback path -> physical-host replay. Synthetic/test sources must be
 test-only and must never be reported as physical camera evidence. Automated default gates prove
 denial and lifecycle without activating a camera; physical-camera validation is explicitly opt-in.
 The public surface is `on_media_permission` / `crtweb_media_permission_complete` / `crtweb_view_revoke_media`

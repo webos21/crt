@@ -326,10 +326,7 @@ static crtmedia_result alsa_configure(
   return CRTMEDIA_OK;
 }
 
-/* Tries every real `/dev/snd/pcmC*D*p` (playback) device node found, in
- * ascending (card, device) order, until one fully configures -- a real,
- * plausible case (a device already claimed by another process, EBUSY)
- * deserves trying the next candidate, not giving up immediately. Fills in
+/* Tries the lowest-numbered `/dev/snd/pcmC*D*p` playback device. Fills in
  * `sink->fd`/`block_align`/`sample_rate` and leaves `sink->backend` unset
  * on success; returns CRTMEDIA_ERROR_UNSUPPORTED (never a crash) if no
  * candidate exists or none configures -- this project's own WSL dev loop
@@ -357,17 +354,17 @@ static crtmedia_result alsa_try_open(const crtmedia_audio_sink_desc* desc, crtme
   struct dirent* entry;
   unsigned int best_card = 0, best_dev = 0;
   int have_best = 0;
-  /* Two passes over the (small, in-memory-already) directory listing:
-   * first find the lowest (card, device) candidate name, open/configure
-   * it; a real multi-card host trying every candidate in order would
-   * need the full sorted list, but this project's narrow first pass
-   * (matching every other "narrow now, expand later" precedent here)
+  /* A later multi-device selector can try a sorted list. This first pass
    * only tries the single lowest-numbered playback device. */
   char best_name[64];
   best_name[0] = '\0';
   while ((entry = readdir(dir)) != NULL) {
     unsigned int card = 0, devnum = 0;
-    if (sscanf(entry->d_name, "pcmC%uD%up", &card, &devnum) != 2) {
+    int consumed = 0;
+    /* sscanf's assignment count does not include the trailing literal: a
+     * capture node ending in 'c' also returns two assignments without %n. */
+    if (sscanf(entry->d_name, "pcmC%uD%up%n", &card, &devnum, &consumed) != 2
+        || consumed == 0 || entry->d_name[consumed] != '\0') {
       continue;
     }
     if (!have_best || card < best_card || (card == best_card && devnum < best_dev)) {
@@ -400,6 +397,9 @@ static crtmedia_result alsa_try_open(const crtmedia_audio_sink_desc* desc, crtme
   sink->fd = fd;
   sink->block_align = desc->channels * bytes_per_sample;
   sink->sample_rate = desc->sample_rate;
+  if (getenv("CRTMEDIA_AUDIO_SINK_TRACE"))
+    fprintf(stderr, "CRTMEDIA_AUDIO sink_open sink_id=%llu backend=alsa device=%s rate=%u channels=%u\n",
+        (unsigned long long)(uintptr_t)sink, path, desc->sample_rate, desc->channels);
   return CRTMEDIA_OK;
 }
 
@@ -411,7 +411,11 @@ static int64_t alsa_write(crtmedia_audio_sink* sink, const void* data, uint32_t 
   for (;;) {
     int r = ioctl(sink->fd, CRTMEDIA_SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
     if (r == 0) {
-      return (int64_t)xfer.frames; /* successful WRITEI_FRAMES sets frames to the real transferred count */
+      /* Bionic's sound/asound.h: frames is input; result is the actual
+       * transferred frame count (Linux snd_pcm_xferi_frames_ioctl). */
+      if (xfer.result < 0 || (unsigned long)xfer.result > frame_count)
+        return (int64_t)CRTMEDIA_ERROR_UNSUPPORTED;
+      return (int64_t)xfer.result;
     }
     if (errno == EINTR) {
       continue;
@@ -1255,6 +1259,9 @@ crtmedia_result crtmedia_audio_sink_open(const crtmedia_audio_sink_desc* desc, c
 
   memset(sink, 0, sizeof(*sink));
   if (pulse_try_open(desc, sink) == CRTMEDIA_OK) {
+    if (getenv("CRTMEDIA_AUDIO_SINK_TRACE"))
+      fprintf(stderr, "CRTMEDIA_AUDIO sink_open sink_id=%llu backend=pulse rate=%u channels=%u\n",
+          (unsigned long long)(uintptr_t)sink, desc->sample_rate, desc->channels);
     *out_sink = sink;
     return CRTMEDIA_OK;
   }

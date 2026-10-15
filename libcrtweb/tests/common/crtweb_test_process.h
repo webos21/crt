@@ -62,7 +62,7 @@ inline std::vector<Process> children(pid_t parent = getpid())
     CloseHandle(snapshot);
     return result;
 }
-inline Resources resources()
+inline Resources resources(pid_t pid = getpid())
 {
     MemoryCounters memory { };
     memory.size = sizeof memory;
@@ -73,11 +73,13 @@ inline Resources resources()
     entry.size = sizeof entry;
     if (snapshot != reinterpret_cast<void*>(-1)) {
         for (int more = Process32First(snapshot, &entry); more; more = Process32Next(snapshot, &entry))
-            if (entry.pid == static_cast<unsigned>(getpid())) threads = entry.threads;
+            if (entry.pid == static_cast<unsigned>(pid)) threads = entry.threads;
         CloseHandle(snapshot);
     }
-    bool ok = K32GetProcessMemoryInfo(GetCurrentProcess(), &memory, sizeof memory)
-        && GetProcessHandleCount(GetCurrentProcess(), &handles);
+    void* process = pid == getpid() ? GetCurrentProcess() : OpenProcess(0x410, 0, pid);
+    bool ok = process && K32GetProcessMemoryInfo(process, &memory, sizeof memory)
+        && GetProcessHandleCount(process, &handles);
+    if (process && pid != getpid()) CloseHandle(process);
     return {ok ? static_cast<long>(memory.resident / 1024) : -1, threads, ok ? static_cast<long>(handles) : -1};
 }
 #else
@@ -108,11 +110,18 @@ inline std::vector<Process> children(pid_t parent = getpid())
     }
     return result;
 }
-inline Resources resources()
+inline Resources resources(pid_t pid = getpid())
 {
     TaskInfo info { };
-    if (proc_pidinfo(getpid(), 4, 0, &info, sizeof info) != sizeof info) return {-1, -1, -1};
-    return {static_cast<long>(info.residentSize / 1024), info.threads, descriptors()};
+    if (proc_pidinfo(pid, 4, 0, &info, sizeof info) != sizeof info) return {-1, -1, -1};
+    if (pid == getpid()) return {static_cast<long>(info.residentSize / 1024), info.threads, descriptors()};
+    // PROC_PIDLISTFDS entries are {int32_t fd, uint32_t type}. This is a test observer only;
+    // neither libproc nor native handles enter the runtime's public API.
+    int bytes = proc_pidinfo(pid, 1, 0, nullptr, 0);
+    if (bytes <= 0) return {static_cast<long>(info.residentSize / 1024), info.threads, -1};
+    std::vector<uint64_t> entries(static_cast<size_t>(bytes) / 8 + 32);
+    bytes = proc_pidinfo(pid, 1, 0, entries.data(), static_cast<int>(entries.size() * 8));
+    return {static_cast<long>(info.residentSize / 1024), info.threads, bytes > 0 ? bytes / 8 : -1};
 }
 #else
 inline std::vector<Process> children(pid_t parent = getpid())
@@ -144,10 +153,11 @@ inline std::vector<Process> children(pid_t parent = getpid())
     closedir(directory);
     return result;
 }
-inline Resources resources()
+inline Resources resources(pid_t pid = getpid())
 {
     long memory = -1, threads = -1;
-    FILE* file = fopen("/proc/self/status", "r");
+    std::string root = "/proc/" + std::to_string(pid);
+    FILE* file = fopen((root + "/status").c_str(), "r");
     if (file) {
         char line[256];
         while (fgets(line, sizeof line, file)) {
@@ -156,7 +166,14 @@ inline Resources resources()
         }
         fclose(file);
     }
-    return {memory, threads, descriptors()};
+    if (pid == getpid()) return {memory, threads, descriptors()};
+    long count = -1;
+    if (DIR* directory = opendir((root + "/fd").c_str())) {
+        count = 0;
+        while (dirent* entry = readdir(directory)) if (entry->d_name[0] != '.') ++count;
+        closedir(directory);
+    }
+    return {memory, threads, count};
 }
 #endif
 #endif

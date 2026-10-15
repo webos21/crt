@@ -574,17 +574,40 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
 
 def audio_output_evidence(text: str) -> dict:
     sinks = []
+    routes = {}
     for line in text.splitlines():
+        if line.startswith("CRTMEDIA_AUDIO sink_open "):
+            route = dict(re.findall(r"(\w+)=([^ ]+)", line))
+            if route.get("sink_id", "").isdigit():
+                routes[int(route["sink_id"])] = route
         if line.startswith("CRTWEB_AUDIO sink_closed "):
-            sinks.append({key: int(value) for key, value in re.findall(r"(\w+)=(-?\d+)", line)})
-    verified = all(sink.get("write_failures", -1) == 0 for sink in sinks) and any(
-                   sink.get("written_frames", 0) > 0 and sink.get("nonzero_samples", 0) > 0
-                   and sink.get("position_frames", 0) > 0 and sink.get("position_result", -1) == 0
-                   and sink.get("clock_advances", 0) > 0 and sink.get("write_failures", -1) == 0
-                   for sink in sinks)
+            sink = {key: int(value) for key, value in re.findall(r"(\w+)=(-?\d+)", line)}
+            route = routes.get(sink.get("sink_id"), {})
+            sink.update({key: route[key] for key in ("backend", "device") if key in route})
+            sinks.append(sink)
+    def delivered(sink):
+        return (sink.get("written_frames", 0) > 0 and sink.get("nonzero_samples", 0) > 0
+                and sink.get("position_frames", 0) > 0 and sink.get("position_result", -1) == 0
+                and sink.get("clock_advances", 0) > 0 and sink.get("write_failures", -1) == 0)
+    no_failures = all(sink.get("write_failures", -1) == 0 for sink in sinks)
+    verified = no_failures and any(delivered(sink) for sink in sinks)
+    def alsa_playback(sink):
+        return sink.get("backend") == "alsa" and bool(re.fullmatch(
+            r"/dev/snd/pcmC[0-9]+D[0-9]+p", sink.get("device", "")))
+    def complete_fixture(sink):
+        return (delivered(sink) and sink.get("rate") == 48000 and sink.get("channels") == 2
+                and sink.get("written_frames") == 14400 and sink.get("nonzero_samples", 0) > 27000)
     return {"verified": verified, "sinks": sinks,
+            "alsa_hardware_verified": no_failures and any(
+                alsa_playback(sink) and delivered(sink)
+                for sink in sinks),
+            # Generated 300-ms S16/stereo/48kHz clip: paused preroll must not
+            # discard all but its final decoded buffer before opening output.
+            "fixture_pcm_complete": no_failures and any(complete_fixture(sink) for sink in sinks),
+            "native_fixture_verified": no_failures and any(
+                alsa_playback(sink) and complete_fixture(sink) for sink in sinks),
             "fallback_count": text.count("CRTWEB_AUDIO sink_open_failed "),
-            "meaning": "nonzero PCM accepted, hardware position advanced and used to re-anchor the clock; not a listening test"}
+            "meaning": "nonzero PCM accepted, sink position advanced and used to re-anchor the clock; not a listening test or proof a Pulse sink is physical"}
 
 
 def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux",
@@ -595,7 +618,7 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
     import subprocess
     run_env = gate_environment(build, sdk, prefix, work, env, target_os)
     run_env["CRTWEB_MEDIA_AUDIO_TRACE"] = "1"
-    if target_os == "windows":
+    if target_os in ("linux", "windows"):
         run_env["CRTMEDIA_AUDIO_SINK_TRACE"] = "1"
     if target_os == "macos":
         # CoreAudio brings Apple's own C++ runtime. A global loader override also rewrites the
@@ -647,6 +670,26 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
               "va_stub_mapped": sorted(n for n in names if n.startswith("libva")),
               "audio_output": audio_output_evidence(completed.stderr),
               "output": completed.stdout.splitlines()}
+    if target_os == "linux":
+        result["audio_output"]["endpoint_verified"] = result["audio_output"]["verified"]
+        result["audio_output"]["verified"] &= (result["audio_output"]["alsa_hardware_verified"]
+                                                and result["audio_output"]["native_fixture_verified"])
+        result["audio_output"]["linux_route_policy"] = "direct ALSA device evidence; Pulse endpoint alone may be Dummy Output"
+        result["audio_output"]["playback_devices"] = [
+            {"path": str(device), "writable": os.access(device, os.W_OK)}
+            for device in sorted(Path("/dev/snd").glob("pcm*p"))]
+        # Optional build-host observation, not a host client library in the target closure and not
+        # a reason to change routing/permissions. Direct ALSA evidence remains the strict criterion.
+        wpctl = shutil.which("wpctl")
+        if wpctl:
+            try:
+                observed = subprocess.run([wpctl, "inspect", "@DEFAULT_AUDIO_SINK@"],
+                                          capture_output=True, text=True, timeout=5)
+                result["audio_output"]["pipewire_default_sink"] = dict(re.findall(
+                    r'^\s*\*?\s*(node\.name|node\.description|node\.virtual|factory\.name)\s*=\s*"([^"]*)"',
+                    observed.stdout, re.M))
+            except (OSError, subprocess.TimeoutExpired):
+                result["audio_output"]["pipewire_default_sink"] = {"observation": "unavailable"}
     (runs / "audio-output.log").write_text(completed.stderr, encoding="utf-8")
     result["passed"] = (completed.returncode == 0 and "crtweb_media_test: ok" in completed.stdout and not violations
                         and result["crtmedia_mapped"]
@@ -655,8 +698,49 @@ def run_media_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
                         # /usr/lib libc++ and libc++abi, which are recorded and not a CRT dependency.
                         and len(runtimes) == 2 and (macos or not system_runtime))
     if require_audio_output:
-        result["passed"] &= result["audio_output"]["verified"]
+        result["passed"] &= (result["audio_output"]["verified"]
+                             and result["audio_output"]["fixture_pcm_complete"])
+        if target_os == "linux":
+            # A Pulse null sink acknowledges nonzero PCM and advances a software clock. That is
+            # endpoint delivery, NOT physical Linux output. Require an observed native ALSA sink.
+            result["audio_output"]["physical_linux_output_required"] = True
     return result
+
+
+def camera_stress_evidence(text: str, expected_cycles: int = 20, require_device_fds: bool = False) -> dict:
+    """A fresh process per run cannot prove bounded camera lifetimes in one browser process."""
+    def fields(line):
+        return {key: int(value) for key, value in re.findall(r"(\w+)=(-?\d+)", line)}
+    baselines = [fields(line) for line in text.splitlines() if line.startswith("CAMERA_STRESS baseline ")]
+    cycles = [fields(line) for line in text.splitlines() if line.startswith("CAMERA_STRESS cycle=")]
+    summaries = [fields(line) for line in text.splitlines() if line.startswith("CAMERA_STRESS completed=")]
+    permissions = [fields(line) for line in text.splitlines() if line.startswith("CAMERA_STRESS permission_requests=")]
+    verified = (expected_cycles >= 20 and len(baselines) == len(summaries) == len(permissions) == 1
+                and len(cycles) == expected_cycles and "CAMERA_STRESS failed" not in text)
+    baseline = baselines[0] if len(baselines) == 1 else {}
+    summary = summaries[0] if len(summaries) == 1 else {}
+    verified &= (baseline.get("pid", -1) > 0 and summary.get("completed") == expected_cycles
+                 and summary.get("warmups", -1) >= 3 and summary.get("same_process") == 1
+                 and summary.get("rss_limit_kib") == 24576 and summary.get("thread_limit") == 2
+                 and summary.get("descriptor_limit") == 2
+                 and (permissions[0].get("permission_requests") if len(permissions) == 1 else -1)
+                 == 1 + summary.get("warmups", 0) + expected_cycles)
+    for role in ("ui", "web"):
+        verified &= all(baseline.get(role + "_" + key, -1) > 0 for key in ("rss", "threads", "descriptors"))
+    for index, cycle in enumerate(cycles, 1):
+        verified &= (cycle.get("cycle") == index and cycle.get("pid") == baseline.get("pid")
+                     and cycle.get("samples", 0) >= 3 and cycle.get("distinct", 0) >= 2)
+        verified &= cycle.get("mode") == (summary.get("warmups", -1) + index - 1) % 4
+        for role in ("ui", "web"):
+            for key, limit in (("rss", 24576), ("threads", 2), ("descriptors", 2)):
+                delta = cycle.get(role + "_" + key + "_delta")
+                verified &= delta is not None and delta <= limit and baseline.get(role + "_" + key, -1) + delta > 0
+        if require_device_fds:
+            verified &= cycle.get("camera_fds") == 0
+    verified &= {cycle.get("mode") for cycle in cycles} == {0, 1, 2, 3}
+    return {"verified": bool(verified), "baseline": baseline, "summary": summary, "cycles": cycles,
+            "device_fd_release_required": require_device_fds,
+            "meaning": "same UI/Web process; bounded post-stop RSS/threads/descriptors after warm-up; no images saved"}
 
 
 def run_physical_camera_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
@@ -679,8 +763,19 @@ def run_physical_camera_gate(build: Path, sdk: Path, prefix: Path, work: Path, e
         results.append({"returncode": completed.returncode,
                         "passed": completed.returncode == 0 and "crtweb_camera_probe: ok" in completed.stdout,
                         "output": output.splitlines()})
-    return {"passed": all(run["passed"] for run in results), "source": "physical (explicit opt-in)",
-            "runs": results, "physical_camera_opened": any(run["passed"] for run in results)}
+    completed = subprocess.run([str(build / "bin" / ("crtweb_camera_probe" + exe)), "--allow-physical-camera",
+                                "0", "--stress-cycles=20"], env=run_env, cwd=directory,
+                               capture_output=True, text=True, timeout=300)
+    output = completed.stdout + completed.stderr
+    print(output, end="")
+    (directory / "stress.log").write_text(output, encoding="utf-8")
+    stress = camera_stress_evidence(output, require_device_fds=target_os == "linux")
+    stress.update(returncode=completed.returncode, output=output.splitlines())
+    stress["passed"] = (completed.returncode == 0 and "crtweb_camera_probe: ok" in completed.stdout
+                        and stress["verified"])
+    return {"passed": bool(results) and all(run["passed"] for run in results) and stress["passed"],
+            "source": "physical (explicit opt-in)", "runs": results, "stress": stress,
+            "physical_camera_opened": True if any(run["passed"] for run in results) else None}
 
 
 def run_capture_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, target_os: str = "linux") -> dict:
@@ -723,7 +818,8 @@ def main() -> int:
     parser.add_argument("--require-audio-output", action="store_true",
                         help="with --webkit --run-tests: require real PCM delivery and a progressing sink clock")
     parser.add_argument("--allow-physical-camera", action="store_true",
-                        help="with --webkit --run-tests: explicitly open the real camera in three consecutive probe runs")
+                        help="with --webkit --run-tests: explicitly open the real camera in three probe runs "
+                             "and 20 same-process capture lifetimes after warm-up")
     parser.add_argument("--define", action="append", default=[], help="extra -D option for cmake")
     parser.add_argument("-k", "--keep-going", action="store_true", help="ninja -k 0: collect every error")
     parser.add_argument("-j", "--jobs", type=int, default=0)

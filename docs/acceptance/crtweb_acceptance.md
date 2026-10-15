@@ -1993,9 +1993,10 @@ and a missing file both end in `MEDIA_ERR_SRC_NOT_SUPPORTED`, HTTP playback thro
 loader, twelve load/play/reset lifetimes with the Web process at 17 -> 14 threads, and every web process
 gone after the runtime. The combined gate (now eleven entries with `media_playback`) is green; the
 Web process maps 36 files with no Host ABI violation, `libcrtmedia.so` and the two stubs mapped, one
-C++ runtime. **Not verified:** audio *output*. This host has no sound card, so every run used the wall
-clock fallback (`crtmedia_audio_sink_open` failed and was reported by falling back); the audio-clock
-path and real PCM delivery need a physical-host run. Also unverified: other codecs than the test assets'
+C++ runtime. **Not verified at that checkpoint:** audio *output*. Every run used the wall
+clock fallback (`crtmedia_audio_sink_open` failed); that alone did not establish whether hardware was
+absent or inaccessible. The 2026-10-15 follow-up below distinguishes endpoint delivery from hardware.
+Also unverified: other codecs than the test assets'
 (H.264 Constrained Baseline, AAC, MP3, PCM) and A/V sync over long clips.
 
 This is **8B Linux acceptance**, not closure of Tranche 8: macOS/Windows replay of 8A and 8B and the 8C
@@ -2271,8 +2272,138 @@ the Windows reproduction command above. Its evidence is
 Camera runs do not yet establish same-process RSS/thread/handle bounds or an
 independent device-busy check. Microphone, OS-level permission revocation and
 acoustic loopback remain outside this evidence.
-Tranche 8 remains open for Linux real-audio evidence, Linux/macOS replay of the
-common permission-token fix and same-process physical-camera resource stress.
+At that Windows checkpoint, Linux real-audio evidence, Linux/macOS replay of
+the common permission-token fix and same-process physical-camera resource
+stress remained open. The Linux follow-up below supersedes its Linux gaps.
+
+**Linux/x86_64 physical-device follow-up (2026-10-15).** The user explicitly
+authorized short audio output and physical video-camera runs. Initial endpoint
+delivery was not hardware output: the account lacked the `audio` group in its
+effective process credentials, playback nodes were not writable, and PipeWire
+exposed only `auto_null` (`Dummy Output`, `support.null-audio-sink`, virtual).
+The user added the group and logged in again; device access is now effective.
+The agent did not change group membership, ACLs or session routing. PipeWire
+still exposes Dummy Output, so Pulse PCM/position alone is not hardware proof.
+Read-only session inspection after login finds the built-in audio card's active
+PipeWire profile is `off` (`tranche8-linux-pipewire-profile.log` under the work
+root); its profile/routing was not changed for this validation.
+
+The new opt-in PAL diagnostic (`CRTMEDIA_AUDIO_SINK_TRACE`) identifies the
+backend/device and a sink identity. The browser's close diagnostic joins that
+identity to accepted nonzero PCM, device position and clock re-anchors; allocator
+address reuse is handled chronologically. Strict Linux output requires an exact
+`/dev/snd/pcmC<number>D<number>p` playback node and the complete native-format
+fixture, not merely an open sink, decoded data or a wall/software clock.
+
+The first post-login replay exposed a pre-existing PAL bug: `sscanf` reported
+two numeric assignments even when its trailing `p` literal did not match a
+capture node ending in `c`. It opened `/dev/snd/pcmC0D0c`; this result is invalid
+as playback evidence, and no captured PCM was saved to a file. Complete-name
+validation now rejects capture/suffix nodes before open. `WRITEI_FRAMES` also
+uses the actual `snd_xferi.result`, not its input `frames` field. A deterministic
+CRT-linked PAL test substitutes the OS boundary and verifies direction filtering,
+lowest playback selection and partial/zero/full/invalid transfer counts without
+opening any hardware. Bionic's cleaned `sound/asound.h` and the Linux kernel's
+transfer implementation were checked; no host audio client library or public
+native type was introduced.
+
+The browser test generates a quiet 300-ms, 400-Hz, stereo S16/48kHz WAV fixture.
+Early native output delivered only its last 2,112 frames: paused preroll discarded
+decoded PCM. Retaining the first buffer exposed another loss path (8,192 of
+14,400 frames): decoder backpressure released compressed samples instead of
+retrying the same input. Both are corrected. Audio-only readiness requires real
+decoded PCM, which stays owned until playback; video seek preroll retains
+interleaved PCM in a queue capped at 4 MiB/256 buffers (overflow fails loading),
+preventing a full audio decoder from blocking the target video frame. Input and
+PCM ownership are released on seek/teardown. The fixture waits paused after
+readiness, and strict output now requires all 14,400 frames with nonzero samples;
+a tail fragment does not pass. The initial seek-event regression is retained
+in `tranche8-linux-seek-checkpoint.json` and `.log` under the work root, not
+relabeled as a combined pass.
+
+| Focused strict replay | Run 1 | Run 2 |
+| --- | --- | --- |
+| Native sink | `/dev/snd/pcmC0D0p`, 48000 Hz, stereo | Same |
+| Accepted fixture PCM | 14,400 frames; 28,320 nonzero samples | Same |
+| Device position / advancing clock updates | 28,144 frames / 4 | 28,776 frames / 4 |
+| Write errors / sink-open fallbacks | 0 / 0 | 0 / 0 |
+| Browser seek/playback/lifecycle | Pass; 12 measured lifetimes | Pass; 12 measured lifetimes |
+| WebProcess mappings | 36 files; one CRT C++ pair; no violations | Same |
+
+These are hardware PCM/device-clock delivery results, not a listening or
+acoustic-loopback test. Hardware position can include underrun silence; it is
+not a count of delivered nonzero samples. Only the native stereo WAV fixture
+is physical-output proof here: decoded mono/float sources (including MP3)
+still use Pulse on this machine, whose default is virtual. No general hardware
+format conversion, long-clip A/V-sync or all-codec output claim is inferred.
+Trace evidence for both focused runs opens only `/dev/snd/pcmC0D0p`, with no
+capture PCM node. Generated artifacts:
+`out/web-crt-webcore/tranche8-linux-audio-complete-{1,2}.json`,
+`tranche8-linux-audio-complete.log` and `tranche8-linux-browser-audio-syscalls.log`.
+Earlier endpoint-only, wrong-direction and incomplete-fixture checkpoints remain
+diagnostic artifacts, not substitutes for these complete-output results.
+
+Linux also replays the strengthened permission-token regression three times:
+stale completion after view destruction, allocation churn, replacement-request
+identity and unknown opaque handles are rejected safely. Live-camera stress
+exposed `currentTime` remaining zero because streams have no file decode worker
+to own their clock. Stream play/pause now maintains monotonic anchors, and last
+track end freezes the clock. Synthetic regressions cover advance, pause/resume
+and a clone keeping the source live after its original track stops.
+
+The opt-in physical gate now adds twenty measured lifetimes after three warm-ups
+in one UI/WebProcess pair. Four modes rotate: stop the original track, explicitly
+revoke its grant, navigate while capture is active, and stop the original while
+a clone remains live before releasing the last clone. Every cycle requires at
+least three fresh frame serials/two distinct hashes and unchanged +24 MiB/+2
+thread/+2 descriptor bounds in both processes. Linux independently observes
+zero `/dev/video*` descriptors after each release; a new process per capture
+cannot satisfy this gate. The new macOS/Windows child-resource observers and
+shared playback/capture fixes still require replay on those hosts; Tranche 8
+is not closed by the Linux evidence alone. No camera images are saved.
+
+Reproduce after refreshing and verifying the FFmpeg-enabled cumulative `05-ui` SDK:
+
+```sh
+cmake --build out/linux-host-ninja-debug --target crt-ui-dist -j 8
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root out/linux-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/linux-host-ninja-debug/port-tests/install \
+  --work-root out/web-crt-webcore --reuse-tree --webkit --run-tests \
+  --require-audio-output --allow-physical-camera -j 8
+```
+
+Both device options are explicit opt-ins; default automatic gates do not open
+a physical camera or require an audio endpoint. Basic media CTests pass 6/6,
+device-evidence checks 12/12, licensing 15/15, CMake path checks 2/2, JSC tool
+checks 6/6 and TLS-fixture checks 4/4. The 23-patch/63-modified-file/24-CRT-overlay
+manifest passes. SDK refresh/verification evidence is
+`out/web-crt-webcore/tranche8-linux-playback-fix-build.log`.
+
+The final combined Linux gate passes **12/12**, including all fifteen browser/
+WebView network-trust cases, strict complete-fixture output, synthetic capture
+and physical camera. Final audio delivers the same 14,400 frames/28,320 nonzero
+samples, position 29,688 frames, four advancing clock updates, zero write errors
+and zero sink-open fallbacks. Media lifetimes keep one WebProcess (16 -> 13
+threads); mapping is 36 files with one CRT C++ pair and no violations.
+
+| Final physical-camera/lifecycle evidence | Result |
+| --- | --- |
+| Three ordinary camera runs | USB Camera (046d:08d8), 640x480/nominal 30 fps; 20 samples each, 19/20/19 distinct hashes; one permission request each, ended after stop |
+| Same-process camera stress | 3 warm-ups + 20 measured cycles, WebProcess PID 72359 unchanged, all four release modes, 24 total permission requests |
+| Stress final UI delta | +44 KiB RSS, +0 threads, +0 descriptors |
+| Stress final WebProcess delta | -76 KiB RSS, -1 thread, +0 descriptors |
+| Stress largest measured RSS delta | UI +44 KiB; WebProcess +1,512 KiB; thread/descriptor increases never exceed zero |
+| Native camera release | Zero camera descriptors in both processes after every measured cycle |
+| Public API / internal B7 / WebView lifetimes | 100 / 100 / 20 cycles; final RSS +52 / +240 / +0 KiB, final thread/descriptor deltas +0 |
+| Host ABI | 18 static binaries, 132 runtime files across UI/Web/Network roles, no violations |
+| Final cleanup | No remaining work-tree browser test process |
+
+Generated final evidence: `out/web-crt-webcore/acceptance-b3.json`,
+`tranche8-linux-hardware-final.log`, `media-run/audio-output.log`,
+`physical-camera-run/run-{1,2,3}.log` and `physical-camera-run/stress.log`.
+This closes the Linux device follow-up, not the current shared-code replay
+obligations on macOS/arm64 and Windows/x64.
 
 ### 9. GPU integration
 

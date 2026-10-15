@@ -86,6 +86,27 @@ static void writeFile(const std::string& path, const std::string& content)
     fclose(file);
 }
 
+static std::string stereoPCMFixture()
+{
+    // A quiet 300-ms triangular tone in the common native ALSA format. Decoder-native mono/float
+    // can be accepted by a Pulse null sink even when no hardware receives PCM; exercise an actual
+    // hardware-facing format too. Generated test data, not a patched upstream asset.
+    const uint32_t rate = 48000, frames = rate * 3 / 10, bytes = frames * 4;
+    std::string wav = "RIFF";
+    auto append = [&](uint32_t value, unsigned count) {
+        for (unsigned i = 0; i < count; ++i) wav += static_cast<char>((value >> (i * 8)) & 255);
+    };
+    append(bytes + 36, 4); wav += "WAVEfmt "; append(16, 4);
+    append(1, 2); append(2, 2); append(rate, 4); append(rate * 4, 4);
+    append(4, 2); append(16, 2); wav += "data"; append(bytes, 4);
+    for (uint32_t i = 0; i < frames; ++i) {
+        int phase = static_cast<int>(i % 120); // 400 Hz, peak 2048/32768
+        int16_t sample = static_cast<int16_t>((phase < 60 ? phase - 30 : 90 - phase) * 2048 / 30);
+        append(static_cast<uint16_t>(sample), 2); append(static_cast<uint16_t>(sample), 2);
+    }
+    return wav;
+}
+
 static std::string fileURLFor(const std::string& path)
 {
     std::string normalized = path;
@@ -464,6 +485,17 @@ int main(int argc, char** argv)
     writeFile(directory + "/crtweb_media_wav.html", pageFor("<audio id=m src='" + assetURL + "/test_tone.wav'></audio>", ""));
     CHECK(loadPage(fileURLFor(directory + "/crtweb_media_wav.html")) && pumpUntil([&] { return logHas("loadedmetadata"); }, 15000), "wav metadata");
     CHECK(num("m.duration") > 0.2 && num("m.duration") < 0.4, "wav duration (0.25 s)");
+
+    writeFile(directory + "/crtweb_media_stereo.wav", stereoPCMFixture());
+    writeFile(directory + "/crtweb_media_stereo.html", pageFor("<audio id=m src='"
+        + fileURLFor(directory + "/crtweb_media_stereo.wav") + "'></audio>", ""));
+    CHECK(loadPage(fileURLFor(directory + "/crtweb_media_stereo.html"))
+        && pumpUntil([&] { return logHas("loadeddata"); }, 15000), "stereo PCM metadata/data");
+    CHECK(num("m.duration") > 0.29 && num("m.duration") < 0.31, "generated stereo PCM duration");
+    crtweb_runtime_pump(gRuntime, 300);
+    CHECK(js("m.paused && m.currentTime === 0 && !m.ended") == "true", "paused preroll retains stereo PCM");
+    js("m.play(),'stereo'");
+    CHECK(pumpUntil([&] { return logHas("ended"); }, 10000), "stereo PCM plays to end");
 
     // ---- sources that cannot play ----
     writeFile(directory + "/crtweb_media_bad.mp4", "this is not an mp4 file");

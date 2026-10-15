@@ -218,9 +218,23 @@ int main()
     }
     CHECK(stateHas(statePath, "open") && stateHas(statePath, "start"), "the source was opened and started after the grant");
 
-    // 5. track.stop() releases the source.
+    // MediaStream has no file decode worker to own its clock. Live pixels alone must not hide a
+    // permanently-zero clock, nor may pause continue advancing it.
+    CHECK(pumpUntil([&] { return js(view, "String(document.getElementById('v').currentTime>0)") == "true"; }), "camera playback clock advances");
+    js(view, "document.getElementById('v').pause();window.pausedCameraTime=document.getElementById('v').currentTime;'paused'");
+    for (unsigned i = 0; i < 10; ++i) crtweb_runtime_pump(gRuntime, 20);
+    CHECK(js(view, "String(Math.abs(document.getElementById('v').currentTime-window.pausedCameraTime)<0.02)") == "true", "camera pause freezes clock");
+    js(view, "document.getElementById('v').play();'resumed'");
+    CHECK(pumpUntil([&] { return js(view, "String(document.getElementById('v').currentTime>window.pausedCameraTime+0.02)") == "true"; }), "camera resume advances clock again");
+
+    // 5. A live clone retains the source after the original stops; the last stop releases it.
+    js(view, "window.clone=window.track.clone();document.getElementById('v').srcObject=new MediaStream([window.clone]);'cloned'");
     js(view, "window.track.stop(),'stopped'");
-    CHECK(pumpUntil([&] { return stateHas(statePath, "stop") && stateHas(statePath, "close"); }, 10000), "track.stop() stops and closes the source");
+    for (unsigned i = 0; i < 10; ++i) crtweb_runtime_pump(gRuntime, 20);
+    CHECK(js(view, "window.clone.readyState") == "live", "the clone survives original track.stop()");
+    CHECK(!stateHas(statePath, "close"), "a live clone retains the capture source");
+    js(view, "window.clone.stop();window.clone=null;'last-owner-stopped'");
+    CHECK(pumpUntil([&] { return stateHas(statePath, "stop") && stateHas(statePath, "close"); }, 10000), "last track.stop() stops and closes the source");
 
     // 6. A duplicate / late completion is rejected.
     CHECK(record.last && crtweb_media_permission_complete(record.last, 1, 0) == CRTWEB_ERROR_INVALID_ARGUMENT, "a resolved request cannot be completed again");

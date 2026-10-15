@@ -702,6 +702,13 @@ set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtmedia_player_test_ru
 # exists (CRTMEDIA_BACKEND_SOURCES above). Same plain-C-executable shape as
 # crtmedia_frame_test above, no FFmpeg dependency (unconditional on
 # CRTMEDIA_ENABLE_FFMPEG).
+if(CRT_TARGET_OS STREQUAL "linux")
+  # Deterministic PAL regression; no real audio/capture device is touched.
+  add_crt_test(crtmedia_audio_sink_linux_test tests/audio_sink_linux_test.c)
+  target_include_directories(crtmedia_audio_sink_linux_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  set_tests_properties(crtmedia_audio_sink_linux_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "crtmedia_audio_sink_linux_test: ok")
+endif()
 if(CRTMEDIA_BACKEND_SOURCES)
   add_executable(crtmedia_audio_sink_test
     ${CRT_STARTUP_OBJECTS}

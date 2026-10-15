@@ -67,6 +67,7 @@ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <vector>
 
 namespace WebCore {
@@ -302,6 +303,11 @@ void MediaPlayerPrivateCRTShared::run()
     uint64_t clockUpdates = 0, clockAdvances = 0, lastSinkPosition = 0;
     unsigned writeFailures = 0;
     bool havePending = false;        // a decoded video frame waiting for its time
+    std::deque<crtmedia_audio_buffer> pendingAudio; // paused preroll, including interleaved seek audio
+    uint64_t pendingAudioBytes = 0;
+    bool decodeFailed = false;
+    bool havePendingInput = false;   // retry the same sample after decoder backpressure
+    crtmedia_sample pendingInput { };
     crtmedia_frame pending;
     memset(&pending, 0, sizeof pending);
     bool extractorEof = false;
@@ -371,6 +377,14 @@ void MediaPlayerPrivateCRTShared::run()
         }
 
         if (doSeek) {
+            if (havePendingInput) {
+                crtmedia_sample_release(&pendingInput);
+                havePendingInput = false;
+            }
+            for (auto& buffer : pendingAudio)
+                crtmedia_audio_buffer_release(&buffer);
+            pendingAudio.clear();
+            pendingAudioBytes = 0;
             crtmedia_extractor_seek_to(extractor, seekTarget);
             if (video.present)
                 crtmedia_codec_flush(video.codec);
@@ -426,7 +440,13 @@ void MediaPlayerPrivateCRTShared::run()
             for (int i = 0; i < 8; ++i) {
                 crtmedia_sample sample;
                 int eof = 0;
-                crtmedia_result rc = crtmedia_extractor_read_sample(extractor, &sample, &eof);
+                crtmedia_result rc = CRTMEDIA_OK;
+                if (havePendingInput) {
+                    sample = pendingInput;
+                    memset(&pendingInput, 0, sizeof pendingInput);
+                    havePendingInput = false;
+                } else
+                    rc = crtmedia_extractor_read_sample(extractor, &sample, &eof);
                 if (rc != CRTMEDIA_OK) {
                     extractorEof = true;
                     break;
@@ -448,20 +468,35 @@ void MediaPlayerPrivateCRTShared::run()
                     queued = crtmedia_codec_queue_input(video.codec, sample.data, sample.size, sample.pts_us, 0);
                 else if (audio.present && sample.track_index == audio.index)
                     queued = crtmedia_codec_queue_input(audio.codec, sample.data, sample.size, sample.pts_us, 0);
-                crtmedia_sample_release(&sample);
                 progressed = true;
-                if (queued == CRTMEDIA_WOULD_BLOCK)
+                if (queued == CRTMEDIA_WOULD_BLOCK) {
+                    pendingInput = sample;
+                    havePendingInput = true;
                     break;
+                }
+                crtmedia_sample_release(&sample);
             }
         }
 
-        // Audio: decode, then play (or discard while paused/seeking or without a device).
-        if (audio.present && !audio.outputEnded) {
+        // Audio: retain the first preroll buffer until play; only seek-stale
+        // samples or a missing output device may discard decoded audio.
+        if (audio.present && (!audio.outputEnded || !pendingAudio.empty())) {
             for (;;) {
+                if (!playingNow && (!prerolling || (!video.present && !pendingAudio.empty())))
+                    break;
                 crtmedia_audio_buffer buffer;
                 int eof = 0;
                 memset(&buffer, 0, sizeof buffer);
-                crtmedia_result rc = crtmedia_codec_dequeue_output(audio.codec, nullptr, &buffer, &eof);
+                crtmedia_result rc = CRTMEDIA_OK;
+                if (playingNow && !pendingAudio.empty()) {
+                    buffer = pendingAudio.front();
+                    pendingAudio.pop_front();
+                    pendingAudioBytes -= static_cast<uint64_t>(buffer.frame_count) * buffer.channels
+                        * (buffer.format == CRTMEDIA_SAMPLE_FORMAT_S16 ? 2 : 4);
+                } else if (audio.outputEnded)
+                    break;
+                else
+                    rc = crtmedia_codec_dequeue_output(audio.codec, nullptr, &buffer, &eof);
                 if (rc != CRTMEDIA_OK)
                     break;
                 if (eof) {
@@ -470,6 +505,22 @@ void MediaPlayerPrivateCRTShared::run()
                 }
                 progressed = true;
                 bool stale = buffer.timestamp_us != CRTMEDIA_AUDIO_TIMESTAMP_NONE && buffer.timestamp_us + 20000 < discardBeforeUs;
+                if (!playingNow && !stale) {
+                    // While finding the seek's video frame, interleaved audio
+                    // must be drained too or its full decoder queue blocks demux.
+                    uint64_t bytes = static_cast<uint64_t>(buffer.frame_count) * buffer.channels
+                        * (buffer.format == CRTMEDIA_SAMPLE_FORMAT_S16 ? 2 : 4);
+                    if (pendingAudio.size() >= 256 || bytes > 4 * 1024 * 1024 - pendingAudioBytes) {
+                        crtmedia_audio_buffer_release(&buffer);
+                        { Locker locker { lock }; failed = true; }
+                        post();
+                        decodeFailed = true;
+                        break;
+                    }
+                    pendingAudio.push_back(buffer);
+                    pendingAudioBytes += bytes;
+                    continue;
+                }
                 if (traceAudio && ++audioTraceCount <= 4)
                     fprintf(stderr, "CRTWEB_AUDIO buffer frames=%u ts_us=%lld playing=%d stale=%d sink=%d unavailable=%d\n",
                         static_cast<unsigned>(buffer.frame_count), static_cast<long long>(buffer.timestamp_us),
@@ -556,6 +607,8 @@ void MediaPlayerPrivateCRTShared::run()
                     break;
             }
         }
+        if (decodeFailed)
+            break;
 
         // Video: hold one decoded frame until its time.
         if (video.present && !video.outputEnded) {
@@ -596,7 +649,7 @@ void MediaPlayerPrivateCRTShared::run()
             }
         } else if (prerolling && !video.present && audio.present) {
             // Audio-only media: ready once the decoder produced anything or ended.
-            bool anyAudio = progressed || audio.outputEnded;
+            bool anyAudio = !pendingAudio.empty() || audio.outputEnded;
             if (anyAudio) {
                 {
                     Locker locker { lock };
@@ -628,7 +681,8 @@ void MediaPlayerPrivateCRTShared::run()
         }
 
         // The end: every decoder drained.
-        if (!ended && extractorEof && (!video.present || video.outputEnded) && (!audio.present || audio.outputEnded) && !havePending) {
+        if (!ended && extractorEof && (!video.present || video.outputEnded) && (!audio.present || audio.outputEnded)
+            && !havePending && pendingAudio.empty()) {
             ended = true;
             {
                 Locker locker { lock };
@@ -654,12 +708,16 @@ void MediaPlayerPrivateCRTShared::run()
 
     if (havePending)
         crtmedia_frame_release(&pending);
+    for (auto& buffer : pendingAudio)
+        crtmedia_audio_buffer_release(&buffer);
+    if (havePendingInput)
+        crtmedia_sample_release(&pendingInput);
     if (sink) {
         if (traceAudio) {
             uint64_t position = 0;
             crtmedia_result positionResult = crtmedia_audio_sink_get_position_frames(sink, &position);
-            fprintf(stderr, "CRTWEB_AUDIO sink_closed rate=%u channels=%u written_frames=%llu nonzero_samples=%llu position_frames=%llu position_result=%d clock_updates=%llu clock_advances=%llu write_failures=%u\n",
-                static_cast<unsigned>(sinkRate), static_cast<unsigned>(sinkChannels),
+            fprintf(stderr, "CRTWEB_AUDIO sink_closed sink_id=%llu rate=%u channels=%u written_frames=%llu nonzero_samples=%llu position_frames=%llu position_result=%d clock_updates=%llu clock_advances=%llu write_failures=%u\n",
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(sink)), static_cast<unsigned>(sinkRate), static_cast<unsigned>(sinkChannels),
                 static_cast<unsigned long long>(sinkFramesWritten), static_cast<unsigned long long>(nonzeroSamplesWritten),
                 static_cast<unsigned long long>(position), static_cast<int>(positionResult),
                 static_cast<unsigned long long>(clockUpdates), static_cast<unsigned long long>(clockAdvances), writeFailures);
@@ -739,6 +797,8 @@ private:
             m_shared->frameHeight = 0;
             ++m_shared->frameSerial;
             m_shared->ended = true;
+            m_shared->anchorUs = m_shared->clockUsLocked();
+            m_shared->clockRunning = false;
         }
         m_shared->post();
     }
@@ -969,7 +1029,14 @@ void MediaPlayerPrivateCRT::play()
         return;
     Locker locker { m_shared->lock };
     m_shared->playing = true;
-    if (m_shared->ended) {
+    // File players start/freeze their clock in the decode worker. MediaStream has no such worker:
+    // its camera callback supplies frames only. Own its play/pause wall-clock anchors here, as the
+    // upstream MediaStream player does; otherwise live camera currentTime stays at zero forever.
+    if (m_isStream && !m_shared->ended && !m_shared->clockRunning) {
+        m_shared->anchorNs = nowNs();
+        m_shared->clockRunning = true;
+    }
+    if (m_shared->ended && !m_isStream) {
         // Replaying from the end starts over.
         m_shared->ended = false;
         m_shared->seekRequested = true;
@@ -985,6 +1052,10 @@ void MediaPlayerPrivateCRT::pause()
     if (!m_shared)
         return;
     Locker locker { m_shared->lock };
+    if (m_isStream) {
+        m_shared->anchorUs = m_shared->clockUsLocked();
+        m_shared->clockRunning = false;
+    }
     m_shared->playing = false;
     m_shared->condition.notifyAll();
 }

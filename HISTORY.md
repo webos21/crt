@@ -11,6 +11,86 @@ substantive update.
 
 ## 2026-10-15
 
+### Linux Web capture clocks and same-process device lifetimes
+
+Linux replay of the strengthened permission-token regression passes three
+consecutive synthetic runs, including delayed completion after view destruction,
+allocation churn, replacement-request identity and an unknown opaque handle.
+Physical-camera stress exposed live video `currentTime` stuck at zero: file
+players have a decode worker to maintain their clock, but streams do not.
+The stream player now owns monotonic play/pause anchors and freezes its clock
+when its last track ends. Synthetic regressions check advance, pause, resume
+and a clone retaining the source after the original track stops.
+
+The opt-in camera probe now exercises twenty measured lifetimes after three
+warm-ups in one UI/WebProcess pair, rotating explicit stop, revoke, active
+navigation and last-clone release. Each cycle requires fresh pictures and the
+unchanged +24 MiB/+2 thread/+2 descriptor limits in both processes. Linux also
+observes zero native camera descriptors after every release; image data is not
+saved. The driver rejects incomplete traces, process replacement, unknown
+resource observations and separate-process reopen evidence as substitutes for
+this lifetime gate. macOS/Windows replay of the new stream-clock/resource gate
+remains open in `TODO.md`; detailed Linux measurements and reproduction are in
+`docs/acceptance/crtweb_acceptance.md`.
+
+### Linux ALSA playback selection and transferred-frame accounting
+
+After the user granted the audio group and logged in again, the first browser
+audio replay exposed a pre-existing direction-selection bug. `sscanf` counted
+the card/device assignments even when its trailing `p` literal did not match,
+allowing a capture node ending in `c`. This invalid replay is retained, not
+accepted as output evidence; no captured PCM was saved to a file. Selection now
+requires the complete playback-node name. `WRITEI_FRAMES` also now returns the
+actual `snd_xferi.result`, not the input `frames` field, preserving short writes.
+The private UAPI shape was checked against Bionic's
+[cleaned asound header](https://android.googlesource.com/platform/bionic/+/refs/heads/main/libc/kernel/uapi/sound/asound.h)
+and Linux's `snd_pcm_xferi_frames_ioctl`; no public ABI or host client-library
+dependency was added.
+
+The native-format fixture also exposed paused preroll consuming and discarding
+decoded audio before `play()`: only the last 2,112 of 14,400 frames reached the
+sink. The worker now retains preroll audio until playback and releases it on
+seek/teardown. Audio-only preroll stops after the first valid buffer; paused
+video seeking uses a bounded (4 MiB/256-buffer) PCM queue so interleaved audio
+cannot block demux before the target video frame. Overflow fails loading
+instead of dropping samples or growing without limit.
+Audio-only readiness requires a retained decoded buffer rather than demux
+progress. A second loss path released compressed samples on decoder
+`CRTMEDIA_WOULD_BLOCK`; the worker now retains and retries that same sample,
+as required by the installed codec contract, and releases it on seek/teardown.
+The regression waits paused after readiness; strict output requires all 14,400
+fixture frames and nonzero PCM, not just a tail fragment. Linux additionally
+requires that complete fixture to use a native playback node.
+
+A deterministic CRT-linked Linux PAL test replaces only OS boundaries and
+checks capture/suffix rejection before opening anything, lowest playback-node
+selection, partial/zero/full transfer counts and invalid transfer results.
+The strict browser evidence joins PAL route diagnostics to nonzero PCM and a
+progressing device clock by sink identity; Linux requires an exact playback
+node, not a Pulse endpoint that may be Dummy Output. The acceptance document
+owns the hardware replay and its format/listening limits.
+
+Two consecutive focused strict-output replays pass: the entire generated
+stereo S16/48kHz fixture (14,400 frames, 28,320 nonzero samples) is delivered to
+`/dev/snd/pcmC0D0p`, with four progressing device-clock updates and no write
+errors or sink-open fallbacks in each run. Seek events pass too. System-call
+tracing observes only that playback PCM node, not capture nodes. Basic media
+CTests pass 6/6, evidence checks 12/12, licensing 15/15, path tests 2/2, JSC tool
+tests 6/6 and TLS-fixture tests 4/4; the 23-patch manifest check passes.
+
+The final combined Linux replay passes 12/12, including fifteen network-trust
+cases and all physical-device gates. Camera stress retains the same process
+for all twenty measured stop/revoke/navigation/clone cycles: final UI +44 KiB
+RSS/+0 threads/+0 descriptors, WebProcess -76 KiB/-1/+0, with zero native
+camera descriptors after every cycle. Public API/internal B7/WebView lifetimes
+are 100/100/20 cycles with +52/+240/+0 KiB RSS and no thread/descriptor growth.
+Static audit covers eighteen binaries and runtime audit 132 mapped files
+without violations; no browser test process remains. Final evidence:
+`out/web-crt-webcore/acceptance-b3.json` and `tranche8-linux-hardware-final.log`.
+The OS PipeWire profile is still Off/Dummy Output; the native stereo fixture is
+the physical-output proof, not mono MP3/Pulse output or a listening test.
+Current shared-code replay on macOS/Windows remains open in `TODO.md`.
+
 ### Windows Web physical-camera replay and WASAPI PCM-format correction
 
 The explicitly requested browser camera probe passes three consecutive ordinary
