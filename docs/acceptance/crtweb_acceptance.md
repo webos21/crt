@@ -1,8 +1,8 @@
 # crtweb Acceptance (Stage `06-web`)
 
-**Status: in progress. Tranches 0-7 are closed, including the public `crtweb`
+**Status: in progress. Tranches 0-8 are closed, including the public `crtweb`
 API and `crtui` WebView plus public-API/process lifecycle acceptance on
-Linux/x86_64, macOS/arm64 and Windows/x64. Tranche 8 is in progress; a packaged
+Linux/x86_64, macOS/arm64 and Windows/x64. GPU integration is next (Tranche 9); a packaged
 `06-web` SDK follows in Tranche 10.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
@@ -41,8 +41,9 @@ or GLib type appears in a public header.
 Required for v1: HTML, CSS, DOM, JavaScript, navigation, HTTP/HTTPS, images,
 fonts/text, mouse/keyboard, scrolling, Canvas 2D, basic cookies/storage. Video camera capture with
 application-owned permission decisions is an approved extension (2026-10-14), gated independently
-in Tranche 8C. Its synthetic-source path is accepted on Linux/x86_64 and replayed on macOS/arm64;
-physical-host acceptance remains open as recorded below.
+in Tranche 8C. Synthetic and physical-camera paths, permission decisions and repeated
+same-process lifetimes are accepted on Linux/x86_64, macOS/arm64 and Windows/x64,
+within the device/resource scope recorded below.
 
 Deferred: WebRTC, WebGPU, WebXR, EME/DRM, microphone/display capture, printing,
 extensions, full accessibility, downloads.
@@ -1889,9 +1890,10 @@ patch is re-applied. *Not exercised on macOS:* GPUProcess (Tranche 9), and a run
 Replace subsystems one at a time, after the working browser/lifecycle gates. The **WPE reference**
 uses GLib/libsoup/GStreamer, but the **PlatformCRT product** is PlayStation-shaped and already uses
 WebKit Curl over CRT-built OpenSSL/libcurl and CRT PAL sockets. It does not link GLib/libsoup or
-GStreamer. HTML video is compiled (`ENABLE_VIDEO=ON`) but no real playback engine is registered;
-capture/MediaStream are disabled. Removing nonexistent product dependencies is not an acceptance
-item. Keep the reference unchanged for comparisons.
+GStreamer. At tranche entry, HTML video was compiled (`ENABLE_VIDEO=ON`) without a registered
+playback engine, and capture/MediaStream were disabled. The 8B/8C implementations and accepted
+replays follow below. Removing nonexistent product dependencies is not an acceptance item.
+Keep the reference unchanged for comparisons.
 
 #### 8A. Network ownership and explicit trust
 
@@ -1925,7 +1927,7 @@ records `crt_network_trust` alongside the existing eight entries in `acceptance-
 CLI supporting `req -addext`/`ca` for fresh per-run PKI, no Internet or committed private
 keys. Run fixture unit tests with `python3 tools/test_crtweb_network_fixture.py`; they are not the
 browser acceptance result. The Windows target path conversion is in the driver; new policy code
-is shared across hosts, but **macOS/Windows replay is still required**.
+is shared across hosts; its required macOS/Windows replays are recorded below.
 
 **Linux/x86_64 evidence (2026-10-14).** The final combined run passes all nine entries, including
 ten public-API network cases and five separate-host WebView cases. The public API's 100 lifecycle
@@ -1999,8 +2001,8 @@ absent or inaccessible. The 2026-10-15 follow-up below distinguishes endpoint de
 Also unverified: other codecs than the test assets'
 (H.264 Constrained Baseline, AAC, MP3, PCM) and A/V sync over long clips.
 
-This is **8B Linux acceptance**, not closure of Tranche 8: macOS/Windows replay of 8A and 8B and the 8C
-capture gate remain.
+This was **8B Linux acceptance**, not closure of Tranche 8 at that checkpoint:
+macOS/Windows replay of 8A and 8B and the 8C capture gate still remained.
 
 #### 8C. Capture (separate from playback)
 
@@ -2670,10 +2672,10 @@ private header in the 04 source archive and passes the five base-media tests
 (`out/web-windows-current-artifacts-final.log`, `out/web-windows-current-media-final.log`).
 
 Windows Tranche 8 replay is complete. The focused macOS playback replay below
-also passes. Cross-host closure still requires focused Linux playback of the
+also passes. At this checkpoint cross-host closure still required focused Linux playback of the
 common device-drain correction (including the complete PCM fixture and
 device-free frame regression), and native Linux
-allocator/fork execution of the indexed allocator. The earlier Linux/macOS
+allocator/fork execution of the indexed allocator; the final Linux section below closes both. The earlier Linux/macOS
 captures remain accepted; the MF ownership fix is Windows-specific. Packaging,
 Windows media export narrowing and GPU integration remain their existing
 Tranche 10/9 work, not implicitly completed by this replay.
@@ -2739,7 +2741,126 @@ Tranche 8 checkpoints are preserved in their original directories.
 This completes the macOS focused common-output-drain replay. It is **not** a
 new combined 12-gate or camera run: earlier macOS 8A/8C acceptance remains
 unchanged. Linux focused playback of this correction and native Linux
-allocator/fork regressions remain open in `TODO.md`.
+allocator/fork regressions were still open at this checkpoint; both close below.
+
+#### Linux focused 8B replay and Tranche 8 closure (2026-10-15)
+
+Replayed the `ef081d2` runtime plus the Linux-private correction below on
+Linux/x86_64. A fresh preset configuration and `crt-c-build` rebuild the current
+runtime; cumulative SDKs `01-c` through `05-ui` all verify. The WebKit driver
+rebuilds the composed tree with `--reuse-tree --webkit`, targets
+`crtweb_media_test`, `WebProcess` and `NetworkProcess`, and `-j 8`. Its build log
+records recompilation of `MediaPlayerPrivateCRT.cpp`; this is not execution of
+the pre-drain-fix common player. After correcting the Linux media backend, a
+final `crt-ui-dist` refresh regenerates and verifies all five SDK manifests.
+
+The first focused run failed video/MP3/HTTP `ended` assertions even though its
+ALSA fixture delivered complete PCM. The common player correctly waited for
+output, but the Pulse MP3 stream's native read cursor stopped at 8,902 of 9,216
+accepted frames. A one-frame-prebuffer experiment did not fix the failure and
+was reverted. Both checkpoints remain in their original evidence directories.
+PipeWire 1.6.2's
+[`stream_process` and native drain handling](https://github.com/PipeWire/pipewire/blob/1.6.2/src/modules/module-protocol-pulse/pulse-server.c)
+explain the remaining sub-period tail: underrun may generate silence instead
+of consuming a buffer smaller than `minreq`, whereas native DRAIN flushes it.
+
+`audio_sink_linux.c` now detects a stopped Pulse stream with accepted data
+beyond the native read cursor, sends DRAIN, waits for its acknowledgement and
+queries the real cursor again. Position is never synthesized from elapsed time
+or accepted writes. Drain/re-query errors remain errors with the caller's
+position unchanged. Seven socketpair/fork fake-peer cases exercise the actual
+packet/ACK path: playing, stopped-and-consumed, stopped-with-tail, drain error,
+re-query error, malformed playing flag and cursor beyond accepted data. They
+contact no sound server or device. No public ABI, shared WebKit player,
+macOS/Windows backend or OS audio configuration changes in this follow-up.
+
+The checked-in evidence parser also now requires the complete PCM fixture's
+position to reach at least its accepted 14,400 frames, not merely advance once.
+The new regression rejects positions 1 and 14,399, accepts 14,400 and 14,401,
+and distinguishes generic Pulse endpoint evidence from native ALSA delivery.
+Its negative control fails before this predicate is added; the final parser
+suite passes **18/18**. The already recorded macOS/Windows fixture positions
+satisfy the same floor; this turn does not claim new execution on either host.
+
+With the final verified SDK, three separate calls to the existing strict
+`run_media_gate(..., "linux", True)` all pass, with `CRTWEB_MEDIA_TRACE=1`:
+
+| Run | Accepted PCM frames / nonzero samples | Position at sink close | Applied clock updates / advances | Web threads over 12 measured lifetimes |
+| --- | --- | --- | --- | --- |
+| 1 | 14,400 / 28,320 | 25,360 | 13 / 10 | 17 -> 14 |
+| 2 | 14,400 / 28,320 | 22,656 | 13 / 10 | 16 -> 14 |
+| 3 | 14,400 / 28,320 | 23,752 | 13 / 10 | 17 -> 14 |
+
+The 300ms S16/stereo/48kHz fixture uses native ALSA
+`/dev/snd/pcmC0D0p`, with zero fallback or write failures across sinks. Position
+is sampled at close and may exceed accepted PCM; it is neither another delivery
+count nor a sample-exact observation of `ended`. PipeWire's separately observed
+default remains virtual `auto_null` / Dummy Output. Pulse-only streams establish
+endpoint/clock behavior, not physical output; the complete fixture's direct
+ALSA route establishes native device delivery. Neither constitutes human
+listening or an acoustic loopback test.
+
+All existing media assertions pass: metadata/pixels, play/pause/seek/EOF,
+complete paused-preroll PCM retention, volume/mute, MP3/WAV, local/HTTP sources,
+unsupported/missing/garbage sources and repeated teardown. The unchanged Web
+thread bound is +3. Each runtime audit records 35 mapped files, no violation,
+`libcrtmedia` and exactly one CRT libc++/libc++abi pair. Linux's private libva
+stubs remain mapped as documented, not hardware-decoding evidence. Child
+teardown assertions pass; final inventory finds no surviving WebProcess,
+NetworkProcess or media-test process from this build.
+
+Base-media CTest passes **7/7** (frame, GPU frame, transport queue, format,
+player, audio sink and Linux audio sink). This includes the portable MF queue
+ownership regression, not execution of the Windows MF device backend. Source
+include closure passes 7/7 and the final 04 source archive contains
+`capture_mf_queue.h`. Licensing passes 15/15; the patch gate accepts 23 patches,
+63 modified files and 24 CRT-owned files. Driver/JSC helper tests pass 2/2 and
+6/6, and TLS fixture tests 4/4; the latter are not another full browser network
+replay. Native core passes 136/136, allocator environment sweep 130/130,
+baseline correctness tiers 4/4 and contention cases 8/8; measurements and
+performance caveats belong to
+[allocator acceptance](allocator_baseline.md#linux-native-indexed-allocator-replay-2026-10-15).
+
+Reproduction from the repository root:
+
+```sh
+cmake --fresh --preset linux-host-ninja-debug \
+  -DCRTMEDIA_ENABLE_FFMPEG=ON -DCRTGFX_ENABLE_SKIA=ON \
+  -DCRTGFX_ENABLE_GPU_BACKEND=ON -DCRTUI_ENABLE_LVGL=ON \
+  -DCRT_USE_IMPORTED_LIBCXX=ON
+cmake --build out/linux-host-ninja-debug --target crt-c-build crt-ui-dist -j 8
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root out/linux-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/linux-host-ninja-debug/port-tests/install \
+  --work-root out/web-crt-webcore --reuse-tree --webkit \
+  --target crtweb_media_test --target WebProcess --target NetworkProcess -j 8
+```
+
+Then call the checked-in `run_media_gate` three times in separate directories
+with the same build/SDK/dependency roots, strict Linux output enabled and
+`CRTWEB_MEDIA_TRACE=1`. The generated local helper
+`out/web-crt-webcore/tranche8_close_replay.py` performs those calls with
+run-local font caches; it does not replace or weaken the gate. Final evidence
+under `out/web-crt-webcore/` is `tranche8-close-playback/{summary.json,run-{1,2,3}/}`,
+each run containing `result.json`, `gate.log` and `media-run/audio-output.log`.
+Build logs are `tranche8-close-{configure,sdk-build,webkit-build,sdk-final}.log`;
+the final media log is `tranche8-close-base-media-final.log`. Earlier failures
+are preserved as `tranche8-close-playback-initial-failed/` and
+`tranche8-close-playback-prebuf1-failed/`; the corrected component-install
+checkpoint before final manifest regeneration is
+`tranche8-close-playback-pulse-fixed/`. Parser negative-control and protocol
+test logs are `tranche8-close-drain-negative-control.log` and
+`tranche8-close-pulse-rpc-test.log`.
+
+**Closure:** 8A network, 8B CPU playback and 8C video capture/permission/lifetime
+gates are accepted on Linux/x86_64, macOS/arm64 and Windows/x64. The common
+output-drain correction and shared indexed allocator now have their required
+native replays. This focused Linux follow-up does not claim a new combined
+12-gate run or reopen cameras: prior three-host 8A/8C evidence, including the
+four-mode twenty-same-PID physical lifetime gates, remains accepted. Earlier
+failed checkpoints are preserved, not relabeled as passes. Tranche 8 is closed;
+GPU integration (9), isolated packaging/security (10) and the stated media
+exclusions remain separate work.
 
 ### 9. GPU integration
 

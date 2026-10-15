@@ -5,16 +5,14 @@ plus the `crtweb` runtime/view API and the `crtui` WebView on top of it. Contrac
 tranche order and evidence: [`docs/acceptance/crtweb_acceptance.md`](../docs/acceptance/crtweb_acceptance.md);
 upstream mapping: [`docs/porting/crtweb_porting.md`](../docs/porting/crtweb_porting.md).
 
-**Status: bring-up.** Web Tranches 0-3 are closed on Linux/x86_64, macOS/arm64 and Windows/x64
-(`PlatformCRT` renders, takes input and survives 100x create/destroy; JavaScriptCore is accepted on all
-four acceptance pairs). Tranche 4 is closed on Linux/x86_64, macOS/arm64 and Windows/x64:
-the public C API `crtweb`
-(`include/crtweb/crtweb.h`, `src/crtweb.cpp` -> `libcrtweb.so`), the out-of-process `crtweb_host`
-(`tools/crtweb_host.cpp`) and the `crtui` WebView `crtweb::WebView` (`include/crtweb/webview.h`) over
-the web surface protocol and its control extension. A packaged `06-web` SDK does not exist yet
-(Tranche 10); W^X remains separate hardening.
-Current lifecycle work and replay order are tracked in [`TODO.md`](../TODO.md);
-the process/recovery contract and measured results are owned by Web acceptance.
+The public C API (`include/crtweb/crtweb.h`, `src/crtweb.cpp`) and out-of-process
+`crtweb_host` (`tools/crtweb_host.cpp`) serve the `crtui` WebView
+`crtweb::WebView` (`include/crtweb/webview.h`) over the web surface/control protocol.
+The product also registers CRT-owned playback and permission-gated video-camera
+sources over the installed `crtmedia` APIs. Host acceptance, lifecycle/resource
+measurements and media limits live in the acceptance document linked above;
+active work lives in [`TODO.md`](../TODO.md), not a second checklist here.
+A packaged `06-web` SDK remains the separate Tranche 10 deliverable.
 
 ## Layout
 

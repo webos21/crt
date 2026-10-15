@@ -11,6 +11,47 @@ substantive update.
 
 ## 2026-10-15
 
+### Web Tranche 8 closed: Linux output drain and native allocator replay
+
+Refreshed the current Linux/x86_64 runtime from `ef081d2` with a fresh CMake
+configuration, verified cumulative SDKs `01-c` through `05-ui`, and rebuilt
+WebKit's common player, WebProcess, NetworkProcess and media test. The initial
+focused replay exposed a real Pulse tail stall: decoder EOF now correctly waits
+for output, but PipeWire retained less than one processing quantum and never
+advanced its read cursor far enough to finish playback. A one-frame-prebuffer
+experiment did not fix it and was reverted; both failed checkpoints are retained.
+
+The Linux-private Pulse position path now uses native DRAIN when a stopped
+stream still has accepted PCM queued, waits for its acknowledgement and
+re-queries the server cursor. It never substitutes elapsed time or written
+frames for device position. Failed drain/query stays an error. Seven fake-peer
+protocol scenarios exercise the actual framing/ACK path without devices; the
+strict evidence predicate now also requires the complete fixture's position to
+reach its accepted 14,400 frames (parser tests 18/18, with a failing negative
+control retained). No public ABI, shared WebKit player or other host backend
+changes in this follow-up.
+
+The final verified SDK passes strict focused 8B **3/3**: complete 48kHz stereo
+PCM, 14,400 frames/28,320 nonzero samples, native ALSA playback/clock evidence,
+zero fallback/write failures, playback EOF and twelve measured lifetimes per
+run within the unchanged resource bound. The final measurements, failed
+checkpoints, runtime audits and reproduction live in
+[Web acceptance](docs/acceptance/crtweb_acceptance.md#linux-focused-8b-replay-and-tranche-8-closure-2026-10-15).
+These are device delivery/clock observations, not human listening. Camera
+hardware was not reopened; the accepted three-host 8A/8C evidence is preserved.
+
+Native core CTest passes **136/136**, allocator padding sweep **130/130**,
+seed-42 baseline tiers **4/4** and contention cases **8/8**. Detailed correctness
+scope and performance caveats belong to
+[allocator acceptance](docs/acceptance/allocator_baseline.md#linux-native-indexed-allocator-replay-2026-10-15).
+Base-media tests pass 7/7 (including the portable MF queue regression and Linux
+Pulse protocol cases), stage-source include closure 7/7, licensing 15/15 and the
+23-patch manifest gate. The 04 source archive contains the private MF helper.
+Updated the port mapping and library overview to remove obsolete implementation
+claims; `STATUS.md` is intentionally unchanged. Together with the recorded
+macOS/Windows output-drain and allocator replays, this closes 8B and Tranche 8.
+GPU integration (9) and isolated distribution/security closure (10) remain open.
+
 ### macOS replay of the Windows Web 8B output-drain correction
 
 Rebuilt `8c989ac` on macOS/arm64: refreshed the cumulative `01-c` through `05-ui`

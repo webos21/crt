@@ -627,13 +627,15 @@ def audio_output_evidence(text: str) -> dict:
             r"/dev/snd/pcmC[0-9]+D[0-9]+p", sink.get("device", "")))
     def complete_fixture(sink):
         return (delivered(sink) and sink.get("rate") == 48000 and sink.get("channels") == 2
-                and sink.get("written_frames") == 14400 and sink.get("nonzero_samples", 0) > 27000)
+                and sink.get("written_frames") == 14400 and sink.get("nonzero_samples", 0) > 27000
+                and sink.get("position_frames", 0) >= sink["written_frames"])
     return {"verified": verified, "sinks": sinks,
             "alsa_hardware_verified": no_failures and any(
                 alsa_playback(sink) and delivered(sink)
                 for sink in sinks),
             # Generated 300-ms S16/stereo/48kHz clip: paused preroll must not
-            # discard all but its final decoded buffer before opening output.
+            # discard all but its final decoded buffer before opening output;
+            # device position must also reach the accepted count before close.
             "fixture_pcm_complete": no_failures and any(complete_fixture(sink) for sink in sinks),
             "native_fixture_verified": no_failures and any(
                 alsa_playback(sink) and complete_fixture(sink) for sink in sinks),

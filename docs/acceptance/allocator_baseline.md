@@ -109,8 +109,6 @@ Rationale:
 
 - Run the focused allocator CTest selection on Windows/aarch64 when that host
   is available.
-- Replay the indexed-free-list change on Linux with native allocator/fork
-  regressions; macOS and Windows/x64 replay are recorded below.
 - Promote Scudo only if a repeatable blocker appears in the current allocator
   and the reproducer is preserved.
 
@@ -140,9 +138,9 @@ passes all four tiers through 1M operations (12 OS regions at 1M); contention
 passes all eight private/shared 1/8/16/32-thread cases. Generated one-off reports
 are under `out/macos-host-ninja-debug/tranche8-replay-20261015/allocator-{baseline,contention}/`.
 These runs overlapped SDK build activity and are correctness/envelope evidence,
-not a controlled throughput comparison against the September data. Native
-Linux execution of the common change remains a separate replay; Windows/x64
-execution is recorded below. Cross-target compile checks are not substitutes.
+not a controlled throughput comparison against the September data. At this
+macOS checkpoint, native Linux replay remained separate; its completed result
+follows below, alongside Windows/x64. Cross-target compile checks are not substitutes.
 
 Windows/x64 now passes native core CTest 155/155 after a fresh configuration
 and runtime rebuild, including ordinary/diagnostic allocator, fault, fork,
@@ -221,8 +219,8 @@ Evidence: `out/malloc-ci-configure.log`, `out/malloc-ci-build-resume.log`,
 was interrupted after sandbox DNS failures and successfully resumed with
 network access; no compile/test failure was hidden. The workflow and its
 existing two-layout coverage are unchanged. Remote five-host CI confirmation
-requires a subsequent push/run; native Linux replay of the indexed allocator
-remains the separate open gate above.
+requires a subsequent push/run; native Linux replay was still a separate gate
+at that checkpoint and is completed below.
 
 ### macOS Merge Replay
 
@@ -242,3 +240,52 @@ steps, also passes **130/130**. The parent process environment is unchanged.
 Logs are `out/macos-malloc-ci-replay/{configure,build,ctest,environment-sweep}.log`.
 This focused fixture regression is not a full core rerun, a performance result,
 or native Linux allocator acceptance; those scopes are not expanded by the merge.
+
+## Linux Native Indexed-Allocator Replay (2026-10-15)
+
+Replayed the current `ef081d2` runtime on Linux/x86_64 after a fresh preset
+configuration, preserving the FFmpeg/Skia/GPU/LVGL/imported-libc++ options used
+by the Web predecessor SDK. `crt-c-build` rebuilds the current allocator and
+test executables; the cumulative `01-c` through `05-ui` SDKs are refreshed and
+verified separately. This is native execution, not a cross-target compile or
+a run against the old allocator binary.
+
+- Core CTest passes **136/136**, including normal/diagnostic allocation,
+  alignment, canaries, fault injection, contention, fork/runtime reset and
+  fragmented many-region fork.
+- The current isolated coalescing fixture passes both normal and diagnostic
+  binaries at all 65 child-scoped environment padding lengths 0..30,720 in
+  480-byte steps (**130/130**). The parent environment is unchanged.
+- Seed-42 baseline correctness passes **4/4** operation tiers (1K/10K/100K/1M),
+  every report `status=ok`, no skipped tier. The 1M run uses 19 OS regions,
+  peaks at 26,391,049 requested live bytes and ends with no live workload
+  allocations. Its wall time is 34.197s.
+- Contention passes **8/8** private/shared cases at 1/8/16/32 threads, 5,000
+  operations per thread, seed 42. Every report has `status=ok`.
+
+These one-off runs overlap SDK work and establish correctness, not a controlled
+throughput comparison with macOS/Windows or the September baseline. Missing
+host-RSS samples remain unknown, not zero. No allocator implementation, public
+ABI, test bound or Scudo policy changed in this Linux replay. Together with the
+native macOS and Windows evidence above, this closes the indexed allocator's
+three-host prerequisite for Web Tranche 8. Windows/aarch64 focused execution
+and subsequent remote CI confirmation remain their separately scoped follow-ups.
+
+Reproduce after configuring the current Linux preset:
+
+```sh
+cmake --build out/linux-host-ninja-debug --target crt-c-build -j 8
+ctest --test-dir out/linux-host-ninja-debug \
+  -E '^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)' --output-on-failure
+python3 tools/run_allocator_baseline.py --build-dir out/linux-host-ninja-debug \
+  --seed 42 --out-dir out/web-crt-webcore/tranche8-close-allocator/baseline
+python3 tools/run_allocator_contention_baseline.py --build-dir out/linux-host-ninja-debug \
+  --seed 42 --out-dir out/web-crt-webcore/tranche8-close-allocator/contention
+```
+
+Generated logs under `out/web-crt-webcore/` are `tranche8-close-configure.log`,
+`tranche8-close-sdk-build.log`, `tranche8-close-core-ctest.log`,
+`tranche8-close-malloc-layout-sweep.log`, `tranche8-close-allocator-baseline.log`
+and `tranche8-close-allocator-contention.log`. Four-tier and eight-case JSONL
+reports live in `tranche8-close-allocator/{baseline,contention}/`; they are
+ad-hoc correctness evidence, not promoted controlled benchmark data.

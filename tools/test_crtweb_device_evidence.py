@@ -86,6 +86,20 @@ class AudioEvidenceTests(unittest.TestCase):
                         dict(channels=1), dict(clock_advances=0), dict(write_failures=1)):
             self.assertFalse(audio_output_evidence(route + self.evidence(**(fields | changes)))["native_fixture_verified"])
 
+    def test_complete_fixture_requires_drain_not_just_a_clock_advance(self):
+        fields = dict(sink_id=1, rate=48000, channels=2, written_frames=14400, nonzero_samples=28320)
+        for backend in ("alsa", "pulse"):
+            route = f"CRTMEDIA_AUDIO sink_open sink_id=1 backend={backend} device=/dev/snd/pcmC0D0p\n"
+            for position in (1, 14399):
+                evidence = audio_output_evidence(route + self.evidence(**fields, position_frames=position))
+                self.assertTrue(evidence["verified"])  # Endpoint progress is not full output EOF.
+                self.assertFalse(evidence["fixture_pcm_complete"])
+                self.assertFalse(evidence["native_fixture_verified"])
+            for position in (14400, 14401):
+                evidence = audio_output_evidence(route + self.evidence(**fields, position_frames=position))
+                self.assertTrue(evidence["fixture_pcm_complete"])
+                self.assertEqual(evidence["native_fixture_verified"], backend == "alsa")
+
 
 class CameraEvidenceTests(unittest.TestCase):
     def evidence(self, warmups=3):

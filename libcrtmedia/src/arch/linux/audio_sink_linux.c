@@ -1156,7 +1156,9 @@ static int64_t pulse_write(crtmedia_audio_sink* sink, const void* data, uint32_t
   return (int64_t)(send_bytes / sink->block_align);
 }
 
-static crtmedia_result pulse_get_position_frames(crtmedia_audio_sink* sink, uint64_t* out_frames) {
+static crtmedia_result pulse_drain(crtmedia_audio_sink* sink);
+
+static crtmedia_result pulse_query_position(crtmedia_audio_sink* sink, uint64_t* out_frames, int* out_playing) {
   uint32_t tag = sink->pulse_next_tag++;
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
@@ -1194,7 +1196,9 @@ static crtmedia_result pulse_get_position_frames(crtmedia_audio_sink* sink, uint
    * crtmedia_audio_sink_write() so far, matching its documented
    * semantic. */
   crtmedia_result result = CRTMEDIA_OK;
-  if (reply.rest_len >= 46 + 9 && reply.rest[46] == 'r') {
+  if (reply.rest_len >= 46 + 9 && reply.rest[46] == 'r'
+      && (reply.rest[18] == '0' || reply.rest[18] == '1')) {
+    *out_playing = reply.rest[18] == '1';
     int64_t read_index;
     uint8_t be[8];
     memcpy(be, reply.rest + 47, 8);
@@ -1209,7 +1213,28 @@ static crtmedia_result pulse_get_position_frames(crtmedia_audio_sink* sink, uint
   return result;
 }
 
-static void pulse_close(crtmedia_audio_sink* sink) {
+static crtmedia_result pulse_get_position_frames(crtmedia_audio_sink* sink, uint64_t* out_frames) {
+  uint64_t frames = 0;
+  int playing = 0;
+  crtmedia_result result = pulse_query_position(sink, &frames, &playing);
+  if (result != CRTMEDIA_OK)
+    return result;
+  if (!playing && frames < sink->pulse_bytes_written_total / sink->block_align) {
+    /* PipeWire 1.6's Pulse server leaves a sub-period tail queued on underrun
+     * until DRAIN (pulse-server.c:stream_process). A stopped read cursor alone
+     * cannot finish that tail. Flush it through the native drain protocol,
+     * then re-query the real cursor. Never synthesize position from elapsed
+     * time or the number of writes; failed ACK/query stays an error. */
+    result = pulse_drain(sink);
+    if (result != CRTMEDIA_OK)
+      return result;
+    return pulse_query_position(sink, out_frames, &playing);
+  }
+  *out_frames = frames;
+  return CRTMEDIA_OK;
+}
+
+static crtmedia_result pulse_drain(crtmedia_audio_sink* sink) {
   uint32_t tag = sink->pulse_next_tag++;
   uint8_t buf[16];
   crtmedia_pulse_writer w;
@@ -1229,10 +1254,17 @@ static void pulse_close(crtmedia_audio_sink* sink) {
      * contract's own documented crtmedia_audio_sink_close() behavior;
      * see this file's own trace decode showing the real DRAIN reply only
      * arrives once draining genuinely completes. */
-    if (pulse_wait_for_reply(sink, tag, &reply) == CRTMEDIA_OK) {
+    crtmedia_result result = pulse_wait_for_reply(sink, tag, &reply);
+    if (result == CRTMEDIA_OK) {
       free(reply.owned);
     }
+    return result;
   }
+  return CRTMEDIA_ERROR_UNSUPPORTED;
+}
+
+static void pulse_close(crtmedia_audio_sink* sink) {
+  (void)pulse_drain(sink);
   close(sink->fd);
 }
 
