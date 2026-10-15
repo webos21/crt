@@ -72,6 +72,10 @@ set_tests_properties(fd_errno_test_runs PROPERTIES
 )
 
 add_crt_test(malloc_test malloc_test.c)
+# The coalescing fixture needs an untouched heap, not the process heap used by
+# startup/environment import. Reuse the independently renamed production
+# allocator already used by the cross-instance fault tests, in both layouts.
+target_sources(malloc_test PRIVATE malloc_fault_instance_b.c)
 set_tests_properties(malloc_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "malloc_test: ok"
 )
@@ -85,6 +89,7 @@ set_tests_properties(malloc_test_runs PROPERTIES
 # enables malloc_test.c's diagnostic-only assertions.
 add_crt_test(malloc_debug_test malloc_test.c)
 target_sources(malloc_debug_test PRIVATE
+  malloc_fault_instance_b.c
   "${CMAKE_SOURCE_DIR}/libc/src/malloc.c"
 )
 target_compile_definitions(malloc_debug_test PRIVATE CRT_DEBUG_MALLOC=1)

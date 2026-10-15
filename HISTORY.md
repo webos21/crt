@@ -11,6 +11,34 @@ substantive update.
 
 ## 2026-10-15
 
+### Windows CI malloc coalescing fixture: remove startup-heap dependence
+
+Windows/x64 CI run `38697153498`, job `116296326734`, fails only
+`malloc_test_runs` (154/155). Its detailed step log was not accessible through
+the unauthenticated log endpoint; local reproduction on the same `8c989ac`
+binary reports `malloc_test: adjacent coalescing reuse` when a child-only
+environment variable contains 22,560 padding bytes. The old test assumes
+twelve process-heap allocations are physically consecutive despite Windows
+startup importing a variable-sized environment into that same heap. That is
+not a public malloc address-order guarantee; it can invalidate the fixture
+without a coalescing defect.
+
+Both existing normal/diagnostic targets now reuse the independently renamed
+production allocator in `malloc_fault_instance_b.c` for this white-box fixture.
+The fixture checks one OS region and consecutive addresses before requiring
+reuse, explicitly exercises ascending and descending release, checks live
+neighbours and shrink preservation, and rejects fresh-region fallback. The
+remaining public malloc-family tests still exercise the process allocator.
+No runtime implementation, public ABI, workflow or skip-CI policy changes.
+
+A fresh `out/windows-malloc-ci` configuration and `crt-c-build` complete;
+core CTest passes **155/155**. Both layouts pass all 65 padding sizes
+0..30,720 by 480 bytes (**130/130**). Negative controls temporarily disabling
+backward or forward merging fail both layouts with the corresponding reuse
+message; the production source was restored before the final rebuild.
+Reproduction commands, log paths and the pending remote CI confirmation are
+in [allocator acceptance](docs/acceptance/allocator_baseline.md#windows-ci-coalescing-fixture-2026-10-15).
+
 ### Windows Web replay fixes: output EOF and MF frame-ring ownership
 
 The first current shared-code replay passes 10/12; its failed checkpoint is
