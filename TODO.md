@@ -136,15 +136,15 @@ uses the host replay order stated below and in the acceptance document.
 * [x] **7. macOS/arm64 replay.** Done 2026-10-13: B3-B7, Tranche 4 and the Tranche 5
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Sequential gates in `docs/acceptance/crtweb_acceptance.md`.
-  Windows/x64 current replay is complete, including strict output and same-process camera stress.
-  Remaining: Linux/macOS focused replay of the new common output-drain fix and Linux native
+  Windows/x64 current replay and macOS/arm64 focused playback replay are complete.
+  Remaining: Linux focused replay of the new common output-drain fix and Linux native
   allocator/fork regressions. Preserve earlier failed checkpoints in the acceptance record.
   Investigation/reproduction: [`Windows Tranche 8 checkpoint`](docs/bringup/crtweb_windows_tranche8.md).
   * [x] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy accepted on
     Linux/x86_64, macOS/arm64 and Windows/x64 (acceptance).
   * [ ] **8B playback:** complete 14,400-frame PCM fixture and paused-preroll/backpressure fixes
-    accepted on all three hosts; Windows output-drain/clock correction passes. Replay that
-    common correction and the device-free frame test on Linux/macOS before closing this gate.
+    accepted on all three hosts; Windows and macOS output-drain/clock correction passes.
+    Replay that common correction and the device-free frame test on Linux before closing this gate.
   * [x] **8C capture:** synthetic and physical-camera evidence plus same-process four-mode resource/
     restart gates accepted on Linux, macOS and Windows. Windows MF queue ownership fix verified.
   * [ ] **Shared allocator regression:** macOS and Windows native allocator/fork replay pass;

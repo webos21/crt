@@ -11,6 +11,35 @@ substantive update.
 
 ## 2026-10-15
 
+### macOS replay of the Windows Web 8B output-drain correction
+
+Rebuilt `8c989ac` on macOS/arm64: refreshed the cumulative `01-c` through `05-ui`
+SDKs (all verified), then rebuilt the composed WebKit tree, including the common
+player, WebProcess, NetworkProcess and media test. Focused strict 8B replay
+passes **3/3** without further runtime changes. Every run delivers the complete
+48kHz stereo fixture (14,400 frames/28,320 nonzero samples), with sink-close
+positions 18,479/18,629/18,048 and 48/48/47 applied clock updates, 44/44/43 advances.
+No sink fallback or write failure. Default output is the built-in MacBook Pro
+speakers; this is CoreAudio delivery/clock evidence, not a listening test.
+
+Pause/seek/EOF, paused PCM preroll, local/HTTP playback and bad/missing-source
+handling pass. Each run measures twelve playback lifetimes; Web threads are
+28 -> 25, 28 -> 25 and 27 -> 25 within the unchanged +3 bound. Runtime mapping
+audits pass with one CRT libc++/libc++abi image pair, recording Apple's framework
+pair separately, and no remaining work-tree Web/Network process after teardown.
+Base-media CTest passes 7/7, including the new device-free MF queue ownership
+regression; stage-source include closure passes 7/7 and the generated macOS 04
+source asset contains its private helper. Evidence/parser tests pass 17/17,
+licensing 15/15 and the 23-patch manifest check.
+
+Evidence is under `out/macos-host-ninja-debug/tranche8b-drain-replay-20261015/`:
+SDK/WebKit build logs, `base-media.log`, default-device observation, and three
+per-run gate logs/JSON plus `summary.json`. Detailed measurements and replay
+scope belong to `docs/acceptance/crtweb_acceptance.md`. This closes macOS focused
+replay of the common 8B correction, not the outstanding Linux playback/allocator
+replay. Camera hardware was not reopened; prior macOS 8C acceptance is unchanged,
+and the Windows MF backend itself was not exercised on macOS.
+
 ### Windows Web replay fixes: output EOF and MF frame-ring ownership
 
 The first current shared-code replay passes 10/12; its failed checkpoint is
@@ -19,8 +48,8 @@ fit in WASAPI's buffer before any position advance, yet the player posted
 decoder EOF as playback end. The CRT player now keeps applying the device clock
 until accepted PCM drains. Focused strict output delivers 14,400 frames/28,320
 nonzero samples, 28 clock updates/20 advances and zero errors/fallbacks; media
-threads 17 -> 19 remain within the existing bound. This common player change
-still requires Linux/macOS focused replay.
+threads 17 -> 19 remain within the existing bound. At this Windows checkpoint,
+the common player change still awaited Linux/macOS focused replay (macOS results above).
 
 Windows physical-camera stress exposed a pre-existing MF ring ownership bug:
 dequeue left the transferred storage address in its old slot and teardown
@@ -54,7 +83,7 @@ stage-source closure 7/7, CMake paths 2/2, ABI policy 6/6, TLS fixture 4/4,
 licensing 15/15 and the 23-patch manifest gate. Artifact/software logs are
 `out/web-windows-current-artifacts-final.log` and
 `out/web-windows-current-media-final.log`. This closes Windows replay, not the
-new common output-drain fix's Linux/macOS replay or Linux native allocator
+new common output-drain fix's then-pending Linux/macOS replay or Linux native allocator
 regressions. Remote Audio is endpoint/clock evidence, not local-speaker listening.
 
 ### Windows native replay of the indexed allocator

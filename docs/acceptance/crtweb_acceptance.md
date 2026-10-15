@@ -2669,13 +2669,77 @@ The final artifact refresh verifies `01-c` through `05-ui`, includes the new
 private header in the 04 source archive and passes the five base-media tests
 (`out/web-windows-current-artifacts-final.log`, `out/web-windows-current-media-final.log`).
 
-Windows Tranche 8 replay is complete. Cross-host closure still requires focused
-Linux/macOS playback of the common device-drain correction (including the
-complete PCM fixture and device-free frame regression), and native Linux
+Windows Tranche 8 replay is complete. The focused macOS playback replay below
+also passes. Cross-host closure still requires focused Linux playback of the
+common device-drain correction (including the complete PCM fixture and
+device-free frame regression), and native Linux
 allocator/fork execution of the indexed allocator. The earlier Linux/macOS
 captures remain accepted; the MF ownership fix is Windows-specific. Packaging,
 Windows media export narrowing and GPU integration remain their existing
 Tranche 10/9 work, not implicitly completed by this replay.
+
+#### macOS focused 8B replay of the Windows output-drain fix (2026-10-15)
+
+Replayed `8c989ac` on macOS/arm64 without another runtime patch. Refreshed and
+verified cumulative SDKs `01-c` through `05-ui`, then used the port driver with
+`--reuse-tree --webkit`, targets `crtweb_media_test`, `WebProcess` and
+`NetworkProcess`, and `-j 8`. The work tree is `/private/tmp/webB3f`; its build log
+confirms recompilation of `MediaPlayerPrivateCRT.cpp` and the media test, not
+execution of pre-change binaries. The SDK/dependency roots are
+`out/macos-host-ninja-debug/dist/05-ui` and
+`out/macos-host-ninja-debug/port-tests/install`.
+
+Ran `build_webkit_crt_port.run_media_gate(..., "macos", True)` three times in
+separate work directories, with `CRTWEB_MEDIA_TRACE=1`. This is the existing
+strict audio-output gate plus a focused check that the complete generated
+fixture's sink-close position is at least its accepted 14,400 frames. All
+three runs pass both checks; no test deadline or resource bound was relaxed.
+
+| Run | Accepted PCM frames / nonzero samples | Position at sink close | Applied clock updates / advances | Web threads over 12 measured lifetimes |
+| --- | --- | --- | --- | --- |
+| 1 | 14,400 / 28,320 | 18,479 | 48 / 44 | 28 -> 25 |
+| 2 | 14,400 / 28,320 | 18,629 | 48 / 44 | 28 -> 25 |
+| 3 | 14,400 / 28,320 | 18,048 | 47 / 43 | 27 -> 25 |
+
+The fixture is 300ms, S16/stereo/48kHz. CoreAudio position is sampled at sink
+close after playback, so it may exceed the accepted frame count; it is not a
+second PCM-delivery count or a sample-exact observation of the `ended` event.
+Current default output was the built-in MacBook Pro speakers, independently
+observed with `system_profiler SPAudioDataType`. Each run has zero sink-open
+fallbacks and zero write failures across its sinks. This proves API/device
+delivery and clock progress, not human listening or acoustic loopback.
+
+The existing media assertions also pass: metadata/pixels, play/pause/seek/EOF,
+paused-preroll retention of the complete PCM clip, volume/mute, MP3/WAV,
+local/HTTP sources, unsupported/missing/garbage sources and repeated teardown.
+The original Web thread bound (+3) is unchanged. Each runtime map audit has
+1,665 mapped-file observations, no violations, `libcrtmedia` mapped, no libva
+mapping, and one CRT runtime pair (`libc++.1.0.dylib`, `libc++abi.1.0.dylib`).
+Apple's `/usr/lib` libc++/libc++abi pair is recorded separately as an OS media
+framework dependency. Device runs remove `DYLD_LIBRARY_PATH` and retain the
+linked RPATHs. The tests' child teardown assertions pass and a final process
+inventory finds no remaining WebProcess/NetworkProcess from this build.
+
+Base-media CTest passes **7/7** (frame, GPU frame, transport queue, format,
+player, audio sink and AVFoundation conversion). The frame test includes the
+new portable MF queue ownership regression; this is not execution of the
+Windows MF device backend on macOS. Stage-source include closure passes 7/7
+and the generated macOS 04 source archive contains `capture_mf_queue.h`.
+Device-evidence/parser tests pass 17/17, licensing 15/15, and the manifest gate
+accepts 23 patches, 63 modified files and 24 CRT-owned files.
+
+Local evidence root: `out/macos-host-ninja-debug/tranche8b-drain-replay-20261015/`.
+It contains `sdk-build.log`, `webkit-build.log`, `base-media.log`,
+`audio-devices.txt`, `replay.log`, `summary.json` and, under `run-{1,2,3}/`,
+`result.json`, `gate.log` and `media-run/audio-output.log`. The local
+`replay.py` harness calls the checked-in gate and records the additional drain
+check; it does not replace the gate implementation. Earlier failed/final
+Tranche 8 checkpoints are preserved in their original directories.
+
+This completes the macOS focused common-output-drain replay. It is **not** a
+new combined 12-gate or camera run: earlier macOS 8A/8C acceptance remains
+unchanged. Linux focused playback of this correction and native Linux
+allocator/fork regressions remain open in `TODO.md`.
 
 ### 9. GPU integration
 
