@@ -14,11 +14,12 @@
 
 typedef union block_header block_header;
 
-union block_header {
+union __attribute__((aligned(16))) block_header {
   struct {
     size_t size;
     int free;
     block_header* next;
+    block_header* previous;
     uint64_t magic;
 #ifdef CRT_DEBUG_MALLOC
     /* CRT_DEBUG_MALLOC (2026-09-14, diagnosing the Skia/SkSL heap-
@@ -63,17 +64,19 @@ union block_header {
     size_t requested_size;
 #endif
   } block;
-  long double align;
+  max_align_t align;
 };
 
 /* Payload alignment is an ABI requirement, not a property of the allocator's
  * private metadata size. The original allocator happened to have a 32-byte
  * block_header, so using sizeof(block_header) in the power-of-two rounding
- * expression worked by accident. CRT_DEBUG_MALLOC adds owner/requested_size
- * and makes the header 48 bytes on the supported 64-bit targets; 48 is not a
- * power of two, and also must not make posix_memalign(32) fall through to a
- * merely 16-byte-aligned malloc result. Keep the two concepts separate. */
-#define CRT_MALLOC_ALIGNMENT ((size_t)__alignof__(max_align_t))
+ * expression worked by accident. An earlier diagnostic layout grew to 48
+ * bytes, which is not a power of two and must not let posix_memalign(32)
+ * fall through to a merely 16-byte-aligned result. Physical-neighbour metadata now makes
+ * the header 48 bytes (64 in diagnostic builds); its alignment and payload
+ * alignment must still follow max_align_t, not sizeof(block_header). */
+#define CRT_MALLOC_ALIGNMENT \
+  ((size_t)(__alignof__(max_align_t) > 16 ? __alignof__(max_align_t) : 16))
 typedef char crt_malloc_alignment_must_be_power_of_two
     [(CRT_MALLOC_ALIGNMENT != 0 &&
       (CRT_MALLOC_ALIGNMENT & (CRT_MALLOC_ALIGNMENT - 1)) == 0)
@@ -90,7 +93,45 @@ typedef struct {
 } aligned_header;
 
 static block_header* heap_head;
+static block_header* heap_tail;
 static crt_spinlock heap_lock = CRT_SPINLOCK_INIT;
+
+/* Free-list links occupy only released payload. Physical neighbours are kept
+ * separately so freeing a block never scans the process's live allocations. */
+typedef struct {
+  block_header* previous;
+  block_header* next;
+} free_links;
+typedef char crt_free_links_must_fit_minimum_block
+    [(sizeof(free_links) <= CRT_MALLOC_ALIGNMENT) ? 1 : -1];
+static block_header* free_bins[sizeof(size_t) * 8];
+
+static size_t free_bin(size_t size) {
+  size_t bin = 0;
+  while ((size >>= 1) != 0) ++bin;
+  return bin;
+}
+
+static free_links* links(block_header* header) {
+  return (free_links*)(header + 1);
+}
+
+static void index_free_block(block_header* header) {
+  size_t bin = free_bin(header->block.size);
+  block_header* next = free_bins[bin];
+  links(header)->previous = 0;
+  links(header)->next = next;
+  if (next != 0) links(next)->previous = header;
+  free_bins[bin] = header;
+}
+
+static void unindex_free_block(block_header* header) {
+  block_header* previous = links(header)->previous;
+  block_header* next = links(header)->next;
+  if (previous != 0) links(previous)->next = next;
+  else free_bins[free_bin(header->block.size)] = next;
+  if (next != 0) links(next)->previous = previous;
+}
 
 #ifdef CRT_DEBUG_MALLOC
 /* &heap_head itself is the identity: a distinct, stable address per
@@ -258,6 +299,7 @@ static block_header* append_chunk(size_t size) {
   header->block.size = chunk_size - sizeof(block_header);
   header->block.free = 1;
   header->block.next = 0;
+  header->block.previous = heap_tail;
   header->block.magic = CRT_BLOCK_MAGIC;
 #ifdef CRT_DEBUG_MALLOC
   crt_malloc_set_owner(header);
@@ -265,15 +307,28 @@ static block_header* append_chunk(size_t size) {
 
   if (heap_head == 0) {
     heap_head = header;
+    heap_tail = header;
     return header;
   }
 
-  current = heap_head;
-  while (current->block.next != 0) {
-    current = current->block.next;
-  }
+  current = heap_tail;
   current->block.next = header;
+  heap_tail = header;
   return header;
+}
+
+/* current is not indexed; every following free block is. */
+static void coalesce_free_blocks(block_header* current) {
+  while (current->block.next != 0) {
+    block_header* next = current->block.next;
+    unsigned char* end = (unsigned char*)(current + 1) + current->block.size;
+    if (!next->block.free || end != (unsigned char*)next) break;
+    unindex_free_block(next);
+    current->block.size += sizeof(block_header) + next->block.size;
+    current->block.next = next->block.next;
+    if (current->block.next != 0) current->block.next->block.previous = current;
+    else heap_tail = current;
+  }
 }
 
 static void split_block(block_header* header, size_t size) {
@@ -287,6 +342,9 @@ static void split_block(block_header* header, size_t size) {
   next->block.size = header->block.size - size - sizeof(block_header);
   next->block.free = 1;
   next->block.next = header->block.next;
+  next->block.previous = header;
+  if (next->block.next != 0) next->block.next->block.previous = next;
+  else heap_tail = next;
   next->block.magic = CRT_BLOCK_MAGIC;
 #ifdef CRT_DEBUG_MALLOC
   /* header itself keeps whatever owner it already had (set when it was
@@ -298,21 +356,8 @@ static void split_block(block_header* header, size_t size) {
 
   header->block.size = size;
   header->block.next = next;
-}
-
-static void coalesce_free_blocks(void) {
-  block_header* current = heap_head;
-
-  while (current != 0 && current->block.next != 0) {
-    unsigned char* current_end = (unsigned char*)(current + 1) + current->block.size;
-    if (current->block.free && current->block.next->block.free &&
-        current_end == (unsigned char*)current->block.next) {
-      current->block.size += sizeof(block_header) + current->block.next->block.size;
-      current->block.next = current->block.next->block.next;
-    } else {
-      current = current->block.next;
-    }
-  }
+  coalesce_free_blocks(next);
+  index_free_block(next);
 }
 
 static void* malloc_unlocked(size_t size) {
@@ -336,17 +381,20 @@ static void* malloc_unlocked(size_t size) {
   }
   size = align_size(size);
 
-  current = heap_head;
-  while (current != 0) {
-    if (current->block.free && current->block.size >= size) {
-      split_block(current, size);
-      current->block.free = 0;
+  for (size_t bin = free_bin(size); bin < sizeof(free_bins) / sizeof(free_bins[0]); ++bin) {
+    current = free_bins[bin];
+    while (current != 0) {
+      if (current->block.size >= size) {
+        unindex_free_block(current);
+        split_block(current, size);
+        current->block.free = 0;
 #ifdef CRT_DEBUG_MALLOC
-      crt_malloc_paint_canary(current, requested_size);
+        crt_malloc_paint_canary(current, requested_size);
 #endif
-      return current + 1;
+        return current + 1;
+      }
+      current = links(current)->next;
     }
-    current = current->block.next;
   }
 
   current = append_chunk(size);
@@ -390,7 +438,16 @@ static void free_unlocked(void* ptr) {
   crt_malloc_check_canary(header);
 #endif
   header->block.free = 1;
-  coalesce_free_blocks();
+  coalesce_free_blocks(header);
+  index_free_block(header);
+  if (header->block.previous != 0 && header->block.previous->block.free) {
+    block_header* previous = header->block.previous;
+    if ((unsigned char*)(previous + 1) + previous->block.size == (unsigned char*)header) {
+      unindex_free_block(previous);
+      coalesce_free_blocks(previous);
+      index_free_block(previous);
+    }
+  }
 }
 
 void* malloc(size_t size) {

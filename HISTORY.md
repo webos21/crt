@@ -11,6 +11,41 @@ substantive update.
 
 ## 2026-10-15
 
+### macOS Web 8C: allocator latency and native lifetime scoping
+
+The final combined gate passes **12/12**, closing macOS/arm64 Tranche 8C. It includes three ordinary
+physical-camera runs and twenty measured lifetimes in one WebProcess, plus a separate forty-cycle
+stress run. All original resource/deadline bounds remain in force. Failed intermediate checkpoints
+are retained beside the final acceptance evidence rather than relabelled as successes.
+
+The native comparison led to a CRT/PAL-only reproducer, without WebKit. Sampling shows Apple's
+Portrait/Espresso initialization calling CRT new/delete and waiting on the global allocator lock:
+malloc traversed live blocks and each free swept the entire heap. Repeated capture grew from
+roughly 1.6s to 21.7s per lifetime; forward-only coalescing was insufficient and eventually missed
+the first-frame budget. The bootstrap allocator now indexes free blocks by size, coalesces physical
+neighbours locally and appends via a tail. Its private header and released-payload bookkeeping change,
+not Bionic public allocation types/symbols/error policy. Minimum/header alignment stays at least 16
+bytes, including Windows' native 8-byte long double case. Scudo/host malloc were not substituted.
+
+Direct CRT/PAL capture then completes twenty measured sessions with increasing owned-frame timestamps
+and 360-1,491ms lifetimes, RSS +2,448 KiB maximum and no thread/fd growth. Allocator-only browser runs
+pass twice but a combined replay still catches native thread +3; that failed checkpoint is preserved.
+All AVFoundation start/stop/release calls now own Cocoa autorelease pools, as open already did. The
+combined allocator/PAL path passes focused twenty- and forty-cycle stop/revoke/navigation/clone runs
+without increasing the +24 MiB/+2 thread/+2 fd or two-second limits. No separate stream-clock change
+was needed for these accepted runs. This does not attribute all native cached-thread variation to a
+single autorelease defect. Detailed evidence and the final combined gate belong to
+`docs/acceptance/crtweb_acceptance.md`.
+
+Faster execution also exposes a B7 observer race: its 100-cycle test passes, but external `vmmap`
+sometimes reaches a WebProcess after it has exited. A macOS-only atomic ready/release checkpoint now
+holds the first painted process pair alive for observation before the measured warmup; B7 again
+observes UI/Web/Network with no violations. The checkpoint parser rejects missing, duplicate and
+wrong-process identities. The unit suite passes 17 cases. CTest passes 190/190 (the two physical
+camera-to-file tests were deliberately excluded); allocator ordinary/diagnostic/fault tests, seed-42
+1M baseline and all eight 1/8/16/32-thread contention cases pass. Native Linux/Windows runtime replay
+of the common allocator change is still separate from the successful cross-target compile checks.
+
 ### macOS Web Tranche 8 shared-code replay: complete PCM output accepted
 
 Rebuilt and verified the cumulative `05-ui` SDK, recomposed the pinned PlatformCRT tree (22 applicable
@@ -28,7 +63,7 @@ post-stop snapshot; an idle observation sees the native counts decline again. A 
 experiment did not resolve the result and was reverted. The test now warms every release mode (four
 cycles), records up to two seconds of post-stop settling against the unchanged resource bounds, and
 prints DOM/track state on a video-clock timeout. Fourteen evidence-parser tests pass. Focused hardware
-retests still fail (resource settling and video-clock startup), so **macOS 8C is not closed** and no
+retests still fail (resource settling and video-clock startup), so **macOS 8C remained open at this checkpoint** and no
 runtime/PAL implementation fix is claimed. Basic media CTests pass 6/6 and the capture-conversion
 CTest passes; no work-tree processes remain. Evidence and reproduction:
 `docs/acceptance/crtweb_acceptance.md`, macOS current shared-code replay (2026-10-15).

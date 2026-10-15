@@ -28,21 +28,12 @@
  * with an instance ivar (`class_addIvar`/`object_setInstanceVariable`/
  * `object_getInstanceVariable`), confirming per-instance state storage
  * works, which is what lets more than one crtmedia_capture instance exist
- * safely. A real, confirmed environment fact, not a design choice: a bare
- * command-line binary invoked directly (no app bundle, or an unsigned/
- * un-launched-via-LaunchServices bundle) never receives real frames on
- * this host -- TCC's camera authorization is only granted to a process
- * launched through LaunchServices (`open`) from a signed `.app` bundle
- * declaring `NSCameraUsageDescription`; a plain `crtmedia_capture_v4l2_
- * test`-style CTest executable invocation is exactly the case that does
- * not get it. crtmedia_capture_backend_open()/_start() below still
- * succeed either way (AVFoundation's own API calls do not themselves
- * fail for this) -- crtmedia_capture_backend_dequeue() simply never
- * receives a real frame, so the live acceptance test (tests/capture_
- * avfoundation_test.c) reports a precise, honest skip rather than a false
- * pass or a hard failure, mirroring capture_v4l2_test.c's own no-device
- * skip for the identical "implementation complete, physical/environment
- * gate pending" reason.
+ * safely. The 2026-09-27 CLI replay lacked TCC authorization and used a
+ * signed LaunchServices app for physical evidence. That was an environment
+ * observation, not a requirement that AVFoundation only work in app bundles:
+ * the authorized 2026-10-15 host delivers frames to direct CRT/native CLI
+ * probes. Device tests must distinguish unavailable authorization/frames
+ * from a passing capture, and hardware probes require explicit opt-in.
  *
  * This file DOES use this project's own libc headers (pthread_mutex_t/
  * pthread_cond_t for the frame queue below, clock_gettime()) normally,
@@ -467,9 +458,13 @@ crtmedia_result crtmedia_capture_backend_enumerate(
 }
 
 static void release_backend(crtmedia_avfoundation_capture* capture) {
+  id pool;
   if (capture == NULL) {
     return;
   }
+  pool = ((id (*)(id, SEL))objc_msgSend)(
+      ((id (*)(id, SEL))objc_msgSend)((id)objc_getClass("NSAutoreleasePool"), sel_registerName("alloc")),
+      sel_registerName("init"));
   if (capture->session != NULL) {
     if (capture->started) {
       ((void (*)(id, SEL))objc_msgSend)(capture->session, sel_registerName("stopRunning"));
@@ -503,6 +498,7 @@ static void release_backend(crtmedia_avfoundation_capture* capture) {
   }
   pthread_cond_destroy(&capture->not_empty);
   pthread_mutex_destroy(&capture->lock);
+  ((void (*)(id, SEL))objc_msgSend)(pool, sel_registerName("release"));
   free(capture);
 }
 
@@ -670,6 +666,7 @@ crtmedia_result crtmedia_capture_backend_open(
 
 crtmedia_result crtmedia_capture_backend_start(void* backend) {
   crtmedia_avfoundation_capture* capture = (crtmedia_avfoundation_capture*)backend;
+  id pool;
   if (capture->started) {
     return CRTMEDIA_OK;
   }
@@ -678,7 +675,13 @@ crtmedia_result crtmedia_capture_backend_start(void* backend) {
   capture->have_timestamp_origin = 0;
   capture->last_timestamp_us = -1;
   pthread_mutex_unlock(&capture->lock);
+  /* Native calls can autorelease helpers too, not only open(). A CRT caller
+   * need not own a Cocoa run loop or an outer autorelease pool. */
+  pool = ((id (*)(id, SEL))objc_msgSend)(
+      ((id (*)(id, SEL))objc_msgSend)((id)objc_getClass("NSAutoreleasePool"), sel_registerName("alloc")),
+      sel_registerName("init"));
   ((void (*)(id, SEL))objc_msgSend)(capture->session, sel_registerName("startRunning"));
+  ((void (*)(id, SEL))objc_msgSend)(pool, sel_registerName("release"));
   capture->started = 1;
   return CRTMEDIA_OK;
 }
@@ -740,9 +743,13 @@ crtmedia_result crtmedia_capture_backend_dequeue(void* backend, int timeout_ms, 
 
 crtmedia_result crtmedia_capture_backend_stop(void* backend) {
   crtmedia_avfoundation_capture* capture = (crtmedia_avfoundation_capture*)backend;
+  id pool;
   if (!capture->started) {
     return CRTMEDIA_OK;
   }
+  pool = ((id (*)(id, SEL))objc_msgSend)(
+      ((id (*)(id, SEL))objc_msgSend)((id)objc_getClass("NSAutoreleasePool"), sel_registerName("alloc")),
+      sel_registerName("init"));
   ((void (*)(id, SEL))objc_msgSend)(capture->session, sel_registerName("stopRunning"));
   capture->started = 0;
   if (capture->dispatch_queue != NULL) {
@@ -751,6 +758,7 @@ crtmedia_result crtmedia_capture_backend_stop(void* backend) {
   pthread_mutex_lock(&capture->lock);
   queue_clear_locked(capture);
   pthread_mutex_unlock(&capture->lock);
+  ((void (*)(id, SEL))objc_msgSend)(pool, sel_registerName("release"));
   return CRTMEDIA_OK;
 }
 

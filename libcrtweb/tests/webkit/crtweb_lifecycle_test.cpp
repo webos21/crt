@@ -494,6 +494,28 @@ int main(int argc, char** argv)
             printMappedFiles(getpid(), "UIProcess");
             for (auto& child : live)
                 printMappedFiles(child.first, child.second);
+#if defined(WTF_CRT_MACHO_ASM)
+            // Keep the first painted Web process alive until the external vmmap observer is done.
+            if (const char* directory = getenv("CRTWEB_MAP_AUDIT_DIR")) {
+                std::string ready = std::string(directory) + "/ready";
+                std::string temporary = ready + ".tmp";
+                std::string release = std::string(directory) + "/release";
+                if (FILE* file = fopen(temporary.c_str(), "w")) {
+                    fprintf(file, "UIProcess %ld\n", static_cast<long>(getpid()));
+                    for (auto& child : live)
+                        fprintf(file, "%s %ld\n", child.second.c_str(), static_cast<long>(child.first));
+                    fclose(file);
+                    check(rename(temporary.c_str(), ready.c_str()) == 0, "publish complete map checkpoint");
+                } else
+                    check(false, "publish map observer checkpoint");
+                unsigned waited = 0;
+                while (access(release.c_str(), F_OK) != 0 && waited < 30000) {
+                    spin(20);
+                    waited += 20;
+                }
+                check(access(release.c_str(), F_OK) == 0, "map observer released checkpoint");
+            }
+#endif
         }
         check(live.size() == 2, "a Web and a Network process while the view is alive");
 

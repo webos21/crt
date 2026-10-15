@@ -4,6 +4,10 @@ This document records the current allocator baseline before the Upper Runtime
 work adds heavier allocation pressure from hardware decode, zero-copy graphics
 paths, WebRTC, QuickJS, and larger C++ workloads.
 
+The September decision/data below describe the pre-Upper-Runtime implementation.
+The 2026-10-15 Web camera follow-up at the end records its indexed-free-list
+extension; earlier host results are not measurements of that newer implementation.
+
 The purpose of this pass is measurement and risk control, not allocator
 replacement. The current bootstrap allocator remains the default unless a
 reproducible correctness issue, nonlinear scaling blocker, unbounded memory
@@ -105,6 +109,37 @@ Rationale:
 
 - Run the focused allocator CTest selection on Windows/aarch64 when that host
   is available.
-- Compare the first real upper-runtime stress workload against this envelope.
+- Replay the indexed-free-list change on Linux/Windows with their native
+  allocator/fork regressions; macOS replay is recorded below.
 - Promote Scudo only if a repeatable blocker appears in the current allocator
   and the reproducer is preserved.
+
+## Web Camera Follow-Up (2026-10-15)
+
+macOS Web Tranche 8C exposed a nonlinear latency blocker, not a need to change
+the public allocation ABI: Apple's capture model initialization coalesces C++
+new/delete to the CRT allocator. Repeated sessions accumulated model work while
+every free swept the entire live heap under one lock and malloc searched live
+blocks from the beginning. Direct CRT/PAL capture reproduced the slowdown
+without WebKit; native libSystem controls did not. The retained samples and
+camera measurements are owned by [Web acceptance](crtweb_acceptance.md).
+
+Keep the bootstrap/reference allocator, but index free blocks by size class,
+track physical neighbours for local coalescing and append through a tail
+pointer. Free-list links live only in released payload. This is still a
+globally locked allocator, not Scudo or a claim of constant-time allocation
+(a size bucket can contain multiple candidates). The private header changes,
+but Bionic-facing malloc/free/realloc/alignment/error contracts do not. Header
+and minimum payload alignment are at least 16 bytes, including Windows targets
+whose native long double is only 8-byte aligned. Rebuild the runtime as a unit;
+private heap snapshots are not interchangeable across builds.
+
+On macOS, ordinary/diagnostic coalescing, canaries and alignment, fork-region
+and fault regressions pass in the broad CTest run. Seed-42 baseline correctness
+passes all four tiers through 1M operations (12 OS regions at 1M); contention
+passes all eight private/shared 1/8/16/32-thread cases. Generated one-off reports
+are under `out/macos-host-ninja-debug/tranche8-replay-20261015/allocator-{baseline,contention}/`.
+These runs overlapped SDK build activity and are correctness/envelope evidence,
+not a controlled throughput comparison against the September data. Native
+Linux/Windows execution of the common change remains a separate replay;
+cross-target compile checks are not substitutes for it.

@@ -5,11 +5,9 @@
  * exercises AVFoundation capture -> owned YUV420P -> software encode ->
  * MP4 -> extractor/decode-back. A host with no camera, or one where this
  * exact process has not been granted real camera access, reports a
- * precise CTest skip rather than a false pass or a hard failure -- see
- * src/arch/macos/capture_avfoundation.c's own top comment for exactly why
- * a plain CTest-invoked executable is the second case on this project's
- * own real macOS host today (TCC only grants real frames to a process
- * launched through LaunchServices from a signed .app bundle). */
+ * precise CTest skip rather than a false pass or a hard failure. Authorization
+ * depends on macOS TCC state, not solely on app-bundle versus CLI launch:
+ * direct CLI capture works on the authorized 2026-10-15 replay host. */
 #include "crtmedia/capture.h"
 #include "crtmedia/codec.h"
 #include "crtmedia/extractor.h"
@@ -106,12 +104,8 @@ int main(void) {
 
   CHECK(crtmedia_capture_start(capture) == CRTMEDIA_OK, "start capture");
 
-  /* First frame is a real environment gate, not a correctness assertion --
-   * see this file's own top comment: a plain CTest-invoked executable does
-   * not receive real frames on this project's own real macOS host today
-   * (no LaunchServices-launched signed .app bundle), so this is the
-   * precise, honest skip for exactly that case, distinct from "no camera
-   * at all" above. */
+  /* First-frame availability is separate from the no-device case above;
+   * a device can enumerate/open even when TCC prevents frame delivery. */
   crtmedia_frame first_frame;
   crtmedia_result first_result = CRTMEDIA_WOULD_BLOCK;
   int waited_ms = 0;

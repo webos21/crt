@@ -3,7 +3,28 @@
 
 import unittest
 
-from build_webkit_crt_port import audio_output_evidence, camera_stress_evidence
+from build_webkit_crt_port import audio_output_evidence, camera_stress_evidence, macos_map_checkpoint
+
+
+class MapCheckpointTests(unittest.TestCase):
+    def test_complete_live_process_checkpoint(self):
+        self.assertEqual(macos_map_checkpoint("UIProcess 10\nWebProcess 11\nNetworkProcess 12\n", 10),
+                         {"WebProcess": 11, "NetworkProcess": 12})
+
+    def test_incomplete_or_wrong_process_identity_is_rejected(self):
+        valid = "UIProcess 10\nWebProcess 11\nNetworkProcess 12\n"
+        for invalid in ("", "UIProcess 10\n", valid.replace("UIProcess 10", "UIProcess 20"),
+                        valid.replace("WebProcess 11", "WebProcess 12"),
+                        valid.replace("WebProcess 11", "WebProcess 0"),
+                        valid.replace("WebProcess 11", "WebProcess -1"),
+                        valid.replace("WebProcess 11", "OtherProcess 11")):
+            self.assertIsNone(macos_map_checkpoint(invalid, 10), invalid)
+
+    def test_malformed_or_duplicate_records_are_rejected(self):
+        for invalid in ("WebProcess", "WebProcess nope", "WebProcess 11 extra",
+                        "WebProcess \u00b2",
+                        "UIProcess 10\nWebProcess 11\nNetworkProcess 12\nWebProcess 13"):
+            self.assertIsNone(macos_map_checkpoint(invalid, 10), invalid)
 
 
 class AudioEvidenceTests(unittest.TestCase):

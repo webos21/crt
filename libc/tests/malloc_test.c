@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <malloc.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -11,6 +12,39 @@ static int fail(const char* message) {
   write(2, message, strlen(message));
   write(2, suffix, sizeof(suffix) - 1);
   return 1;
+}
+
+static int check_adjacent_coalescing(void) {
+  unsigned char* blocks[12];
+  unsigned char* combined;
+  uintptr_t address;
+  size_t i;
+  for (i = 0; i < 12; ++i) {
+    blocks[i] = (unsigned char*)malloc(2048);
+    if (blocks[i] == 0) return fail("coalescing allocation");
+    memset(blocks[i], (int)i, 2048);
+  }
+  address = (uintptr_t)blocks[4];
+  /* Exercise backward merging on ascending release, then forward merging on
+   * descending release. No single block can satisfy the combined request. */
+  for (i = 4; i < 8; ++i) {
+    free(blocks[i]);
+    blocks[i] = 0;
+  }
+  combined = (unsigned char*)malloc(7000);
+  if (combined == 0 || (uintptr_t)combined != address)
+    return fail("adjacent coalescing reuse");
+  memset(combined, 0x5a, 7000);
+  for (i = 0; i < 2048; ++i) {
+    if (blocks[3][i] != 3 || blocks[8][i] != 8)
+      return fail("coalescing live neighbours");
+  }
+  combined = (unsigned char*)realloc(combined, 3073);
+  if (combined == 0 || combined[3072] != 0x5a)
+    return fail("coalescing shrink preservation");
+  free(combined);
+  for (i = 12; i > 0; --i) free(blocks[i - 1]);
+  return 0;
 }
 
 int main(void) {
@@ -25,6 +59,8 @@ int main(void) {
   unsigned char* moved;
   unsigned char* moved_grown;
   size_t i;
+
+  if (check_adjacent_coalescing() != 0) return 1;
 
   bytes = (unsigned char*)malloc(16);
   if (bytes == 0) {
@@ -101,11 +137,9 @@ int main(void) {
     return fail("posix memalign invalid");
   }
 
-  /* CRT_DEBUG_MALLOC grows block_header from 32 to 48 bytes on the 64-bit
-   * targets. Payload alignment must stay independent of that private header
-   * size: posix_memalign(32) must not take the ordinary malloc shortcut and
-   * return the first mapping's base+48 address. Exercise both a sub-header-
-   * size and page-size request on every host. */
+  /* Payload alignment must stay independent of private header size:
+   * posix_memalign(32) must not take a merely 16-byte-aligned shortcut.
+   * Exercise both a small and page-size request on every host. */
   aligned32 = 0;
   if (posix_memalign((void**)&aligned32, 32, 19) != 0 || aligned32 == 0 ||
       ((size_t)aligned32 & 31u) != 0) {

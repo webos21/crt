@@ -2405,7 +2405,7 @@ Generated final evidence: `out/web-crt-webcore/acceptance-b3.json`,
 This closes the Linux device follow-up, not the current shared-code replay
 obligations on macOS/arm64 and Windows/x64.
 
-**macOS/arm64 current shared-code replay (2026-10-15): 11/12; physical-camera stress remains open.**
+**macOS/arm64 initial shared-code replay (2026-10-15): 11/12; superseded by the closure below.**
 The `05-ui` SDK was rebuilt and verified before replaying `ae1dac2`; the pristine pinned tree was
 recomposed with 22 applicable patches from the 23-entry manifest. The earlier 2026-10-14 camera
 result covered three ordinary processes. The Linux follow-up added twenty measured lifetimes in one
@@ -2506,10 +2506,76 @@ deadline or evicting AppleDepth/Espresso caches. Therefore:
   evidence that native capture stopped supplying frames; the new DOM diagnostic must distinguish
   source delivery from autoplay/playback/clock state on its next reproduction.
 
-Keep the failed **11/12** combined result and current gate unchanged. Next compare direct CRT/PAL
+At this checkpoint, keep the failed **11/12** result and gate unchanged. The next investigation compares direct CRT/PAL
 capture lifetimes with this host-native control, then isolate DOM play/load/track replacement if the
 direct path succeeds. Record total resources and ownership/first-frame/stop completion separately;
 do not change global OS effects, relax thresholds or substitute a new process per cycle to obtain green.
+
+**macOS/arm64 8C closure (2026-10-15, follow-up to `1085835`): final combined gate 12/12.**
+The missing piece was not an unsupported native session lifecycle. A CRT/PAL-only probe reproduced
+the progressively slower restarts without WebKit. Sampling finds Portrait/Espresso model work
+calling CRT new/delete and spending most of its time waiting for the allocator lock or scanning the
+heap: malloc searched live blocks and free coalesced by sweeping the whole heap. The original probe
+grew from 1,640ms to 21,728ms per lifetime before its diagnostic run was terminated. A forward-only
+free-coalescing experiment still failed at cycle 16 (only two frames within its first-frame budget).
+Neither failed run is resource acceptance; the first also lacked the macOS resource-observer define
+and reported RSS/threads `-1`.
+
+The allocator now indexes released blocks by size class, keeps physical-neighbour links for local
+coalescing and appends via a tail. It stays CRT-owned and globally locked, not host malloc or Scudo.
+Only private heap bookkeeping changes; public Bionic-facing types, symbols and error semantics do
+not. The minimum alignment is 16 bytes even on Windows frontends with 8-byte long double. Allocator
+regressions and the cross-host replay boundary are owned by
+[allocator acceptance](allocator_baseline.md#web-camera-follow-up-2026-10-15).
+
+Allocator-only browser repeats passed twice but the combined run still caught thread +3; preserve
+`acceptance-binned-first.json` and `camera-binned-combined-failed.log`. Native-stack observation now
+shows CoreMedia/ANE/framework work rather than the former allocator bottleneck. PAL start, stop and
+release now also bound their Cocoa autoreleases, just as open already did; callers need not supply a
+Cocoa run loop or pool. This is correct native-call ownership, not proof that every extra native
+cached thread was an autorelease leak. No WebKit stream-clock workaround, upstream patch, OS effect
+setting change, threshold increase or separate-process substitution was used.
+
+| Accepted camera evidence | Measured lifetimes | Peak UI RSS / threads / fds delta | Peak Web RSS / threads / fds delta | Max settling |
+| --- | --- | --- | --- | --- |
+| Direct CRT/PAL, allocator isolation (`pal-camera-binned.log`) | 20 after 4 warmups | Single process: +2,448 KiB / +0 / +0 | Not WebKit; lifetime 360-1,491ms | Snapshot at 300ms |
+| Browser, allocator + native pools (`camera-binned-pools.log`) | 20 after 4 warmups | +16 KiB / +0 / +0 | +8,896 KiB / +2 / +0 | 0ms |
+| Longer same-process browser run (`camera-pools-40.log`) | 40 after 4 warmups | +32 KiB / +0 / +0 | +9,888 KiB / +2 / +0 | 1,962ms |
+| Final combined gate (`camera-combined-final.log`) | 20 after 4 warmups | +32 KiB / +0 / +0 | +4,944 KiB / +1 / +0 | 0ms |
+
+The final Web baseline is 163,280 KiB / 48 threads / 14 fds; UI baseline is 35,776 KiB / 13 / 8.
+Apple's model initialization now progresses during warmup, so the absolute baseline is higher than
+the earlier slow/incomplete initialization checkpoint; this is not a claim of lower absolute RSS.
+Each measured browser cycle keeps the same PID, receives three fresh frame serials and at least two
+distinct pictures, rotates stop/revoke/active navigation/last-clone release, and ends the released
+track. Permission counts are 25 for twenty cycles and 45 for forty. The +24 MiB/+2 thread/+2 fd and
+2,000ms limits are unchanged. macOS still reports native camera-fd identity as unavailable (`-1`),
+not a fabricated zero; the gate uses total process fd counts and the explicit worker/track lifecycle.
+No camera image data is saved.
+
+The faster runtime exposed a separate **observer race** in B7, not a failing lifetime test. An
+external `vmmap` could reach an already-exited WebProcess while the test itself passed 100 cycles.
+The macOS test now atomically publishes the first painted UI/Web/Network PID checkpoint and holds
+it alive until the host observer releases it, before measured warmup. The driver rejects incomplete,
+duplicate, malformed or wrong-parent records. This restores all three observed roles without
+weakening the static/runtime mapping rules or adding an observer child to the measured UI process.
+
+Final validation: **12/12 combined gates**; three ordinary physical probes pass with 20/20/20 distinct
+pictures; complete 14,400-frame/28,320-nonzero-sample CoreAudio fixture and progressing sink clock;
+twelve playback lifetimes (Web threads 29 -> 25); network trust 15 cases; public API/B7 100 cycles
+each (+32 KiB/+0 threads/+0 fds each); WebView and Host ABI/export/header gates pass. CTest passes
+190/190, deliberately excluding the two camera-to-file tests; allocator debug/canary/fault and
+contention regressions pass, as do the 1M-operation and eight contention sweep cases. Device/map
+evidence unit tests pass 17/17; licensing 15/15; patch-manifest and `05-ui` verification pass.
+One ordinary probe retains a shutdown `Error sending IPC message: Bad file descriptor` stderr line;
+it exits zero with the track ended and no surviving child. This gate does not certify stderr-free
+shutdown. The existing B5 reference-pixel comparison remains unavailable, not newly proven here.
+
+Final evidence is retained under `out/macos-host-ninja-debug/tranche8-replay-20261015/`:
+`acceptance-camera-final.json`, `driver-camera-final.log`, `camera-combined-final.log`, the focused
+logs above, `pal-camera-before.sample.txt`, `camera-binned-threads.sample.txt`, `b7-checkpoint.json`,
+`ctest-binned.log` and allocator reports. The earlier failed JSON/logs remain distinct. This closes
+**macOS 8C**, not Windows's current shared-code replay or native Linux/Windows allocator/fork replay.
 
 Reproduce the combined gate (the physical-camera flag remains explicit):
 

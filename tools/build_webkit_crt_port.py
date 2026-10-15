@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -369,11 +370,11 @@ def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
             "consumer_output": consumer_output.splitlines()}
 
 
-def observe_macos_processes(parent_pid: int) -> dict:
+def observe_macos_processes(parent_pid: int, children: dict | None = None) -> dict:
     """The mapped files of the three live B7 processes (UI, Web, Network), from the host side. macOS has
     no /proc, and an observer started inside the process under test (popen of ps/vmmap) is a child
     that changes the lifecycle being measured, so the driver samples while the test runs."""
-    children = {}
+    children = dict(children or {})
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and len(children) < 2:
         snapshot = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True,
@@ -399,13 +400,43 @@ def observe_macos_processes(parent_pid: int) -> dict:
     return mapped
 
 
+def macos_map_checkpoint(text: str, parent_pid: int) -> dict | None:
+    records = {}
+    for line in text.splitlines():
+        fields = line.split()
+        if (len(fields) != 2 or fields[0] in records or not fields[1].isascii() or not fields[1].isdigit()
+                or int(fields[1]) <= 0):
+            return None
+        records[fields[0]] = int(fields[1])
+    if set(records) != {"UIProcess", "WebProcess", "NetworkProcess"} or records["UIProcess"] != parent_pid:
+        return None
+    if len(set(records.values())) != 3:
+        return None
+    return {role: records[role] for role in ("WebProcess", "NetworkProcess")}
+
+
 def run_lifecycle_program_macos(build: Path, sdk: Path, prefix: Path, work: Path, env: dict) -> tuple:
     """crtweb_lifecycle_test as run_program runs it, with the host-side sampling of the process maps."""
     program = build / "bin" / "crtweb_lifecycle_test"
-    process = subprocess.Popen([str(program)], cwd=work, env=gate_environment(build, sdk, prefix, work, env, "macos"),
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    mapped = observe_macos_processes(process.pid)
-    stdout, stderr = process.communicate()
+    with tempfile.TemporaryDirectory(prefix="map-audit-", dir=work) as directory:
+        run_env = gate_environment(build, sdk, prefix, work, env, "macos")
+        run_env["CRTWEB_MAP_AUDIT_DIR"] = directory
+        process = subprocess.Popen([str(program)], cwd=work, env=run_env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        mapped = {}
+        try:
+            ready = Path(directory) / "ready"
+            deadline = time.monotonic() + 25
+            while time.monotonic() < deadline and process.poll() is None:
+                if ready.exists():
+                    children = macos_map_checkpoint(ready.read_text(), process.pid)
+                    if children is not None:
+                        mapped = observe_macos_processes(process.pid, children)
+                        break
+                time.sleep(0.02)
+        finally:
+            (Path(directory) / "release").touch()
+            stdout, stderr = process.communicate(timeout=660)
     print(stdout, end="")
     print(stderr, end="", file=sys.stderr)
     audit = audit_program_native(program, sdk, prefix, build, "macos")

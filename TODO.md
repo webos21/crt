@@ -137,8 +137,7 @@ uses the host replay order stated below and in the acceptance document.
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Sequential gates in `docs/acceptance/crtweb_acceptance.md`.
   Linux token, real ALSA output and four-mode physical-camera resource gates pass.
-  macOS complete-fixture playback passes; its new same-process physical-camera gate is red
-  (resource bounds and video-clock timeout; native AVFoundation controls succeed, acceptance).
+  macOS complete-fixture playback and repeated physical capture now pass (acceptance).
   Windows replay of the current shared playback/capture fixes remains pending.
   Investigation/reproduction: [`Windows Tranche 8 checkpoint`](docs/bringup/crtweb_windows_tranche8.md).
   * [x] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy accepted on
@@ -146,9 +145,9 @@ uses the host replay order stated below and in the acceptance document.
   * [ ] **8B playback:** complete 14,400-frame PCM fixture and paused-preroll/backpressure fixes
     accepted on Linux and macOS (2026-10-15); current Windows replay pending.
   * [ ] **8C capture:** synthetic replay accepted on all three hosts; Linux/macOS/Windows physical-camera
-    evidence recorded; Linux 20 same-process cycles pass. macOS permission/stream-clock synthetic
-    regressions pass, but physical resource/restart stress still fails. Next isolate direct CRT/PAL
-    sessions from DOM playback against the native control; Windows current replay pending.
+    evidence recorded; Linux and macOS same-process resource/restart gates pass.
+    Windows current replay pending; replay the common allocator change's native allocator/fork
+    regressions on Linux/Windows before claiming updated cross-host acceptance.
 * [ ] **9. GPU integration.**
   * [ ] Present WebKit's private Skia output through the CRT external-surface path.
   * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one
