@@ -2,7 +2,7 @@
 
 **Status: in progress. Tranches 0-8 are closed, including the public `crtweb`
 API and `crtui` WebView plus public-API/process lifecycle acceptance on
-Linux/x86_64, macOS/arm64 and Windows/x64. GPU integration is next (Tranche 9); a packaged
+Linux/x86_64, macOS/arm64 and Windows/x64. GPU integration is in progress (Tranche 9); a packaged
 `06-web` SDK follows in Tranche 10.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
@@ -2867,6 +2867,140 @@ exclusions remain separate work.
 Start with WebKit's Skia output to an external surface consumed by CRT's Skia.
 Later optimize to a shared/zero-copy GPU buffer import. Sharing one Skia
 context between WebKit and CRT is explicitly not an initial acceptance item.
+
+Keep three boundaries separate:
+
+1. **9A, GPU final composition.** Consume the current CPU BGRA shared-memory
+   WebView image through `crtui` External Surface into a real application-owned
+   Ganesh GPU target and native presentation surface. Prove pixels, UI ordering,
+   ancestor clip/opacity, input, viewport resize, fresh updates, producer death/
+   replacement and teardown. Classify this as `cpu-upload`, not zero-copy.
+2. **9B, GPU resource production/import and synchronization.** Define a separate
+   negotiated resource contract without changing the frozen v1 fields. Prove
+   backend/device/format compatibility, native GPU-ready and release completion,
+   bounded in-flight buffers and explicit CPU fallback. Decide producer/
+   GPUProcess ownership without passing private Skia objects between different
+   revisions or loading native GPU clients into the incompatible shared-runtime
+   browser address space. The CPU `crtgfx_gpu_fence` is not a native GPU fence.
+3. **9C, lifecycle and host closure.** Add GPU device/process loss and recovery,
+   resize while resources are outstanding, delayed/closed consumers and bounded
+   repeated resource lifetimes. Replay the accepted path and relevant existing
+   lifecycle/Host ABI gates on macOS/arm64 and Windows/x64 after Linux. The
+   GPUProcess part deferred by Tranche 5 remains required, not fulfilled by an
+   application-side GPU target.
+
+Public ownership/completion policy belongs to
+[GPU final composition](../design/libcrtweb_api_policy.md#gpu-final-composition-tranche-9a).
+9A does not turn on accelerated compositing, enable GPUProcess, replace the
+WebCore EGL/GLES stubs or change the CPU `crtweb_view_copy_frame()` API.
+
+#### 9A Linux implementation and replay (2026-10-15)
+
+`crtweb/skia.h` adds an optional header-only C++ companion,
+`crtweb::compose_gpu`, over the existing WebView/External Surface provider. It
+requires an application-owned Ganesh context and a GPU surface belonging to
+that exact context, rejects raster/null targets or an abandoned context, and
+reports no-frame as `CRTUI_WOULD_BLOCK`. After synchronous scene composition it
+flushes and checks submission with a CPU completion wait, even after partial
+composition. Successful submission completes before source retirement; an IO
+failure requires recovery/teardown of the GPU path before retiring sources. Presentation
+and `frame_presented()` acknowledgement remain the caller's responsibility.
+The helper never acknowledges a failed composition. No new public C ABI or
+WebKit patch; the browser and application retain independent Skia revisions.
+
+The new `crtweb_webview_gpu_test` launches the real `crtweb_host`, not a synthetic
+producer, and uses an actual GPU offscreen target. Exact acceptance-only GPU
+readback proves red UI below, clipped-out web pixels, 50% web opacity, and blue
+UI above. A forwarded pointer changes the page from green to magenta; retained
+old source pixels remain green across subsequent update/resize. A fresh GPU
+target and browser viewport change from 160x100/90x70 to 200x120/130x90. Twenty
+alternating updates use the same browser/GPU context and retain the +24 MiB RSS,
++2 thread/+2 descriptor bound. Killing the WebProcess leaves the last picture
+composable, then a new process produces a fresh green picture. Shutdown reaps
+the owned browser host/children. Live mode additionally wraps a real acquired
+Wayland/Vulkan swapchain image and presents the requested bounded frame count.
+
+The source image is explicitly checked **not** to be texture-backed; the target
+must belong to the real GPU context. Production performs upload and GPU
+composition, not GPU readback. The test cannot establish GPU-buffer IPC,
+zero-copy or GPU WebCore rendering merely by observing a GPU-backed target.
+
+**Linux 9A result:** the final checked-submit implementation passes offscreen
+**3/3** and live Wayland/Vulkan **3/3**, each live run presenting **5/5** frames.
+Every run passes the pixel/input/resize/twenty-update/recovery/cleanup assertions;
+twenty-update deltas are **+40 KiB RSS, +0 threads, +0 descriptors**. These are
+application host counters after the initial warm draw, not device-memory or
+native-fence leak measurements. The GPUProcess/device resource-lifetime gate
+remains separate. Browser static audits pass; each of the six repeated Linux
+runs records 104 mapped-file observations across Host/Web/Network (the final
+public CLI run records 105), zero violations, and the CRT-owned
+`libEGL.so`/`libGLESv2.so` link stubs. Native GPU clients remain
+in the application, not those browser processes.
+
+The existing CPU WebView test also passes: three process recoveries and twenty
+launch/load/resize/shutdown cycles with +0 KiB RSS/+0 threads/+0 descriptors.
+Wire layout/transport and CPU surface CTest passes 3/3. GPU evidence/map helper
+tests pass 8/8; existing device evidence 18/18, driver path helpers 2/2, JSC
+helpers 6/6, source include closure 7/7 and licensing 15/15 pass. The unchanged
+patch manifest remains 23 patches/63 modified/24 CRT-owned files; no new upstream
+patch was introduced. Public header leak scan is clean.
+
+Reproduction (after the existing FFmpeg/Skia/GPU/LVGL/imported-libc++ Linux
+predecessor configuration; fresh configuration log below):
+
+```sh
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root out/linux-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/linux-host-ninja-debug/port-tests/install \
+  --work-root out/web-crt-webcore --reuse-tree --webkit --run-gpu-tests -j 8
+# Add --gpu-window-frames 5 to exercise a real presentation window.
+```
+
+`--run-gpu-tests` can run alone (no audio/camera tests) or alongside `--run-tests`.
+It refreshes the in-tree consumer, builds the real host and writes a separate
+`acceptance-gpu.json`. A missing GPU/host returns 77 in ordinary CTest (an actual
+skip); the driver passes `--require-gpu` and fails instead. The evidence parser
+requires the expected native backend, all checks, exact live frame count and
+the `source=cpu-shm interop=cpu-upload` classification. Native runtime mapping
+observation is currently Linux-only; other hosts report it as pending, not a
+clean empty audit, and still need native replay before closing 9A globally.
+
+Strict negative controls fail for a missing host and a child-scoped unusable
+Vulkan ICD selection (both exit 1); missing host without strict mode exits 77,
+and an invalid live frame count exits 2. The parent environment is unchanged.
+A separate fresh GPU-OFF configuration, reusing the pinned local Skia/LVGL
+sources, keeps CPU WebView/surface targets and omits the GPU target. Ordinary
+GPU CTest without `CRTWEB_HOST` is explicitly skipped, not GPU acceptance.
+
+Evidence under `out/web-crt-webcore/`: `tranche9-configure.log`,
+`tranche9-consumer-build.log`, `tranche9-host-build-driver.log`,
+`tranche9-replay-final.log` and `tranche9-replay/summary.json`; each
+`tranche9-replay/{offscreen,window}-{1,2,3}/` has `result.json`, `gate.log` and
+`gpu-webview-run/{stdout,stderr}.log`. The generated local `tranche9_replay.py`
+calls the checked-in strict gate without replacing it. The earlier successful
+pre-submit-check repetition remains in `tranche9-replay-before-submit-check/`.
+The final public CLI invocation is recorded in `tranche9-gpu-driver-final.log`
+and `acceptance-gpu.json`. CPU regression, wire, negative controls and GPU-OFF
+configuration logs are `tranche9-cpu-webview.log`, `tranche9-wire-ctest.log`,
+`tranche9-negative-controls.log`, `tranche9-ctest-skip.log` and
+`tranche9-gpu-off-configure-final.log`. An initial GPU-OFF configure lacked its
+local pinned source paths and failed; it is preserved separately rather than
+claimed as a build failure or a successful CPU-only build.
+
+The first pixel checkpoint raced the initial blank frame: a title notification
+is not a paint-completion event. The test now waits for expected source pixels
+as well as fresh serial/geometry before evaluating GPU output. The retained
+failure is `out/web-crt-webcore/tranche9-initial-gpu.log`. The first map-audit
+checkpoint correctly exposed missing observer classifications, not a GPU
+render failure: CRT-owned no-context EGL/GLES stubs are recorded explicitly,
+and the CRT's own immediately unlinked, non-executable memfd data mappings are
+reported separately as `ANON_SHM`, never allowed as arbitrary `/tmp` libraries.
+That checkpoint is retained in `tranche9-map-checkpoint-failed.json` and
+`tranche9-gpu-final-offscreen-1.log`.
+
+GPU-buffer IPC, native producer/consumer GPU fences, accelerated WebCore,
+GPUProcess/device-loss acceptance and macOS/Windows replay remain open. The
+existing CPU surface contract and fallback are not replaced by this first slice.
 
 ### 10. Distribution and security closure
 

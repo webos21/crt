@@ -603,6 +603,103 @@ def run_webview_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict
     return result
 
 
+def gpu_composition_evidence(text: str, target_os: str, window_frames: int = 0) -> dict:
+    """Fail closed: a skipped browser/GPU probe is not Tranche 9A acceptance."""
+    lines = text.splitlines()
+    summaries = [line.split(": ok ", 1)[1] for line in lines
+                 if line.startswith("crtweb_webview_gpu_test: ok ")]
+    required = dict(source="cpu-shm", interop="cpu-upload", gpu_target="pass", pixels="pass",
+                    clip="pass", opacity="pass", ordering="pass", input="pass", resize="pass",
+                    updates="20", recovery="pass", cleanup="pass")
+    fields = dict(item.split("=", 1) for item in summaries[0].split() if "=" in item) if len(summaries) == 1 else {}
+    backend = {"windows": "1", "macos": "2", "linux": "3"}.get(target_os)
+    presented = re.findall(r"^crtweb_webview_gpu_test: presented=(\d+) requested=(\d+)$", text, re.M)
+    window_ok = (presented == [(str(window_frames), str(window_frames))]) if window_frames else not presented
+    return {"verified": bool(backend and fields.get("backend") == backend
+                              and all(fields.get(k) == v for k, v in required.items())
+                              and window_ok and not re.search(r"FAILED|skipped", text)),
+            "backend": fields.get("backend"), "source": fields.get("source"),
+            "interop": fields.get("interop"), "window_frames": window_frames,
+            "presented": int(presented[0][0]) if len(presented) == 1 else 0}
+
+
+def gpu_browser_map_evidence(text: str, sdk: Path, prefix: Path, build: Path, work: Path,
+                             target_os: str) -> dict:
+    # Linux records browser roles separately from the application which owns
+    # the native GPU driver. Other hosts need their native observer on replay;
+    # do not silently present absent observations as a clean runtime audit.
+    if target_os != "linux":
+        return {"verified": None, "scope": "native runtime observation pending", "violations": []}
+    roots = [path.resolve() for path in (sdk, prefix, build, work, ROOT / "libcrtgfx/assets/fonts")]
+    mapped = re.findall(r"^MAPPED (HostProcess|WebProcess|NetworkProcess) (/.*)$", text, re.M)
+    violations = []
+    stub_files = {(prefix / "lib" / name).resolve() for name in ("libEGL.so", "libGLESv2.so")}
+    stubs = set()
+    for role, path in mapped:
+        resolved = Path(path).resolve()
+        if resolved.name.startswith("ld-linux"):
+            continue
+        if not any(resolved.is_relative_to(root) for root in roots):
+            violations.append(f"{role}: maps {path}")
+        if resolved in stub_files:
+            stubs.add(resolved.name)  # existing CRT-owned no-context B3 link stubs, not native drivers
+        elif resolved.name.startswith(("libvulkan", "libEGL", "libGLES", "libGLX", "libGL.so")):
+            violations.append(f"{role}: GPU loader entered CPU browser path: {path}")
+    roles = sorted({role for role, _ in mapped})
+    return {"verified": roles == ["HostProcess", "NetworkProcess", "WebProcess"] and not violations,
+            "roles": roles, "mapped_files": len(mapped), "violations": violations, "crt_gl_stubs": sorted(stubs)}
+
+
+def run_gpu_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
+                 target_os: str = "linux", window_frames: int = 0) -> dict:
+    """Tranche 9A only: CPU-shared-memory WebView -> Ganesh GPU composition/present.
+
+    This gate does not enable accelerated WebCore, a GPUProcess or GPU-buffer IPC.
+    The application's GPU PAL may load native drivers; the separate browser host
+    remains subject to the existing static Host ABI audit.
+    """
+    result = {"passed": False}
+    exe = ".exe" if target_os == "windows" else ""
+    build_root = sdk.parent.parent
+    program = build_root / "libcrtweb" / ("crtweb_webview_gpu_test" + exe)
+    if (build_root / "build.ninja").exists():
+        built = jsc.run(["ninja", "-C", str(build_root), "crtweb_webview_gpu_test"], env=env, check=False)
+        if built.returncode:
+            return result | {"reason": "could not rebuild GPU WebView consumer"}
+    if not program.exists():
+        return result | {"reason": f"missing {program}; enable Skia/GPU/LVGL in the predecessor build"}
+    runs = work / "gpu-webview-run"
+    runs.mkdir(exist_ok=True)
+    fonts, cache = ROOT / "libcrtgfx/assets/fonts", runs / "fontcache"
+    path_for_target = crt_path if target_os == "windows" else str
+    (runs / "fonts.conf").write_text(font_configuration(path_for_target(fonts), path_for_target(cache)), encoding="utf-8")
+    run_env = gate_environment(build, sdk, prefix, runs, env, target_os)
+    host = build / "bin" / ("crtweb_host" + exe)
+    run_env["CRTWEB_HOST"] = str(host)
+    if target_os == "macos":
+        run_env.pop("DYLD_LIBRARY_PATH", None)
+    command = [str(program), "--require-gpu"]
+    if window_frames:
+        command += ["--window-frames", str(window_frames)]
+    completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=240)
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    (runs / "stdout.log").write_text(completed.stdout, encoding="utf-8")
+    (runs / "stderr.log").write_text(completed.stderr, encoding="utf-8")
+    library = build / "lib" / ("libcrtweb.dylib" if target_os == "macos" else "libcrtweb.so")
+    if target_os == "windows":
+        candidates = sorted((build / "bin").glob("*crtweb.dll")) + sorted((build / "lib").glob("*crtweb.dll"))
+        library = candidates[0] if candidates else build / "bin/libcrtweb.dll"
+    audit = jsc.host_abi_audit(sdk, prefix, build, [host, library], run_env, target_os)
+    evidence = gpu_composition_evidence(completed.stdout + completed.stderr, target_os, window_frames)
+    runtime = gpu_browser_map_evidence(completed.stdout, sdk, prefix, build, runs, target_os)
+    result.update(returncode=completed.returncode, evidence=evidence, output=completed.stdout.splitlines(),
+                  host_abi={"ok": audit["ok"], "violations": audit["violations"]}, browser_runtime=runtime)
+    result["passed"] = (completed.returncode == 0 and evidence["verified"] and audit["ok"]
+                        and runtime["verified"] is not False)
+    return result
+
+
 def audio_output_evidence(text: str) -> dict:
     sinks = []
     routes = {}
@@ -845,6 +942,10 @@ def main() -> int:
     parser.add_argument("--run-tests", action="store_true",
                         help="run the WebCore gate; with --webkit also run browser/API/lifecycle, "
                              "render/input, WebView, network trust and Host ABI gates")
+    parser.add_argument("--run-gpu-tests", action="store_true",
+                        help="with --webkit: strict Tranche 9A GPU WebView gate (alone or with --run-tests)")
+    parser.add_argument("--gpu-window-frames", type=int, default=0,
+                        help="with --run-gpu-tests: also open a real GPU window for 1..300 frames")
     parser.add_argument("--reuse-tree", action="store_true", help="keep the composed tree and build directory")
     parser.add_argument("--recompose", action="store_true",
                         help="with --reuse-tree: compose the source tree again (a patch or the pin changed) but keep "
@@ -860,6 +961,10 @@ def main() -> int:
     parser.add_argument("-k", "--keep-going", action="store_true", help="ninja -k 0: collect every error")
     parser.add_argument("-j", "--jobs", type=int, default=0)
     args = parser.parse_args()
+    if args.run_gpu_tests and not args.webkit:
+        parser.error("--run-gpu-tests requires --webkit")
+    if args.gpu_window_frames < 0 or args.gpu_window_frames > 300 or (args.gpu_window_frames and not args.run_gpu_tests):
+        parser.error("--gpu-window-frames requires --run-gpu-tests and a count in 0..300")
     if (args.require_audio_output or args.allow_physical_camera) and not (args.webkit and args.run_tests):
         parser.error("device evidence options require --webkit --run-tests")
 
@@ -922,6 +1027,10 @@ def main() -> int:
         args.target = list(args.target or DEFAULT_TARGETS)
         if "crtweb_camera_probe" not in args.target:
             args.target.append("crtweb_camera_probe")
+    if args.run_gpu_tests:
+        args.target = list(args.target or (["crtweb_host"] if not args.run_tests else DEFAULT_TARGETS))
+        if "crtweb_host" not in args.target:
+            args.target.append("crtweb_host")
     command = ["ninja", "-C", str(build)]
     if args.jobs:
         command += [f"-j{args.jobs}"]
@@ -929,9 +1038,19 @@ def main() -> int:
         command += ["-k", "0"]
     command += list(args.target or DEFAULT_TARGETS)
     status = jsc.run(command, env=env, check=False).returncode
-    if status != 0 or not args.run_tests:
+    if status != 0 or not (args.run_tests or args.run_gpu_tests):
         return status
+    gpu_results = {}
+    if args.run_gpu_tests:
+        gpu_results["gpu_webview"] = run_gpu_gate(build, sdk, prefix, work, env, target_os, args.gpu_window_frames)
+        gpu_passed = gpu_results["gpu_webview"]["passed"]
+        (work / "acceptance-gpu.json").write_text(json.dumps(
+            {"passed": gpu_passed, "programs": gpu_results}, indent=2) + "\n", encoding="utf-8")
+        if not args.run_tests:
+            print("Tranche 9A GPU gate:", "PASSED" if gpu_passed else "FAILED")
+            return 0 if gpu_passed else 1
     results = {name: run_program(name, build, sdk, prefix, work, env, target_os) for name in tests}
+    results.update(gpu_results)
     if args.webkit and target_os in ("linux", "macos", "windows"):
         results["render_through_surface_protocol"] = run_render_gate(build, sdk, prefix, work, env, target_os)
         print("B5 diff:", json.dumps(results["render_through_surface_protocol"].get("diff_against_wpe_reference")))

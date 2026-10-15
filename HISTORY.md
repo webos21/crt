@@ -11,6 +11,47 @@ substantive update.
 
 ## 2026-10-15
 
+### Web Tranche 9A: Linux GPU final composition (CPU-upload path)
+
+Added the optional `crtweb/skia.h` C++ companion and a real browser/WebView GPU
+consumer. The application uses its own SDK Ganesh context; WebKit retains its
+different private Skia in the separate browser process. The companion validates
+GPU target/context identity, flushes and checks synchronous GPU submission before
+source retirement, and leaves presentation/ACK to the caller. The v1 shared-memory
+wire contract and public C ABI are unchanged. This is explicitly CPU BGRA upload
+and GPU final composition, not GPU WebCore rendering or zero-copy IPC.
+
+The new strict driver gate (`--webkit --run-gpu-tests`, optionally
+`--gpu-window-frames 5`) requires actual GPU execution rather than a skipped
+prerequisite. It writes separate GPU evidence and audits the browser host plus
+Linux Host/Web/Network mappings, distinguishing CRT EGL/GLES stubs and anonymous
+shared data from native GPU client libraries. Fresh CMake configuration and
+consumer/host builds succeed. The test proves GPU output pixels, UI ordering,
+ancestor clipping/opacity, input-driven pixel change, viewport/target resize,
+retained old-frame immutability, twenty fresh updates, producer termination/
+replacement and child cleanup. Detailed repetition/resource measurements,
+negative controls and reproduction belong to
+[Web acceptance](docs/acceptance/crtweb_acceptance.md#9a-linux-implementation-and-replay-2026-10-15).
+The final checked-submit implementation passes offscreen **3/3** and live
+Wayland/Vulkan **3/3**, each live run presenting 5/5 frames. Every twenty-update
+sample is +40 KiB host RSS/+0 threads/+0 descriptors, with clean browser
+static/runtime audits. These counters do not measure device memory.
+
+Preserved the first title-before-paint fixture race and the initial map-observer
+classification failure; neither was relabeled as a pass. The existing CPU
+WebView regression passes three process recoveries and twenty host lifetimes
+with +0 KiB RSS/+0 threads/+0 descriptors, and wire/surface CTest passes 3/3.
+GPU evidence/map tests pass 8/8; existing device evidence, driver/JSC helpers,
+source closure, licensing and patch-manifest checks remain green. A separate
+GPU-OFF configure keeps CPU consumers but registers no GPU consumer; ordinary
+CTest records missing prerequisites as skipped, while strict negative controls
+fail. No audio or physical camera capture was requested by this GPU gate.
+
+Split the remaining Tranche 9 boundary into resource/GPU synchronization and
+device/GPUProcess lifecycle/host replay gates. Those, including macOS/Windows
+replay, remain open; the Linux final-compositor slice does not close Tranche 9.
+`STATUS.md`, root README and the completed Tranche 8 evidence are unchanged.
+
 ### Web Tranche 8 closed: Linux output drain and native allocator replay
 
 Refreshed the current Linux/x86_64 runtime from `ef081d2` with a fresh CMake

@@ -139,9 +139,12 @@ uses the host replay order stated below and in the acceptance document.
   Windows/x64: network, playback, capture and shared allocator replay evidence in
   `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
 * [ ] **9. GPU integration.**
-  * [ ] Present WebKit's private Skia output through the CRT external-surface path.
-  * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one
-    Skia context is not an initial gate.
+  * [ ] **9A GPU final composition:** CPU-shared-memory WebView upload into the CRT
+    GPU compositor accepted on Linux; macOS/Windows replay remains (Web acceptance).
+  * [ ] **9B GPU resources:** separately negotiated shared/zero-copy GPU-buffer import,
+    actual GPU synchronization and producer/GPUProcess ownership; no private Skia ABI across IPC.
+  * [ ] **9C closure:** device/process loss, bounded resource reuse and three-host replay.
+    Sharing one Skia context is not an initial gate. Evidence stays in Web acceptance.
 * [ ] **10. Distribution and security closure.**
   * [ ] Build `06-web` in isolation from the installed `05-ui` SDK and add the
     stage-source/prerequisite manifests.

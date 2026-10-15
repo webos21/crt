@@ -14,6 +14,13 @@ measurements and media limits live in the acceptance document linked above;
 active work lives in [`TODO.md`](../TODO.md), not a second checklist here.
 A packaged `06-web` SDK remains the separate Tranche 10 deliverable.
 
+`crtweb/skia.h` is the optional GPU final-composition companion for a WebView:
+it uses the application's SDK Ganesh context, composes into an offscreen or
+acquired `crtgfx` GPU surface and waits for completion before source retirement.
+The existing v1 transport is still CPU shared memory; this path uploads pixels
+and does not claim zero-copy or GPU WebCore rendering. Contract and remaining
+resource/host gates: [GPU integration](../docs/acceptance/crtweb_acceptance.md#9-gpu-integration).
+
 ## Layout
 
 - `tests/jsc/` -- the JavaScriptCore acceptance: `jsc_acceptance.js` and

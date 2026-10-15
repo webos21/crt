@@ -28,8 +28,9 @@ public header, an exported symbol or a dependency of the SDK's consumer-facing l
   hidden thread an application must synchronise with, and nothing happens in an application that does
   not pump (it is the application's loop that owns time: `crtui`'s frame loop, a test, a CLI).
 - **Pixels.** v1 delivers CPU pixels: `crtweb_view_copy_frame()` copies the newest complete picture
-  as premultiplied BGRA (the AR24 layout of the web surface protocol). A GPU path (Tranche 9) adds
-  a new function; it does not change this one.
+  as premultiplied BGRA (the AR24 layout of the web surface protocol). Tranche 9A's application-side
+  GPU compositor still uploads those CPU pixels. A future GPU-buffer transport adds a distinct
+  contract; it does not change this function or reinterpret v1 shared memory as a GPU handle.
 
 ## Rules
 
@@ -196,3 +197,57 @@ The web surface protocol (`libcrtweb/platform/crtweb_surface_wire.h`) remains th
 *separate-process* producer. `crtweb` is the in-process API; it uses the same pixel layout and the
 same input vocabulary (keysym + evdev keycode, modifier bits, logical pixels) so an application can
 switch between them without changing its input mapping.
+
+## GPU final composition (Tranche 9A)
+
+The optional C++17 `crtweb/skia.h` companion provides
+`crtweb::compose_gpu(view, ui, window, context, target)` for an application-owned
+Ganesh context and GPU `SkSurface` (offscreen or an acquired `crtgfx` swapchain).
+These are the application's SDK Skia objects, never WebKit's private Skia.
+The application still links no WebKit. Core `libcrtui` and the public `crtweb.h`
+C ABI gain no GPU, Skia or native-handle dependency.
+
+The helper validates context/target identity, rejects a raster target and
+reports an abandoned context instead of silently falling back. A missing web
+frame returns `CRTUI_WOULD_BLOCK`. It composes the existing External Surface
+provider between the UI planes, then flushes/submits with a CPU completion
+wait, including after a partially composed scene, and checks submission success.
+On GPU submission failure it returns `CRTUI_ERROR_IO`; the caller must recover/
+tear down that GPU path before source retirement, not treat failure as completion.
+After successful submission the application
+can poll, resize or shut down the producer without an outstanding GPU read
+of the source memory from that call. UI/context-owner thread only. The caller
+owns native presentation and sends `frame_presented()` only after successful
+composition/presentation; the helper never acknowledges failure.
+
+This path is explicitly **CPU shared memory -> GPU upload -> GPU composition**,
+not GPU WebCore rendering, zero-copy transport or a GPUProcess implementation.
+The production compositor does not read GPU pixels back; the acceptance test
+does so only to compare exact output. No application/producer `SkImage`,
+`GrDirectContext` or private Skia object crosses IPC. Native GPU loaders stay in
+the application's existing graphics PAL, outside the shared-runtime browser
+processes. The CRT-owned no-context EGL/GLES link stubs remain distinct from
+those native loaders.
+
+### Next boundary: GPU buffers and synchronization (Tranche 9B)
+
+Do not extend the frozen v1 memfd fields by reinterpretation. Before enabling
+GPU producers, define a separately negotiated/versioned resource contract:
+
+- Backend/device identity, format, extent, planes/offsets/strides/modifiers and
+  import capability must be validated before taking ownership. Transfer only
+  PAL-controlled shareable resources, never native pointers or Skia ABI objects.
+- Producer-ready and consumer-complete synchronization must be actual GPU
+  completion primitives. `crtgfx_gpu_fence` is currently a CPU pthread fence;
+  it cannot stand in for Vulkan/D3D12/Metal completion. A presentation ACK is
+  pacing, not permission to overwrite an in-flight resource.
+- Import/release ownership and generations must survive resize, delayed
+  consumers, disconnect and producer/GPU-process death without premature reuse
+  or leaked descriptors/handles. Bound in-flight resources and wait deadlines.
+- Keep v1 CPU fallback explicit and available. A strict GPU/zero-copy gate must
+  reject unavailable native import/synchronization, not rename an upload or GPU
+  copy. Record the actual interop mode independently from the rendering backend.
+
+Acceptance and the remaining GPUProcess/recovery/host replay work are owned by
+[Web acceptance](../acceptance/crtweb_acceptance.md#9-gpu-integration), not implied
+by the 9A final-compositor helper.

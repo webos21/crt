@@ -83,4 +83,37 @@ if(TARGET crtui_skia AND TARGET crtgfx_skia AND
     TIMEOUT 180
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtweb_webview_test_runs)
+
+  # Tranche 9A: real browser frames through the GPU final compositor. CTest
+  # records unavailable prerequisites as a skip, never as GPU acceptance; the
+  # web driver supplies CRTWEB_HOST and --require-gpu for strict evidence.
+  if(CRTGFX_ENABLE_GPU_BACKEND)
+    add_executable(crtweb_webview_gpu_test
+      ${CRT_STARTUP_OBJECTS}
+      tests/platform-crt/webview_gpu_test.cc)
+    target_include_directories(crtweb_webview_gpu_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/platform")
+    target_link_libraries(crtweb_webview_gpu_test PRIVATE
+      crt_cxx_build_flags crtui_skia crtgfx_skia crtmedia)
+    if(CRT_TARGET_OS STREQUAL "windows")
+      target_compile_definitions(crtweb_webview_gpu_test PRIVATE CRTGFX_HAVE_D3D12=1)
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      target_compile_definitions(crtweb_webview_gpu_test PRIVATE CRTGFX_HAVE_VULKAN=1 SK_USE_INTERNAL_VULKAN_HEADERS)
+    elseif(CRT_TARGET_OS STREQUAL "macos")
+      target_compile_definitions(crtweb_webview_gpu_test PRIVATE CRTGFX_HAVE_METAL=1)
+    endif()
+    if(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
+      target_compile_options(crtweb_webview_gpu_test PRIVATE
+        "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
+        "-isystem${CMAKE_SOURCE_DIR}/libc/include" "-isystem${CMAKE_SOURCE_DIR}/include")
+      add_dependencies(crtweb_webview_gpu_test crt-libcxx-sysroot)
+    endif()
+    crt_wire_skia_executable(crtweb_webview_gpu_test SKIP_MACOS_DEAD_STRIP)
+    crt_link_startup_end_objects(crtweb_webview_gpu_test)
+    add_dependencies(crtweb_webview_gpu_test cxx c crt1 crtui_skia crtgfx_skia)
+    add_test(NAME crtweb_webview_gpu_test_runs COMMAND crtweb_webview_gpu_test)
+    set_tests_properties(crtweb_webview_gpu_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" SKIP_RETURN_CODE 77 TIMEOUT 240)
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtweb_webview_gpu_test_runs)
+  endif()
 endif()
