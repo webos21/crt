@@ -21,7 +21,10 @@
  * shared library just to get two coexisting instances in one process;
  * the preprocessor rename below achieves the identical "two independent
  * allocator instances, one process" shape directly. See malloc_fault_
- * victim.c for the actual fault this second instance is used to trigger. */
+ * victim.c for the actual fault this second instance is used to trigger.
+ * malloc_test/malloc_debug_test also reuse this instance as a pristine
+ * coalescing fixture, independent of startup's process-heap allocations;
+ * those targets select the normal/diagnostic layout themselves. */
 
 #define malloc crt_fault_instance_b_malloc
 #define free crt_fault_instance_b_free

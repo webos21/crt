@@ -5,6 +5,14 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Test-only instance of the real allocator; startup cannot fragment its heap.
+ * All remaining API tests below still use the process's ordinary malloc family.
+ * CMake compiles both instances with the same normal/diagnostic layout. */
+void* crt_fault_instance_b_malloc(size_t size);
+void crt_fault_instance_b_free(void* ptr);
+void* crt_fault_instance_b_realloc(void* ptr, size_t size);
+int crt_fault_instance_b_os_region_count(void);
+
 static int fail(const char* message) {
   static const char prefix[] = "malloc_test: ";
   static const char suffix[] = "\n";
@@ -14,36 +22,51 @@ static int fail(const char* message) {
   return 1;
 }
 
-static int check_adjacent_coalescing(void) {
+static int check_adjacent_coalescing(int descending) {
   unsigned char* blocks[12];
   unsigned char* combined;
   uintptr_t address;
+  uintptr_t stride;
   size_t i;
   for (i = 0; i < 12; ++i) {
-    blocks[i] = (unsigned char*)malloc(2048);
+    blocks[i] = (unsigned char*)crt_fault_instance_b_malloc(2048);
     if (blocks[i] == 0) return fail("coalescing allocation");
     memset(blocks[i], (int)i, 2048);
   }
-  address = (uintptr_t)blocks[4];
-  /* Exercise backward merging on ascending release, then forward merging on
-   * descending release. No single block can satisfy the combined request. */
-  for (i = 4; i < 8; ++i) {
-    free(blocks[i]);
-    blocks[i] = 0;
+  /* This is an implementation regression, not a public malloc address-order
+   * guarantee. Verify the fixture actually has twelve consecutive blocks in
+   * one fresh 64 KiB region before requiring reuse of a particular address.
+   * The old process-heap fixture crossed regions with larger Windows CI
+   * environments, so blocks[4..7] were not necessarily adjacent at all. */
+  stride = (uintptr_t)blocks[1] - (uintptr_t)blocks[0];
+  if (crt_fault_instance_b_os_region_count() != 1 || stride <= 2048)
+    return fail("coalescing fixture region");
+  for (i = 1; i < 12; ++i) {
+    if ((uintptr_t)blocks[i] != (uintptr_t)blocks[0] + i * stride)
+      return fail("coalescing fixture adjacency");
   }
-  combined = (unsigned char*)malloc(7000);
-  if (combined == 0 || (uintptr_t)combined != address)
-    return fail("adjacent coalescing reuse");
+  address = (uintptr_t)blocks[4];
+  /* Ascending release requires backward merging; descending release requires
+   * forward merging. Neither may satisfy the request using a single block. */
+  for (i = 0; i < 4; ++i) {
+    size_t index = descending ? 7 - i : 4 + i;
+    crt_fault_instance_b_free(blocks[index]);
+    blocks[index] = 0;
+  }
+  combined = (unsigned char*)crt_fault_instance_b_malloc(7000);
+  if (combined == 0 || (uintptr_t)combined != address ||
+      crt_fault_instance_b_os_region_count() != 1)
+    return fail(descending ? "forward coalescing reuse" : "backward coalescing reuse");
   memset(combined, 0x5a, 7000);
   for (i = 0; i < 2048; ++i) {
     if (blocks[3][i] != 3 || blocks[8][i] != 8)
       return fail("coalescing live neighbours");
   }
-  combined = (unsigned char*)realloc(combined, 3073);
+  combined = (unsigned char*)crt_fault_instance_b_realloc(combined, 3073);
   if (combined == 0 || combined[3072] != 0x5a)
     return fail("coalescing shrink preservation");
-  free(combined);
-  for (i = 12; i > 0; --i) free(blocks[i - 1]);
+  crt_fault_instance_b_free(combined);
+  for (i = 12; i > 0; --i) crt_fault_instance_b_free(blocks[i - 1]);
   return 0;
 }
 
@@ -60,7 +83,7 @@ int main(void) {
   unsigned char* moved_grown;
   size_t i;
 
-  if (check_adjacent_coalescing() != 0) return 1;
+  if (check_adjacent_coalescing(0) != 0 || check_adjacent_coalescing(1) != 0) return 1;
 
   bytes = (unsigned char*)malloc(16);
   if (bytes == 0) {

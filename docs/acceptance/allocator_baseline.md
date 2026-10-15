@@ -156,3 +156,89 @@ SDK work overlapped these runs: they establish correctness, not controlled
 throughput comparisons. The runner's raw host-RSS counters have not been
 independently reconciled with Windows startup relaunch and are not used as
 memory-envelope evidence here. No allocator policy or resource bound changed.
+
+## Windows CI Coalescing Fixture (2026-10-15)
+
+[Windows/x64 CI job 116296326734](https://github.com/webos21/crt/actions/runs/38697153498/job/116296326734)
+on `8c989ac` reports only `malloc_test_runs` failing. The detailed log endpoint
+requires authentication, so its individual assertion was not independently
+retrieved. Locally, that revision's binary fails with `adjacent coalescing reuse`
+when `CRT_MALLOC_CI_PADDING` has 22,560 `x` bytes; without padding it passes.
+This size is a local reproducer, not a cross-host threshold. Windows startup
+copies environment entries into the process heap before main. The previous
+fixture's twelve `malloc(2048)` calls therefore need not occupy consecutive
+physical blocks, making exact-address reuse an invalid assumption there.
+
+The corrected fixture uses the same production allocator source through the
+existing test-only renamed instance, in both ordinary and diagnostic builds.
+It verifies one region and all twelve consecutive addresses, then requires
+four released blocks to merge and satisfy 7,000 bytes at the first released
+address without a new region. Ascending and descending release independently
+cover backward and forward merging; live neighbours and shrinking realloc
+contents remain checked. Public API tests continue to use the process allocator.
+This changes neither the shipped allocator nor the public allocation contract.
+
+Fresh Windows/x64 validation:
+
+```powershell
+cmake --fresh --preset windows-host-ninja-debug -B out/windows-malloc-ci
+cmake --build out/windows-malloc-ci --target crt-c-build -j 8
+ctest --test-dir out/windows-malloc-ci -E '^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)' --output-on-failure
+```
+
+- Core: **155/155**, including faults, canaries, contention and native fork.
+- Environment sweep: both executables pass 65 padding lengths, 0..30,720 in
+  480-byte increments (**130/130**). Each child inherits the scoped padding
+  variable; it is removed after the sweep.
+- Final normal/diagnostic repeat: 20 executions each, **40/40**.
+- Negative controls: temporarily disabling backward merge makes both targets
+  fail `backward coalescing reuse`; disabling only forward release merge makes
+  both fail `forward coalescing reuse`. Both changes were reverted, confirmed
+  by a clean diff of `libc/src/malloc.c`, before rebuilding/running the final core.
+
+Re-run the environment sweep from the repository root (preserve any existing
+value in the invoking process):
+
+```powershell
+$previousPadding = $env:CRT_MALLOC_CI_PADDING
+try {
+  foreach ($paddingIndex in 0..64) {
+    $env:CRT_MALLOC_CI_PADDING = 'x' * ($paddingIndex * 480)
+    foreach ($testName in @('malloc_test', 'malloc_debug_test')) {
+      & "./out/windows-malloc-ci/libc/tests/$testName.exe"
+      if ($LASTEXITCODE -ne 0) { throw "$testName failed at padding index $paddingIndex" }
+    }
+  }
+} finally {
+  $env:CRT_MALLOC_CI_PADDING = $previousPadding
+}
+```
+
+Evidence: `out/malloc-ci-configure.log`, `out/malloc-ci-build-resume.log`,
+`out/malloc-ci-final-build.log`, `out/malloc-ci-core-ctest.log`,
+`out/malloc-ci-layout-sweep.log`, `out/malloc-ci-final-repeat.log` and
+`out/malloc-ci-mutation-{backward,forward}.log`. The first build's make fetch
+was interrupted after sandbox DNS failures and successfully resumed with
+network access; no compile/test failure was hidden. The workflow and its
+existing two-layout coverage are unchanged. Remote five-host CI confirmation
+requires a subsequent push/run; native Linux replay of the indexed allocator
+remains the separate open gate above.
+
+### macOS Merge Replay
+
+Merged `c0cf7a9` with the macOS Web 8B replay documentation without changing the
+CI fix or the runtime. A separate fresh macOS/arm64 configuration and targeted
+build pass:
+
+```sh
+cmake --fresh --preset macos-host-ninja-debug -B out/macos-malloc-ci-replay
+cmake --build out/macos-malloc-ci-replay --target malloc_test malloc_debug_test -j 8
+ctest --test-dir out/macos-malloc-ci-replay -R '^malloc(_debug)?_test_runs$' --output-on-failure
+```
+
+Both tests pass **2/2**. Running each executable in a subprocess with a
+child-scoped `CRT_MALLOC_CI_PADDING` value of 0..30,720 `x` bytes, in 480-byte
+steps, also passes **130/130**. The parent process environment is unchanged.
+Logs are `out/macos-malloc-ci-replay/{configure,build,ctest,environment-sweep}.log`.
+This focused fixture regression is not a full core rerun, a performance result,
+or native Linux allocator acceptance; those scopes are not expanded by the merge.
