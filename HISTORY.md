@@ -11,6 +11,40 @@ substantive update.
 
 ## 2026-10-15
 
+### macOS Web Tranche 8 shared-code replay: complete PCM output accepted
+
+Rebuilt and verified the cumulative `05-ui` SDK, recomposed the pinned PlatformCRT tree (22 applicable
+patches from the 23-entry manifest), and replayed `ae1dac2` on macOS/arm64. The combined result is
+**11/12**, with the newly strengthened physical-camera lifetime gate still red. Playback delivers the
+complete 48kHz stereo fixture (14,400 frames, 28,320 nonzero samples) through CoreAudio, without write
+errors or sink-open fallbacks; paused preroll, backpressure, seek and twelve media lifetimes pass.
+Network trust, synthetic permission/stream-clock regressions, public/internal/WebView lifetimes and
+Host ABI audits pass. Three ordinary physical-camera executions pass too. Detailed measurements and
+the unresolved same-process camera failures live in the acceptance document and `TODO.md`.
+
+The camera investigation retained the initial failed checkpoint. Sampling the CRT WebProcess finds Apple's
+Portrait/Espresso model initialization and AppleDepth model-file descriptors surviving the immediate
+post-stop snapshot; an idle observation sees the native counts decline again. A PAL autorelease-pool
+experiment did not resolve the result and was reverted. The test now warms every release mode (four
+cycles), records up to two seconds of post-stop settling against the unchanged resource bounds, and
+prints DOM/track state on a video-clock timeout. Fourteen evidence-parser tests pass. Focused hardware
+retests still fail (resource settling and video-clock startup), so **macOS 8C is not closed** and no
+runtime/PAL implementation fix is claimed. Basic media CTests pass 6/6 and the capture-conversion
+CTest passes; no work-tree processes remain. Evidence and reproduction:
+`docs/acceptance/crtweb_acceptance.md`, macOS current shared-code replay (2026-10-15).
+
+**Native lifecycle comparison.** Added an opt-in Apple-SDK/libSystem-only diagnostic under
+`libcrtmedia/tests/native/`, deliberately outside CRT targets and acceptance. Both 2,000ms and 300ms
+post-release cadences complete four warmups plus twenty fresh AVFoundation sessions, each receiving
+real camera frames. Measured maxima are respectively RSS +2,080/+2,528 KiB, threads +1/+0 and fds
++0/+0. Thus repeated session ownership is supported on this Mac; the browser failure cannot be
+attributed solely to unsupported macOS lifecycle behavior. `stopRunning` guarantees the session has
+stopped, not that framework caches or worker pools have vanished. The fixed resource deadline is
+our acceptance policy, not an Apple promise, and remains unchanged. This control does not exercise
+CRT allocation, PAL conversion/queues or DOM/navigation/clone semantics; it neither identifies the
+remaining defect nor closes 8C. See the acceptance document's native comparison and the diagnostic
+README for the separate host-only build/run procedure. No camera images were saved.
+
 ### Linux Web capture clocks and same-process device lifetimes
 
 Linux replay of the strengthened permission-token regression passes three

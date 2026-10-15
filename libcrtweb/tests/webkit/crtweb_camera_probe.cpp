@@ -26,6 +26,9 @@
 #include <vector>
 
 static crtweb_runtime* gRuntime;
+// Initialize every release path, including clone, before measuring repeated lifetimes.
+static constexpr unsigned cameraStressWarmups = 4;
+static constexpr unsigned cameraResourceSettleMs = 2000;
 
 static bool pumpFor(unsigned ms, const std::function<bool()>& done = [] { return false; })
 {
@@ -102,7 +105,7 @@ static long cameraDescriptors(pid_t pid)
 
 static bool stressCamera(crtweb_view* view, unsigned cycles, const std::string& page)
 {
-    const unsigned warmups = 3;
+    const unsigned warmups = cameraStressWarmups;
     crtweb_test::Resources uiBefore { }, webBefore { };
     pid_t pid = -1;
     for (unsigned iteration = 0; iteration < warmups + cycles; ++iteration) {
@@ -116,7 +119,11 @@ static bool stressCamera(crtweb_view* view, unsigned cycles, const std::string& 
         if (!pumpFor(15000, [&] { return js(view, "String(window.result)") != "null"; })
             || js(view, "String(window.result)") != "ok") return fail("start");
         // Count fresh frame serials from a nonzero video, not the previous page's retained picture.
-        if (!pumpFor(10000, [&] { return js(view, "String(document.getElementById('v').videoWidth>0&&document.getElementById('v').currentTime>0)") == "true"; })) return fail("video-clock");
+        if (!pumpFor(10000, [&] { return js(view, "String(document.getElementById('v').videoWidth>0&&document.getElementById('v').currentTime>0)") == "true"; })) {
+            fprintf(stderr, "CAMERA_STRESS video_state=%s\n", js(view,
+                "(function(){var v=document.getElementById('v');return JSON.stringify({width:v.videoWidth,time:v.currentTime,paused:v.paused,ready:v.readyState,ended:v.ended,track:window.track&&window.track.readyState,result:window.result});})()").c_str());
+            return fail("video-clock");
+        }
         std::set<uint64_t> serials;
         std::set<uint64_t> hashes;
         for (unsigned sample = 0; sample < 30 && (serials.size() < 3 || hashes.size() < 2); ++sample) {
@@ -166,15 +173,27 @@ static bool stressCamera(crtweb_view* view, unsigned cycles, const std::string& 
         if (iteration >= warmups) {
             auto uiAfter = crtweb_test::resources();
             auto webAfter = crtweb_test::resources(pid);
-            printf("CAMERA_STRESS cycle=%u mode=%u pid=%ld samples=%zu distinct=%zu camera_fds=%ld ui_rss_delta=%ld ui_threads_delta=%ld ui_descriptors_delta=%ld web_rss_delta=%ld web_threads_delta=%ld web_descriptors_delta=%ld\n",
-                iteration - warmups + 1, mode, static_cast<long>(pid), serials.size(), hashes.size(), cameraFds,
+            // AVFoundation's model initialization can finish asynchronously after stopRunning.
+            // This fixed acceptance budget is not an AVFoundation cache/thread-release guarantee.
+            auto settleStart = std::chrono::steady_clock::now();
+            auto deadline = settleStart + std::chrono::milliseconds(cameraResourceSettleMs);
+            while ((!bounded(uiBefore, uiAfter) || !bounded(webBefore, webAfter))
+                && std::chrono::steady_clock::now() < deadline) {
+                pumpFor(20);
+                uiAfter = crtweb_test::resources();
+                webAfter = crtweb_test::resources(pid);
+            }
+            auto settledMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - settleStart).count();
+            printf("CAMERA_STRESS cycle=%u mode=%u pid=%ld samples=%zu distinct=%zu camera_fds=%ld settled_ms=%lld ui_rss_delta=%ld ui_threads_delta=%ld ui_descriptors_delta=%ld web_rss_delta=%ld web_threads_delta=%ld web_descriptors_delta=%ld\n",
+                iteration - warmups + 1, mode, static_cast<long>(pid), serials.size(), hashes.size(), cameraFds, static_cast<long long>(settledMs),
                 uiAfter.memoryKiB - uiBefore.memoryKiB, uiAfter.threads - uiBefore.threads, uiAfter.descriptors - uiBefore.descriptors,
                 webAfter.memoryKiB - webBefore.memoryKiB, webAfter.threads - webBefore.threads, webAfter.descriptors - webBefore.descriptors);
             fflush(stdout);
-            if (!bounded(uiBefore, uiAfter) || !bounded(webBefore, webAfter)) return fail("resource-bound");
+            if (!bounded(uiBefore, uiAfter) || !bounded(webBefore, webAfter) || settledMs > cameraResourceSettleMs)
+                return fail("resource-bound");
         }
     }
-    printf("CAMERA_STRESS completed=%u warmups=%u same_process=1 rss_limit_kib=24576 thread_limit=2 descriptor_limit=2\n", cycles, warmups);
+    printf("CAMERA_STRESS completed=%u warmups=%u same_process=1 rss_limit_kib=24576 thread_limit=2 descriptor_limit=2 settle_timeout_ms=%u\n", cycles, warmups, cameraResourceSettleMs);
     return true;
 }
 
@@ -282,7 +301,7 @@ int main(int argc, char** argv)
     if (ok && stressCycles) {
         ok = stressCamera(view, stressCycles, server.url("/camera"));
         printf("CAMERA_STRESS permission_requests=%u\n", record.requests);
-        ok &= record.requests == 1 + 3 + stressCycles;
+        ok &= record.requests == 1 + cameraStressWarmups + stressCycles;
     }
     cleanup();
     ok &= crtweb_test::children().empty();

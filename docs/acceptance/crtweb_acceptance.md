@@ -2405,6 +2405,122 @@ Generated final evidence: `out/web-crt-webcore/acceptance-b3.json`,
 This closes the Linux device follow-up, not the current shared-code replay
 obligations on macOS/arm64 and Windows/x64.
 
+**macOS/arm64 current shared-code replay (2026-10-15): 11/12; physical-camera stress remains open.**
+The `05-ui` SDK was rebuilt and verified before replaying `ae1dac2`; the pristine pinned tree was
+recomposed with 22 applicable patches from the 23-entry manifest. The earlier 2026-10-14 camera
+result covered three ordinary processes. The Linux follow-up added twenty measured lifetimes in one
+UI/WebProcess pair, and this new gate does not yet pass on this Mac.
+
+| Combined replay evidence | Result |
+| --- | --- |
+| Browser PCM fixture | Complete 14,400 frames / 28,320 nonzero samples, 48kHz stereo, CoreAudio; default output is built-in MacBook Pro speakers |
+| Sink clock | Position 8,849 frames before drain; four applied queries, two advancing; zero write failures or sink-open fallbacks |
+| Playback regressions | Paused PCM retention, decoder backpressure, seek, media errors and twelve measured lifetimes pass; Web process threads 28 -> 24 |
+| Network and synthetic capture | All fifteen browser/WebView trust cases and strengthened permission-token/stream-clock regressions pass |
+| Public API / B7 / WebView lifetimes | 100 / 100 / 20 cycles; respective RSS -16 / +80 / +0 KiB, threads -1 / +0 / +0, descriptors +0 throughout |
+| Host ABI | Static/runtime audits and header/export firewall pass; media mapping has one CRT C++ pair and no violations |
+| Three ordinary camera processes | 3/3 pass, FaceTime HD camera, negotiated 640x480/30 fps, 20 samples each with 18/19/18 distinct pictures; track ended after stop |
+| Same-process camera stress | **Failed**, not twenty completed lifetimes; initial three-warm-up run exceeds the Web thread bound (+4) at the first measured clone cycle |
+| Cleanup | No remaining work-tree test/Web/Network processes after the combined and focused runs |
+
+PCM delivery and sink-clock progress are device/API evidence, without human listening or acoustic
+loopback. Device position is not a count of nonzero samples played. The existing B5 reference-image
+comparison is unavailable (`reference or consumer frame missing`); this replay adds no WPE-reference
+pixel-equivalence claim.
+
+The failed checkpoint is preserved under
+`out/macos-host-ninja-debug/tranche8-replay-20261015/`: `acceptance-initial.json`, `driver.log`,
+`camera-stress-initial.log`, `audio-output-initial.log` and `audio-devices.json`. The SDK verification,
+six basic media CTests, capture-conversion CTest, fourteen evidence-parser tests, fifteen licensing
+tests and the manifest check pass. This is not a combined hardware acceptance.
+
+**Camera investigation and test refinement.** Three warm-ups did not exercise clone mode before its
+first measured invocation. Four warm-ups cover all four release modes, but that alone still fails
+on native resource growth. Adding autorelease pools to PAL start/stop/release did not resolve the
+growth; those experimental runtime changes were reverted. Sampling the CRT WebProcess and inspecting its fds identify
+`com.apple.cmio.portraitblur.pteffect_init` / Espresso model initialization and AppleDepth model files.
+The diagnostic idle run falls back to 20 threads and 18 descriptors (baseline 27/18), showing that
+at least part of the immediate increase is asynchronous OS framework work. This observation does not
+prove bounded twenty-cycle behavior or exclude a separate capture/restart defect.
+
+The probe now keeps the +24 MiB RSS / +2 thread / +2 descriptor limits, initializes every release path,
+and allows at most 2,000 ms for post-stop observations to meet them, recording `settled_ms` and
+`settle_timeout_ms`. The evidence parser rejects observations beyond that deadline; historical
+pre-settling traces remain readable. A timeout also records video DOM/track state for the next
+reproduction. No OS camera effects, permissions, routing or system settings were changed, and no
+camera images were written.
+
+Focused results remain red:
+
+- `camera-four-mode-warmup.log`: three measured cycles, then Web threads +3.
+- `camera-native-observe.log` and `camera-native.sample.txt`: retained failure and subsequent idle
+  observations of the native model work.
+- `camera-bounded-settle.log` / `.json`: six measured cycles, then `video-clock` timeout at total
+  iteration 11; one earlier cycle settled in 1,423 ms.
+- `camera-restart-state.log` / `.json`: resource failure at the fourth measured clone cycle;
+  `settled_ms=2011`, Web threads +4, descriptors +2. The deadline failure is retained as a failure.
+
+The next camera work is to distinguish native first-frame startup from DOM playback/clock state on
+the failing restart, and establish a bounded AVFoundation start/stop lifecycle while continuing to
+report total process resources. macOS 8B is accepted with the complete fixture; macOS 8C repeated
+physical lifetimes and the current Windows shared-code replay remain open. No libc/PAL/public ABI
+change was retained from this replay's investigation.
+
+**Native AVFoundation lifecycle comparison (same device, 2026-10-15).** To test whether the repeated
+open/stop/release pattern itself contradicts macOS behavior, a separate build-host diagnostic uses
+Apple SDK headers and libSystem, with no CRT runtime or WebKit. Its source and reproducible build/run
+procedure are in [`libcrtmedia/tests/native`](../../libcrtmedia/tests/native/README.md); it is not a
+CMake/CTest target, SDK dependency or substitute for the physical-camera gate. `otool -L` confirms
+Apple frameworks, libSystem and libobjc rather than CRT libraries. Each new session requests the
+default camera at 640x480/NV12, receives at least three actual frame callbacks, calls `stopRunning`,
+removes the delegate, drains the serial callback queue, releases session/output/delegate ownership
+and drains the lifetime's autorelease pool. No images are saved. Four warmups precede twenty
+measured sessions in a single process, followed by thirty idle seconds; the two runs are sequential.
+
+| Native host control | Post-release cadence | Completed measured sessions | Peak measured RSS / threads / fds delta | Final idle threads / fds |
+| --- | --- | --- | --- | --- |
+| `native-camera-control.log` | Observe at 300ms and 2,000ms; restart after 2,000ms | 20/20 | +2,080 KiB / +1 / +0 | 4 / 8 (baseline 17 / 8) |
+| `native-camera-control-rapid.log` | Observe/restart after 300ms | 20/20 | +2,528 KiB / +0 / +0 | 3 / 8 (baseline 17 / 8) |
+
+Both logs live beside the earlier failed replay artifacts. All 24 lifetimes including warmups receive
+frames in each run; the rapid run also explicitly checks/logs `running_after_stop=0`. These observations
+fit the existing resource bounds without a threshold increase. Before warmup, however, native
+initialization grows RSS by tens of MiB and creates temporary framework threads/descriptors; even after
+successful session teardown, the idle worker count takes seconds to drop. The earlier sampled CRT
+WebProcess and this **separate native executable** are different experiments, not the same evidence.
+
+The local Apple SDK's `AVCaptureSession.h` (`startRunning`/`stopRunning` method documentation) specifies
+blocking session start/stop. It does **not** specify a process-wide RSS/thread/fd return-to-baseline
+deadline or evicting AppleDepth/Espresso caches. Therefore:
+
+- Repeated session start/stop/release is a valid native lifecycle on this machine, not a Linux-only
+  assumption. The CRT PAL's stop/delegate-detach/queue-drain ownership sequence is consistent with
+  that lifecycle; its integration still needs the failing browser test resolved.
+- The four-mode warmup and bounded settling observation avoid treating the first clone path or an
+  immediate post-stop snapshot as a leak. The +24 MiB/+2 thread/+2 fd and 2,000ms bounds remain CRT
+  acceptance policy, **not an AVFoundation guarantee**. A single breach does not establish a leak;
+  neither does a later decline establish twenty-cycle browser acceptance.
+- The control deliberately omits CRT's allocator, the PAL's NV12-to-YUV420P conversion/frame queue,
+  RGBA presentation, WebKit/DOM clocks, permission revocation, navigation and track cloning. It cannot
+  certify those paths or identify the remaining failure. The earlier `video-clock` timeout is not
+  evidence that native capture stopped supplying frames; the new DOM diagnostic must distinguish
+  source delivery from autoplay/playback/clock state on its next reproduction.
+
+Keep the failed **11/12** combined result and current gate unchanged. Next compare direct CRT/PAL
+capture lifetimes with this host-native control, then isolate DOM play/load/track replacement if the
+direct path succeeds. Record total resources and ownership/first-frame/stop completion separately;
+do not change global OS effects, relax thresholds or substitute a new process per cycle to obtain green.
+
+Reproduce the combined gate (the physical-camera flag remains explicit):
+
+```sh
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root out/macos-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/macos-host-ninja-debug/port-tests/install \
+  --work-root /private/tmp/webB3f --reuse-tree --webkit --run-tests \
+  --require-audio-output --allow-physical-camera -j 8
+```
+
 ### 9. GPU integration
 
 Start with WebKit's Skia output to an external surface consumed by CRT's Skia.

@@ -731,6 +731,9 @@ def camera_stress_evidence(text: str, expected_cycles: int = 20, require_device_
         verified &= (cycle.get("cycle") == index and cycle.get("pid") == baseline.get("pid")
                      and cycle.get("samples", 0) >= 3 and cycle.get("distinct", 0) >= 2)
         verified &= cycle.get("mode") == (summary.get("warmups", -1) + index - 1) % 4
+        if "settled_ms" in cycle or "settle_timeout_ms" in summary:
+            verified &= (summary.get("settle_timeout_ms") == 2000
+                         and 0 <= cycle.get("settled_ms", -1) <= 2000)
         for role in ("ui", "web"):
             for key, limit in (("rss", 24576), ("threads", 2), ("descriptors", 2)):
                 delta = cycle.get(role + "_" + key + "_delta")

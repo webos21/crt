@@ -67,18 +67,30 @@ class AudioEvidenceTests(unittest.TestCase):
 
 
 class CameraEvidenceTests(unittest.TestCase):
-    def evidence(self):
+    def evidence(self, warmups=3):
         lines = ["CAMERA_STRESS baseline pid=123 ui_rss=1000 ui_threads=4 ui_descriptors=8 web_rss=50000 web_threads=12 web_descriptors=20"]
         for cycle in range(1, 21):
-            lines.append(f"CAMERA_STRESS cycle={cycle} mode={(cycle + 2) % 4} pid=123 samples=3 distinct=2 camera_fds=0 "
+            lines.append(f"CAMERA_STRESS cycle={cycle} mode={(warmups + cycle - 1) % 4} pid=123 samples=3 distinct=2 camera_fds=0 "
                          "ui_rss_delta=8 ui_threads_delta=0 ui_descriptors_delta=0 "
                          "web_rss_delta=100 web_threads_delta=0 web_descriptors_delta=0")
-        lines += ["CAMERA_STRESS completed=20 warmups=3 same_process=1 rss_limit_kib=24576 thread_limit=2 descriptor_limit=2",
-                  "CAMERA_STRESS permission_requests=24"]
+        lines += [f"CAMERA_STRESS completed=20 warmups={warmups} same_process=1 rss_limit_kib=24576 thread_limit=2 descriptor_limit=2",
+                  f"CAMERA_STRESS permission_requests={1 + warmups + 20}"]
         return "\n".join(lines)
 
     def test_same_process_bounds_and_device_release(self):
         self.assertTrue(camera_stress_evidence(self.evidence(), require_device_fds=True)["verified"])
+
+    def test_all_four_release_paths_can_be_warmed_before_baseline(self):
+        self.assertTrue(camera_stress_evidence(self.evidence(warmups=4), require_device_fds=True)["verified"])
+
+    def test_resource_settling_has_a_fixed_deadline(self):
+        text = self.evidence(warmups=4).replace("camera_fds=0 ", "camera_fds=0 settled_ms=1200 ")
+        text = text.replace("descriptor_limit=2", "descriptor_limit=2 settle_timeout_ms=2000")
+        self.assertTrue(camera_stress_evidence(text)["verified"])
+        for invalid in (text.replace("settled_ms=1200", "settled_ms=2001"),
+                        text.replace("settled_ms=1200", "settled_ms=-1"),
+                        text.replace("settle_timeout_ms=2000", "settle_timeout_ms=3000")):
+            self.assertFalse(camera_stress_evidence(invalid)["verified"])
 
     def test_separate_runs_or_incomplete_output_do_not_prove_stress(self):
         for text in ("crtweb_camera_probe: ok\n" * 3, "", self.evidence().split("CAMERA_STRESS completed")[0],

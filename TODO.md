@@ -137,15 +137,18 @@ uses the host replay order stated below and in the acceptance document.
   public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
 * [ ] **8. CRT subsystem substitution.** Sequential gates in `docs/acceptance/crtweb_acceptance.md`.
   Linux token, real ALSA output and four-mode physical-camera resource gates pass.
-  Replay the current shared playback/capture fixes and resource gates on macOS/Windows.
+  macOS complete-fixture playback passes; its new same-process physical-camera gate is red
+  (resource bounds and video-clock timeout; native AVFoundation controls succeed, acceptance).
+  Windows replay of the current shared playback/capture fixes remains pending.
   Investigation/reproduction: [`Windows Tranche 8 checkpoint`](docs/bringup/crtweb_windows_tranche8.md).
   * [x] **8A network:** CRT-owned Curl/OpenSSL/PAL path and explicit TLS policy accepted on
     Linux/x86_64, macOS/arm64 and Windows/x64 (acceptance).
-  * [ ] **8B playback:** output evidence recorded on all three hosts; Linux now delivers the complete
-    native PCM fixture. Replay the current paused-preroll/backpressure fixes on macOS/Windows.
+  * [ ] **8B playback:** complete 14,400-frame PCM fixture and paused-preroll/backpressure fixes
+    accepted on Linux and macOS (2026-10-15); current Windows replay pending.
   * [ ] **8C capture:** synthetic replay accepted on all three hosts; Linux/macOS/Windows physical-camera
-    evidence recorded; Linux 20 same-process stop/revoke/navigation/clone cycles pass. Replay the
-    current permission/stream-clock regression and physical resource gate on macOS/Windows.
+    evidence recorded; Linux 20 same-process cycles pass. macOS permission/stream-clock synthetic
+    regressions pass, but physical resource/restart stress still fails. Next isolate direct CRT/PAL
+    sessions from DOM playback against the native control; Windows current replay pending.
 * [ ] **9. GPU integration.**
   * [ ] Present WebKit's private Skia output through the CRT external-surface path.
   * [ ] Add shared/zero-copy GPU buffer import and synchronization; sharing one
