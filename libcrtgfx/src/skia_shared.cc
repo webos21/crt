@@ -2,7 +2,7 @@
 
 /* Native sharing is an optional backend capability, independent of ordinary
  * Ganesh rendering. Do not rename an upload or a CPU fence as native sharing. */
-#if !defined(CRTGFX_HAVE_VULKAN)
+#if !defined(CRTGFX_HAVE_VULKAN) && !defined(CRTGFX_HAVE_D3D12)
 crtgfx_result crtgfx_skia_shared_query(const crtgfx_gpu_device* device, crtgfx_shared_image_desc* out) {
   if (!out || !device) return CRTGFX_ERROR_INVALID_ARGUMENT;
   *out = {};

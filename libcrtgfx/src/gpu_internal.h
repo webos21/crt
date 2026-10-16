@@ -164,6 +164,9 @@ crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surfac
 crtgfx_result crtgfx_gpu_win32_surface_resize(struct crtgfx_gpu_surface* surface, uint32_t width, uint32_t height);
 int crtgfx_gpu_win32_borrow_device(
     const struct crtgfx_gpu_device* device, struct crtgfx_gpu_win32_device_view* out_view);
+/* LUID/vendor/device and driver-version/subsystem/revision, 16 bytes each (Web 9B sharing identity). */
+int crtgfx_gpu_win32_adapter_identity(
+    const struct crtgfx_gpu_device* device, unsigned char out_device[16], unsigned char out_driver[16]);
 int crtgfx_gpu_win32_begin_ganesh(
     struct crtgfx_gpu_surface* surface, struct crtgfx_gpu_win32_surface_view* out_view);
 int crtgfx_gpu_win32_is_ganesh_wrapped(const struct crtgfx_gpu_surface* surface);

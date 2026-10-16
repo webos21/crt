@@ -290,6 +290,7 @@ STAGES = {
                 # file by its repo-relative path (@ROOT@-substituted).
                 "porting/recipes/mbedtls-windows-exclude-symbols.rsp",
                 "libcrtgfx/src/arch/windows/gpu_win32.c",
+                "libcrtgfx/src/arch/windows/skia_shared_d3d12.cc",
                 # libcrtgfx/src/gpu.c #includes this directly; missing here
                 # produced "file not found" isolated-stage build failures
                 # (2026-09-11) -- see the matching "03-gfx-simple" entry,

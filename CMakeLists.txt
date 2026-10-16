@@ -1501,7 +1501,10 @@ if(Python3_Interpreter_FOUND)
       # to read headers/libraries while crt-libcxx-dist replaces that directory.
       # Windows 9A replay reproduced a missing cstddef in the GPU/surface tests.
       foreach(crt_web_consumer IN ITEMS crtweb_web_surface_test crtweb_webview_test crtweb_webview_gpu_test
-          crtweb_gpu_worker crtweb_gpu_resource_test crtgfx_skia_shared_image_test)
+          crtweb_gpu_worker crtweb_gpu_resource_test crtgfx_skia_shared_image_test
+          # The Skia objects read the same headers: a build asking for a consumer and its Skia objects
+          # together raced the dist publisher ("cstddef/cctype not found") on Windows (9B replay).
+          crtgfx_skia_objects crtui_skia crtui_skia_media)
         if(TARGET ${crt_web_consumer})
           add_dependencies(${crt_web_consumer} crt-libcxx-dist)
         endif()

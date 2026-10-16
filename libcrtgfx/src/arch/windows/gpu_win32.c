@@ -33,6 +33,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 /* Deliberately no <stdlib.h> (no calloc/free): this translation unit
  * compiles with only libcrtgfx/include and libcrtgfx/src on its own
  * include path (see libcrtgfx/CMakeLists.txt's own crtgfx_backend_objects
@@ -273,7 +274,10 @@ typedef struct crtgfx_dxgi_adapter1_vtbl {
   HRESULT(CRTGFX_WINAPI* QueryInterface)(crtgfx_dxgi_adapter1* self, REFIID riid, void** out);
   ULONG(CRTGFX_WINAPI* AddRef)(crtgfx_dxgi_adapter1* self);
   ULONG(CRTGFX_WINAPI* Release)(crtgfx_dxgi_adapter1* self);
-  void* reserved_3_to_9[7];
+  /* IDXGIObject (SetPrivateData..GetParent = 3-6), IDXGIAdapter::EnumOutputs/GetDesc = 7-8,
+   * CheckInterfaceSupport = 9 (umd_version is a LARGE_INTEGER), IDXGIAdapter1::GetDesc1 = 10. */
+  void* reserved_3_to_8[6];
+  HRESULT(CRTGFX_WINAPI* CheckInterfaceSupport)(crtgfx_dxgi_adapter1* self, REFIID interface_name, long long* umd_version);
   HRESULT(CRTGFX_WINAPI* GetDesc1)(crtgfx_dxgi_adapter1* self, crtgfx_dxgi_adapter_desc1* out_desc);
 } crtgfx_dxgi_adapter1_vtbl;
 struct crtgfx_dxgi_adapter1 {
@@ -551,6 +555,12 @@ typedef struct crtgfx_dxgi_swap_chain_desc1 {
  * linking the SDK's own extern IID_* symbols). */
 static const GUID crtgfx_iid_id3d12_device = {
     0x189819f1, 0x1db6, 0x4b57, {0xbe, 0x54, 0x18, 0x21, 0x33, 0x9b, 0x85, 0xf7}};
+static const GUID crtgfx_iid_idxgi_device = {
+    0x54ec77fa, 0x1377, 0x44e6, {0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4d}};
+static const GUID crtgfx_iid_id3d11_device = {
+    0xdb6f6ddb, 0xac77, 0x4e88, {0x82, 0x53, 0x81, 0x9d, 0xf9, 0xbb, 0xf1, 0x40}};
+static const GUID crtgfx_iid_id3d10_device = {
+    0x9b7e4c0f, 0x342c, 0x4106, {0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0}};
 static const GUID crtgfx_iid_id3d12_device5 = {
     0x8b4f173b, 0x2fea, 0x4b80, {0x8f, 0x58, 0x43, 0x07, 0x19, 0x1a, 0xb9, 0x5d}};
 static const GUID crtgfx_iid_id3d12_command_queue = {
@@ -1458,6 +1468,40 @@ crtgfx_result crtgfx_gpu_win32_surface_resize(
 crtgfx_result crtgfx_gpu_win32_surface_present(struct crtgfx_gpu_surface* surface) {
   return crtgfx_gpu_win32_surface_state_present(
       (struct crtgfx_gpu_win32_surface_state*)surface->backend_state);
+}
+
+/* The adapter's identity for sharing resources between processes (Web Tranche 9B), as two 16-byte values:
+ * LUID + vendor id + device id, and user-mode driver version + subsystem id + revision. It is read here, with
+ * this file's own DXGI_ADAPTER_DESC1, because a translation unit compiled with the project's 4-byte wchar_t
+ * (the Skia bridge) sees a DXGI_ADAPTER_DESC1 whose Description is twice the real size and reads zeros. */
+int crtgfx_gpu_win32_adapter_identity(
+    const struct crtgfx_gpu_device* device, unsigned char out_device[16], unsigned char out_driver[16]) {
+  const struct crtgfx_gpu_win32_device_state* state;
+  crtgfx_dxgi_adapter1* adapter;
+  crtgfx_dxgi_adapter_desc1 desc;
+  long long umd = 0;
+  if (device == NULL || out_device == NULL || out_driver == NULL || device->backend != CRTGFX_GPU_BACKEND_D3D12) return 0;
+  state = (const struct crtgfx_gpu_win32_device_state*)device->backend_state;
+  if (state == NULL || state->dxgi_adapter == NULL) return 0;
+  adapter = (crtgfx_dxgi_adapter1*)state->dxgi_adapter;
+  memset(&desc, 0, sizeof(desc));
+  if (FAILED(adapter->lpVtbl->GetDesc1(adapter, &desc))) return 0;
+  if (desc.VendorId == 0 && desc.DeviceId == 0 && desc.AdapterLuid.LowPart == 0 && desc.AdapterLuid.HighPart == 0) return 0;
+  /* The user-mode driver version is only reported for the interface the driver implements: a WDDM
+   * adapter may refuse IDXGIDevice and still answer for ID3D11Device. The first answer is used; both
+   * processes ask the same adapter in the same order, so they get the same value. */
+  if (FAILED(adapter->lpVtbl->CheckInterfaceSupport(adapter, &crtgfx_iid_idxgi_device, &umd)) &&
+      FAILED(adapter->lpVtbl->CheckInterfaceSupport(adapter, &crtgfx_iid_id3d11_device, &umd)) &&
+      FAILED(adapter->lpVtbl->CheckInterfaceSupport(adapter, &crtgfx_iid_id3d10_device, &umd))) {
+    umd = 0;
+  }
+  memcpy(out_device, &desc.AdapterLuid, 8);
+  memcpy(out_device + 8, &desc.VendorId, 4);
+  memcpy(out_device + 12, &desc.DeviceId, 4);
+  memcpy(out_driver, &umd, 8);
+  memcpy(out_driver + 8, &desc.SubSysId, 4);
+  memcpy(out_driver + 12, &desc.Revision, 4);
+  return 1;
 }
 
 int crtgfx_gpu_win32_borrow_device(

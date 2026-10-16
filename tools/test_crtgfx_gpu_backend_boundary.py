@@ -22,6 +22,7 @@ INTERNAL_HEADER_USERS = {
     "libcrtgfx/src/arch/linux/gpu_vulkan.c",
     "libcrtgfx/src/arch/linux/skia_shared_vulkan.cc",  # borrowed device view, no concrete layout
     "libcrtgfx/src/arch/windows/gpu_win32.c",
+    "libcrtgfx/src/arch/windows/skia_shared_d3d12.cc",  # borrowed device view + adapter identity hook only
     "libcrtgfx/src/arch/macos/gpu_metal.c",
 }
 

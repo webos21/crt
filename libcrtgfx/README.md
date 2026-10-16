@@ -5,8 +5,10 @@ Graphics and compositor-facing upper runtime layer.
 The optional `crtgfx/skia_shared.h` companion provides native shared-image
 production/import for same-device SDK Ganesh contexts. Fixed-width resource
 metadata lives in `crtgfx/shared_image.h`; native handles stay private to the
-per-host adapter. The initial implementation is Vulkan opaque-FD memory plus
-native semaphore/fence reference imports, not the CPU `crtgfx_gpu_fence`.
+per-host adapter. The implementations are Vulkan opaque-FD memory plus native
+semaphore/fence reference imports (Linux) and a D3D12 shared texture plus two shared
+fences as NT handles (Windows, `src/arch/windows/skia_shared_d3d12.cc`), not the CPU
+`crtgfx_gpu_fence`.
 Unsupported backends return `CRTGFX_ERROR_UNSUPPORTED`. The first consumer's
 [GPU resource contract](../docs/design/libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b)
 defines ownership and the precise shared segment.

@@ -20,8 +20,13 @@ bool run(crtgfx_gpu_device* a, crtgfx_gpu_device* b) {
   std::unique_ptr<crtgfx_skia_shared_image> producer, consumer;
   if (!check(crtgfx_skia_shared_create(a, 128, 96, &producer) == CRTGFX_OK, "create exportable image")) return false;
   int fds[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
-  if (!check(producer->export_handles(fds) == CRTGFX_OK, "five native resource handles")) return false;
+  if (!check(producer->export_handles(fds) == CRTGFX_OK, "native resource handles")) return false;
   auto desc = producer->description();
+  const unsigned handles = crtgfx_shared_image_handle_count(&desc);
+  check(handles == CRTGFX_SHARED_IMAGE_HANDLE_COUNT || handles == CRTGFX_SHARED_IMAGE_D3D12_HANDLE_COUNT,
+      "the backend's descriptor count");
+  for (unsigned i = 0; i < CRTGFX_SHARED_IMAGE_HANDLE_COUNT; ++i)
+    check((i < handles) == (fds[i] >= 0), "exactly the descriptor count of handles is exported");
   std::unique_ptr<crtgfx_skia_shared_image> invalid;
   auto bad = desc; bad.device_uuid[0] ^= 1;
   check(crtgfx_skia_shared_import(b, bad, fds, &invalid) == CRTGFX_ERROR_UNSUPPORTED && !invalid, "reject device mismatch");
@@ -30,7 +35,7 @@ bool run(crtgfx_gpu_device* a, crtgfx_gpu_device* b) {
   bad = desc; ++bad.allocation_size;
   check(crtgfx_skia_shared_import(b, bad, fds, &invalid) == CRTGFX_ERROR_INVALID_ARGUMENT && !invalid, "reject allocation shape mismatch");
   bool imported = check(crtgfx_skia_shared_import(b, desc, fds, &consumer) == CRTGFX_OK, "import independent logical device");
-  for (unsigned i = 0; i < CRTGFX_SHARED_IMAGE_HANDLE_COUNT; ++i) {
+  for (unsigned i = 0; i < handles; ++i) {
     check(fcntl(fds[i], F_GETFD) >= 0, "import borrows caller handles"); close(fds[i]);
   }
   if (!imported) return false;
@@ -86,6 +91,8 @@ extern "C" int main(int argc, char** argv) {
   if (b) crtgfx_gpu_device_release(b);
   crtgfx_gpu_device_release(a);
   if (!ok) return 1;
-  printf("crtgfx_skia_shared_image_test: ok epochs=20 memory=shared-gpu sync=native-fence-and-semaphore pixels=pass\n");
+  printf("crtgfx_skia_shared_image_test: ok epochs=20 memory=shared-gpu sync=%s pixels=pass backend=%u handles=%u\n",
+      identity.backend == CRTGFX_GPU_BACKEND_D3D12 ? "native-shared-fence" : "native-fence-and-semaphore",
+      identity.backend, crtgfx_shared_image_handle_count(&identity));
   return 0;
 }
