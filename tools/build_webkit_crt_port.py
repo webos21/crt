@@ -370,6 +370,37 @@ def run_input_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict, 
             "consumer_output": consumer_output.splitlines()}
 
 
+def macos_mapped_files(pid: int, log: Path | None = None, anonymous: list | None = None) -> list:
+    completed = subprocess.run(["vmmap", str(pid)], capture_output=True, text=True,
+                               check=False, timeout=15)
+    if log is not None:
+        log.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    if completed.returncode:
+        return []
+    # Parse real region rows, not the masked Path: or Analysis Tool: metadata.
+    # Observe ALL path roots, including foreign /opt, /Library and /Volumes images.
+    pattern = re.compile(r"^.+?\s+[0-9a-fA-F]+-[0-9a-fA-F]+\s+\[[^]]+\]\s+"
+                         r"([rwx-]{3})/[rwx-]{3}\s+.*?\s(/.*)$")
+    files = set()
+    temporary = Path(tempfile.gettempdir()).resolve()
+    for line in completed.stdout.splitlines():
+        match = pattern.search(line)
+        if not match:
+            continue
+        permissions, path = match.group(1), match.group(2).rstrip()
+        resolved = Path(path).resolve()
+        # libc's own memfd_create (mman.c): an immediately unlinked, PID-scoped
+        # temporary file used as non-executable shared data. Never exempt an
+        # executable, named, foreign-PID or arbitrary temporary-file mapping.
+        if (anonymous is not None and "x" not in permissions and resolved.parent == temporary
+                and re.fullmatch(rf"crt_memfd_{pid}_[0-9]{{6}}\.tmp", resolved.name)
+                and not resolved.exists()):
+            anonymous.append(path)
+        else:
+            files.add(path)
+    return sorted(files)
+
+
 def observe_macos_processes(parent_pid: int, children: dict | None = None) -> dict:
     """The mapped files of the three live B7 processes (UI, Web, Network), from the host side. macOS has
     no /proc, and an observer started inside the process under test (popen of ps/vmmap) is a child
@@ -388,15 +419,8 @@ def observe_macos_processes(parent_pid: int, children: dict | None = None) -> di
         if len(children) < 2:
             time.sleep(0.02)
     mapped = {}
-    pattern = re.compile(r"(?:^|\s)(/(?:Users|private|tmp|usr|System)/.*)$")
     for role, pid in {"UIProcess": parent_pid, **children}.items():
-        output = subprocess.run(["vmmap", str(pid)], capture_output=True, text=True, check=False).stdout
-        files = set()
-        for line in output.splitlines():
-            match = pattern.search(line)
-            if match:
-                files.add(match.group(1).rstrip())
-        mapped[role] = sorted(files)
+        mapped[role] = macos_mapped_files(pid)
     return mapped
 
 
@@ -628,16 +652,19 @@ def gpu_browser_map_evidence(text: str, sdk: Path, prefix: Path, build: Path, wo
     # Record browser roles separately from the application which owns the
     # native GPU driver. Other hosts need their native observer on replay;
     # do not silently present absent observations as a clean runtime audit.
-    if target_os not in ("linux", "windows"):
+    if target_os not in ("linux", "windows", "macos"):
         return {"verified": None, "scope": "native runtime observation pending", "violations": []}
     roots = [path.resolve() for path in (sdk, prefix, build, work, ROOT / "libcrtgfx/assets/fonts")]
     mapped = re.findall(r"^MAPPED (HostProcess|WebProcess|NetworkProcess) (.+)$", text, re.M)
     violations = []
     windows = target_os == "windows"
-    stub_names = ("libEGL.dll", "libGLESv2.dll") if windows else ("libEGL.so", "libGLESv2.so")
+    macos = target_os == "macos"
+    suffix = ".dll" if windows else ".dylib" if macos else ".so"
+    stub_names = tuple(name + suffix for name in ("libEGL", "libGLESv2"))
     stub_files = {(prefix / "lib" / name).resolve() for name in stub_names}
     system_root = Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve() if windows else None
     os_runtime = set()
+    os_mappings = set()
     stubs = set()
     for role, path in mapped:
         resolved = Path(path).resolve()
@@ -661,18 +688,105 @@ def gpu_browser_map_evidence(text: str, sdk: Path, prefix: Path, build: Path, wo
             continue
         if resolved.name.startswith("ld-linux"):
             continue
+        if macos:
+            # vmmap sees Apple's transitive framework closure, including media
+            # GPU helpers. As in B7, record that separately; the static Mach-O
+            # audit still restricts direct imports to the owned PAL contract.
+            if path.startswith(("/usr/lib/", "/System/", "/usr/share/", "/Library/Apple/",
+                                "/private/var/db/", "/usr/libexec/")):
+                os_mappings.add(path)
+                continue
         if not any(resolved.is_relative_to(root) for root in roots):
             violations.append(f"{role}: maps {path}")
         if resolved in stub_files:
             stubs.add(resolved.name)  # existing CRT-owned no-context B3 link stubs, not native drivers
-        elif resolved.name.startswith(("libvulkan", "libEGL", "libGLES", "libGLX", "libGL.so")):
+        elif (resolved.name.startswith(("libvulkan", "libEGL", "libGLES", "libGLX", "libGL.", "libMoltenVK"))
+              or (macos and resolved.name in ("Metal", "MetalKit", "MetalPerformanceShaders", "MPSGraph", "OpenGL"))):
             violations.append(f"{role}: GPU loader entered CPU browser path: {path}")
     roles = sorted({role for role, _ in mapped})
     result = {"verified": roles == ["HostProcess", "NetworkProcess", "WebProcess"] and not violations,
               "roles": roles, "mapped_files": len(mapped), "violations": violations, "crt_gl_stubs": sorted(stubs)}
     if windows:
         result["os_runtime_dlls"] = sorted(os_runtime)
+    if macos:
+        result["os_mappings"] = sorted(os_mappings)
+        result["anonymous_shared_data"] = re.findall(
+            r"^ANON_SHM (HostProcess|WebProcess|NetworkProcess) (.+)$", text, re.M)
     return result
+
+
+def macos_gpu_map_checkpoint(text: str, consumer_pid: int) -> list | None:
+    records = []
+    for line in text.splitlines():
+        fields = line.split()
+        if (len(fields) != 2 or fields[0] not in ("HostProcess", "WebProcess", "NetworkProcess")
+                or not fields[1].isascii() or not fields[1].isdigit() or int(fields[1]) <= 0):
+            return None
+        records.append((fields[0], int(fields[1])))
+    roles = [role for role, _ in records]
+    pids = [pid for _, pid in records]
+    if (roles.count("HostProcess") != 1 or roles.count("NetworkProcess") != 1 or "WebProcess" not in roles
+            or len(set(pids)) != len(pids) or consumer_pid in pids):
+        return None
+    return records
+
+
+def run_gpu_program_macos(command: list, runs: Path, env: dict) -> tuple:
+    """Hold the browser at the post-update checkpoint while the host samples its real mappings."""
+    mapped = []
+    observation = {"verified": False, "reason": "missing or invalid browser map checkpoint"}
+    with tempfile.TemporaryDirectory(prefix="gpu-map-audit-", dir=runs) as directory:
+        run_env = dict(env, CRTWEB_GPU_MAP_AUDIT_DIR=directory)
+        process = subprocess.Popen(command, cwd=runs, env=run_env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            ready = Path(directory) / "ready"
+            deadline = time.monotonic() + 60
+            while process.poll() is None and time.monotonic() < deadline:
+                if ready.exists():
+                    text = ready.read_text(encoding="utf-8")
+                    (runs / "map-checkpoint.txt").write_text(text, encoding="utf-8")
+                    records = macos_gpu_map_checkpoint(text, process.pid)
+                    if records:
+                        snapshot = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="],
+                                                  capture_output=True, text=True, check=False, timeout=10)
+                        processes = {}
+                        for line in snapshot.stdout.splitlines():
+                            fields = line.strip().split(None, 2)
+                            if len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit():
+                                processes[int(fields[0])] = (int(fields[1]), Path(fields[2]).name)
+                        host_pid = next(pid for role, pid in records if role == "HostProcess")
+                        topology_ok = all(processes.get(pid) == (
+                            process.pid if role == "HostProcess" else host_pid,
+                            "crtweb_host" if role == "HostProcess" else role) for role, pid in records)
+                        if topology_ok:
+                            counts = []
+                            for role, pid in records:
+                                anonymous = []
+                                paths = macos_mapped_files(pid, runs / f"vmmap-{role}-{pid}.log", anonymous)
+                                counts.append(len(paths))
+                                mapped += [f"MAPPED {role} {path}" for path in paths]
+                                mapped += [f"ANON_SHM {role} {path}" for path in sorted(set(anonymous))]
+                            observation = {"verified": all(counts),
+                                           "processes": [{"role": role, "pid": pid,
+                                                          "parent_pid": processes[pid][0],
+                                                          "name": processes[pid][1], "mapped_files": count}
+                                                         for (role, pid), count in zip(records, counts)]}
+                        else:
+                            observation["reason"] = "browser checkpoint does not match native parent/name observations"
+                    break
+                time.sleep(0.02)
+        finally:
+            (Path(directory) / "release").touch()
+            try:
+                stdout, stderr = process.communicate(timeout=240)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+                raise
+    if mapped:
+        stdout += "\n" + "\n".join(mapped) + "\n"
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr), observation
 
 
 def run_gpu_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
@@ -706,7 +820,11 @@ def run_gpu_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
     command = [str(program), "--require-gpu"]
     if window_frames:
         command += ["--window-frames", str(window_frames)]
-    completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=240)
+    observation = None
+    if target_os == "macos":
+        completed, observation = run_gpu_program_macos(command, runs, run_env)
+    else:
+        completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=240)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     (runs / "stdout.log").write_text(completed.stdout, encoding="utf-8")
@@ -718,10 +836,13 @@ def run_gpu_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
     audit = jsc.host_abi_audit(sdk, prefix, build, [host, library], run_env, target_os)
     evidence = gpu_composition_evidence(completed.stdout + completed.stderr, target_os, window_frames)
     runtime = gpu_browser_map_evidence(completed.stdout, sdk, prefix, build, runs, target_os)
+    if observation is not None:
+        runtime["observation"] = observation
+        runtime["verified"] &= observation["verified"]
     result.update(returncode=completed.returncode, evidence=evidence, output=completed.stdout.splitlines(),
                   host_abi={"ok": audit["ok"], "violations": audit["violations"]}, browser_runtime=runtime)
     result["passed"] = (completed.returncode == 0 and evidence["verified"] and audit["ok"]
-                        and runtime["verified"] is not False)
+                        and runtime["verified"] is True)
     return result
 
 

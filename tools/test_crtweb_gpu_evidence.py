@@ -3,6 +3,7 @@
 import unittest
 from unittest import mock
 from pathlib import Path
+import subprocess
 import build_webkit_crt_port as port
 
 
@@ -64,7 +65,30 @@ class BrowserMapTests(unittest.TestCase):
         self.assertEqual(evidence["crt_gl_stubs"], ["libEGL.so"])
 
     def test_other_hosts_are_explicitly_unobserved_not_clean(self):
-        self.assertIsNone(self.evidence("", "macos")["verified"])
+        self.assertIsNone(self.evidence("", "unsupported")["verified"])
+
+    def test_macos_roles_stubs_and_os_transitive_frameworks(self):
+        maps = self.maps().replace(".so", ".dylib")
+        self.assertFalse(self.evidence("", "macos")["verified"])
+        self.assertFalse(self.evidence(maps.replace("MAPPED NetworkProcess", "IGNORED NetworkProcess"),
+                                       "macos")["verified"])
+        maps += ("MAPPED WebProcess /deps/lib/libEGL.dylib\n"
+                 "MAPPED WebProcess /deps/lib/libGLESv2.dylib\n"
+                 "MAPPED WebProcess /usr/lib/libc++.1.dylib\n"
+                 "MAPPED WebProcess /System/Library/Frameworks/Metal.framework/Versions/A/Metal\n")
+        result = self.evidence(maps, "macos")
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["crt_gl_stubs"], ["libEGL.dylib", "libGLESv2.dylib"])
+        self.assertEqual(len(result["os_mappings"]), 2)
+
+    def test_macos_foreign_images_and_non_os_gpu_clients_rejected(self):
+        maps = self.maps().replace(".so", ".dylib")
+        for path in ("/opt/homebrew/lib/libc++.dylib", "/Library/Other/libforeign.dylib",
+                     "/foreign/*/injected.dylib", "/sdk/lib/libMoltenVK.dylib",
+                     "/sdk/lib/libvulkan.1.dylib", "/sdk/lib/libEGL.dylib",
+                     "/sdk/lib/libGL.dylib", "/sdk/lib/Metal.framework/Versions/A/Metal",
+                     "/sdk/lib/OpenGL.framework/Versions/A/OpenGL"):
+            self.assertFalse(self.evidence(maps + f"MAPPED WebProcess {path}\n", "macos")["verified"], path)
 
     def test_windows_requires_all_browser_roles(self):
         self.assertFalse(self.evidence("", "windows")["verified"])
@@ -94,6 +118,61 @@ class BrowserMapTests(unittest.TestCase):
                      "/os/Windows/System32/D3DCOMPILER_47.dll", "/os/Windows/System32/vulkan-1.dll",
                      "/os/Windows/System32/opengl32.dll", "/sdk/lib/libEGL.dll"):
             self.assertFalse(self.evidence(maps + f"MAPPED WebProcess {path}\n", "windows")["verified"], path)
+
+
+class MacObserverTests(unittest.TestCase):
+    checkpoint = "HostProcess 11\nWebProcess 12\nNetworkProcess 13\n"
+
+    def test_checkpoint_has_distinct_browser_pids_not_the_gpu_application(self):
+        self.assertEqual(port.macos_gpu_map_checkpoint(self.checkpoint, 10),
+                         [("HostProcess", 11), ("WebProcess", 12), ("NetworkProcess", 13)])
+        records = port.macos_gpu_map_checkpoint(self.checkpoint + "WebProcess 14\n", 10)
+        self.assertEqual(len(records), 4)  # prewarmed Web processes must also be observed
+
+    def test_malformed_missing_or_duplicate_identity_fails_closed(self):
+        invalid = ("", self.checkpoint.replace("NetworkProcess 13\n", ""),
+                   self.checkpoint.replace("HostProcess", "UIProcess"),
+                   self.checkpoint.replace("13", "12"), self.checkpoint.replace("11", "10"),
+                   self.checkpoint.replace("12", "0"), self.checkpoint.replace("12", "-12"),
+                   self.checkpoint.replace("12", "\u0661\u0662"), self.checkpoint.replace("12", "12 extra"),
+                   self.checkpoint + "HostProcess 14\n", self.checkpoint + "NetworkProcess 14\n")
+        for text in invalid:
+            self.assertIsNone(port.macos_gpu_map_checkpoint(text, 10), text)
+
+    @mock.patch.object(port.subprocess, "run")
+    def test_vmmap_observes_all_path_roots_not_only_allowed_prefixes(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0,
+            "Path: /private/tmp/*/WebProcess\nAnalysis Tool: /usr/bin/vmmap\n"
+            "__TEXT 0001-0002 [ 16K 16K 0K 0K] r-x/r-x SM=COW /opt/homebrew/lib/foreign.dylib\n"
+            "__TEXT 0002-0003 [ 16K 16K 0K 0K] r-x/r-x SM=COW /Volumes/SDK With Spaces/libother.dylib\n"
+            "__TEXT 0003-0004 [ 16K 16K 0K 0K] r-x/r-x SM=COW /System/Library/Frameworks/Metal.framework/Versions/A/Metal\n", "")
+        paths = port.macos_mapped_files(12)
+        self.assertEqual(len(paths), 3)
+        self.assertIn("/opt/homebrew/lib/foreign.dylib", paths)
+        self.assertIn("/Volumes/SDK With Spaces/libother.dylib", paths)
+        run.return_value = subprocess.CompletedProcess([], 1, "error /opt/homebrew/lib/foreign.dylib", "denied")
+        self.assertEqual(port.macos_mapped_files(12), [])
+
+    @mock.patch.object(port.subprocess, "run")
+    def test_only_unlinked_nonexecutable_pid_scoped_temp_data_is_separate(self, run):
+        # Simulate Darwin paths even when this unit suite runs on Windows.
+        temporary = "/tmp/crt-gpu-map-unit"
+        own = temporary + "/crt_memfd_12_000001.tmp"
+        foreign = temporary + "/crt_memfd_13_000001.tmp"
+        other = temporary + "/foreign.dylib"
+        row = lambda permissions, path: f"mapped file 0001-0002 [ 16K 16K 0K 0K] {permissions}/rwx SM=ALI {path}\n"
+        run.return_value = subprocess.CompletedProcess([], 0,
+            row("rw-", own) + row("r-x", own) + row("rw-", foreign) + row("rw-", other), "")
+        with mock.patch.object(port.tempfile, "gettempdir", return_value=temporary), \
+                mock.patch.object(Path, "exists", return_value=False):
+            anonymous = []
+            self.assertEqual(port.macos_mapped_files(12, anonymous=anonymous), sorted([own, foreign, other]))
+            self.assertEqual(anonymous, [own])
+            # Named files are not the CRT's delete-while-open memfd contract.
+            with mock.patch.object(Path, "exists", return_value=True):
+                anonymous = []
+                self.assertIn(own, port.macos_mapped_files(12, anonymous=anonymous))
+                self.assertEqual(anonymous, [])
 
 
 if __name__ == "__main__":

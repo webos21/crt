@@ -2963,7 +2963,8 @@ skip); the driver passes `--require-gpu` and fails instead. The evidence parser
 requires the expected native backend, all checks, exact live frame count and
 the `source=cpu-shm interop=cpu-upload` classification. This first implementation
 observed native browser mappings on Linux only; the Windows extension and replay
-are recorded below. macOS still reports pending, not a clean empty runtime audit.
+are recorded below. macOS was still pending at this checkpoint, not a clean
+empty runtime audit; its native observer and accepted replay are recorded below.
 
 Strict negative controls fail for a missing host and a child-scoped unusable
 Vulkan ICD selection (both exit 1); missing host without strict mode exits 77,
@@ -2998,16 +2999,16 @@ reported separately as `ANON_SHM`, never allowed as arbitrary `/tmp` libraries.
 That checkpoint is retained in `tranche9-map-checkpoint-failed.json` and
 `tranche9-gpu-final-offscreen-1.log`.
 
-GPU-buffer IPC, native producer/consumer GPU fences, accelerated WebCore,
-GPUProcess/device-loss acceptance and macOS replay remain open. The
-existing CPU surface contract and fallback are not replaced by this first slice.
+GPU-buffer IPC, native producer/consumer GPU fences, accelerated WebCore and
+GPUProcess/device-loss acceptance remain open. Host replays below extend this
+9A slice without replacing the existing CPU surface contract and fallback.
 
 #### 9A Windows/x64 replay (2026-10-15..16)
 
 Replayed `332e904` plus the Windows observer/build-order changes.
 This is the same CPU-shared-memory upload path, now targeting D3D12/Ganesh;
-it does not request audio or physical camera capture. macOS replay, 9B and 9C
-remain independent open gates.
+it does not request audio or physical camera capture. At that checkpoint macOS
+replay was still pending (recorded below); 9B and 9C remain independent open gates.
 
 The initial fresh combined `-j 8` SDK/consumer build failed: the release-grade
 `02-cxx` publisher replaced its directory while the GPU/CPU-surface consumers
@@ -3082,10 +3083,134 @@ offscreen run passes independently (`out/web-windows-tranche9a-driver-offscreen-
 The final public strict CLI with `--gpu-window-frames 5` also passes, including
 5/5 presentations and the native browser map audit:
 `out/web-windows-tranche9a-driver-live-final.log` and
-`C:/crtw/b3w/acceptance-gpu.json`. This closes Windows 9A replay, not the macOS
-replay or any GPU-resource/GPUProcess gate.
+`C:/crtw/b3w/acceptance-gpu.json`. This closes Windows 9A replay; macOS was still
+pending at that checkpoint (its replay is below), as were GPU-resource/GPUProcess gates.
 Wire/negative-control logs are `out/web-windows-tranche9a-wire-negative.log`;
 GPU-OFF configuration/target logs have the `web-windows-tranche9a-gpu-off-` prefix.
+
+#### 9A macOS/arm64 replay (2026-10-16)
+
+Replayed `3b09d45` plus acceptance-only native observer and runtime-build
+environment fixes. A fresh `macos-host-ninja-debug` configuration retains the
+predecessor's imported-libc++/Skia/Metal/LVGL/FFmpeg/Curl options and local pinned
+source paths. The combined `-j 8` SDK and GPU/CPU-consumer build succeeds with
+the Windows publisher-ordering correction. The composed browser tree is
+`/private/tmp/webB3f`; host/Web/Network and B7 are rebuilt against `05-ui`.
+No audio-output or physical-camera test is requested by this GPU replay.
+
+**Metal/Ganesh result:** offscreen **3/3**, native window **3/3**, every live
+run presenting **5/5** frames. Each passes the unchanged GPU pixel/readback,
+UI ordering/ancestor clipping/opacity, pointer-driven pixel change, fresh
+viewport/target resize, retained-source immutability, twenty alternating
+updates, producer termination/replacement and browser cleanup assertions.
+
+| Mode | Run | Twenty-update RSS delta | Thread delta | Descriptor delta | Live presentations |
+| --- | --- | --- | --- | --- | --- |
+| Offscreen | 1 | +208 KiB | +0 | +0 | Not requested |
+| Offscreen | 2 | +160 KiB | +0 | +0 | Not requested |
+| Offscreen | 3 | +160 KiB | +0 | +0 | Not requested |
+| Metal window | 1 | +240 KiB | +0 | +0 | 5/5 |
+| Metal window | 2 | +144 KiB | +0 | +0 | 5/5 |
+| Metal window | 3 | +144 KiB | +0 | +0 | 5/5 |
+
+The unchanged bound is +24 MiB/+2 threads/+2 descriptors after warm draw.
+These are application-process observations, not Metal device-memory, native
+GPU-fence or GPUProcess lifetime measurements. The source remains explicitly
+non-texture-backed CPU BGRA shared memory (`source=cpu-shm interop=cpu-upload`);
+only the application-owned Ganesh target and presentation are GPU-backed.
+
+The acceptance checkpoint atomically publishes every browser PID while the
+view is alive. An external observer validates Host/Web/Network identities and
+parentage with native `ps`, saves their raw `vmmap` reports and releases the
+checkpoint before producer-loss testing. Empty/missing roles or a failed map
+observation cannot pass. vmmap's masked `Path:` and `Analysis Tool:` headers
+are not mapped images: only real address/protection region rows are parsed,
+including images under `/opt`, `/Library` and `/Volumes`. Current non-executable,
+immediately unlinked `crt_memfd_<own-pid>_<six-digits>.tmp` files under the actual
+temporary directory are reported as `ANON_SHM`. Named/executable/foreign-PID
+files are not exempt, nor are arbitrary temporary libraries.
+
+All six repetitions observe **4,634** browser file/role records with zero
+violations and both CRT EGL/GLES link stubs. Each also records three anonymous
+shared-data files separately. Apple's shared-cache/system region inventory
+is recorded separately: it can list Metal and system C++ images without proving
+the browser uses those APIs. The unchanged static Mach-O audit still rejects
+direct Metal or host-libc++ imports by browser artifacts; declared media
+framework imports belong to `libcrtmedia` alone. Negative unit cases cover
+these distinctions. Application-side native Metal clients are deliberately
+outside the CPU browser firewall.
+
+The final public strict CLI independently passes **5/5** presentations, +208
+KiB/+0/+0 over twenty updates, 4,635 browser map observations, and clean static
+and runtime audits. Device runs clear `DYLD_LIBRARY_PATH` and use their linked
+RPATHs. The header leak scan and exported-symbol check pass (37 `crtweb_*`
+exports, no foreign names). A final native process-name inventory finds no
+remaining test/browser process.
+
+CPU WebView replay passes three process recoveries and twenty
+launch/load/resize/shutdown lifetimes with **+0 KiB/+0 threads/+0 descriptors**,
+settling 0ms. B7 passes **100** lifetimes, after ten warmups **+32 KiB/+0/+0**,
+with at most one Web and one Network child alive together. Its static audit
+lists eighteen browser artifacts; runtime UI/Web/Network observation has
+1,668 file/role records and zero violations. Wire layout/transport and CPU
+surface CTest passes **3/3** after final SDK publication.
+
+Two failed checkpoints are preserved, not counted as acceptance:
+
+- The first public entry fails SDK verification **before GPU execution**.
+  The consumer driver's `CRT_CXX_RUNTIME_LINKAGE=shared` reaches a nested
+  libc++ build and injects an absolute `dist/01-c/lib` RPATH. The builder now
+  clears consumer linkage/hosted/port-RPATH hints and owns its compiler/link
+  policy. Its fingerprint invalidates old build trees once, since Ninja does
+  not track environment-only link changes. Fetched sources/pins and runtime
+  ABI are unchanged; no packaging check was bypassed or weakened. The final
+  cumulative `01-c` through `05-ui` SDK refresh and verification pass.
+- After that fix, GPU pixels/recovery/cleanup and static Host ABI pass, but
+  the initial observer misclassifies report metadata and CRT memfd data.
+  Region/protection parsing and the narrow anonymous-data classification
+  above resolve it; foreign libraries still fail the audit.
+
+GPU evidence/observer unit tests pass **17/17**, backend boundary 7/7, existing
+device evidence 18/18, libc++ predecessor/environment isolation 6/6 and local
+fetch recovery 1/1, driver/JSC helpers 2/2 and 9/9, source closure 7/7 and
+licensing 15/15. The manifest remains 23 patches/63 modified/24 CRT-owned files.
+A separate fresh GPU-OFF configure registers CPU surface/WebView targets but
+no GPU consumer. Ordinary no-host GPU CTest is explicitly skipped; direct
+no-host execution returns 77, strict no-host returns 1, invalid frame counts
+0/301 and unknown arguments return 2. These negative controls are not GPU
+acceptance. No deadline, child-name exclusion or resource bound was relaxed.
+
+Public reproduction after configuring the same predecessor features:
+
+```sh
+python3.14 tools/build_webkit_crt_port.py \
+  --sdk-root out/macos-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/macos-host-ninja-debug/port-tests/install \
+  --work-root /private/tmp/webB3f --reuse-tree --webkit \
+  --run-gpu-tests --gpu-window-frames 5 -j 8
+# Omit --gpu-window-frames for strict offscreen-only replay.
+```
+
+Evidence root: `out/macos-host-ninja-debug/tranche9a-replay-20261016/`.
+Configuration/SDK/browser logs are `configure.log`,
+`sdk-consumer-build-initial.log`, `browser-build.log`, `sdk-build-final.log`
+and `sdk-verify-final.log`. `replay.py` repeats the already-built consumer
+sequentially with the checked-in strict evidence/map predicates and static
+audit, without a concurrent build. `summary.json`, `replay.log` and each
+`{offscreen,window}-{1,2,3}/` retain result JSON, stdout/stderr, PID checkpoint
+and native vmmap logs. Final public CLI evidence is `driver-live-final.log`
+and `acceptance-gpu-final.json` (also `/private/tmp/webB3f/acceptance-gpu.json`).
+The retained failures are `driver-offscreen-initial.log` /
+`acceptance-gpu-initial-build-failed.json` and
+`driver-offscreen-environment-fixed.log` / `acceptance-gpu-map-failed.json` /
+`map-checkpoint-failed/`. CPU/B7 logs and JSON are in `regressions/`; boundary,
+wire, skip, negative-control and GPU-OFF evidence have the matching names
+under the evidence root.
+
+This closes macOS and the three-host **9A** baseline, not 9B/9C or the packaged
+`06-web` stage. Linux/Windows native execution of the host-neutral runtime-build
+environment fix was not performed on this Mac; their existing 9A baselines
+remain the host evidence above, not new results claimed by this replay.
 
 ### 10. Distribution and security closure
 

@@ -142,6 +142,30 @@ void report_browser_maps() {
     fclose(maps);
     for (const auto& file : files) printf("MAPPED %s %s\n", role, file.c_str());
   };
+#elif defined(__APPLE__) || defined(WTF_CRT_MACHO_ASM)
+  // vmmap runs in the driver, not as a child of the application whose
+  // resources/teardown we measure. Publish every live browser role atomically.
+  const char* directory = getenv("CRTWEB_GPU_MAP_AUDIT_DIR");
+  if (!directory) return;
+  std::string ready = std::string(directory) + "/ready";
+  std::string temporary = ready + ".tmp";
+  std::string release = std::string(directory) + "/release";
+  FILE* file = fopen(temporary.c_str(), "w");
+  if (!check(file != nullptr, "GPU map observer checkpoint")) return;
+  for (const auto& host : crtweb_test::children()) {
+    if (host.name != "crtweb_host") continue;
+    fprintf(file, "HostProcess %ld\n", static_cast<long>(host.pid));
+    for (const auto& child : crtweb_test::children(host.pid))
+      if (child.name == "WebProcess" || child.name == "NetworkProcess")
+        fprintf(file, "%s %ld\n", child.name.c_str(), static_cast<long>(child.pid));
+  }
+  bool closed = fclose(file) == 0;
+  if (!check(closed && rename(temporary.c_str(), ready.c_str()) == 0,
+      "publish complete GPU map checkpoint")) return;
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (access(release.c_str(), F_OK) != 0 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  check(access(release.c_str(), F_OK) == 0, "GPU map observer released checkpoint");
 #endif
 #if defined(_WIN32) || defined(__linux__)
   for (const auto& host : crtweb_test::children()) {

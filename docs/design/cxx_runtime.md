@@ -171,6 +171,17 @@ with environment variables, set in a port recipe's `build.env` or by the stage d
   libraries' `libc.so`), each with its own thread/key registry and allocator, and threads
   created by one are unknown to the other.
 
+These are **consumer** hints, not SDK-build settings. `tools/crt-libcxx-build.py`
+removes inherited `CRT_CXX_RUNTIME_LINKAGE`, `CRT_CXX_HOSTED` and
+`CRT_PORT_RPATH_DIR` before building the imported runtimes. It owns the runtime
+compiler/link policy even when invoked by an in-tree consumer target from a
+WebKit driver environment. In particular, a consumer's shared-link setting
+must not inject an absolute predecessor-sysroot RPATH into packaged libc++.
+The predecessor fingerprint also records this environment-isolation policy:
+older cached runtime build trees are invalidated once, since Ninja cannot
+detect an environment-only change to a wrapper's link command. Source pins
+and the public C++ ABI are unchanged.
+
 On Linux a stray `-lm`/`-ldl` from an upstream makefile is dropped in a static-runtime link
 (the static link already names `libm.a`/`libdl.a`; the extra option would add a
 `NEEDED libm.so` with no rpath, which the host loader resolves to glibc's linker script),

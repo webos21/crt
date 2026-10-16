@@ -37,6 +37,32 @@ class BuildWebKitJSCModeTests(unittest.TestCase):
                          build_webkit_jsc.target_c_flags("linux", "aarch64"))
 
 
+class MacMediaABIAuditTests(unittest.TestCase):
+    def audit(self, name, imports):
+        binary = Path("/build/lib") / name
+        output = str(binary) + ":\n" + "\n".join(f"\t{item} (compatibility version 1.0.0)" for item in imports)
+        with mock.patch.object(build_webkit_jsc, "run", return_value=
+                               subprocess.CompletedProcess([], 0, output, "")):
+            return build_webkit_jsc.host_abi_audit_macos(Path("/sdk"), Path("/deps"), Path("/build"), [binary])
+
+    def test_media_framework_imports_belong_to_the_media_pal_only(self):
+        framework = "/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation"
+        result = self.audit("libcrtmedia.dylib", [framework])
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["known_host_libraries"], {"AVFoundation": ["libcrtmedia.dylib"]})
+        self.assertFalse(self.audit("libWebKit.dylib", [framework])["ok"])
+
+    def test_os_transitive_metal_mapping_is_not_a_direct_import_waiver(self):
+        metal = "/System/Library/Frameworks/Metal.framework/Versions/A/Metal"
+        for name in ("crtweb_host", "WebProcess", "NetworkProcess", "libWebKit.dylib", "libcrtmedia.dylib"):
+            self.assertFalse(self.audit(name, [metal])["ok"], name)
+
+    def test_browser_direct_system_cxx_runtime_remains_forbidden(self):
+        self.assertTrue(self.audit("WebProcess", ["/usr/lib/libSystem.B.dylib"])["ok"])
+        for library in ("/usr/lib/libc++.1.dylib", "/opt/homebrew/lib/libc++.dylib"):
+            self.assertFalse(self.audit("WebProcess", [library])["ok"], library)
+
+
 class WindowsMediaABIAuditTests(unittest.TestCase):
     def audit(self, name, imports):
         with tempfile.TemporaryDirectory() as directory:

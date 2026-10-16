@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused tests for imported-libc++ predecessor invalidation."""
+"""Focused tests for imported-libc++ predecessor and build-environment isolation."""
 
 import importlib.util
 import tempfile
@@ -64,6 +64,37 @@ class PredecessorFingerprintTests(unittest.TestCase):
         (empty / "lib").mkdir(parents=True)
         with self.assertRaises(SystemExit):
             DRIVER.predecessor_fingerprint(empty)
+
+    def test_old_ambient_environment_cache_is_rebuilt_once(self) -> None:
+        fingerprint = DRIVER.predecessor_fingerprint(self.sysroot)
+        previous = dict(fingerprint)
+        previous.pop("runtime_environment_policy")
+        DRIVER.write_predecessor_fingerprint(self.build_root, previous)
+        self.make_build_trees()
+        DRIVER.invalidate_stale_builds(self.build_root, self.order, fingerprint)
+        for recipe in self.order:
+            self.assertFalse((self.build_root / recipe["name"]).exists())
+        DRIVER.write_predecessor_fingerprint(self.build_root, fingerprint)
+        self.make_build_trees()
+        DRIVER.invalidate_stale_builds(self.build_root, self.order, fingerprint)
+        for recipe in self.order:
+            self.assertTrue((self.build_root / recipe["name"] / "sentinel").is_file())
+
+
+class RuntimeEnvironmentTests(unittest.TestCase):
+    def test_consumer_hints_do_not_enter_runtime_builds(self):
+        parent = {"CRT_CXX_RUNTIME_LINKAGE": "shared", "CRT_CXX_HOSTED": "1",
+                  "CRT_PORT_RPATH_DIR": "/consumer/lib", "CRT_HOST_CXX": "/llvm/clang++",
+                  "CRT_WINDOWS_SDK_LIBPATH": "/sdk/um/x64", "PATH": "/host/bin"}
+        snapshot = dict(parent)
+        result = DRIVER.runtime_build_environment(parent)
+        self.assertEqual(result, {key: parent[key] for key in
+                                  ("CRT_HOST_CXX", "CRT_WINDOWS_SDK_LIBPATH", "PATH")})
+        self.assertEqual(parent, snapshot)
+
+    def test_clean_environment_is_unchanged(self):
+        parent = {"PATH": "/host/bin"}
+        self.assertEqual(DRIVER.runtime_build_environment(parent), parent)
 
 
 if __name__ == "__main__":

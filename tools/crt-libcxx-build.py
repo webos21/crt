@@ -149,8 +149,16 @@ from pathlib import Path
 PREDECESSOR_FINGERPRINT_FILE = ".crt-predecessor-fingerprint.json"
 
 
+def runtime_build_environment(environ: dict) -> dict:
+    """Consumer wrapper hints must not alter the SDK runtime's own link policy."""
+    env = dict(environ)
+    for variable in ("CRT_CXX_RUNTIME_LINKAGE", "CRT_CXX_HOSTED", "CRT_PORT_RPATH_DIR"):
+        env.pop(variable, None)
+    return env
+
+
 def predecessor_fingerprint(sysroot: Path) -> dict:
-    """Fingerprint the C-runtime link inputs consumed by imported runtimes."""
+    """Fingerprint C-runtime link inputs and the owned runtime build policy."""
     library_dir = sysroot / "lib"
     candidates = []
     for pattern in ("libc.*", "libm.*", "libdl.*"):
@@ -170,11 +178,14 @@ def predecessor_fingerprint(sysroot: Path) -> dict:
             "size": path.stat().st_size,
             "sha256": digest.hexdigest(),
         })
-    return {"schema_version": 1, "files": files}
+    # Older cached links may contain consumer-injected absolute RPATHs.
+    # Ninja cannot track environment-only link changes; rebuild those trees
+    # once when adopting isolated runtime environments, even with identical C inputs.
+    return {"schema_version": 1, "runtime_environment_policy": 1, "files": files}
 
 
 def invalidate_stale_builds(build_root: Path, order: list[dict], fingerprint: dict) -> None:
-    """Remove only imported-runtime build trees when predecessor bytes change."""
+    """Remove only runtime build trees when predecessor bytes or build policy change."""
     stamp = build_root / PREDECESSOR_FINGERPRINT_FILE
     previous = None
     if stamp.is_file():
@@ -944,7 +955,7 @@ def main():
     invalidate_stale_builds(build_root, order, predecessor)
 
     cmake = shutil.which("cmake") or "cmake"
-    env = os.environ.copy()
+    env = runtime_build_environment(os.environ)
     # CRT_HOST_CC/CRT_HOST_CXX: tools/crt-cc/tools/crt-c++ (the compiler
     # launcher scripts every recipe below is actually built through) fall
     # back to a bare "clang"/"clang++" whenever these are unset, resolved

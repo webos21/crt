@@ -11,6 +11,45 @@ substantive update.
 
 ## 2026-10-16
 
+### Web Tranche 9A: macOS Metal final-compositor replay
+
+Replayed `3b09d45` plus acceptance-observer/build-environment fixes on macOS/arm64.
+Metal/Ganesh offscreen **3/3** and native presentation **3/3** pass, each live run
+presenting **5/5** frames. The public strict CLI passes independently. Pixels,
+clip/opacity/ordering, input, viewport resize, retained old CPU source, twenty
+updates, producer replacement and cleanup pass with unchanged bounds. This is
+CPU-shared-memory upload, not GPU WebCore rendering or zero-copy/GPU-buffer IPC.
+Detailed measurements and reproduction belong to
+[macOS 9A acceptance](docs/acceptance/crtweb_acceptance.md#9a-macosarm64-replay-2026-10-16).
+
+Added an acceptance-only external vmmap checkpoint, including native PID/name/
+parent validation for every browser role. Missing observations fail closed.
+Real region rows exclude report metadata; only the CRT's PID-scoped, unlinked,
+non-executable temporary memfd data is classified separately. Foreign images
+remain violations. Apple's shared-cache inventory stays separate from the
+static Mach-O dependency firewall; it is not proof of GPU browser rendering.
+
+The initial public entry failed before GPU execution: consumer shared-runtime
+environment hints contaminated the nested libc++ build with an absolute
+predecessor RPATH. The runtime builder now removes those hints and invalidates
+old environment-dependent build trees once. A second checkpoint passes GPU
+rendering but catches observer metadata/memfd misclassification; both failed
+checkpoints are retained. No runtime implementation, public ABI, source pin,
+WebKit patch or acceptance threshold changed. Refreshed SDKs `01-c` through
+`05-ui` all verify after the build fix.
+
+CPU WebView passes three recoveries and twenty lifetimes (+0 KiB/+0 threads/+0
+descriptors); B7 passes one hundred lifetimes (+32 KiB/+0/+0). Browser static/
+runtime audits and the public header/export firewall pass. Wire/CPU surface
+CTest passes 3/3; GPU evidence/observer tests 17/17, backend boundary 7/7,
+device evidence 18/18, libc++ predecessor/environment 6/6 and fetch 1/1,
+driver/JSC helpers 2/2 and 9/9, source closure 7/7 and licensing 15/15 pass;
+the manifest remains 23 patches/63 modified/24 CRT-owned files. No remaining
+test/browser process, audio output or physical camera use. This closes the
+three-host 9A baseline, not 9B/9C or `06-web` packaging. Linux/Windows were not
+natively rerun here for the host-neutral runtime-build environment fix.
+`STATUS.md` is intentionally untouched.
+
 ### Web Tranche 9A: Windows D3D12 final-compositor replay
 
 Replayed `332e904` on Windows/x64: offscreen **3/3** and native D3D12/Ganesh
@@ -43,8 +82,9 @@ passes 3/3, GPU evidence/maps 11/11, backend boundary 7/7, existing device
 evidence 18/18, source closure 7/7, licensing 15/15, driver/JSC helpers 2/2 and
 6/6, and the unchanged 23-patch manifest pass. GPU-OFF still registers CPU
 consumers only; no-host GPU CTest skips and strict/invalid-argument negative
-controls fail as required. This closes the Windows replay slice, not macOS 9A
-or the 9B/9C resource/GPUProcess gates. No public ABI or WebKit patch changed;
+controls fail as required. At that checkpoint this closes the Windows replay
+slice, not the then-pending macOS 9A replay or the 9B/9C resource/GPUProcess gates.
+The macOS replay is recorded above. No public ABI or WebKit patch changed;
 `STATUS.md` is intentionally untouched.
 
 ## 2026-10-15
@@ -86,8 +126,9 @@ CTest records missing prerequisites as skipped, while strict negative controls
 fail. No audio or physical camera capture was requested by this GPU gate.
 
 Split the remaining Tranche 9 boundary into resource/GPU synchronization and
-device/GPUProcess lifecycle/host replay gates. Those, including macOS/Windows
-replay, remain open; the Linux final-compositor slice does not close Tranche 9.
+device/GPUProcess lifecycle/host replay gates. At that Linux checkpoint,
+macOS/Windows replays still awaited execution (recorded above). The resource/
+GPUProcess gates remain open; the Linux final-compositor slice does not close Tranche 9.
 `STATUS.md`, root README and the completed Tranche 8 evidence are unchanged.
 
 ### Web Tranche 8 closed: Linux output drain and native allocator replay
