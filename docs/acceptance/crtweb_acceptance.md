@@ -3317,6 +3317,87 @@ repeated full resource lifetimes, and the deferred upstream GPUProcess
 lifecycle gate remain 9C work; normal queue draining is not a bounded
 hung-driver recovery claim. Tranche 9 and `06-web` packaging are not closed.
 
+#### 9B Windows/x64 D3D12 shared-resource implementation and replay (2026-10-16)
+
+Windows had no native resource backend when the Linux slice landed (`skia_shared.cc` returned unsupported and
+the strict gate refused the host), so this is an implementation plus replay, not a replay of Linux code. The
+[resource policy](../design/libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b) owns the
+protocol; the D3D12 form is `src/arch/windows/skia_shared_d3d12.cc` behind the unchanged
+`crtgfx_skia_shared_image` interface and the same v2 wire. The browser is the unchanged accepted CPU
+implementation; **browser CPU -> worker upload -> shared GPU texture -> application** is the measured path and only
+worker -> application is shared GPU memory. No claim of GPU WebCore, end-to-end zero-copy, a WebKit GPUProcess or a
+shared private Skia ABI.
+
+Hardware: Intel UHD Graphics 630 (vendor 0x8086, device 0x3e92), WDDM user-mode driver 31.0.101.2140. The
+shared pair is one adapter: identity is the LUID + vendor + device id and the user-mode driver version + subsystem +
+revision (`ca9e00000000000086800000923e0000` / `5c08650000001f008680122200000000`); a second logical device on the same adapter is the
+consumer in the PAL test, and a different adapter negotiates CPU mode.
+
+**Accepted Windows results:** offscreen **3/3**, native D3D12 window **3/3**, each window **5/5** presentations,
+every run through the checked-in strict driver (`--webkit --run-gpu-resource-tests
+[--gpu-resource-window-frames 5]`). Each run uses actual browser frames, checks GPU-backed source and target,
+exact green/magenta composition, ancestor clipping, half opacity, UI below/above, stalled-consumer immutability,
+generation/extent resize and twenty fresh alternating updates. Every run imports six resources over two
+generations (18 shared objects: texture + two fences each), releases twenty-three epochs, retires all three
+old-generation images and settles at three live images (peak four, hard protocol limit six). Worker counters are
+24 uploads, 23 completed releases/reuses, **zero GPU readbacks**; consumer CPU uploads are zero. Across the twenty
+post-resize updates the UI process changes by **+4 KiB RSS, +0 threads, -1 handle** in all six runs, the worker by
+**+116..+204 KiB RSS, +0 threads, +0 handles**; the limits remain +24 MiB / +2 threads / +2 descriptors per
+process. Final shutdown checks that the worker and every observed Host/Web/Network descendant are stopped and
+reaped (none left behind). The static PE Host ABI audit of `crtweb_host.exe` and `libcrtweb.dll` and the
+Toolhelp module audit of all three browser roles pass with no violations; the browser processes map no D3D12,
+Vulkan, OpenGL or d3dcompiler module, only the CRT-owned no-context EGL/GLES stubs.
+
+The independently built PAL test (`crtgfx_skia_shared_image_test`) passes twenty epochs between two logical D3D12
+devices in one process: exact GPU pixel identity, unsignaled ready/release fences that time out, no overwrite
+before release, a consumed ready epoch that cannot authorize a second read, bad device/driver identity and
+allocation-shape rejection, and borrowed-descriptor ownership (the import duplicates; the caller still closes).
+`windows_fd_adopt_handle_test` covers the PAL hook that turns an NT handle into a descriptor (in-process duplicate,
+a spawned child signalling through its copy, `close()` closing the kernel handle). The plain-C wire test and its
+5-descriptor layout checks are unchanged and pass; BUFFER_ADD now requires exactly
+`crtgfx_shared_image_handle_count(descriptor)` descriptors (five for Vulkan, three for D3D12).
+
+Negative controls: missing prerequisites exit **77**, strict missing prerequisites **1**, an invalid frame count
+**2**. A genuinely different adapter (the application on device index 1, the software Microsoft Basic Render
+Driver, vendor 0x1414) makes the worker answer `mode=cpu-fallback resources=0`; ordinary fallback mode exits **0**
+with CPU mode and **zero imported resources**, and the strict run on the same pair exits **1** with "negotiate
+shared GPU channel" failed: fallback never satisfies the strict resource parser. A missing browser host fails
+strictly and everything is cleaned up. No parent GPU environment was changed.
+
+Regressions on the same build: the 9A gate (`--run-gpu-tests --gpu-window-frames 5`) passes with CPU-upload
+D3D12 composition, `backend=1`, 5/5 presentations and 20 updates at +120 KiB / +0 / +0; the B3-C8 and Tranche 5
+gate passes (public API lifecycle, WebView lifecycle, B7 100 view lifetimes at +0 handles); `ctest` passes 208/208
+(3 skipped by design: they need `CRTWEB_HOST`/worker or a capture device); resource-evidence unit tests (4),
+GPU boundary tests (7), stage-source closure tests (8) and the patch manifest pass. A fresh GPU-OFF configuration
+(`out/web-windows-tranche9b-gpu-off`, `CRTGFX_ENABLE_GPU_BACKEND=OFF`) registers no worker/resource/PAL-test targets,
+compiles `skia_shared.cc` to the unsupported stubs and `skia_shared_d3d12.cc` to an empty object; this is not a
+GPU-OFF product build/run claim.
+
+**Found and fixed by the replay.**
+(1) D3D12 shares textures and fences as NT handles, which the CRT could not send: `__crt_windows_fd_adopt_handle()`
+(a PAL hook, see `bionic_libc_gaps.md`). (2) The descriptor and wire were five-descriptor Vulkan only; they now carry
+a backend-specific count and a D3D12/NT-handle shape, and the worker and PAL test follow it. (3) The first adapter
+identity was all zeros: the Skia-bridge translation unit's 4-byte `wchar_t` gives the real `DXGI_ADAPTER_DESC1` a
+512-byte `Description`, so `GetDesc1()` filled other offsets; a zero identity matched every adapter and the mismatch
+tests passed vacuously. The identity is read in `gpu_win32.c` (`crtgfx_gpu_win32_adapter_identity()`), and the
+driver version comes from `CheckInterfaceSupport` on `IDXGIDevice`, `ID3D11Device` or `ID3D10Device`, whichever the
+driver answers. (4) `GrD3DTextureResourceInfo`'s pointer constructor adopts without `AddRef`, so a texture wrapper
+released the shared resource when it went out of scope. (5) `crtweb::WebView::launch()` fell back to `/tmp` (absent
+on Windows) when `TMPDIR` was unset; it now tries `TEMP` and `TMP` first. (6) The Skia object libraries compile
+against `dist/02-cxx` while the dist publisher can rewrite it ("cstddef/cctype not found" when a consumer and its
+Skia objects were built together); they now wait for `crt-libcxx-dist`.
+
+*Not done / open:* Linux and macOS have not re-run the shared edits (descriptor handle-count helper, wire
+validation, worker/test changes, `WebView::launch()` temp-directory fallback, CMake ordering, evidence parser); macOS Metal shared resources, device/process loss, consumer disconnect and recovery, repeated
+full resource lifetimes and the deferred upstream GPUProcess lifecycle gate (9C); `D3D12_FENCE` timeouts are a
+two-second bound, not a hung-driver recovery claim. A handle is duplicated into the peer when it is sent, so a
+worker that exits after BUFFER_ADD does not invalidate resources the application already imported. Tranche 9 and
+`06-web` packaging are not closed.
+
+Evidence: `C:/crtw/b3w/acceptance-gpu-resources.json` per run (kept as `rep9b-{offscreen,window}-{1,2,3}.json`),
+the driver logs `rep9b-*.log`, `reg9b-9a.log` and `reg9b-full.log`, and the GPU-OFF configure log
+`gpuoff-configure.log`, all under `C:/crtw/`.
+
 ### 10. Distribution and security closure
 
 Isolated `06-web` build from the installed `05-ui` SDK: JSC/WebCore/WebKit ->

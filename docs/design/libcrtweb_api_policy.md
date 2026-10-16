@@ -231,7 +231,7 @@ those native loaders.
 
 ### GPU buffers and synchronization (Tranche 9B)
 
-The Linux resource implementation uses a **separate v2 channel**
+The Linux and Windows resource implementations use a **separate v2 channel**
 (`platform/crtweb_gpu_wire.h`); the frozen v1 CPU memfd packets and public C
 `crtweb.h` API are unchanged. `crtweb::GpuSurfaceClient` imports resources for
 the application's SDK Ganesh context. `crtweb_gpu_worker` is a separate,
@@ -264,6 +264,19 @@ The worker waits for upload completion before releasing its browser CPU source.
 Vulkan rules: [external resource overview](https://docs.vulkan.org/guide/latest/extensions/external.html),
 [opaque-memory allocation requirements](https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryAllocateInfo.html),
 [reference fence handle semantics](https://docs.vulkan.org/refpages/latest/refpages/source/VkExternalFenceHandleTypeFlagBits.html).
+
+**D3D12 (Windows).** The same v2 channel and strict rules, with a D3D12 adapter instead of Vulkan: the descriptor
+names backend D3D12 and handle kind NT_HANDLE, and BUFFER_ADD carries exactly **three** owned descriptors
+(`crtgfx_shared_image_handle_count()`): the shared texture and two shared `ID3D12Fence` objects (ready,
+release). A D3D12 fence is both the GPU wait (Ganesh queue wait) and the CPU wait (`SetEventOnCompletion`)
+and only counts up, so an epoch is a number: the consumer waits for ready >= its read count + 1, the
+producer for release >= its write count, and a stale signal cannot satisfy a later epoch (nothing is "reset").
+The texture is a committed shared-heap resource with `ALLOW_RENDER_TARGET | ALLOW_SIMULTANEOUS_ACCESS`; before
+ownership moves, each side records an explicit barrier from the state Ganesh reports to COMMON on its own
+direct queue and then signals. NT handles cross processes as CRT descriptors (`__crt_windows_fd_adopt_handle`,
+duplicated into the peer by the CRT's `SCM_RIGHTS`). Identity is the adapter LUID + vendor + device id and the
+user-mode driver version + subsystem + revision; a different adapter or driver build negotiates CPU mode.
+Neither process shares a D3D12 device with the other; `OpenSharedHandle` is the only crossing.
 
 ACK is pacing only. The consumer retains its current image until a replacement,
 flushes all reads, signals native release and sends RELEASE. The producer accepts

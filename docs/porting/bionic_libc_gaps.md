@@ -565,6 +565,23 @@ Building fontconfig, libwpe and WebCore against the SDK showed these gaps, all f
 Covered by `random_state_test`, `shm_open_test`, `android_log_test`, the fontconfig and libwpe port
 tests and `crtweb_webcore_graph_test`.
 
+## Windows replay of Web Tranche 9B (2026-10-16)
+
+- *Kernel handles as descriptors.* D3D12 shares textures and fences as NT handles, not as CRT descriptors, so
+  they could not ride `SCM_RIGHTS`. `__crt_windows_fd_adopt_handle(HANDLE)` (libc private
+  `crt_fd_table.h`, Windows only) makes any open handle a descriptor: `close()` closes it, `fcntl(FD_CLOEXEC)`
+  applies, and the CRT's `SCM_RIGHTS`/spawn snapshot duplicate it into the peer with `DuplicateHandle`.
+  `__crt_windows_fd_get_handle()` is the reverse. Not a Bionic API: a PAL hook for code that holds a native
+  handle. Test: `windows_fd_adopt_handle_test` (events: in-process duplicate, a spawned child signalling through
+  its copy, `close()` closing the handle).
+- *Mixed `wchar_t` widths.* A translation unit built with the project's 4-byte `wchar_t` that includes the real
+  `<dxgi.h>` sees `DXGI_ADAPTER_DESC1` with a 512-byte `Description`; `GetDesc1()` fills the real 256 bytes and every
+  later field reads as zero (a shared-image identity of all zeros matched every adapter). Structures with
+  `WCHAR` members are read in `gpu_win32.c`, which declares them at their real size
+  (`crtgfx_gpu_win32_adapter_identity()`), never in a translation unit that includes the real headers.
+- *Temporary directory.* `crtweb::WebView::launch()` fell back to `/tmp`, which does not exist for a Windows
+  process; it now tries `TMPDIR`, `TEMP`, `TMP`, then `/tmp`.
+
 ## Windows replay of Web Tranche 4 (2026-10-13)
 
 - *Static constructors of a CRT-built DLL.* A DLL has no crt1: the `-shared` links of `tools/crt-cc` and

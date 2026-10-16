@@ -11,6 +11,31 @@ substantive update.
 
 ## 2026-10-16
 
+### Web Tranche 9B on Windows/x64: D3D12 shared texture and fences, strict replay
+
+Windows had no resource backend (`skia_shared.cc` was the unsupported stub), so this implements one behind the
+unchanged `crtgfx_skia_shared_image` interface and the v2 wire, then replays the strict 9B gate. A producer
+creates a committed shared texture (`ALLOW_SIMULTANEOUS_ACCESS`) and two shared `ID3D12Fence` objects; the
+consumer opens them on its own device with `OpenSharedHandle`. A fence is both the GPU wait and the CPU wait and
+only counts up, so an epoch is a value and a stale signal cannot satisfy a later epoch; each side records an
+explicit barrier to COMMON on its direct queue before it signals. The three NT handles ride the CRT's
+`SCM_RIGHTS` as descriptors through a new PAL hook, `__crt_windows_fd_adopt_handle()`; the descriptor and
+BUFFER_ADD carry a backend-specific handle count (five Vulkan, three D3D12) and an adapter identity.
+
+Accepted: offscreen 3/3 and native D3D12 window 3/3 (5/5 frames each) through the checked-in strict driver on an
+Intel UHD 630, 24 worker uploads, 23 reuses, 0 GPU readbacks, 6 imports / 3 live / generation 2, UI +4 KiB RSS
+and -1 handle, worker +116..+204 KiB and +0 handles, browser Host ABI and module audits clean. Negative controls:
+exit 77/1/2, and a real mismatch (application on the software adapter) negotiates `mode=cpu-fallback` with zero
+resources that the strict run refuses. The 9A gate, the B3-C8/Tranche 5 gate and `ctest` (208/208) pass on the same build.
+
+Found by the run: the first identity was all zeros (a 4-byte `wchar_t` translation unit reads a real
+`DXGI_ADAPTER_DESC1` at the wrong offsets, so the mismatch tests passed vacuously; now read in `gpu_win32.c`);
+`GrD3DTextureResourceInfo`'s pointer constructor adopts without `AddRef`, so the wrapped shared resource was
+released early (SIGSEGV); `WebView::launch()` used `/tmp` when `TMPDIR` was unset; the Skia object libraries raced
+the `dist/02-cxx` publisher. Details and limits are in
+[Windows 9B acceptance](docs/acceptance/crtweb_acceptance.md#9b-windows-x64-d3d12-shared-resource-implementation-and-replay-2026-10-16).
+macOS Metal and 9C process/device-loss closure remain open; Linux and macOS have not re-run the shared descriptor/wire/test edits; no `06-web` packaging or global Tranche 9 completion is claimed.
+
 ### Web Tranche 9B: Linux shared GPU resources and owned producer
 
 Implemented the Linux resource slice over a separate v2 channel, preserving

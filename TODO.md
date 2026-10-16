@@ -147,7 +147,8 @@ uses the host replay order stated below and in the acceptance document.
   * [ ] **9B GPU resources:** separately negotiated shared/zero-copy GPU-buffer import,
     actual GPU synchronization and producer/GPUProcess ownership; no private Skia ABI across IPC.
     * [x] Linux Vulkan resource channel, CRT GPU worker, native ready/release synchronization and strict replay.
-    * [ ] Windows D3D12 / macOS Metal shared-resource backends and native replay.
+    * [x] Windows D3D12 shared texture + shared-fence backend, NT handles as CRT descriptors, strict replay (offscreen 3/3, window 3/3).
+    * [ ] macOS Metal shared-resource backend and native replay.
   * [ ] **9C closure:** device/process loss, bounded resource reuse and three-host replay.
     Sharing one Skia context is not an initial gate. Evidence stays in Web acceptance.
 * [ ] **10. Distribution and security closure.**
