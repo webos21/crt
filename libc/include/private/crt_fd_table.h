@@ -106,5 +106,8 @@ void __crt_windows_fd_snapshot_relaunch_abort(void);
  * libstdc++/third_party/win32_shim/windows.h's own _get_osfhandle()
  * shim, the actual consumer. */
 uintptr_t __crt_windows_fd_get_handle(int fd);
+/* Windows-only: adopts an open kernel HANDLE as a CRT descriptor (close() closes it) so it can be sent with
+ * SCM_RIGHTS or inherited like any other. -1 with errno set on failure; the handle then stays the caller's. */
+int __crt_windows_fd_adopt_handle(uintptr_t handle);
 
 #endif

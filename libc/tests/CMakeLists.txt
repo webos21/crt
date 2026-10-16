@@ -620,6 +620,10 @@ add_crt_test(fcntl_record_lock_test fcntl_record_lock_test.c)
 set_tests_properties(fcntl_record_lock_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fcntl_record_lock_test: ok"
   TIMEOUT 60)
+add_crt_test(windows_fd_adopt_handle_test windows_fd_adopt_handle_test.c)
+set_tests_properties(windows_fd_adopt_handle_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "windows_fd_adopt_handle_test: (ok|skipped)"
+  TIMEOUT 60)
 add_crt_test(signal_threads_test signal_threads_test.c)
 set_tests_properties(signal_threads_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "signal_threads_test: ok"

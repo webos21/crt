@@ -3342,6 +3342,28 @@ uintptr_t __crt_windows_fd_get_handle(int fd) {
   return (uintptr_t)h;
 }
 
+/* The reverse of __crt_windows_fd_get_handle(): makes an open kernel HANDLE a CRT descriptor, which then rides
+ * everything a descriptor rides: SCM_RIGHTS (DuplicateHandle into the peer), the spawn snapshot, close(),
+ * fcntl(FD_CLOEXEC). Ownership moves to the descriptor (close() is CloseHandle). The handle may be of any kind
+ * a handle duplication works for: files, events, D3D12 shared resources and fences (Web Tranche 9B). Returns
+ * the descriptor, or -1 with errno set (the handle is then still the caller's). */
+static int alloc_fd(HANDLE handle);
+
+int __crt_windows_fd_adopt_handle(uintptr_t handle) {
+  int fd;
+
+  if (handle == 0 || (HANDLE)handle == INVALID_HANDLE_VALUE) {
+    errno = EINVAL;
+    return -1;
+  }
+  fd = alloc_fd((HANDLE)handle);
+  if (fd < 0) {
+    errno = EMFILE;
+    return -1;
+  }
+  return fd;
+}
+
 static SOCKET get_fd_socket(int fd) {
   init_fd_table();
   if (fd < 0 || fd >= CRT_FD_TABLE_SIZE || fd_kind[fd] != CRT_FD_KIND_SOCKET) {
