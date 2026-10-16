@@ -21,6 +21,14 @@ The existing v1 transport is still CPU shared memory; this path uploads pixels
 and does not claim zero-copy or GPU WebCore rendering. Contract and remaining
 resource/host gates: [GPU integration](../docs/acceptance/crtweb_acceptance.md#9-gpu-integration).
 
+`crtweb/gpu_surface.h` is the separate GPU-resource consumer. A CRT-owned
+`crtweb_gpu_worker` owns an ordinary CPU WebView and uploads its frames into
+exportable GPU images. The app imports those images over the separately
+negotiated `platform/crtweb_gpu_wire.h` channel; no private Skia object crosses
+IPC. Only worker -> app is shared GPU memory. Native synchronization and
+ownership rules, backend limits and explicit CPU fallback are defined by the
+[resource contract](../docs/design/libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b).
+
 ## Layout
 
 - `tests/jsc/` -- the JavaScriptCore acceptance: `jsc_acceptance.js` and

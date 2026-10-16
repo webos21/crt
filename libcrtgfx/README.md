@@ -2,6 +2,15 @@
 
 Graphics and compositor-facing upper runtime layer.
 
+The optional `crtgfx/skia_shared.h` companion provides native shared-image
+production/import for same-device SDK Ganesh contexts. Fixed-width resource
+metadata lives in `crtgfx/shared_image.h`; native handles stay private to the
+per-host adapter. The initial implementation is Vulkan opaque-FD memory plus
+native semaphore/fence reference imports, not the CPU `crtgfx_gpu_fence`.
+Unsupported backends return `CRTGFX_ERROR_UNSUPPORTED`. The first consumer's
+[GPU resource contract](../docs/design/libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b)
+defines ownership and the precise shared segment.
+
 This library is intentionally separate from `libc`: host windows, GPU APIs,
 surface composition, Skia integration, and Wayland-compatible protocol policy
 belong here rather than in the Bionic-compatible low-level runtime.

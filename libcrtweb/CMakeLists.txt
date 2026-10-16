@@ -8,6 +8,12 @@ target_include_directories(crtweb_wire_layout_test PRIVATE "${CMAKE_CURRENT_SOUR
 set_tests_properties(crtweb_wire_layout_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "wire_layout_test: ok")
 
+add_crt_test(crtweb_gpu_wire_test tests/platform-crt/gpu_wire_test.c)
+target_include_directories(crtweb_gpu_wire_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/platform" "${CMAKE_SOURCE_DIR}/libcrtgfx/include")
+set_tests_properties(crtweb_gpu_wire_test_runs PROPERTIES TIMEOUT 30
+  PASS_REGULAR_EXPRESSION "gpu_wire_test: ok")
+
 # The same contract over its real transport (SOCK_SEQPACKET, SCM_RIGHTS, a memfd), in one process and between
 # two. Needs no browser, window or Skia; on Windows it runs over the CRT's own AF_UNIX layer.
 add_crt_test(crtweb_wire_transport_test tests/platform-crt/wire_transport_test.c)
@@ -115,5 +121,41 @@ if(TARGET crtui_skia AND TARGET crtgfx_skia AND
     set_tests_properties(crtweb_webview_gpu_test_runs PROPERTIES
       WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" SKIP_RETURN_CODE 77 TIMEOUT 240)
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtweb_webview_gpu_test_runs)
+
+    # Tranche 9B: a CRT-owned GPU producer, deliberately not linked to WebKit.
+    # Browser CPU pixels are uploaded here; only worker -> app uses shared GPU memory.
+    foreach(gpu_target IN ITEMS crtweb_gpu_worker crtweb_gpu_resource_test)
+      if(gpu_target STREQUAL "crtweb_gpu_worker")
+        set(gpu_source tools/crtweb_gpu_worker.cc)
+      else()
+        set(gpu_source tests/platform-crt/gpu_resource_test.cc)
+      endif()
+      add_executable(${gpu_target} ${CRT_STARTUP_OBJECTS} ${gpu_source})
+      target_include_directories(${gpu_target} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/platform")
+      target_link_libraries(${gpu_target} PRIVATE
+        crt_cxx_build_flags crtui_skia crtgfx_skia crtmedia)
+      if(CRT_TARGET_OS STREQUAL "linux")
+        target_compile_definitions(${gpu_target} PRIVATE CRTGFX_HAVE_VULKAN=1 SK_USE_INTERNAL_VULKAN_HEADERS)
+      elseif(CRT_TARGET_OS STREQUAL "windows")
+        target_compile_definitions(${gpu_target} PRIVATE CRTGFX_HAVE_D3D12=1)
+      elseif(CRT_TARGET_OS STREQUAL "macos")
+        target_compile_definitions(${gpu_target} PRIVATE CRTGFX_HAVE_METAL=1)
+      endif()
+      if(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
+        target_compile_options(${gpu_target} PRIVATE
+          "-isystem${CRT_LIBCXX_SYSROOT}/include/c++/v1"
+          "-isystem${CMAKE_SOURCE_DIR}/libc/include" "-isystem${CMAKE_SOURCE_DIR}/include")
+        add_dependencies(${gpu_target} crt-libcxx-sysroot)
+      endif()
+      crt_wire_skia_executable(${gpu_target} SKIP_MACOS_DEAD_STRIP)
+      crt_link_startup_end_objects(${gpu_target})
+      add_dependencies(${gpu_target} cxx c crt1 crtui_skia crtgfx_skia)
+    endforeach()
+    add_dependencies(crtweb_gpu_resource_test crtweb_gpu_worker)
+    add_test(NAME crtweb_gpu_resource_test_runs COMMAND crtweb_gpu_resource_test)
+    set_tests_properties(crtweb_gpu_resource_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" SKIP_RETURN_CODE 77 TIMEOUT 240)
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtweb_gpu_resource_test_runs)
   endif()
 endif()

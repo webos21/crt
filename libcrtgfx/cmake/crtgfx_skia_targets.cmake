@@ -19,7 +19,12 @@
 function(crt_add_crtgfx_skia_object_target)
   set(CRTGFX_SKIA_OBJECTS)
   if(CRTGFX_ENABLE_SKIA)
-    add_library(crtgfx_skia_objects OBJECT "${CRTGFX_ROOT}/src/skia_bridge.cc")
+    add_library(crtgfx_skia_objects OBJECT
+      "${CRTGFX_ROOT}/src/skia_bridge.cc"
+      "${CRTGFX_ROOT}/src/skia_shared.cc")
+    if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_LINUX_VULKAN_LIB)
+      target_sources(crtgfx_skia_objects PRIVATE "${CRTGFX_ROOT}/src/arch/linux/skia_shared_vulkan.cc")
+    endif()
     if(TARGET crt_cxx_build_flags)
       target_link_libraries(crtgfx_skia_objects PRIVATE crt_cxx_build_flags)
     endif()

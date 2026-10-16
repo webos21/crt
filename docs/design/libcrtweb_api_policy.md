@@ -229,25 +229,54 @@ the application's existing graphics PAL, outside the shared-runtime browser
 processes. The CRT-owned no-context EGL/GLES link stubs remain distinct from
 those native loaders.
 
-### Next boundary: GPU buffers and synchronization (Tranche 9B)
+### GPU buffers and synchronization (Tranche 9B)
 
-Do not extend the frozen v1 memfd fields by reinterpretation. Before enabling
-GPU producers, define a separately negotiated/versioned resource contract:
+The Linux resource implementation uses a **separate v2 channel**
+(`platform/crtweb_gpu_wire.h`); the frozen v1 CPU memfd packets and public C
+`crtweb.h` API are unchanged. `crtweb::GpuSurfaceClient` imports resources for
+the application's SDK Ganesh context. `crtweb_gpu_worker` is a separate,
+statically CRT-linked producer using the SDK graphics PAL; it owns an ordinary
+`crtweb::WebView` and its separate browser processes. It links no WebKit library.
+The browser remains CPU-rendered: browser CPU BGRA -> worker upload -> shared
+GPU image -> app GPU composition. Only **worker -> application** is shared GPU
+memory, with no consumer CPU upload or worker GPU readback. This is not
+accelerated WebCore or upstream WebKit's GPUProcess.
 
-- Backend/device identity, format, extent, planes/offsets/strides/modifiers and
-  import capability must be validated before taking ownership. Transfer only
-  PAL-controlled shareable resources, never native pointers or Skia ABI objects.
-- Producer-ready and consumer-complete synchronization must be actual GPU
-  completion primitives. `crtgfx_gpu_fence` is currently a CPU pthread fence;
-  it cannot stand in for Vulkan/D3D12/Metal completion. A presentation ACK is
-  pacing, not permission to overwrite an in-flight resource.
-- Import/release ownership and generations must survive resize, delayed
-  consumers, disconnect and producer/GPU-process death without premature reuse
-  or leaked descriptors/handles. Bound in-flight resources and wait deadlines.
-- Keep v1 CPU fallback explicit and available. A strict GPU/zero-copy gate must
-  reject unavailable native import/synchronization, not rename an upload or GPU
-  copy. Record the actual interop mode independently from the rendering backend.
+The initial native resource is an optimal-tiled, dedicated Vulkan BGRA8 image.
+Its opaque layout has no public CPU plane stride/modifier; v1 cannot pretend
+to consume it. HELLO/CONFIG negotiate capabilities and matching device **and
+driver** UUIDs. BUFFER_ADD carries fixed-width metadata and exactly five owned
+SCM_RIGHTS descriptors: memory, ready/release binary semaphores, ready/release
+fences. The Vulkan adapter verifies backend, format, extent, native limits,
+allocation size and memory type before import. Import duplicates borrowed FDs;
+the receiver closes transfer FDs on success or failure. Private Vulkan handles,
+pointers and Skia ABI objects never cross IPC. This is a trusted application /
+owned-worker resource seam, not validation of arbitrary hostile GPU allocations.
 
-Acceptance and the remaining GPUProcess/recovery/host replay work are owned by
-[Web acceptance](../acceptance/crtweb_acceptance.md#9-gpu-integration), not implied
-by the 9A final-compositor helper.
+Native synchronization uses OPAQUE_FD **reference imports**, not snapshot
+SYNC_FD or `crtgfx_gpu_fence` (the latter is a CPU pthread fence). Each epoch
+waits at most two seconds for a native ready/release fence before enqueueing
+its GPU semaphore wait. A timeout grants no ownership and enqueues no unsignaled
+wait. The acquirer resets the consumed shared fence, so a stale signal cannot
+authorize a second read/write. Ganesh acquires EXTERNAL queue ownership and
+returns the image in GENERAL/EXTERNAL state before the matching native signal.
+The worker waits for upload completion before releasing its browser CPU source.
+Vulkan rules: [external resource overview](https://docs.vulkan.org/guide/latest/extensions/external.html),
+[opaque-memory allocation requirements](https://docs.vulkan.org/refpages/latest/refpages/source/VkMemoryAllocateInfo.html),
+[reference fence handle semantics](https://docs.vulkan.org/refpages/latest/refpages/source/VkExternalFenceHandleTypeFlagBits.html).
+
+ACK is pacing only. The consumer retains its current image until a replacement,
+flushes all reads, signals native release and sends RELEASE. The producer accepts
+only the exact live slot/generation/serial and reuses it only after native GPU
+completion. Pools have three buffers per extent, at most six live slots during
+resize; old generations retire only after release. Client provider references
+must be returned before polling/resize/destruction and cannot schedule later
+draws. Devices and same-device contexts outlive all imported objects/Skia refs.
+
+Unsupported sharing negotiates CPU mode with zero GPU resources; the caller
+must use the existing v1 WebView explicitly. It is never GPU acceptance.
+The strict resource gate is separate from 9A. D3D12/Metal native sharing,
+device/process-loss recovery and full GPUProcess lifecycle closure remain
+separate work in [Web acceptance](../acceptance/crtweb_acceptance.md#9-gpu-integration).
+Normal teardown waits for the local queue; a hung/lost driver is not yet a
+bounded-recovery claim (9C).

@@ -696,7 +696,7 @@ static uint32_t crtgfx_gpu_vulkan_instance_extension_count = 0;
  * device without them creates exactly the device it always did and
  * borrow_device() reports dmabuf_import = 0 (the bridge then declines and the
  * caller keeps the honest CPU path). */
-#define CRTGFX_GPU_VULKAN_MAX_DEVICE_EXTENSIONS 8u
+#define CRTGFX_GPU_VULKAN_MAX_DEVICE_EXTENSIONS 10u
 static const char* const crtgfx_gpu_vulkan_dmabuf_extension_names[] = {
     "VK_KHR_external_memory_fd",
     "VK_EXT_external_memory_dma_buf",
@@ -1019,6 +1019,16 @@ static crtgfx_result crtgfx_gpu_vulkan_device_state_create(
         dev_ext_names[dev_ext_count++] = crtgfx_gpu_vulkan_dmabuf_extension_names[i];
       }
     }
+    /* Web 9B: enable the independent external-memory/synchronization FD
+     * extensions when available. Do not tie opaque-FD sharing to the optional
+     * VA-API dma-buf/modifier set. Consumers still query external handle
+     * capabilities; a missing extension keeps the ordinary device usable. */
+    if (!dmabuf_import && crtgfx_gpu_vulkan_device_has_extension(devices[device_index], "VK_KHR_external_memory_fd"))
+      dev_ext_names[dev_ext_count++] = "VK_KHR_external_memory_fd";
+    if (crtgfx_gpu_vulkan_device_has_extension(devices[device_index], "VK_KHR_external_semaphore_fd"))
+      dev_ext_names[dev_ext_count++] = "VK_KHR_external_semaphore_fd";
+    if (crtgfx_gpu_vulkan_device_has_extension(devices[device_index], "VK_KHR_external_fence_fd"))
+      dev_ext_names[dev_ext_count++] = "VK_KHR_external_fence_fd";
     device_create_info.enabledExtensionCount = dev_ext_count;
     device_create_info.ppEnabledExtensionNames = (dev_ext_count > 0) ? dev_ext_names : NULL;
   }

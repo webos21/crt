@@ -147,6 +147,7 @@ STAGES = {
             # "03-gfx-simple" entry, which already got this right).
             "libcrtgfx/src/wayland_weston_internal.h",
             "libcrtgfx/src/skia_bridge.cc",
+            "libcrtgfx/src/skia_shared.cc",
             "libcrtgfx/tests/gpu_test.c",
             "libcrtgfx/tests/skia_raster_smoke.cc",
             "libcrtgfx/tests/skia_media_lifecycle_test.cc",
@@ -342,6 +343,7 @@ STAGES = {
             ),
             "linux": (
                 "libcrtgfx/src/arch/linux/gpu_vulkan.c",
+                "libcrtgfx/src/arch/linux/skia_shared_vulkan.cc",
                 # libcrtgfx/src/gpu.c #includes this directly; missing here
                 # produced "file not found" isolated-stage build failures
                 # (2026-09-11) -- see the matching "03-gfx-simple" entry,

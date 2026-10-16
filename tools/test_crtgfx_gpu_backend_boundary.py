@@ -20,6 +20,7 @@ INTERNAL_HEADER_USERS = {
     "libcrtgfx/src/gpu.c",
     "libcrtgfx/src/skia_bridge.cc",
     "libcrtgfx/src/arch/linux/gpu_vulkan.c",
+    "libcrtgfx/src/arch/linux/skia_shared_vulkan.cc",  # borrowed device view, no concrete layout
     "libcrtgfx/src/arch/windows/gpu_win32.c",
     "libcrtgfx/src/arch/macos/gpu_metal.c",
 }
@@ -36,7 +37,7 @@ LAYOUT_DEFINITION = "libcrtgfx/src/gpu_internal.h"
 NON_OWNER_FIELD_USERS: set[str] = set()
 
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm"}
-INTERNAL_INCLUDE_RE = re.compile(r'^\s*#\s*include\s+["<]gpu_internal\.h[">]', re.MULTILINE)
+INTERNAL_INCLUDE_RE = re.compile(r'^\s*#\s*include\s+["<](?:[^">]*/)?gpu_internal\.h[">]', re.MULTILINE)
 BACKEND_FIELD_RE = re.compile(
     r"->(?:vk_|d3d12_|dxgi_|mtl_|ganesh_wrapped\b)|"
     r"->device->(?:vk_|d3d12_|dxgi_|mtl_)"

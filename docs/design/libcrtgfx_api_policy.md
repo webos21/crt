@@ -75,6 +75,8 @@ libcrtgfx/include/
     window.h        # window/surface/frame/event API (runtime+surface+event_loop, one file)
     gpu.h           # advanced GPU device/surface/frame/fence contract
     skia.h          # convenience include/bridge for Skia integration
+    shared_image.h  # fixed-width opaque shared-resource metadata
+    skia_shared.h   # optional same-device Ganesh resource ownership companion
 
 libcrtgfx/third_party/skia/
   README.md         # source/provenance and build-policy metadata
@@ -123,6 +125,20 @@ rest, which has not happened.
 `crtgfx/skia.h` is a small bridge header, not a replacement drawing API. It
 includes selected Skia public headers when available and declares helpers that
 connect a `crtgfx` framebuffer to an `SkSurface`/`SkCanvas`.
+
+`crtgfx/skia_shared.h` adds an optional C++17 production/import companion, not
+a new drawing API. Query/create/import return unsupported when the native
+backend lacks sharing; no CPU fence or upload is substituted. The initial
+Linux adapter owns dedicated optimal-tiled Vulkan BGRA8 allocations and native
+ready/release semaphore/fence reference imports. `shared_image.h` is plain C
+metadata; native SDK types remain private to `src/arch/linux/`. The context
+must come from the supplied device and outlive every returned Skia reference.
+Factories duplicate borrowed transfer handles; exported handles belong to the
+caller. One GPU-owner thread orders acquire/draw/release, and the consumed
+native fence epoch is reset before reuse. Normal destruction drains the local
+queue; device-loss/hung-driver recovery is a separate contract. The first
+consumer's negotiated IPC and strict synchronization/ownership rules are in
+[Web GPU resources](libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b).
 
 Current bridge status (2026-08-18):
 

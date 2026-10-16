@@ -106,6 +106,17 @@ def unbundled_project_headers(stage: str, target_os: str) -> dict:
 
 
 class StageSourceClosure(unittest.TestCase):
+    def test_04_shared_skia_target_sources_are_bundled(self):
+        text = (ROOT / "libcrtgfx/cmake/crtgfx_skia_targets.cmake").read_text(encoding="utf-8")
+        names = re.findall(r'\$\{CRTGFX_ROOT\}/(src/[\w./]+\.cc)', text)
+        self.assertGreaterEqual(len(names), 3)
+        for target_os in ("linux", "macos", "windows"):
+            bundled = expand(stage_source.required_project_paths(stage_source.STAGES["04-gfx-media"], target_os))
+            for name in names:
+                if "/arch/" in name and f"/arch/{target_os}/" not in name:
+                    continue
+                self.assertIn((ROOT / "libcrtgfx" / name).resolve(), bundled, (target_os, name))
+
     def test_every_stage_bundles_the_private_headers_its_sources_include(self):
         for stage in sorted(stage_source.STAGES):
             spec = stage_source.STAGES[stage]

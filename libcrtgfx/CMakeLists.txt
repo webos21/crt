@@ -2080,6 +2080,16 @@ if(CRTGFX_ENABLE_SKIA)
       PASS_REGULAR_EXPRESSION "crtgfx_skia_gpu_offscreen_smoke: (ok|skipped)"
     )
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_gpu_offscreen_smoke_runs)
+
+    add_executable(crtgfx_skia_shared_image_test
+      ${CRT_STARTUP_OBJECTS} tests/skia_shared_image_test.cc)
+    target_link_libraries(crtgfx_skia_shared_image_test PRIVATE crt_cxx_build_flags crtgfx_skia crtmedia)
+    crt_wire_skia_executable(crtgfx_skia_shared_image_test SKIP_MACOS_DEAD_STRIP)
+    crt_link_startup_end_objects(crtgfx_skia_shared_image_test)
+    add_dependencies(crtgfx_skia_shared_image_test cxx c crt1 crtgfx_skia)
+    add_test(NAME crtgfx_skia_shared_image_test_runs COMMAND crtgfx_skia_shared_image_test)
+    set_tests_properties(crtgfx_skia_shared_image_test_runs PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_skia_shared_image_test_runs)
   endif()
 
   # Tranche 5 ownership regression: a real hardware decoder and the

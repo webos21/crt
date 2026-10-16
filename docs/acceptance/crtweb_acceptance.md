@@ -3212,6 +3212,111 @@ This closes macOS and the three-host **9A** baseline, not 9B/9C or the packaged
 environment fix was not performed on this Mac; their existing 9A baselines
 remain the host evidence above, not new results claimed by this replay.
 
+#### 9B Linux shared-resource implementation and replay (2026-10-16)
+
+Linux/x86_64 now has a real native-resource boundary, separate from 9A's CPU
+upload in the consumer. The [resource policy](../design/libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b)
+owns the v2 protocol, five-handle ownership, native fence/semaphore epochs and
+explicit fallback. `crtweb_gpu_worker` is a CRT-owned GPU producer with its own
+static CRT/SDK Skia, not a WebKit GPUProcess or a library loaded into the
+shared-runtime browser. Its ordinary WebView owns separate Host/Web/Network
+processes. **Browser CPU -> worker upload -> shared GPU memory -> application**
+is the measured path. Only worker -> app is zero-copy/shared GPU memory; no
+claim of GPU WebCore, end-to-end zero-copy, or a shared private Skia ABI.
+The resource companion currently exposes evaluation/resize, not the full
+WebView control/event API; the existing v1 CPU WebView remains available.
+
+Hardware: Intel UHD Graphics 630 (CFL GT2), Mesa 26.0.8, Vulkan 1.4.335.
+External-memory, semaphore and fence OPAQUE_FD import/export capabilities are
+queried independently of the VA-API dma-buf/modifier extension set. Both device
+and driver UUID must match. Optimal tiling remains opaque; allocation extent,
+size and memory type are checked, never guessed from a CPU stride.
+
+**Accepted Linux results:** offscreen **3/3**, native Wayland/Vulkan window
+**3/3**, each window **5/5** presentations. Every run uses actual browser
+frames, checks GPU-backed source/target, exact green/magenta composition,
+ancestor clipping, half opacity, UI below/above, stalled-consumer immutability,
+viewport/resource generation resize and twenty fresh alternating updates.
+Each run imports six resources over two generations, releases twenty-three
+epochs, retires all three old-generation images, and settles at three live
+images (peak four, hard protocol limit six). Worker counters are twenty-four
+uploads, twenty-three completed releases/reuses, **zero GPU readbacks**;
+consumer CPU uploads are zero. Pixel readback is acceptance-only.
+
+Across twenty post-resize updates, UI RSS delta is **+0 KiB**, worker **+20 KiB**;
+both thread and descriptor deltas are **0** in all six runs. Limits remain
++24 MiB / +2 threads / +2 descriptors per process. Final shutdown checks the
+owned worker and every observed Host/Web/Network descendant are stopped and
+reaped. Static Host ABI audits and all three browser-role mapping audits pass
+with no violations; only the existing CRT-owned no-context EGL/GLES stubs are
+mapped, not native GPU clients in the browser.
+
+The independently built PAL test passes twenty epochs between two logical
+Vulkan devices, exact GPU pixel identity, unsignaled ready/release timeouts,
+no overwrite before release, no reuse of an already consumed ready signal,
+bad device/driver UUID and allocation-shape rejection, and borrowed-FD
+ownership. The plain-C wire test checks 72/256-byte layouts, five-FD/CLOEXEC
+transfer and complete FD cleanup on malformed version/backend/format/extent,
+surplus/missing/truncated descriptors, short and zero-length packets. Native
+timeouts grant no ownership and do not enqueue an unsignaled GPU wait.
+
+Negative controls: missing prerequisites exit **77**, strict missing
+prerequisites **1**, invalid live count **2**. A child-scoped llvmpipe ICD
+selection genuinely lacks the native fence/semaphore sharing capability:
+ordinary mode exits **77**, strict mode **1**, and explicit fallback exits
+**0** with CPU mode and **zero imported resources**. Fallback never satisfies
+the strict resource parser. A missing browser executable fails strictly and
+is cleaned up. No parent GPU environment was changed.
+
+The rebuilt CPU WebView passes its full control/input/recovery and twenty-cycle
+lifecycle test. The rebuilt 9A consumer passes strict GPU composition and a
+5/5 native window run; v1 wire layout/transport and the hermetic SurfaceView
+also pass. GPU-OFF fresh configure and Skia-object build succeed: the three
+shared-image factories are unsupported stubs, the native adapter has no GPU
+imports, the CPU WebView target remains and GPU worker/resource targets are
+omitted. This is not a full GPU-OFF product build/run claim. Fresh GPU-ON build
+regenerates and verifies all five cumulative SDKs (`01-c`..`05-ui`), with the
+shared-image sources included in the isolated `04-gfx-media` source asset.
+
+The strict resource driver is `run_gpu_resource_gate()` in
+`tools/build_webkit_crt_port.py`; its independent entry options are
+`--webkit --run-gpu-resource-tests [--gpu-resource-window-frames 5]`, usable
+without media/camera gates. It rejects missing native evidence, CPU fallback,
+incorrect frame counts and browser Host ABI/mapping violations. The checked-in
+resource-evidence tests (4), existing 9A evidence tests (17), driver tests (2),
+GPU boundary tests (7), stage closure tests (8), licensing tests (15) and patch
+manifest (23 patches / 63 modified / 24 CRT-owned files) pass. No WebKit pin,
+patch or public C API changed.
+
+Evidence under `out/web-crt-webcore/`: `tranche9b-replay/summary.json` and each
+`{offscreen,window}-{1,2,3}/{stdout,stderr}.log` / `result.json`;
+`tranche9b-replay/negative/`; `acceptance-gpu-resources.json` and
+`tranche9b-resource-gate-final.log` (the checked-in strict function invoked
+directly); `tranche9b-native-resource-final.log`, `tranche9b-wire-final.log`,
+`tranche9b-focused-ctest.log`, `tranche9b-vulkan-capabilities.log`,
+`tranche9b-regression-crtweb_webview{,_gpu}_test/`, `tranche9b-gpu-off.log`,
+`tranche9b-configure-final.log`, `tranche9b-build-final.log` and
+`tranche9b-verify-sdk-final.log`. The generated `tranche9b_replay.py` calls the
+checked-in strict evidence/map/Host ABI checks; it does not replace them.
+
+The initial extensionless local HTML fixture returned `Frame load interrupted`
+and never produced the expected green pixels. The final test creates an owned
+private `.html` fixture, then still waits for fresh GPU pixels rather than a
+title/load notification. Failures are preserved in
+`tranche9b-resource-{initial,diagnostic}.log`; the first fixed checkpoint is
+`tranche9b-resource-fixture-fixed.log`. Browser binaries are the unchanged
+accepted 9A implementation, exercised against the freshly published SDK.
+Optional broad WebKit recompilation triggered by refreshed SDK timestamps was
+interrupted (`tranche9b-browser-rebuild{,-final}.log`); it is **not** counted as
+a fresh WebKit build or a completed public-CLI run. All new worker, adapter and
+consumer code is rebuilt in the final in-tree build.
+
+This accepts the **Linux 9B resource slice**. Native D3D12/Metal shared resources
+and replay remain open. Device/process loss, consumer disconnect/recovery,
+repeated full resource lifetimes, and the deferred upstream GPUProcess
+lifecycle gate remain 9C work; normal queue draining is not a bounded
+hung-driver recovery claim. Tranche 9 and `06-web` packaging are not closed.
+
 ### 10. Distribution and security closure
 
 Isolated `06-web` build from the installed `05-ui` SDK: JSC/WebCore/WebKit ->

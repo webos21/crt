@@ -1500,7 +1500,8 @@ if(Python3_Interpreter_FOUND)
       # crt-ui-dist, waiting only for the lightweight sysroot leaves them free
       # to read headers/libraries while crt-libcxx-dist replaces that directory.
       # Windows 9A replay reproduced a missing cstddef in the GPU/surface tests.
-      foreach(crt_web_consumer IN ITEMS crtweb_web_surface_test crtweb_webview_test crtweb_webview_gpu_test)
+      foreach(crt_web_consumer IN ITEMS crtweb_web_surface_test crtweb_webview_test crtweb_webview_gpu_test
+          crtweb_gpu_worker crtweb_gpu_resource_test crtgfx_skia_shared_image_test)
         if(TARGET ${crt_web_consumer})
           add_dependencies(${crt_web_consumer} crt-libcxx-dist)
         endif()

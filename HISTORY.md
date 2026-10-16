@@ -11,6 +11,31 @@ substantive update.
 
 ## 2026-10-16
 
+### Web Tranche 9B: Linux shared GPU resources and owned producer
+
+Implemented the Linux resource slice over a separate v2 channel, preserving
+the frozen CPU v1 wire/public C API. A statically CRT/SDK-Skia-linked GPU worker
+owns an ordinary CPU WebView and separate browser processes. It uploads the
+browser pixels once into an exportable Vulkan image; the application imports
+native memory and composes it without a CPU upload. Only worker -> app is
+shared GPU memory, not GPU WebCore or upstream WebKit GPUProcess execution.
+Fixed-width metadata and five owned descriptors carry memory plus native
+ready/release semaphore/fence references. UUID/allocation validation, consumed
+fence epochs, exact serial/generation ownership and bounded pools prevent CPU
+ACKs or stale completion signals from permitting overwrite.
+
+Offscreen 3/3 and native-window 3/3 (5/5 frames each), twenty alternating
+updates, stalled-consumer immutability, resize retirement, descendant teardown,
+Host ABI/browser mappings, real unsupported/fallback negative controls and
+two-device PAL/wire tests pass. CPU WebView and 9A regressions pass. Fresh GPU-ON
+build verifies all five SDKs; GPU-OFF object compilation verifies unsupported
+stubs. Added isolated-source closure and strict resource-evidence guards.
+Detailed measurements, failed fixture checkpoints, reuse of unchanged browser
+binaries, reproduction and limits belong to
+[Linux 9B acceptance](docs/acceptance/crtweb_acceptance.md#9b-linux-shared-resource-implementation-and-replay-2026-10-16).
+Windows/macOS resource backends and 9C process/device-loss/GPUProcess closure
+remain open; no `06-web` packaging or global Tranche 9 completion is claimed.
+
 ### Web Tranche 9A: macOS Metal final-compositor replay
 
 Replayed `3b09d45` plus acceptance-observer/build-environment fixes on macOS/arm64.

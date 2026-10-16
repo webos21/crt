@@ -846,6 +846,62 @@ def run_gpu_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
     return result
 
 
+def gpu_resource_evidence(text: str, target_os: str, window_frames: int = 0) -> dict:
+    """9B resource evidence is independent of 9A and explicit CPU fallback."""
+    summaries = re.findall(r"^crtweb_gpu_resource_test: ok (.+)$", text, re.M)
+    fields = dict(re.findall(r"(\w+)=([^ ]+)", summaries[0])) if len(summaries) == 1 else {}
+    required = dict(backend="3", source="browser-cpu", worker_upload="1", consumer_upload="0",
+                    transport="shared-gpu", sync="native-fence-semaphore", updates="20",
+                    resize="pass", ownership="pass", cleanup="pass")
+    pools = re.findall(r"^crtweb_gpu_resource_test: imports=(\d+) releases=(\d+) live_buffers=(\d+) generation=(\d+)$", text, re.M)
+    pool_ok = len(pools) == 1 and int(pools[0][0]) == 6 and int(pools[0][1]) >= 20 \
+        and 0 < int(pools[0][2]) <= 4 and int(pools[0][3]) == 2
+    workers = re.findall(r"^crtweb_gpu_worker: uploads=(\d+) reused=(\d+) retired=(\d+) peak_buffers=(\d+) gpu_readbacks=(\d+)$", text, re.M)
+    worker_ok = len(workers) == 1 and int(workers[0][0]) >= 22 and int(workers[0][1]) >= 20 \
+        and int(workers[0][2]) == 3 and 0 < int(workers[0][3]) <= 4 and workers[0][4] == "0"
+    presented = re.findall(r"^crtweb_gpu_resource_test: presented=(\d+) requested=(\d+)$", text, re.M)
+    window_ok = presented == [(str(window_frames), str(window_frames))] if window_frames else not presented
+    verified = (target_os == "linux" and len(summaries) == 1
+                and all(fields.get(k) == v for k, v in required.items()) and pool_ok and worker_ok
+                and window_ok and not re.search(r"FAILED|skipped|fallback", text))
+    return {"verified": bool(verified), "fields": fields, "pool": pools, "worker": workers,
+            "window_frames": window_frames, "shared_segment": "GPU worker -> application only"}
+
+
+def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
+                          target_os: str = "linux", window_frames: int = 0) -> dict:
+    if target_os != "linux":
+        return {"passed": False, "reason": "9B native resource backend/replay pending on this host"}
+    build_root = sdk.parent.parent
+    built = subprocess.run(["cmake", "--build", str(build_root), "--target", "crtweb_gpu_resource_test"],
+                           env=dict(os.environ), check=False)
+    if built.returncode:
+        return {"passed": False, "reason": "could not build GPU worker/resource consumer"}
+    runs = work / "gpu-resource-run"
+    runs.mkdir(exist_ok=True)
+    (runs / "fonts.conf").write_text(font_configuration(str(ROOT / "libcrtgfx/assets/fonts"),
+                                                       str(runs / "fontcache")), encoding="utf-8")
+    run_env = gate_environment(build, sdk, prefix, runs, env, target_os)
+    host = build / "bin/crtweb_host"
+    run_env["CRTWEB_HOST"] = str(host)
+    run_env["CRTWEB_GPU_WORKER"] = str(build_root / "libcrtweb/crtweb_gpu_worker")
+    command = [str(build_root / "libcrtweb/crtweb_gpu_resource_test"), "--require-gpu"]
+    if window_frames:
+        command += ["--window-frames", str(window_frames)]
+    completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=240)
+    print(completed.stdout, end="")
+    print(completed.stderr, end="", file=sys.stderr)
+    (runs / "stdout.log").write_text(completed.stdout, encoding="utf-8")
+    (runs / "stderr.log").write_text(completed.stderr, encoding="utf-8")
+    audit = jsc.host_abi_audit(sdk, prefix, build, [host, build / "lib/libcrtweb.so"], run_env, target_os)
+    evidence = gpu_resource_evidence(completed.stdout + completed.stderr, target_os, window_frames)
+    runtime = gpu_browser_map_evidence(completed.stdout, sdk, prefix, build, runs, target_os)
+    return {"passed": completed.returncode == 0 and evidence["verified"] and audit["ok"] and runtime["verified"],
+            "returncode": completed.returncode, "evidence": evidence, "browser_runtime": runtime,
+            "host_abi": {"ok": audit["ok"], "violations": audit["violations"]},
+            "output": completed.stdout.splitlines()}
+
+
 def audio_output_evidence(text: str) -> dict:
     sinks = []
     routes = {}
@@ -1092,6 +1148,10 @@ def main() -> int:
                         help="with --webkit: strict Tranche 9A GPU WebView gate (alone or with --run-tests)")
     parser.add_argument("--gpu-window-frames", type=int, default=0,
                         help="with --run-gpu-tests: also open a real GPU window for 1..300 frames")
+    parser.add_argument("--run-gpu-resource-tests", action="store_true",
+                        help="with --webkit: strict independent Tranche 9B GPU resource/worker gate (Linux)")
+    parser.add_argument("--gpu-resource-window-frames", type=int, default=0,
+                        help="with --run-gpu-resource-tests: also present 1..300 native GPU frames")
     parser.add_argument("--reuse-tree", action="store_true", help="keep the composed tree and build directory")
     parser.add_argument("--recompose", action="store_true",
                         help="with --reuse-tree: compose the source tree again (a patch or the pin changed) but keep "
@@ -1109,6 +1169,10 @@ def main() -> int:
     args = parser.parse_args()
     if args.run_gpu_tests and not args.webkit:
         parser.error("--run-gpu-tests requires --webkit")
+    if args.run_gpu_resource_tests and not args.webkit:
+        parser.error("--run-gpu-resource-tests requires --webkit")
+    if not 0 <= args.gpu_resource_window_frames <= 300 or (args.gpu_resource_window_frames and not args.run_gpu_resource_tests):
+        parser.error("--gpu-resource-window-frames requires --run-gpu-resource-tests and a count in 0..300")
     if args.gpu_window_frames < 0 or args.gpu_window_frames > 300 or (args.gpu_window_frames and not args.run_gpu_tests):
         parser.error("--gpu-window-frames requires --run-gpu-tests and a count in 0..300")
     if (args.require_audio_output or args.allow_physical_camera) and not (args.webkit and args.run_tests):
@@ -1173,7 +1237,7 @@ def main() -> int:
         args.target = list(args.target or DEFAULT_TARGETS)
         if "crtweb_camera_probe" not in args.target:
             args.target.append("crtweb_camera_probe")
-    if args.run_gpu_tests:
+    if args.run_gpu_tests or args.run_gpu_resource_tests:
         args.target = list(args.target or (["crtweb_host"] if not args.run_tests else DEFAULT_TARGETS))
         if "crtweb_host" not in args.target:
             args.target.append("crtweb_host")
@@ -1184,7 +1248,7 @@ def main() -> int:
         command += ["-k", "0"]
     command += list(args.target or DEFAULT_TARGETS)
     status = jsc.run(command, env=env, check=False).returncode
-    if status != 0 or not (args.run_tests or args.run_gpu_tests):
+    if status != 0 or not (args.run_tests or args.run_gpu_tests or args.run_gpu_resource_tests):
         return status
     gpu_results = {}
     if args.run_gpu_tests:
@@ -1192,9 +1256,16 @@ def main() -> int:
         gpu_passed = gpu_results["gpu_webview"]["passed"]
         (work / "acceptance-gpu.json").write_text(json.dumps(
             {"passed": gpu_passed, "programs": gpu_results}, indent=2) + "\n", encoding="utf-8")
-        if not args.run_tests:
-            print("Tranche 9A GPU gate:", "PASSED" if gpu_passed else "FAILED")
-            return 0 if gpu_passed else 1
+    if args.run_gpu_resource_tests:
+        gpu_results["gpu_resources"] = run_gpu_resource_gate(build, sdk, prefix, work, env, target_os,
+                                                            args.gpu_resource_window_frames)
+        (work / "acceptance-gpu-resources.json").write_text(json.dumps(
+            {"passed": gpu_results["gpu_resources"]["passed"], "programs": {
+                "gpu_resources": gpu_results["gpu_resources"]}}, indent=2) + "\n", encoding="utf-8")
+    if not args.run_tests:
+        passed = all(result["passed"] for result in gpu_results.values())
+        print("GPU gates:", "PASSED" if passed else "FAILED")
+        return 0 if passed else 1
     results = {name: run_program(name, build, sdk, prefix, work, env, target_os) for name in tests}
     results.update(gpu_results)
     if args.webkit and target_os in ("linux", "macos", "windows"):
