@@ -124,7 +124,10 @@ class WebView {
   bool launch(const char* host_path, uint32_t width, uint32_t height, const char* initial_url, int timeout_ms,
               const LaunchOptions& options) {
     shutdown();
+    // TMPDIR, then Windows' TEMP/TMP (a Windows process often has only those, and there is no /tmp), then /tmp.
     const char* base = getenv("TMPDIR");
+    if (!base || !*base) base = getenv("TEMP");
+    if (!base || !*base) base = getenv("TMP");
     std::string pattern = std::string(base && *base ? base : "/tmp") + "/crtwebXXXXXX";
     std::string dir = pattern;
     if (mkdtemp(&dir[0]) == nullptr) return false;

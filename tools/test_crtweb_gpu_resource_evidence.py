@@ -5,16 +5,23 @@ import build_webkit_crt_port as port
 
 
 class ResourceEvidenceTests(unittest.TestCase):
-    def output(self):
+    def output(self, backend="3", sync="native-fence-semaphore"):
         return ("crtweb_gpu_worker: uploads=24 reused=23 retired=3 peak_buffers=4 gpu_readbacks=0\n"
                 "crtweb_gpu_resource_test: imports=6 releases=23 live_buffers=3 generation=2\n"
-                "crtweb_gpu_resource_test: ok backend=3 source=browser-cpu worker_upload=1 consumer_upload=0 "
-                "transport=shared-gpu sync=native-fence-semaphore updates=20 resize=pass ownership=pass cleanup=pass\n")
+                f"crtweb_gpu_resource_test: ok backend={backend} source=browser-cpu worker_upload=1 consumer_upload=0 "
+                f"transport=shared-gpu sync={sync} updates=20 resize=pass ownership=pass cleanup=pass\n")
 
-    def test_linux_only_until_native_backend_replay(self):
+    def test_native_backends_linux_vulkan_and_windows_d3d12_only(self):
         self.assertTrue(port.gpu_resource_evidence(self.output(), "linux")["verified"])
-        for target in ("windows", "macos", "android"):
-            self.assertFalse(port.gpu_resource_evidence(self.output(), target)["verified"])
+        self.assertTrue(port.gpu_resource_evidence(self.output("1", "native-shared-fence"), "windows")["verified"])
+        # Metal is not implemented: no label may pass for it, and no host accepts another host's backend.
+        for target in ("macos", "android"):
+            for text in (self.output(), self.output("1", "native-shared-fence")):
+                self.assertFalse(port.gpu_resource_evidence(text, target)["verified"])
+        self.assertFalse(port.gpu_resource_evidence(self.output("1", "native-shared-fence"), "linux")["verified"])
+        self.assertFalse(port.gpu_resource_evidence(self.output(), "windows")["verified"])
+        self.assertFalse(port.gpu_resource_evidence(self.output("1", "native-fence-semaphore"), "windows")["verified"])
+        self.assertFalse(port.gpu_resource_evidence(self.output("3", "native-shared-fence"), "windows")["verified"])
 
     def test_no_skip_fallback_duplicate_failure_or_missing_summary(self):
         for text in ("", "crtweb_gpu_resource_test: fallback mode=cpu resources=0\n", self.output() * 2,
@@ -32,6 +39,12 @@ class ResourceEvidenceTests(unittest.TestCase):
                          ("peak_buffers=4", "peak_buffers=7"), ("gpu_readbacks=0", "gpu_readbacks=1"),
                          ("native-fence-semaphore", "cpu-ack")):
             self.assertFalse(port.gpu_resource_evidence(self.output().replace(old, new), "linux")["verified"], old)
+        # The same counters guard the Windows D3D12 evidence.
+        windows = self.output("1", "native-shared-fence")
+        for old, new in (("backend=1", "backend=0"), ("consumer_upload=0", "consumer_upload=1"),
+                         ("gpu_readbacks=0", "gpu_readbacks=1"), ("imports=6", "imports=0"),
+                         ("native-shared-fence", "cpu-ack")):
+            self.assertFalse(port.gpu_resource_evidence(windows.replace(old, new), "windows")["verified"], old)
 
     def test_exact_native_frame_count(self):
         valid = self.output() + "crtweb_gpu_resource_test: presented=5 requested=5\n"

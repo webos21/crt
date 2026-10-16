@@ -57,9 +57,12 @@ static inline int crtweb_gpu_packet_valid(const crtweb_gpu_packet* p, size_t fd_
   if (!p || p->magic != CRTWEB_GPU_MAGIC || p->version != CRTWEB_GPU_VERSION
       || p->size != sizeof(*p) || p->reserved) return 0;
   if (p->type == CRTWEB_GPU_BUFFER_ADD) {
-    if (fd_count != CRTGFX_SHARED_IMAGE_HANDLE_COUNT || !p->generation || !p->buffer_id
-        || p->buffer_id > CRTWEB_GPU_MAX_BUFFERS || p->serial || p->flags
-        || !crtgfx_shared_image_descriptor_valid(&p->payload.image)) return 0;
+    /* The descriptor says how many native references this backend sends: five for
+     * Vulkan, three for D3D12. A count that differs is a malformed packet. */
+    if (!crtgfx_shared_image_descriptor_valid(&p->payload.image)
+        || fd_count != crtgfx_shared_image_handle_count(&p->payload.image)
+        || !p->generation || !p->buffer_id
+        || p->buffer_id > CRTWEB_GPU_MAX_BUFFERS || p->serial || p->flags) return 0;
     used = sizeof p->payload.image;
   } else {
     if (fd_count) return 0;
@@ -111,7 +114,8 @@ static inline void crtweb_gpu_close_handles(int fds[CRTGFX_SHARED_IMAGE_HANDLE_C
   }
 }
 
-/* Send borrows handles. Receive owns its returned handles, setting CLOEXEC.
+/* Handles: file descriptors; on Windows the descriptors of adopted NT handles (the CRT's
+ * SCM_RIGHTS duplicates them into the peer). Send borrows handles. Receive owns its returned handles, setting CLOEXEC.
  * Any invalid/truncated packet closes ALL received handles before returning. */
 static inline int crtweb_gpu_send(int fd, const crtweb_gpu_packet* p, const int* fds, size_t count) {
   struct msghdr msg;

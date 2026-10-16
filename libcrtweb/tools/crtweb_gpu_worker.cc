@@ -19,6 +19,12 @@
 #include <unistd.h>
 
 namespace {
+// A failing step says where: the worker's only report is its exit status and one stderr line.
+bool fail_at(int line) {
+  fprintf(stderr, "crtweb_gpu_worker: step failed at line %d\n", line);
+  return false;
+}
+#define FAIL() fail_at(__LINE__)
 struct Worker {
   int socket = -1;
   crtgfx_gpu_device* device = nullptr;
@@ -49,7 +55,7 @@ struct Worker {
   bool remove(unsigned i) {
     auto p = crtweb_gpu_message(CRTWEB_GPU_BUFFER_REMOVE);
     p.buffer_id = i + 1; p.generation = buffers[i].generation;
-    if (!send(p)) return false;
+    if (!send(p)) return FAIL();
     buffers[i] = Buffer(); ++retired;
     return true;
   }
@@ -60,34 +66,34 @@ struct Worker {
       if (b.pending_release) {
         crtgfx_result result = b.image->wait_released(0);
         if (result == CRTGFX_ERROR_TIMEOUT) {
-          if (std::chrono::steady_clock::now() >= b.release_deadline) return false;
+          if (std::chrono::steady_clock::now() >= b.release_deadline) return FAIL();
           continue;
         }
-        if (result != CRTGFX_OK) return false;
+        if (result != CRTGFX_OK) return FAIL();
         b.pending_release = false; b.busy = false; ++reused;
       }
-      if (b.generation != generation && !b.busy && !b.pending_release && !remove(i)) return false;
+      if (b.generation != generation && !b.busy && !b.pending_release && !remove(i)) return FAIL();
     }
     return true;
   }
   bool pool(uint32_t w, uint32_t h) {
     if (w == width && h == height) return true;
-    if (!w || !h || w > CRTGFX_SHARED_IMAGE_MAX_EXTENT || h > CRTGFX_SHARED_IMAGE_MAX_EXTENT || generation == UINT32_MAX) return false;
+    if (!w || !h || w > CRTGFX_SHARED_IMAGE_MAX_EXTENT || h > CRTGFX_SHARED_IMAGE_MAX_EXTENT || generation == UINT32_MAX) return FAIL();
     ++generation; width = w; height = h;
-    if (!collect()) return false;
+    if (!collect()) return FAIL();
     unsigned created = 0;
     for (unsigned i = 0; i < buffers.size() && created < CRTWEB_GPU_POOL_SIZE; ++i) {
       auto& b = buffers[i];
       if (b.image) continue;
-      if (crtgfx_skia_shared_create(device, w, h, &b.image) != CRTGFX_OK) return false;
+      if (crtgfx_skia_shared_create(device, w, h, &b.image) != CRTGFX_OK) return FAIL();
       b.generation = generation;
       auto p = crtweb_gpu_message(CRTWEB_GPU_BUFFER_ADD);
       p.buffer_id = i + 1; p.generation = generation; p.payload.image = b.image->description();
       int fds[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
-      if (b.image->export_handles(fds) != CRTGFX_OK) return false;
-      bool sent = send(p, fds, CRTGFX_SHARED_IMAGE_HANDLE_COUNT);
+      if (b.image->export_handles(fds) != CRTGFX_OK) return FAIL();
+      bool sent = send(p, fds, crtgfx_shared_image_handle_count(&p.payload.image));
       crtweb_gpu_close_handles(fds);
-      if (!sent) return false;
+      if (!sent) return FAIL();
       ++created;
     }
     unsigned live = 0; for (const auto& b : buffers) if (b.image) ++live;
@@ -98,13 +104,13 @@ struct Worker {
     if (p.type == CRTWEB_GPU_BYE) { bye = true; return true; }
     if (p.type == CRTWEB_GPU_ACK) {
       if (p.serial != serial || p.serial <= acked || p.buffer_id != last_buffer
-          || p.generation != buffers[p.buffer_id - 1].generation) return false;
+          || p.generation != buffers[p.buffer_id - 1].generation) return FAIL();
       acked = p.serial;
       return true;
     }
     if (p.type == CRTWEB_GPU_RELEASE) {
       auto& b = buffers[p.buffer_id - 1];
-      if (!b.image || !b.busy || b.pending_release || b.generation != p.generation || b.serial != p.serial) return false;
+      if (!b.image || !b.busy || b.pending_release || b.generation != p.generation || b.serial != p.serial) return FAIL();
       b.pending_release = true;
       b.release_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
       return true;
@@ -115,12 +121,12 @@ struct Worker {
       if (p.payload.command.code == CRTWEB_GPU_RESIZE) {
         unsigned w = 0, h = 0; char extra;
         if (sscanf(p.payload.command.text, "%u %u %c", &w, &h, &extra) != 2
-            || !w || !h || w > CRTGFX_SHARED_IMAGE_MAX_EXTENT || h > CRTGFX_SHARED_IMAGE_MAX_EXTENT) return false;
+            || !w || !h || w > CRTGFX_SHARED_IMAGE_MAX_EXTENT || h > CRTGFX_SHARED_IMAGE_MAX_EXTENT) return FAIL();
         browser.resize(w, h);
         return true;
       }
     }
-    return false;
+    return FAIL();
   }
   bool receive(int timeout_ms) {
     bool any = false;
@@ -131,14 +137,14 @@ struct Worker {
       crtweb_gpu_packet p; int fds[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
       int got = crtweb_gpu_recv(socket, &p, fds);
       crtweb_gpu_close_handles(fds);
-      if (got <= 0 || !message(p)) return false;
+      if (got <= 0 || !message(p)) return FAIL();
       any = true;
     }
     return true;
   }
   bool publish() {
     if (!browser.has_frame() || browser.frame_serial() == source_serial || serial != acked) return true;
-    if (!pool(browser.surface()->frame_width(), browser.surface()->frame_height())) return false;
+    if (!pool(browser.surface()->frame_width(), browser.surface()->frame_height())) return FAIL();
     for (unsigned i = 0; i < buffers.size(); ++i) {
       auto& b = buffers[i];
       if (!b.image || b.generation != generation || b.busy || b.pending_release) continue;
@@ -155,7 +161,7 @@ struct Worker {
       }
       // Retain the CPU source until its upload really completed. No readback.
       target.reset(); provider.release(provider.user, nullptr, source);
-      if (!ok) return false;
+      if (!ok) return FAIL();
       source_serial = browser.frame_serial(); browser.frame_presented();
       auto p = crtweb_gpu_message(CRTWEB_GPU_FRAME);
       p.serial = ++serial; p.buffer_id = i + 1; p.generation = generation;
@@ -166,10 +172,10 @@ struct Worker {
   }
   bool run(const char* browser_host, const char* url) {
     struct pollfd pfd {socket, POLLIN, 0};
-    if (poll(&pfd, 1, 10000) <= 0) return false;
+    if (poll(&pfd, 1, 10000) <= 0) return FAIL();
     crtweb_gpu_packet hello; int fds[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
     int got = crtweb_gpu_recv(socket, &hello, fds); crtweb_gpu_close_handles(fds);
-    if (got != 1 || hello.type != CRTWEB_GPU_HELLO) return false;
+    if (got != 1 || hello.type != CRTWEB_GPU_HELLO) return FAIL();
     crtgfx_shared_image_desc identity {};
     bool supported = crtgfx_gpu_device_create(0, &device) == CRTGFX_OK
         && crtgfx_skia_shared_query(device, &identity) == CRTGFX_OK
@@ -180,19 +186,23 @@ struct Worker {
     auto config = crtweb_gpu_message(CRTWEB_GPU_CONFIG);
     config.flags = supported ? CRTWEB_GPU_MODE_SHARED : CRTWEB_GPU_MODE_CPU;
     config.payload.image = identity;
-    if (!send(config)) return false;
+    if (!send(config)) return FAIL();
     if (!supported) { puts("crtweb_gpu_worker: mode=cpu-fallback resources=0"); return true; }
     context = crtgfx_skia_make_gpu_context(device);
     browser.on_load = [](crtweb::WebView::LoadEvent event, const std::string& url, const std::string& message) {
       if (event == crtweb::WebView::LoadEvent::Failed)
         fprintf(stderr, "crtweb_gpu_worker: load failed url=%s message=%s\n", url.c_str(), message.c_str());
     };
-    if (!context || !browser.launch(browser_host, hello.payload.image.width, hello.payload.image.height, url)) return false;
+    if (!context) { fprintf(stderr, "crtweb_gpu_worker: no GPU context for the worker device\n"); return FAIL(); }
+    if (!browser.launch(browser_host, hello.payload.image.width, hello.payload.image.height, url)) {
+      fprintf(stderr, "crtweb_gpu_worker: could not launch the browser host %s\n", browser_host);
+      return FAIL();
+    }
     while (!bye && browser.running()) {
-      if (!receive(2)) return false;
+      if (!receive(2)) return FAIL();
       if (bye) break;
       browser.poll(0);
-      if (!collect() || !publish()) return false;
+      if (!collect() || !publish()) return FAIL();
     }
     printf("crtweb_gpu_worker: uploads=%u reused=%u retired=%u peak_buffers=%u gpu_readbacks=0\n", uploads, reused, retired, peak);
     return bye;

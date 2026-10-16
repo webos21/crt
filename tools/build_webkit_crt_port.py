@@ -850,8 +850,12 @@ def gpu_resource_evidence(text: str, target_os: str, window_frames: int = 0) -> 
     """9B resource evidence is independent of 9A and explicit CPU fallback."""
     summaries = re.findall(r"^crtweb_gpu_resource_test: ok (.+)$", text, re.M)
     fields = dict(re.findall(r"(\w+)=([^ ]+)", summaries[0])) if len(summaries) == 1 else {}
-    required = dict(backend="3", source="browser-cpu", worker_upload="1", consumer_upload="0",
-                    transport="shared-gpu", sync="native-fence-semaphore", updates="20",
+    # backend= is the crtgfx backend enum (Vulkan 3, D3D12 1); sync= names the native handles: Vulkan's
+    # semaphore + fence pairs, or the one shared D3D12 fence per direction. Metal is still unsupported.
+    backends = {"linux": ("3", "native-fence-semaphore"), "windows": ("1", "native-shared-fence")}
+    backend, sync = backends.get(target_os, ("", ""))
+    required = dict(backend=backend, source="browser-cpu", worker_upload="1", consumer_upload="0",
+                    transport="shared-gpu", sync=sync, updates="20",
                     resize="pass", ownership="pass", cleanup="pass")
     pools = re.findall(r"^crtweb_gpu_resource_test: imports=(\d+) releases=(\d+) live_buffers=(\d+) generation=(\d+)$", text, re.M)
     pool_ok = len(pools) == 1 and int(pools[0][0]) == 6 and int(pools[0][1]) >= 20 \
@@ -861,7 +865,7 @@ def gpu_resource_evidence(text: str, target_os: str, window_frames: int = 0) -> 
         and int(workers[0][2]) == 3 and 0 < int(workers[0][3]) <= 4 and workers[0][4] == "0"
     presented = re.findall(r"^crtweb_gpu_resource_test: presented=(\d+) requested=(\d+)$", text, re.M)
     window_ok = presented == [(str(window_frames), str(window_frames))] if window_frames else not presented
-    verified = (target_os == "linux" and len(summaries) == 1
+    verified = (target_os in backends and len(summaries) == 1
                 and all(fields.get(k) == v for k, v in required.items()) and pool_ok and worker_ok
                 and window_ok and not re.search(r"FAILED|skipped|fallback", text))
     return {"verified": bool(verified), "fields": fields, "pool": pools, "worker": workers,
@@ -870,9 +874,14 @@ def gpu_resource_evidence(text: str, target_os: str, window_frames: int = 0) -> 
 
 def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
                           target_os: str = "linux", window_frames: int = 0) -> dict:
-    if target_os != "linux":
+    if target_os not in ("linux", "windows"):
         return {"passed": False, "reason": "9B native resource backend/replay pending on this host"}
+    exe = ".exe" if target_os == "windows" else ""
     build_root = sdk.parent.parent
+    # Skia objects first, alone: they read dist/02-cxx while the dist publisher can rewrite it; the CMake
+    # dependency now orders them, this keeps an older build tree from racing.
+    for target in ("crtgfx_skia_objects", "crtui_skia", "crtgfx_skia"):
+        subprocess.run(["cmake", "--build", str(build_root), "--target", target], env=dict(os.environ), check=False)
     built = subprocess.run(["cmake", "--build", str(build_root), "--target", "crtweb_gpu_resource_test"],
                            env=dict(os.environ), check=False)
     if built.returncode:
@@ -881,11 +890,15 @@ def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env:
     runs.mkdir(exist_ok=True)
     (runs / "fonts.conf").write_text(font_configuration(str(ROOT / "libcrtgfx/assets/fonts"),
                                                        str(runs / "fontcache")), encoding="utf-8")
+    if target_os == "windows":
+        # font_configuration() above was given the POSIX spelling; the CRT wants /c/dir for fontconfig.
+        (runs / "fonts.conf").write_text(font_configuration(
+            crt_path(ROOT / "libcrtgfx/assets/fonts"), crt_path(runs / "fontcache")), encoding="utf-8")
     run_env = gate_environment(build, sdk, prefix, runs, env, target_os)
-    host = build / "bin/crtweb_host"
+    host = build / "bin" / ("crtweb_host" + exe)
     run_env["CRTWEB_HOST"] = str(host)
-    run_env["CRTWEB_GPU_WORKER"] = str(build_root / "libcrtweb/crtweb_gpu_worker")
-    command = [str(build_root / "libcrtweb/crtweb_gpu_resource_test"), "--require-gpu"]
+    run_env["CRTWEB_GPU_WORKER"] = str(build_root / "libcrtweb" / ("crtweb_gpu_worker" + exe))
+    command = [str(build_root / "libcrtweb" / ("crtweb_gpu_resource_test" + exe)), "--require-gpu"]
     if window_frames:
         command += ["--window-frames", str(window_frames)]
     completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=240)
@@ -893,7 +906,11 @@ def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env:
     print(completed.stderr, end="", file=sys.stderr)
     (runs / "stdout.log").write_text(completed.stdout, encoding="utf-8")
     (runs / "stderr.log").write_text(completed.stderr, encoding="utf-8")
-    audit = jsc.host_abi_audit(sdk, prefix, build, [host, build / "lib/libcrtweb.so"], run_env, target_os)
+    library = build / "lib/libcrtweb.so"
+    if target_os == "windows":
+        candidates = sorted((build / "bin").glob("*crtweb.dll")) + sorted((build / "lib").glob("*crtweb.dll"))
+        library = candidates[0] if candidates else build / "bin/libcrtweb.dll"
+    audit = jsc.host_abi_audit(sdk, prefix, build, [host, library], run_env, target_os)
     evidence = gpu_resource_evidence(completed.stdout + completed.stderr, target_os, window_frames)
     runtime = gpu_browser_map_evidence(completed.stdout, sdk, prefix, build, runs, target_os)
     return {"passed": completed.returncode == 0 and evidence["verified"] and audit["ok"] and runtime["verified"],

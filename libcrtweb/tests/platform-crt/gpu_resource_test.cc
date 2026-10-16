@@ -19,6 +19,22 @@
 #include <vector>
 extern char** environ;
 
+#if defined(_WIN32)
+// Acceptance observer only (as in webview_gpu_test.cc): native declarations never enter the CRT surface.
+extern "C" {
+struct GpuModuleEntry {
+  unsigned size, module, pid, globalUsage, processUsage;
+  unsigned char* base;
+  unsigned baseSize;
+  void* handle;
+  char name[256];
+  char path[260];
+};
+int __stdcall Module32First(void*, GpuModuleEntry*);
+int __stdcall Module32Next(void*, GpuModuleEntry*);
+}
+#endif
+
 namespace {
 int failures;
 bool check(bool ok, const char* name) {
@@ -26,7 +42,32 @@ bool check(bool ok, const char* name) {
   return ok;
 }
 bool report_browser_maps(pid_t worker, std::vector<pid_t>& observed) {
-#if defined(__linux__)
+#if defined(_WIN32)
+  std::set<std::string> roles;
+  auto report = [&](pid_t pid, const char* role) {
+    observed.push_back(pid);
+    void* snapshot = crtweb_test::CreateToolhelp32Snapshot(0x8 | 0x10, static_cast<unsigned>(pid));
+    if (snapshot == reinterpret_cast<void*>(-1)) return;
+    std::set<std::string> files;
+    GpuModuleEntry entry = {};
+    entry.size = sizeof entry;
+    for (int more = Module32First(snapshot, &entry); more; more = Module32Next(snapshot, &entry)) {
+      std::string path = entry.path;
+      for (char& c : path) if (c == '\\') c = '/';
+      files.insert(path);
+    }
+    crtweb_test::CloseHandle(snapshot);
+    if (!files.empty()) roles.insert(role);
+    for (const auto& file : files) printf("MAPPED %s %s\n", role, file.c_str());
+  };
+  for (const auto& host : crtweb_test::children(worker)) {
+    if (host.name != "crtweb_host") continue;
+    report(host.pid, "HostProcess");
+    for (const auto& child : crtweb_test::children(host.pid))
+      if (child.name == "WebProcess" || child.name == "NetworkProcess") report(child.pid, child.name.c_str());
+  }
+  return check(roles.size() == 3, "all browser roles observed behind GPU worker");
+#elif defined(__linux__)
   std::set<std::string> roles;
   auto report = [&](pid_t pid, const char* role) {
     observed.push_back(pid);
@@ -76,7 +117,12 @@ struct Child {
     if (!page_directory.empty()) remove(page_directory.c_str());
   }
   int launch(const char* worker, const char* browser) {
+#if defined(_WIN32)
+    // The socket path must stay short (AF_UNIX); the gate's work directory is the scratch space.
+    char temp[] = "crtweb9b-sock-XXXXXX", fixture[] = "crtweb9b-page-XXXXXX", cwd[4096];
+#else
     char temp[] = "/tmp/crtweb9bXXXXXX", fixture[] = "crtweb9b-page-XXXXXX", cwd[4096];
+#endif
     if (!mkdtemp(temp) || !getcwd(cwd, sizeof cwd)) return -1;
     directory = temp; socket = directory + "/s";
     if (!mkdtemp(fixture)) return -1;
@@ -295,15 +341,33 @@ extern "C" int main(int argc, char** argv) {
   const char* worker = getenv("CRTWEB_GPU_WORKER"), *browser = getenv("CRTWEB_HOST");
   if (!worker || !browser || !*worker || !*browser) return required ? 1 : 77;
   crtgfx_gpu_device* device = nullptr;
-  if (crtgfx_gpu_device_create(0, &device) != CRTGFX_OK) return required ? 1 : 77;
+  // Negative control only: an application device that is not the worker's (the worker always uses
+  // device 0) makes the identity negotiation fail honestly, so --probe-fallback exercises the real
+  // "unsupported pair -> explicit CPU mode, zero resources" path instead of a simulated one.
+  unsigned device_index = 0;
+  if (const char* index = getenv("CRTWEB_GPU_TEST_APP_DEVICE_INDEX")) device_index = static_cast<unsigned>(atoi(index));
+  if (crtgfx_gpu_device_create(device_index, &device) != CRTGFX_OK) return required ? 1 : 77;
   crtgfx_shared_image_desc identity {};
   bool supported = crtgfx_skia_shared_query(device, &identity) == CRTGFX_OK;
+  if (supported) {
+    char device_id[33], driver_id[33];
+    for (unsigned i = 0; i < 16; ++i) {
+      snprintf(device_id + 2 * i, 3, "%02x", identity.device_uuid[i]);
+      snprintf(driver_id + 2 * i, 3, "%02x", identity.driver_uuid[i]);
+    }
+    printf("crtweb_gpu_resource_test: app_device=%u backend=%u device_id=%s driver_id=%s\n", device_index, identity.backend,
+        device_id, driver_id);
+  }
   if (!supported && !fallback) { crtgfx_gpu_device_release(device); return required ? 1 : 77; }
   auto context = crtgfx_skia_make_gpu_context(device);
   bool ok = context && run(worker, browser, device, context.get(), frames, fallback);
   context.reset(); crtgfx_gpu_device_release(device);
   if (!ok) return 1;
-  printf("crtweb_gpu_resource_test: %s\n", fallback ? "fallback mode=cpu resources=0" :
-      "ok backend=3 source=browser-cpu worker_upload=1 consumer_upload=0 transport=shared-gpu sync=native-fence-semaphore updates=20 resize=pass ownership=pass cleanup=pass");
+  // backend= is the crtgfx backend enum of the negotiated descriptor (Vulkan 3, D3D12 1); sync= names what
+  // the native handles actually were: Vulkan semaphore + fence pairs, or one shared D3D12 fence per direction.
+  const char* sync = identity.backend == CRTGFX_GPU_BACKEND_D3D12 ? "native-shared-fence" : "native-fence-semaphore";
+  if (fallback) printf("crtweb_gpu_resource_test: fallback mode=cpu resources=0\n");
+  else printf("crtweb_gpu_resource_test: ok backend=%u source=browser-cpu worker_upload=1 consumer_upload=0 "
+      "transport=shared-gpu sync=%s updates=20 resize=pass ownership=pass cleanup=pass\n", identity.backend, sync);
   return 0;
 }
