@@ -9,6 +9,39 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-18
+
+### Web Tranche 9C: macOS/arm64 Metal native replay
+
+Native replay ran on October 17; this record was finalized on October 18.
+Replayed `8154c8c` on an Apple M1 Pro with macOS 27.0.1. No runtime,
+upstream patch, public ABI, fallback policy or acceptance limit needed changing.
+The official `--run-gpu-lifecycle-tests` entry reconfigured and rebuilt 2,158
+browser/JSC/Skia steps, linked WebKit, Web/Network processes and `crtweb_host`,
+and passed the native 9C gate. B7's executable was also refreshed; the earlier
+reused-browser checkpoint remains separate from final acceptance.
+
+On those rebuilt artifacts, strict Metal 9C passes **3/3**, with twenty
+measured complete lifetimes, seven policy warm-ups and final fresh pixels per
+run. RSS is **+816/+752/+656 KiB**, threads and descriptors **+0**; all observed
+browser descendants and workers are reclaimed. Native mapping/Host ABI audits
+pass. This is controlled context abandonment plus owner teardown/recreation,
+not physical GPU reset or arbitrary hung-driver recovery.
+
+Final 9A and 9B each pass offscreen **3/3** and native-window **3/3** (5/5 frames
+each). CPU WebView recovery/twenty lifetimes are flat; refreshed B7 passes
+**100/100**, **+32 KiB/+0 threads/+0 descriptors**. C-stage CTests **138/138**,
+native PAL/wire/SurfaceView **5/5**, shared Metal PAL, 59 focused unit tests,
+SDK `01-c`..`05-ui` verification and the unchanged patch manifest pass.
+Missing-prerequisite CTest entries remain **two skips**, not GPU passes.
+
+Detailed bounds, immutable artifact hashes, native observations, reproduction
+and checkpoint separation belong to
+[macOS 9C acceptance](docs/acceptance/crtweb_acceptance.md#9c-macosarm64-metal-native-replay-2026-10-17).
+Only Windows/x64 9C replay remains before three-host 9C/Tranche 9 closure;
+no Linux/Windows execution, `06-web` packaging or physical camera/audio
+validation is claimed here. `STATUS.md` is unchanged.
+
 ## 2026-10-17
 
 ### Web Tranche 9C: Linux owned-worker loss/recovery and complete lifetimes
@@ -31,7 +64,8 @@ The initial interleaved map-log failure is preserved, not counted as acceptance.
 Detailed bounds, the controlled-loss (not physical-reset) distinction and
 native replay entry belong to
 [Linux 9C acceptance](docs/acceptance/crtweb_acceptance.md#9c-owned-worker-lifecycle-linux-implementationreplay-2026-10-17).
-Windows/macOS must replay the new 9C mode; global 9C/Tranche 9 remains open.
+At that checkpoint Windows/macOS still needed the new 9C mode; macOS's
+completed replay is recorded above, while Windows/global 9C remain open.
 `STATUS.md` and the public C/v1 wire contracts are unchanged.
 
 ### Linux native fork/spawn heap-snapshot replay

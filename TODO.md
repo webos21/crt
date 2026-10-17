@@ -154,7 +154,8 @@ uses the host replay order stated below and in the acceptance document.
     CRT GPU worker is the owned GPU-process boundary; sharing one Skia context is not an initial gate.
     Evidence stays in Web acceptance.
     * [x] Linux owned-worker/context-loss recovery, unread-transfer draining and complete-lifetime replay.
-    * [ ] Windows/x64 and macOS/arm64 native 9C replay with CPU/9A/9B/Host ABI regressions.
+    * [x] macOS/arm64 Metal native 9C replay with rebuilt browser, CPU/9A/9B and Host ABI regressions.
+    * [ ] Windows/x64 native 9C replay with CPU/9A/9B/Host ABI regressions.
   * [x] **Native fork regression replay:** Linux heap-snapshot repeat and C-stage pass;
     native-COW fix/replay evidence is in Web acceptance. Windows memory-copy fork is unchanged.
 * [ ] **10. Distribution and security closure.**

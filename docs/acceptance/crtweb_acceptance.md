@@ -3797,7 +3797,8 @@ and `result.json`, `driver-final.log` /
 The generated replay harness uses the checked-in strict parser, browser-map
 and Host ABI audits rather than replacing them.
 
-**Remaining closure:** Windows/x64 and macOS/arm64 must run this new 9C mode
+**Remaining closure at the Linux checkpoint:** Windows/x64 and macOS/arm64
+must run this new 9C mode
 and their relevant CPU/9A/9B/native Host ABI regressions. Their accepted 9B
 resource backends and earlier 9A device/process tests do not substitute for the
 new complete-lifetime/fault replay. Linux 9C is accepted; global 9C and Tranche 9
@@ -3820,6 +3821,110 @@ Windows uses the existing native process/module observations. Repeat the native
 gate three times without changing artifacts and retain all results. The CTest
 entry is `crtweb_gpu_lifecycle_test_runs` (300-second outer timeout), with the
 driver supplying `CRTWEB_HOST`, `CRTWEB_GPU_WORKER`, fonts and native observers.
+
+#### 9C macOS/arm64 Metal native replay (2026-10-17)
+
+Replayed Linux's `8154c8c` on an **Apple M1 Pro / macOS 27.0.1 (26A434)**
+through the real Metal IOSurface/shared-event backend. No runtime code,
+upstream source/patch/pin, public C/v1 wire ABI, fallback policy or acceptance
+limit needed changing. The GPU process is the **CRT-owned worker**, not upstream
+WebKit GPUProcess or accelerated WebCore. Browser -> worker remains CPU upload;
+worker -> application uses native shared GPU resources.
+
+**Build/checkpoint separation:** the in-tree worker/consumers and cumulative
+SDK `01-c`..`05-ui` were rebuilt and verified first. An initial immutable
+reused-browser checkpoint passes 9C 3/3, 9A/9B six runs each, CPU WebView and
+B7; its evidence stays at the replay root, not relabelled as rebuilt-browser
+acceptance. The official CLI then detects the refreshed SDK, reconfigures
+and rebuilds **2,158 steps** of JSC, bundled Skia, WebCore/WebKit and the
+Web/Network/Host executables. Its strict 9C mode passes independently
+(**+752 KiB/+0 threads/+0 descriptors**). B7's executable is also refreshed
+against that browser. Final acceptance below uses those rebuilt artifacts,
+without republishing SDKs or rebuilding between repetitions. This is an
+incremental product rebuild, not a clean full WebKit or isolated `06-web` build.
+
+**Final strict 9C: 3/3**, each with **20/20 measured complete lifetimes**, seven
+policy warm-ups and one final fresh-pixel session (**84 worker sessions** in
+these three runs). Normal exit, consumer disconnect, exact owned worker/Host
+SIGKILL, Web-process replacement/reload, controlled context loss/native owner
+recreation, and retained-old-image resize all pass. All 28 per-run case
+records pass; elapsed times are **195..3,536 ms**, including native observation
+pauses, below the unchanged 30-second per-case limit. Three prequeued real
+Metal resource announcements are drained without imports; BYE and native
+capability/lease cleanup pass. This is not a timing guess about whether a
+browser resize happened to queue transfers.
+
+RSS after warm-up is **+816/+752/+656 KiB**, threads **+0** and descriptors
+**+0**, within the unchanged +24 MiB/+2/+2 bounds. These are bounded increases,
+not a zero-RSS-growth claim. Each session checks that its observed browser
+descendants are gone and its worker is reaped; no old resource/epoch is adopted
+into a replacement session. A healthy application retains drawable imported
+pixels after producer/connection death; an abandoned context exposes neither
+image nor ACK. Borrowed images/targets and context are destroyed before the
+native Metal owner teardown and a fresh device/session paints real pixels.
+This is **controlled context abandonment plus owner teardown/recreation**, not
+physical GPU reset or interruptibility of arbitrary hung-driver calls.
+
+Every final 9C run passes native parent/name observation and browser
+Host/Web/Network mapping audit (**4,633 file/role observations**, no violations),
+plus static Host ABI. The browser still uses CRT GL stubs; Apple's transitive
+OS framework mappings are recorded separately, not evidence of accelerated
+WebCore. Selected worker/consumer/browser/runtime artifact hashes remain
+unchanged throughout the final matrix.
+
+**Regressions on the rebuilt browser:**
+
+- 9A **offscreen 3/3 + native Metal window 3/3**, each window **5/5** frames;
+  exact pixels, composition/input/resize/updates/recovery/cleanup and native
+  browser audits pass (**4,634** file/role observations per run).
+- 9B **offscreen 3/3 + native Metal window 3/3**, each window **5/5** frames;
+  native shared events, resource reuse/retirement/ownership, twenty updates
+  and browser audits pass (**4,633** file/role observations per run).
+- CPU WebView recovery and twenty complete lifetimes pass at
+  **+0 KiB/+0 threads/+0 descriptors**. Refreshed B7 passes **100/100** at
+  **+32 KiB/+0 threads/+0 descriptors**, at most two children; static Host ABI
+  and native UI/Web/Network mapping pass (**1,668** file/role observations).
+- C-stage CTests **138/138** and native shared-image PAL/wire/SurfaceView
+  **5/5** pass. The existing shared PAL consumer is rerun against the freshly
+  published DSOs and passes twenty native Metal epochs, exact pixels and
+  independent transfer-FD/resource ownership. This is not an upstream Skia
+  shared-build claim.
+- All **59** focused evidence/backend/stage-closure/licensing/driver unit
+  tests pass; the unchanged pristine-source manifest remeasures **23 patches /
+  63 modified / 24 CRT-owned files**. A fresh GPU-enabled CMake configuration
+  registers the lifecycle test; that check is configuration-only, not a fresh
+  product build. Default resource/lifecycle CTests without a browser report
+  **two skips**, not native acceptance. SDK `01-c`..`05-ui` verification passes
+  again after the official driver finishes publication.
+
+Local ignored evidence:
+`out/macos-host-ninja-debug/tranche9c-macos-20261017/` contains `build.log`,
+initial `replay.json` / `regressions.json`, `driver.log` /
+`driver-acceptance-gpu-lifecycle.json`, `b7-refresh.log`, unit/manifest/fresh
+configuration/CTest logs and OS/model metadata. **`final/replay.json` and
+`final/regressions.json` are the accepted rebuilt-browser checkpoint**, with
+`final/9{a,b,c}-*/result.json`, stdout/stderr and raw `vmmap-*` logs. The
+`replay.py` / `regressions.py` harnesses use checked-in strict parsers,
+native observers and Host ABI audits, not replacement pass criteria.
+`final-artifacts-before.json` and `closeout.json` record fourteen artifact
+hashes and final native process cleanup; all hashes stay unchanged and no
+test/browser/GPU-worker process remains. No physical camera/audio test ran.
+
+The official entry exercised here (an existing configured product tree is
+required) is:
+
+```sh
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root out/macos-host-ninja-debug/dist/05-ui \
+  --deps-prefix out/macos-host-ninja-debug/port-tests/install \
+  --work-root /private/tmp/webB3f --webkit --reuse-tree \
+  --target crtweb_host --run-gpu-lifecycle-tests -j 4
+```
+
+This closes the **macOS 9C slice** and replays its 9A/9B baselines.
+**Windows/x64's native 9C replay remains open**, so global 9C/Tranche 9 is not
+closed. Linux/Windows were not executed on this Mac. `06-web` packaging,
+security closure and `STATUS.md` are unchanged.
 
 ### 10. Distribution and security closure
 
