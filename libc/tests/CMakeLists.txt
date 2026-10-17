@@ -675,6 +675,13 @@ set_tests_properties(malloc_fork_regions_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "malloc_fork_regions_test: ok"
 )
 
+add_crt_test(fork_heap_snapshot_test fork_heap_snapshot_test.c)
+set_tests_properties(fork_heap_snapshot_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fork_heap_snapshot_test: ok"
+  SKIP_REGULAR_EXPRESSION "fork_heap_snapshot_test: skipped"
+  TIMEOUT 30
+)
+
 # malloc_fault_victim: a deliberately-crashing helper for malloc_fault_
 # test's own tranche-6 ("make diagnostics permanent and testable")
 # expected-fault coverage -- see malloc_fault_victim.c's own top comment.

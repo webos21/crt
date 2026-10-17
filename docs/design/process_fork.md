@@ -40,6 +40,33 @@ host kernel syscall backend:
 - `vfork()` currently aliases `fork()` until a separate Bionic-compatible policy
   is needed.
 
+Native Linux/macOS `fork()` stabilizes the project-owned heap before taking
+the kernel snapshot. User prepare handlers run first; then
+`__crt_malloc_before_fork()` acquires the allocator lock. The parent releases
+it with `__crt_malloc_after_fork_parent()` on both success and error, before
+user parent handlers. The child resets its inherited lock before user child
+handlers. Thus all three kinds of application callback can allocate without
+recursively taking this internal lock. Resetting a copied lock alone cannot
+make an in-progress free-list mutation coherent.
+
+The native `posix_spawn()` path uses the same allocator snapshot boundary and
+runtime-only child reset, **without invoking application `pthread_atfork()`
+handlers**. This matters on macOS: file actions renumber CRT's framed
+`SOCK_SEQPACKET` descriptors, so the child exports their final numbers into
+the exec environment, and that private adapter allocates. Moving the export
+before file actions would lose the descriptor mapping rather than fix it.
+`_Fork()` remains the raw primitive; it does not acquire allocator locks or
+promise that application malloc is async-signal-safe afterward. This change
+also does not make every CRT/host library operation after a multithreaded fork
+async-signal-safe. Windows's memory-copy backend is unchanged: it allocates
+while copying and cannot use this outer native-COW heap guard.
+
+References: Bionic's [`fork.cpp`](https://android.googlesource.com/platform/bionic/+/refs/heads/main/libc/bionic/fork.cpp)
+separates the raw primitive and application atfork boundary. The allocator
+side follows the lock-before-snapshot principle documented in Android
+Scudo commit [`e274f502dac9`](https://android.googlesource.com/platform/external/scudo/+/e274f502dac9e28654778c589646acedee4fbc87),
+not a claim that CRT imports Scudo or Bionic's complete spawn implementation.
+
 After a successful `fork()`, the child process runs project-owned runtime reset
 hooks before user atfork child handlers:
 
@@ -47,9 +74,10 @@ hooks before user atfork child handlers:
 - Linux thread registry and detached-thread reaper bootstrap state are cleared.
 - pthread key/reaper locks, malloc heap lock, and stdio `FILE` locks are reset
   so the child is not left with locks owned by vanished threads.
-- fd tracking has an explicit `__crt_fd_after_fork_child()` reset hook. On
-  Linux/macOS it is a no-op (native fork inheritance already does the right
-  thing); on Windows it is a real integration point used by the memory-copy
+- fd tracking has an explicit `__crt_fd_after_fork_child()` reset hook. Linux
+  needs no fd-table reconstruction; macOS resets the private framed-socket
+  locks while preserving inherited descriptor state. On Windows it is an
+  integration point used by the memory-copy
   `fork()` child bootstrap described below.
 
 The internal hook boundary is:
@@ -104,6 +132,15 @@ subshell/command-substitution patterns, concurrent-child stress, and GNU make
 jobserver-style pipe contention (`mksh_shell_smoke_test` and
 `process_stress_test`). The remaining Windows mechanism limits are documented
 in `windows_fork_emulation.md`, not kept as stale generic TODO entries here.
+
+`fork_heap_snapshot_test` includes the real allocator as a private fixture,
+holds its heap lock in another thread and verifies that native fork/spawn
+wait for release. It also exercises allocating atfork callbacks, spawn's
+callback suppression and framed-socket inheritance after `dup2` file actions.
+CTest bounds it to 30 seconds. Windows reports a real CTest skip for this
+native-COW-specific fixture; its memory-copy tests remain separate. The
+macOS failure/replay evidence belongs to
+[Web acceptance](../acceptance/crtweb_acceptance.md#9b-macosarm64-availability-replay-2026-10-16).
 
 ---
 

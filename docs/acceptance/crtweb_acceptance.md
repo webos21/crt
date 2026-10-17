@@ -3626,9 +3626,88 @@ out/macos-host-ninja-debug/libcrtgfx/crtgfx_skia_shared_image_test --require-gpu
 
 This closes the macOS **9B resource slice**, not accelerated WebCore, 9C,
 `06-web` packaging or a fresh Linux/Windows replay of this working tree.
-The earlier intermittent B7 spawn/allocator failure remains a separate
-follow-up, not fixed by this adapter. Exporter death before import, consumer
+The earlier intermittent B7 spawn/allocator failure was a separate
+follow-up, not fixed by this adapter; its native runtime fix/replay follows
+below. Exporter death before import, consumer
 disconnect recovery and hung/lost-driver handling remain open 9C contracts.
+
+#### B7 native fork/spawn allocator follow-up (2026-10-17)
+
+The October 16 failure above remains failed, including the original
+`b7-spawn-child-crash.ips` and the independent unmodified successful repeat.
+The crash is in a spawn child's `unindex_free_block()` while allocating the
+framed-socket exec environment, not in the Metal resource adapter. Review
+found native Linux/macOS fork copying allocator state without taking its
+lock; native spawn also skipped the CRT runtime reset before child-side
+PAL operations. A copied-lock reset alone cannot repair partially updated
+free-list metadata.
+
+The fix stabilizes the allocator with its own lock across the native kernel
+snapshot. The parent unlocks on success/error, the child resets the inherited
+lock, and application atfork callbacks remain outside that guard so they may
+allocate. Spawn uses the runtime-only child reset and still does **not** call
+application atfork handlers. macOS framed descriptors are still exported
+after file actions, preserving renumbered fd inheritance. Bionic/Scudo
+references, `_Fork()`'s unchanged raw contract and post-fork safety limits
+are in [Process Fork Model](../design/process_fork.md). Windows's memory-copy
+fork is unchanged; it allocates internally and cannot take this outer guard.
+
+`fork_heap_snapshot_test` includes the real allocator in a private test
+fixture, holds its heap lock in a worker and asks another initialized thread
+to fork/spawn. Its pre-fix binary exits **1** with
+`fork copied a heap critical section`. After the fix, both snapshots wait
+until the holder releases; child allocation, allocating prepare/parent/child
+callbacks, spawn callback suppression, and framed socket data inherited after
+`dup2` actions all pass. The clean CMake build repeats **10/10** successfully;
+CTest has a 30-second outer timeout and marks the separate Windows mechanism
+as **skipped**, not a native-COW pass.
+
+macOS/arm64 validation with the regenerated cumulative SDK:
+
+- C-stage CTests **138/138** pass, including allocator diagnostics, fork,
+  pthread, spawn error reporting and socket inheritance.
+- SDK `01-c` through `05-ui` publication and verification pass.
+- B7 **three independent 100/100** lifetime runs pass with the same native
+  observer and unchanged limits. Post-warm-up RSS is **+32/+48/+32 KiB**;
+  threads and descriptors are **+0** in every run, at most two children.
+- Each run passes static Host ABI over **18 artifacts** and native
+  UI/Web/Network mapping audits (**1,667** file/role observations per run,
+  no violations). Native Mach-O fixups confirm WebKit's
+  `malloc/free/realloc/calloc/posix_spawn` bind to **CRT libc**.
+- The published shared libc and reused WebKit/lifecycle binaries are SHA-256
+  recorded and remain unchanged during all three runs. This is not a fresh
+  WebKit build, GPU/9C replay, physical-camera or audio-output validation.
+- Linux and Windows x86_64/aarch64 branches pass Clang syntax checks using
+  project headers only. No Linux/Windows native execution is claimed here;
+  Linux replay of the new regression remains queued.
+
+The deterministic negative control demonstrates the missing allocator
+snapshot exclusion, not a deterministic recreation of the exact historical
+invalid-pointer instruction. The clean B7 repeats support closing this
+focused macOS follow-up, not a claim that all allocator or multithreaded
+post-fork safety issues are impossible. No public ABI, WebKit patch/pin,
+acceptance limit or fallback policy changed.
+
+Local ignored evidence is under
+`out/macos-host-ninja-debug/b7-spawn-allocator-20261017/`:
+`before-fix` / `before-fix.log`, `fresh-{configure,build,repeat}.log`,
+`core-ctest.log` / `final-core-ctest.log`, `sdk-build.log`, `syntax-check.log`,
+`webkit-allocator-fixups.log`,
+`replay.py` / `replay.log` / `replay.json` and `b7-{1,2,3}/result.json` /
+`lifecycle.log`. The original October 16 evidence is not overwritten.
+For the checked-in regression on each native Linux/macOS host:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target fork_heap_snapshot_test
+ctest --preset macos-host-ninja-debug -R '^fork_heap_snapshot_test_runs$' --repeat until-fail:10
+# On Linux, replace the preset with linux-host-ninja-debug.
+```
+
+For the real B7 observer, reuse the documented WebKit driver with
+`--webkit --run-tests` after publishing the SDK; the local `replay.py`
+records three focused `run_lifecycle_gate(..., "macos")` runs without
+republishing dependencies between them. Tranche **9C** and `06-web` packaging
+remain open; `STATUS.md` is intentionally unchanged.
 
 ### 10. Distribution and security closure
 

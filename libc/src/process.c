@@ -46,6 +46,10 @@ long __crt_sysconf_nprocessors_onln(void);
 long __crt_sysconf_phys_pages(void);
 long __crt_sysconf_avphys_pages(void);
 void __crt_malloc_after_fork_child(void);
+#if !defined(CRT_TARGET_OS_WINDOWS)
+void __crt_malloc_before_fork(void);
+void __crt_malloc_after_fork_parent(void);
+#endif
 void __crt_pthread_after_fork_child(void);
 void __crt_stdio_after_fork_child(void);
 
@@ -458,7 +462,7 @@ static void crt_atfork_run_user_child(void) {
 long __crt_sys_thread_id(void);
 extern long __crt_initial_thread_id;
 
-void __crt_atfork_child(crt_thread_context* current_context) {
+static void crt_runtime_after_fork_child(crt_thread_context* current_context) {
 #if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
   /* The child's only thread is a new native thread, not the parent's initial one whose id the
    * copied .data still holds; as on Linux (child tid == child pid) it becomes the "initial"
@@ -471,6 +475,10 @@ void __crt_atfork_child(crt_thread_context* current_context) {
   __crt_malloc_after_fork_child();
   __crt_fd_after_fork_child();
   __crt_stdio_after_fork_child();
+}
+
+void __crt_atfork_child(crt_thread_context* current_context) {
+  crt_runtime_after_fork_child(current_context);
   crt_atfork_run_user_child();
 }
 
@@ -503,11 +511,20 @@ pid_t fork(void) {
   long child;
 
   __crt_atfork_prepare();
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  /* A native COW snapshot must not copy allocator metadata mid-mutation.
+   * User callbacks stay outside the heap lock because they may allocate.
+   * Windows memory-copy fork itself allocates and has a separate protocol. */
+  __crt_malloc_before_fork();
+#endif
   child = __crt_sys_fork();
   if (child == 0) {
     __crt_atfork_child(current_context);
     return 0;
   }
+#if !defined(CRT_TARGET_OS_WINDOWS)
+  __crt_malloc_after_fork_parent();
+#endif
   __crt_atfork_parent();
   return (pid_t)normalize_syscall_result(child);
 }
@@ -647,6 +664,7 @@ long __crt_sys_posix_spawn(
     const posix_spawnattr_t attr) {
   long child;
   int status_pipe[2];
+  crt_thread_context* current_context;
   (void)search_path;
 
   if (spawn_attr_has_effect(attr)) {
@@ -667,7 +685,12 @@ long __crt_sys_posix_spawn(
     }
     fcntl(status_pipe[0], F_SETFD, FD_CLOEXEC);
   }
+  current_context = __crt_thread_get_current();
+  __crt_malloc_before_fork();
   child = __crt_sys_fork();
+  if (child != 0) {
+    __crt_malloc_after_fork_parent();
+  }
   if (child < 0) {
     close(status_pipe[0]);
     close(status_pipe[1]);
@@ -676,6 +699,9 @@ long __crt_sys_posix_spawn(
   if (child == 0) {
     char* const* child_env = envp != 0 ? envp : environ;
 
+    /* Spawn does not run application pthread_atfork callbacks, but its
+     * PAL file actions and framed-socket export still use CRT state. */
+    crt_runtime_after_fork_child(current_context);
     close(status_pipe[0]);
     spawn_status_fd = status_pipe[1];
     errno = 0;

@@ -152,9 +152,9 @@ uses the host replay order stated below and in the acceptance document.
       strict native replay; static/shared PAL and evidence are in Web acceptance.
   * [ ] **9C closure:** device/process loss, bounded resource reuse and three-host replay.
     Sharing one Skia context is not an initial gate. Evidence stays in Web acceptance.
-  * [ ] **Replay follow-up:** investigate macOS B7's intermittent pre-exec
-    `__crt_seqpacket_export_env()` / allocator crash; retained failure and repeat
-    evidence belong to Web acceptance's macOS 9B availability replay.
+  * [ ] **Native fork regression replay:** run the heap-snapshot regression on
+    Linux; the macOS B7 fix/repeat evidence is in Web acceptance. Windows's
+    separate memory-copy fork is unchanged by this native-COW guard.
 * [ ] **10. Distribution and security closure.**
   * [ ] Build `06-web` in isolation from the installed `05-ui` SDK and add the
     stage-source/prerequisite manifests.

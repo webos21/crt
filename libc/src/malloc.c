@@ -192,6 +192,16 @@ static void crt_malloc_check_canary(const block_header* header) {
 }
 #endif
 
+#if !defined(CRT_TARGET_OS_WINDOWS)
+void __crt_malloc_before_fork(void) {
+  crt_spin_lock(&heap_lock);
+}
+
+void __crt_malloc_after_fork_parent(void) {
+  crt_spin_unlock(&heap_lock);
+}
+#endif
+
 void __crt_malloc_after_fork_child(void) {
   heap_lock.state.value = 0;
 }

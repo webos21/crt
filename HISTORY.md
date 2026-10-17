@@ -11,6 +11,39 @@ substantive update.
 
 ## 2026-10-17
 
+### macOS B7 follow-up: stabilize the native fork/spawn heap snapshot
+
+The retained October 16 spawn-child crash points at the allocator free-list
+while exporting the framed-socket environment before exec. Inspection found
+native fork taking an unguarded heap snapshot and native spawn additionally
+skipping CRT child reset. A new fixture that includes the real allocator holds
+its private lock in another thread: the pre-fix binary fails because fork
+creates a child inside that critical section. Resetting the child's lock alone
+does not stabilize copied heap metadata.
+
+Linux/macOS now lock the heap around native fork, release it in the parent
+on success/error and reset it in the child. Application atfork callbacks stay
+outside that lock; spawn uses runtime-only child reset without application
+callbacks. `_Fork()`, the public ABI and Windows memory-copy fork stay unchanged.
+The direction follows Bionic's fork boundary and Android Scudo's allocator
+snapshot locking; references and scope limits are in
+[Process Fork Model](docs/design/process_fork.md).
+
+macOS/arm64: C-stage CTests **138/138**, fresh-CMake regression **10/10**, and
+shared-CRT B7 **3 x 100/100** lifetimes pass. RSS is **+32/+48/+32 KiB**, threads
+and descriptors **+0**, at most two children. Every run passes native
+UI/Web/Network mapping and static Host ABI audits. SDK `01-c`..`05-ui`
+regeneration/verification pass; WebKit's malloc/free/realloc/calloc/spawn
+bindings point to CRT libc. Linux/Windows x86_64/aarch64 syntax checks pass,
+not native execution. Linux runtime replay remains in `TODO.md`.
+
+The deterministic fixture exposes the missing synchronization, not the exact
+historical invalid-pointer instruction; the 300 clean B7 lifetimes are bounded
+replay evidence, not proof against every allocator defect. Original failures
+are retained. Detailed evidence and reproduction are in
+[B7 allocator follow-up](docs/acceptance/crtweb_acceptance.md#b7-native-forkspawn-allocator-follow-up-2026-10-17).
+9C remains open; `STATUS.md` is unchanged.
+
 ### Web Tranche 9B: Metal shared resources and macOS native acceptance
 
 Implemented and replayed on macOS/arm64 on October 16; static/shared PAL and
@@ -38,8 +71,9 @@ tests cover the isolated build path; a full isolated product build is not claime
 
 The exporter must remain alive until import completes. Imported references
 survive transfer-FD closure, but producer/device loss recovery remains 9C.
-The earlier intermittent B7 spawn/allocator failure and `06-web` packaging
-remain open. Linux/Windows were not re-executed here; `STATUS.md` is unchanged.
+At that checkpoint, the intermittent B7 spawn/allocator failure and `06-web`
+packaging remained open; the focused B7 follow-up is recorded above.
+Linux/Windows were not re-executed here; `STATUS.md` is unchanged.
 
 ## 2026-10-16
 
