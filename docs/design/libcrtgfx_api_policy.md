@@ -130,12 +130,17 @@ connect a `crtgfx` framebuffer to an `SkSurface`/`SkCanvas`.
 a new drawing API. Query/create/import return unsupported when the native
 backend lacks sharing; no CPU fence or upload is substituted. The initial
 Linux adapter owns dedicated optimal-tiled Vulkan BGRA8 allocations and native
-ready/release semaphore/fence reference imports. `shared_image.h` is plain C
-metadata; native SDK types remain private to `src/arch/linux/`. The context
+ready/release semaphore/fence reference imports. Windows uses a shared D3D12
+texture and two shared fences; macOS uses IOSurface and two MTLSharedEvents,
+with capability/lease descriptors redeeming native Mach rights. `shared_image.h`
+is plain C metadata; native SDK types remain private to each `src/arch/<host>/`.
+The context
 must come from the supplied device and outlive every returned Skia reference.
 Factories duplicate borrowed transfer handles; exported handles belong to the
 caller. One GPU-owner thread orders acquire/draw/release, and the consumed
-native fence epoch is reset before reuse. Normal destruction drains the local
+Vulkan fence is reset before reuse; D3D12/Metal event values instead increase
+monotonically. A Metal offer retains native references while transfer leases
+exist, but its exporting process must live until import completes. Normal destruction drains the local
 queue; device-loss/hung-driver recovery is a separate contract. The first
 consumer's negotiated IPC and strict synchronization/ownership rules are in
 [Web GPU resources](libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b).

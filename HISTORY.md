@@ -9,7 +9,65 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-17
+
+### Web Tranche 9B: Metal shared resources and macOS native acceptance
+
+Implemented and replayed on macOS/arm64 on October 16; static/shared PAL and
+99 unit tests passed again on October 17, with no remaining native test/browser
+processes. Final results and open work are reconciled. Metal now uses IOSurface BGRA8 textures and
+two native MTLSharedEvents, with monotonic ready/release epochs on the Ganesh
+queue. Two CRT capability/lease descriptors redeem independent Mach references;
+private native SDK code is separated from the C99 Bionic descriptor/thread
+transport. No WebKit patch, upstream pin, frozen v1 packet or public C API changed.
+
+Strict browser offscreen 3/3 and native-window 3/3 (5/5 frames each), static
+and shared PAL twenty-epoch/retained-resource tests, wire/CPU CTests 4/4,
+six negative controls, 99 unit tests and all five SDK verifications pass.
+Browser Host ABI and native process/mapping audits pass in all six strict
+runs. Worker -> application is shared GPU memory; WebCore remains CPU-rendered.
+Detailed bounds, evidence, reproduction and retained failures are in
+[Metal 9B acceptance](docs/acceptance/crtweb_acceptance.md#9b-macosarm64-metal-shared-resource-implementation-2026-10-16).
+
+The shared PAL initially bound Bionic socket/pthread calls to libSystem;
+CRT-first linking fixes this, verified with native Mach-O fixups. SDK
+publication now declares IOSurface, normalizes Darwin archive indexes with
+`ranlib -D`, and orders libc++ configure after the packaged C publisher, without
+weakening predecessor hashes. Stage-source closure and generated link-order
+tests cover the isolated build path; a full isolated product build is not claimed.
+
+The exporter must remain alive until import completes. Imported references
+survive transfer-FD closure, but producer/device loss recovery remains 9C.
+The earlier intermittent B7 spawn/allocator failure and `06-web` packaging
+remain open. Linux/Windows were not re-executed here; `STATUS.md` is unchanged.
+
 ## 2026-10-16
+
+### Web Tranche 9B: macOS availability replay, not native resource acceptance
+
+Rebuilt the pulled `436e7d9` worker/consumer, shared Skia objects and SDKs on
+macOS/arm64. This confirms a missing implementation, not a completed Metal
+resource replay: the native factories are unsupported, the descriptor has no
+Metal handle form, the resource test has no native Mac observer and the strict
+driver refuses the host. Native probes return 77 ordinarily / 1 strictly;
+explicit worker fallback returns CPU mode with zero resources. Neither skip
+nor fallback was counted as 9B acceptance.
+
+Shared wire/CPU surface CTests pass 4/4; Metal 9A offscreen 3/3 and real window
+3/3 (5/5 frames each) pass with strict browser mapping/Host ABI evidence.
+CPU WebView recovery and twenty lifetimes pass. B7 first fails after 82
+lifetimes, with an OS crash report identifying a spawn child's allocator
+failure while exporting the framed-socket environment; an unmodified repeat
+passes 100 lifetimes. The initial failure is retained, not relabelled green,
+and a focused spawn/allocator investigation remains in `TODO.md`.
+
+SDK `01-c`..`05-ui` verification, 53 unit tests and the unchanged patch manifest
+pass. Detailed bounds, native mapping counts, retained failures, evidence and
+the four prerequisites for Metal resource acceptance belong to
+[macOS 9B availability replay](docs/acceptance/crtweb_acceptance.md#9b-macosarm64-availability-replay-2026-10-16).
+No runtime code/ABI or acceptance limit was changed at that checkpoint;
+`STATUS.md` was untouched. Metal 9B, 9C and `06-web` packaging remained open;
+the subsequent Metal implementation is recorded above.
 
 ### Web Tranche 9B on Windows/x64: D3D12 shared texture and fences, strict replay
 
@@ -34,7 +92,9 @@ Found by the run: the first identity was all zeros (a 4-byte `wchar_t` translati
 released early (SIGSEGV); `WebView::launch()` used `/tmp` when `TMPDIR` was unset; the Skia object libraries raced
 the `dist/02-cxx` publisher. Details and limits are in
 [Windows 9B acceptance](docs/acceptance/crtweb_acceptance.md#9b-windows-x64-d3d12-shared-resource-implementation-and-replay-2026-10-16).
-macOS Metal and 9C process/device-loss closure remain open; Linux and macOS have not re-run the shared descriptor/wire/test edits; no `06-web` packaging or global Tranche 9 completion is claimed.
+At this checkpoint, macOS Metal and 9C process/device-loss closure remained open;
+Linux and macOS had not re-run the shared descriptor/wire/test edits. The macOS
+availability replay is recorded above; no `06-web` packaging or global Tranche 9 completion is claimed.
 
 ### Web Tranche 9B: Linux shared GPU resources and owned producer
 

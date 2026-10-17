@@ -231,7 +231,7 @@ those native loaders.
 
 ### GPU buffers and synchronization (Tranche 9B)
 
-The Linux and Windows resource implementations use a **separate v2 channel**
+The Linux, Windows and macOS resource implementations use a **separate v2 channel**
 (`platform/crtweb_gpu_wire.h`); the frozen v1 CPU memfd packets and public C
 `crtweb.h` API are unchanged. `crtweb::GpuSurfaceClient` imports resources for
 the application's SDK Ganesh context. `crtweb_gpu_worker` is a separate,
@@ -278,6 +278,39 @@ duplicated into the peer by the CRT's `SCM_RIGHTS`). Identity is the adapter LUI
 user-mode driver version + subsystem + revision; a different adapter or driver build negotiates CPU mode.
 Neither process shares a D3D12 device with the other; `OpenSharedHandle` is the only crossing.
 
+**Metal (macOS).** BGRA8 is backed by one IOSurface, wrapped independently as a
+Metal texture on each process's own device. Two `MTLSharedEvent` objects carry
+monotonic ready/release epochs. A bounded native CPU event wait must succeed
+before a GPU wait is enqueued; after Ganesh flush/submit, a command buffer on
+that same queue signals the next epoch. Neither a CPU ACK nor socket traffic
+is GPU completion. Device identity combines `MTLDevice.registryID` with a
+format tag; driver identity hashes `kern.osversion`. Metadata, allocation size,
+row size, pixel format and native IOSurface extent must match before import.
+
+The `MACH_CAPABILITY` handle kind carries **two** owned CRT descriptors, not
+task-local Mach port numbers: repeatable metadata and a lease socket. A random,
+ephemeral bootstrap capability redeems three real Mach send rights (IOSurface,
+ready event, release event). No launchd agent is installed. The native adapter
+uses Metal's public `MTLSharedEventHandle` coding hook with an `NSXPCCoder`
+subclass; it records the opaque coding keys supplied by Metal instead of
+depending on private fields or hardcoded keys. Received rights are released
+after independent IOSurface/event references have been acquired. This is a
+trusted owned-worker boundary, not an authenticated sandbox service.
+
+A private C99 transport TU uses CRT descriptors/pthreads and Bionic constants;
+the Objective-C++ TU alone uses the real Apple SDK. The shared bridge binds CRT
+libc before frameworks re-exporting libSystem, including the isolated stage.
+Exported leases retain the native resource even after its producer wrapper is
+destroyed; all lease copies closing revokes the offer. **The exporting process
+must remain alive until import completes.** Once imported, independent kernel
+references survive closure of every transfer descriptor. Pre-import exporter
+death fails closed; recovery from producer death or hung GPUs belongs to 9C.
+Missing native events or bootstrap capability access returns unsupported,
+never an image upload or CPU-fence substitute.
+Native API references: [IOSurface Mach ports](https://developer.apple.com/documentation/iosurface/iosurfacecreatemachport(_:)),
+[MTLSharedEvent](https://developer.apple.com/documentation/metal/mtlsharedevent),
+[NSXPCCoder](https://developer.apple.com/documentation/foundation/nsxpccoder).
+
 ACK is pacing only. The consumer retains its current image until a replacement,
 flushes all reads, signals native release and sends RELEASE. The producer accepts
 only the exact live slot/generation/serial and reuses it only after native GPU
@@ -285,11 +318,14 @@ completion. Pools have three buffers per extent, at most six live slots during
 resize; old generations retire only after release. Client provider references
 must be returned before polling/resize/destruction and cannot schedule later
 draws. Devices and same-device contexts outlive all imported objects/Skia refs.
+Each allocation has one producer/consumer pair starting at epoch one; reconnect
+uses a new allocation rather than joining a previously consumed epoch stream.
 
 Unsupported sharing negotiates CPU mode with zero GPU resources; the caller
 must use the existing v1 WebView explicitly. It is never GPU acceptance.
-The strict resource gate is separate from 9A. D3D12/Metal native sharing,
-device/process-loss recovery and full GPUProcess lifecycle closure remain
+The strict resource gate is separate from 9A. Vulkan, D3D12 and Metal have native
+resource implementations; each must pass its own native replay, not CPU fallback.
+Device/process-loss recovery and full GPUProcess lifecycle closure remain
 separate work in [Web acceptance](../acceptance/crtweb_acceptance.md#9-gpu-integration).
 Normal teardown waits for the local queue; a hung/lost driver is not yet a
 bounded-recovery claim (9C).

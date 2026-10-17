@@ -71,6 +71,26 @@ int main(void) {
   for (i = 0; i < 5; ++i) CHECK(out[i] >= 0 && (fcntl(out[i], F_GETFD) & FD_CLOEXEC));
   crtweb_gpu_close_handles(out);
   {
+    const uint32_t backends[] = {CRTGFX_GPU_BACKEND_D3D12, CRTGFX_GPU_BACKEND_METAL};
+    const uint32_t kinds[] = {CRTGFX_SHARED_IMAGE_NT_HANDLE, CRTGFX_SHARED_IMAGE_MACH_CAPABILITY};
+    const unsigned counts[] = {CRTGFX_SHARED_IMAGE_D3D12_HANDLE_COUNT, CRTGFX_SHARED_IMAGE_METAL_HANDLE_COUNT};
+    unsigned backend;
+    for (backend = 0; backend < 2; ++backend) {
+      crtweb_gpu_packet native = p;
+      native.payload.image.backend = backends[backend]; native.payload.image.handle_kind = kinds[backend];
+      CHECK(crtweb_gpu_packet_valid(&native, counts[backend]));
+      CHECK(!crtweb_gpu_packet_valid(&native, counts[backend] - 1));
+      CHECK(!crtweb_gpu_packet_valid(&native, counts[backend] + 1));
+      native.payload.image.memory_type = 1; CHECK(!crtweb_gpu_packet_valid(&native, counts[backend]));
+      native.payload.image.memory_type = 0;
+      CHECK(crtweb_gpu_send(sockets[0], &native, original, counts[backend]) == 0);
+      CHECK(crtweb_gpu_recv(sockets[1], &received, out) == 1 && !memcmp(&native, &received, sizeof native));
+      for (i = 0; i < CRTGFX_SHARED_IMAGE_HANDLE_COUNT; ++i)
+        CHECK(i < counts[backend] ? out[i] >= 0 && (fcntl(out[i], F_GETFD) & FD_CLOEXEC) : out[i] == -1);
+      crtweb_gpu_close_handles(out);
+    }
+  }
+  {
     int before = descriptors();
     for (i = 0; i < 8; ++i) {
       crtweb_gpu_packet bad = p;

@@ -7,8 +7,11 @@ production/import for same-device SDK Ganesh contexts. Fixed-width resource
 metadata lives in `crtgfx/shared_image.h`; native handles stay private to the
 per-host adapter. The implementations are Vulkan opaque-FD memory plus native
 semaphore/fence reference imports (Linux) and a D3D12 shared texture plus two shared
-fences as NT handles (Windows, `src/arch/windows/skia_shared_d3d12.cc`), not the CPU
-`crtgfx_gpu_fence`.
+fences as NT handles (Windows, `src/arch/windows/skia_shared_d3d12.cc`), and
+IOSurface plus two MTLSharedEvents (macOS, `src/arch/macos/skia_shared_metal.cc`).
+Metal transfers two capability/lease descriptors redeeming native Mach rights;
+the exporter must stay alive until import completes. None uses the CPU
+`crtgfx_gpu_fence` as native completion.
 Unsupported backends return `CRTGFX_ERROR_UNSUPPORTED`. The first consumer's
 [GPU resource contract](../docs/design/libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b)
 defines ownership and the precise shared segment.

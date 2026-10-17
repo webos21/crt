@@ -1004,6 +1004,14 @@ add_custom_target(sysroot
   DEPENDS c c_shared m m_shared dl dl_shared crt1 crt_shell_artifacts
   COMMENT "Installing the C runtime stage into ${CRT_SYSROOT}"
 )
+if(CRT_TARGET_OS STREQUAL "macos")
+  # Match create_dist.py: install-time ranlib timestamps must not change the
+  # predecessor fingerprint between lightweight and packaged SDK refreshes.
+  add_custom_command(TARGET sysroot POST_BUILD
+    COMMAND "${CMAKE_RANLIB}" -D
+      "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" "${CRT_SYSROOT}/lib/libdl.a"
+    VERBATIM)
+endif()
 if(TARGET crtbegin_so)
   # The install component ships crtbegin_so.o (Linux per-DSO __dso_handle).
   add_dependencies(sysroot crtbegin_so)
@@ -1457,6 +1465,9 @@ if(Python3_Interpreter_FOUND)
   )
 
   if(TARGET crt-libcxx-build)
+    # Both publishers write 01-c. Do not fingerprint/read it while crt-c-dist
+    # is replacing the lightweight sysroot with its packaged counterpart.
+    add_dependencies(crt-libcxx-configure crt-c-dist)
     add_dependencies(crt-libcxx-sysroot crt-c-dist)
     add_custom_target(crt-libcxx-test DEPENDS crt-libcxx-smoke)
     # crt-cxx component install (libstdc++/CMakeLists.txt) only installs

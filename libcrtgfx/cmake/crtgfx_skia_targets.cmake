@@ -27,6 +27,21 @@ function(crt_add_crtgfx_skia_object_target)
     elseif(CRT_TARGET_OS STREQUAL "windows")
       # Web 9B: D3D12 shared texture + shared fences (the file is empty unless CRTGFX_HAVE_D3D12).
       target_sources(crtgfx_skia_objects PRIVATE "${CRTGFX_ROOT}/src/arch/windows/skia_shared_d3d12.cc")
+    elseif(CRT_TARGET_OS STREQUAL "macos" AND CRTGFX_ENABLE_GPU_BACKEND)
+      target_sources(crtgfx_skia_objects PRIVATE
+        "${CRTGFX_ROOT}/src/arch/macos/skia_shared_metal.cc"
+        "${CRTGFX_ROOT}/src/arch/macos/metal_shared_native.cc")
+      # Keep the Objective-C exception/coding boundary in one real-SDK source;
+      # no Objective-C language/runtime leaks into the C99 core or public API.
+      set_source_files_properties("${CRTGFX_ROOT}/src/arch/macos/metal_shared_native.cc"
+        PROPERTIES COMPILE_OPTIONS "-x;objective-c++;-fobjc-exceptions;-Wno-deprecated-declarations;-Wno-missing-method-return-type")
+      add_library(crtgfx_metal_share_transport_objects OBJECT
+        "${CRTGFX_ROOT}/src/arch/macos/metal_share_transport.c")
+      set_target_properties(crtgfx_metal_share_transport_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      target_include_directories(crtgfx_metal_share_transport_objects PRIVATE "${CRTGFX_LIBC_INCLUDE_DIR}")
+      if(TARGET crt_build_flags)
+        target_link_libraries(crtgfx_metal_share_transport_objects PRIVATE crt_build_flags)
+      endif()
     endif()
     if(TARGET crt_cxx_build_flags)
       target_link_libraries(crtgfx_skia_objects PRIVATE crt_cxx_build_flags)
@@ -318,6 +333,9 @@ function(crt_add_crtgfx_skia_static_target)
   # (crtgfx_gpu_metal_surface_prepare_ganesh_present()).
   if(CRTGFX_ENABLE_SKIA)
     add_library(crtgfx_skia STATIC $<TARGET_OBJECTS:crtgfx_skia_objects>)
+    if(TARGET crtgfx_metal_share_transport_objects)
+      target_sources(crtgfx_skia PRIVATE $<TARGET_OBJECTS:crtgfx_metal_share_transport_objects>)
+    endif()
     target_link_libraries(crtgfx_skia PUBLIC crtgfx_gpu)
     if(CRT_TARGET_OS STREQUAL "macos" AND CRT_USE_IMPORTED_LIBCXX)
       # Frameworks load Apple's libc++ too. Keep this embedded runtime's weak
@@ -399,6 +417,9 @@ function(crt_add_crtgfx_skia_static_target)
       # to provide it. The isolated 04-gfx-media package exposed this gap
       # when it linked the bridge as its own shared library.
       target_link_libraries(crtgfx_skia PUBLIC "-framework CoreVideo")
+      if(CRTGFX_ENABLE_GPU_BACKEND)
+        target_link_libraries(crtgfx_skia PUBLIC "-framework IOSurface")
+      endif()
     endif()
     # Zero-copy decoded textures Tranche 1 (2026-09-23): crtgfx_skia does
     # NOT link crtmedia itself, deliberately, even though crtgfx_skia_
@@ -434,6 +455,19 @@ function(crt_add_crtgfx_skia_shared_target)
     add_library(crtgfx_skia_shared SHARED
       $<TARGET_OBJECTS:crtgfx_skia_objects>
     )
+    if(TARGET crtgfx_metal_share_transport_objects)
+      target_sources(crtgfx_skia_shared PRIVATE $<TARGET_OBJECTS:crtgfx_metal_share_transport_objects>)
+    endif()
+    if(CRT_TARGET_OS STREQUAL "macos")
+      # Frameworks re-export libSystem; Mach-O binds to the first provider.
+      # Put CRT libc before every framework/dependency so the C99 transport
+      # keeps Bionic socket/pthread ABI, including in the isolated SDK stage.
+      if(TARGET c_shared)
+        target_link_options(crtgfx_skia_shared BEFORE PRIVATE "$<TARGET_FILE:c_shared>")
+      else()
+        target_link_options(crtgfx_skia_shared BEFORE PRIVATE "${CMAKE_SYSROOT}/lib/libc.dylib")
+      endif()
+    endif()
     target_link_libraries(crtgfx_skia_shared PUBLIC crtgfx_gpu_shared)
     target_include_directories(crtgfx_skia_shared PUBLIC
       "${CRTGFX_ROOT}/include"
@@ -694,6 +728,9 @@ function(crt_add_crtgfx_skia_shared_target)
         "-framework Metal"
         "-framework CoreVideo"
       )
+      if(CRTGFX_ENABLE_GPU_BACKEND)
+        target_link_libraries(crtgfx_skia_shared PRIVATE "-framework IOSurface")
+      endif()
     endif()
     if(CRT_TARGET_OS STREQUAL "macos" OR CRT_TARGET_OS STREQUAL "windows" OR
        CRT_TARGET_OS STREQUAL "linux")

@@ -3,7 +3,7 @@
 
 /* Separate GPU resource channel, version 2. NEVER a reinterpretation of the
  * v1 CPU memfd protocol. Fixed little-endian packets, current CRT LE targets.
- * A successful GPU CONFIG negotiates five reference-owned native resource
+ * A successful GPU CONFIG negotiates backend-specific reference-owned resource
  * descriptors per immutable BUFFER_ADD. ACK is pacing; RELEASE authorizes
  * reuse only after the producer waits for the imported native release fence.
  * Only a validated FRAME epoch may consume its corresponding ready fence.
@@ -58,7 +58,7 @@ static inline int crtweb_gpu_packet_valid(const crtweb_gpu_packet* p, size_t fd_
       || p->size != sizeof(*p) || p->reserved) return 0;
   if (p->type == CRTWEB_GPU_BUFFER_ADD) {
     /* The descriptor says how many native references this backend sends: five for
-     * Vulkan, three for D3D12. A count that differs is a malformed packet. */
+     * Vulkan, three for D3D12, two for Metal. A different count is malformed. */
     if (!crtgfx_shared_image_descriptor_valid(&p->payload.image)
         || fd_count != crtgfx_shared_image_handle_count(&p->payload.image)
         || !p->generation || !p->buffer_id

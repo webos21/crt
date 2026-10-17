@@ -96,6 +96,31 @@ bool report_browser_maps(pid_t worker, std::vector<pid_t>& observed) {
       if (child.name == "WebProcess" || child.name == "NetworkProcess") report(child.pid, child.name.c_str());
   }
   return check(roles.size() == 3, "all browser roles observed behind GPU worker");
+#elif defined(__APPLE__) || defined(WTF_CRT_MACHO_ASM)
+  const char* directory = getenv("CRTWEB_GPU_MAP_AUDIT_DIR");
+  if (!check(directory != nullptr, "native resource map observer configured")) return false;
+  std::string ready = std::string(directory) + "/ready", temporary = ready + ".tmp";
+  std::string release = std::string(directory) + "/release";
+  FILE* file = fopen(temporary.c_str(), "w");
+  if (!check(file != nullptr, "resource map checkpoint")) return false;
+  fprintf(file, "GPUWorker %ld\n", static_cast<long>(worker));
+  std::set<std::string> roles;
+  for (const auto& host : crtweb_test::children(worker)) {
+    if (host.name != "crtweb_host") continue;
+    observed.push_back(host.pid); roles.insert("HostProcess");
+    fprintf(file, "HostProcess %ld\n", static_cast<long>(host.pid));
+    for (const auto& child : crtweb_test::children(host.pid)) {
+      if (child.name != "WebProcess" && child.name != "NetworkProcess") continue;
+      observed.push_back(child.pid); roles.insert(child.name);
+      fprintf(file, "%s %ld\n", child.name.c_str(), static_cast<long>(child.pid));
+    }
+  }
+  bool closed = fclose(file) == 0;
+  if (!check(closed && rename(temporary.c_str(), ready.c_str()) == 0, "complete resource map checkpoint")) return false;
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (access(release.c_str(), F_OK) != 0 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  return check(roles.size() == 3 && access(release.c_str(), F_OK) == 0, "resource map observer released all browser roles");
 #else
   (void)worker; (void)observed;
   return false; // Native observers belong to their future resource-backend replay.
@@ -257,6 +282,30 @@ bool live(crtweb::GpuSurfaceClient& client, Scene& scene, crtgfx_gpu_device* dev
   return ok && presented == frames;
 }
 
+// Negotiation negative control, not a claim of a second physical GPU: a real
+// native worker must reject a peer that declares a different device identity.
+bool declared_mismatch(const char* worker, const char* browser, crtgfx_shared_image_desc identity) {
+  Child child;
+  int fd = child.launch(worker, browser);
+  if (!check(fd >= 0, "mismatched peer launch")) return false;
+  auto hello = crtweb_gpu_message(CRTWEB_GPU_HELLO);
+  identity.width = 90; identity.height = 70; identity.device_uuid[0] ^= 1;
+  hello.payload.image = identity;
+  bool ok = crtweb_gpu_send(fd, &hello, nullptr, 0) == 0;
+  struct pollfd ready {fd, POLLIN, 0};
+  ok = ok && poll(&ready, 1, 10000) > 0;
+  crtweb_gpu_packet config; int handles[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
+  if (ok) {
+    ok = crtweb_gpu_recv(fd, &config, handles) == 1;
+    crtweb_gpu_close_handles(handles);
+    ok = ok && config.type == CRTWEB_GPU_CONFIG && config.flags == CRTWEB_GPU_MODE_CPU;
+  }
+  close(fd);
+  ok = check(ok, "declared identity mismatch negotiates CPU mode without resources") && child.finish() && ok;
+  if (ok) puts("crtweb_gpu_resource_test: fallback mode=cpu resources=0 reason=declared-identity-mismatch");
+  return ok;
+}
+
 bool run(const char* worker, const char* browser, crtgfx_gpu_device* device, GrDirectContext* context,
          unsigned frames, bool fallback) {
   Child child;
@@ -328,10 +377,11 @@ bool run(const char* worker, const char* browser, crtgfx_gpu_device* device, GrD
 }
 
 extern "C" int main(int argc, char** argv) {
-  bool required = false, fallback = false; unsigned frames = 0;
+  bool required = false, fallback = false, mismatch = false; unsigned frames = 0;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--require-gpu")) required = true;
     else if (!strcmp(argv[i], "--probe-fallback")) fallback = true;
+    else if (!strcmp(argv[i], "--probe-declared-mismatch")) mismatch = true;
     else if (!strcmp(argv[i], "--window-frames") && i + 1 < argc) {
       char* end = nullptr; unsigned long n = strtoul(argv[++i], &end, 10);
       if (!end || *end || !n || n > 300) return 2;
@@ -359,13 +409,19 @@ extern "C" int main(int argc, char** argv) {
         device_id, driver_id);
   }
   if (!supported && !fallback) { crtgfx_gpu_device_release(device); return required ? 1 : 77; }
+  if (mismatch) {
+    bool ok = supported && declared_mismatch(worker, browser, identity);
+    crtgfx_gpu_device_release(device);
+    return ok && !required ? 0 : 1;
+  }
   auto context = crtgfx_skia_make_gpu_context(device);
   bool ok = context && run(worker, browser, device, context.get(), frames, fallback);
   context.reset(); crtgfx_gpu_device_release(device);
   if (!ok) return 1;
   // backend= is the crtgfx backend enum of the negotiated descriptor (Vulkan 3, D3D12 1); sync= names what
   // the native handles actually were: Vulkan semaphore + fence pairs, or one shared D3D12 fence per direction.
-  const char* sync = identity.backend == CRTGFX_GPU_BACKEND_D3D12 ? "native-shared-fence" : "native-fence-semaphore";
+  const char* sync = identity.backend == CRTGFX_GPU_BACKEND_D3D12 ? "native-shared-fence" :
+      identity.backend == CRTGFX_GPU_BACKEND_METAL ? "native-shared-event" : "native-fence-semaphore";
   if (fallback) printf("crtweb_gpu_resource_test: fallback mode=cpu resources=0\n");
   else printf("crtweb_gpu_resource_test: ok backend=%u source=browser-cpu worker_upload=1 consumer_upload=0 "
       "transport=shared-gpu sync=%s updates=20 resize=pass ownership=pass cleanup=pass\n", identity.backend, sync);

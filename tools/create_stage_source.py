@@ -310,6 +310,10 @@ STAGES = {
             ),
             "macos": (
                 "libcrtgfx/src/arch/macos/gpu_metal.c",
+                "libcrtgfx/src/arch/macos/skia_shared_metal.cc",
+                "libcrtgfx/src/arch/macos/metal_shared_native.cc",
+                "libcrtgfx/src/arch/macos/metal_shared_native.h",
+                "libcrtgfx/src/arch/macos/metal_share_transport.c",
                 # libcrtgfx/src/gpu.c #includes this directly; missing here
                 # produced "file not found" isolated-stage build failures
                 # (2026-09-11) -- see the matching "03-gfx-simple" entry,

@@ -3387,7 +3387,7 @@ on Windows) when `TMPDIR` was unset; it now tries `TEMP` and `TMP` first. (6) Th
 against `dist/02-cxx` while the dist publisher can rewrite it ("cstddef/cctype not found" when a consumer and its
 Skia objects were built together); they now wait for `crt-libcxx-dist`.
 
-*Not done / open:* Linux and macOS have not re-run the shared edits (descriptor handle-count helper, wire
+*Not done / open at the Windows checkpoint:* Linux and macOS had not re-run the shared edits (descriptor handle-count helper, wire
 validation, worker/test changes, `WebView::launch()` temp-directory fallback, CMake ordering, evidence parser); macOS Metal shared resources, device/process loss, consumer disconnect and recovery, repeated
 full resource lifetimes and the deferred upstream GPUProcess lifecycle gate (9C); `D3D12_FENCE` timeouts are a
 two-second bound, not a hung-driver recovery claim. A handle is duplicated into the peer when it is sent, so a
@@ -3397,6 +3397,238 @@ worker that exits after BUFFER_ADD does not invalidate resources the application
 Evidence: `C:/crtw/b3w/acceptance-gpu-resources.json` per run (kept as `rep9b-{offscreen,window}-{1,2,3}.json`),
 the driver logs `rep9b-*.log`, `reg9b-9a.log` and `reg9b-full.log`, and the GPU-OFF configure log
 `gpuoff-configure.log`, all under `C:/crtw/`.
+
+#### 9B macOS/arm64 availability replay (2026-10-16)
+
+The initial replay at `436e7d9` confirmed that **macOS 9B was not implemented or accepted**.
+This was not a Metal device/permission failure or a regression in the accepted
+9A renderer. Only the Linux/Vulkan and Windows/D3D12 native resource adapters
+existed. On this host `src/skia_shared.cc` compiled the unsupported factories,
+even with `CRTGFX_HAVE_METAL=1`; enabling the ordinary GPU backend did not
+enable native resource sharing at that checkpoint.
+
+Four missing pieces preceded a successful Metal replay:
+
+1. Native backing export/import and independent producer/consumer ownership,
+   with real GPU ready/release completion epochs and bounded waits; neither
+   CPU ACKs nor upload/readback substitutes meet 9B.
+2. A Metal-specific handle kind/count and allocation/device validation in the
+   fixed-width resource descriptor and v2 transport. Only Vulkan
+   opaque-FD and D3D12 NT-handle shapes were valid. Native references must have
+   a real cross-process ownership/cleanup path, not raw process-local names.
+3. A native browser-role checkpoint/observer in `gpu_resource_test.cc`. Its
+   macOS branch returned false; the existing 9A observer was not
+   automatically attached to the separate worker/consumer test.
+4. A macOS strict resource driver/evidence path. `run_gpu_resource_gate()`
+   explicitly refused this host and `gpu_resource_evidence()` had no Metal
+   backend/synchronization label. These safeguards were not relaxed.
+
+**Actual native results:** the newly built PAL probe returns **77** ordinarily
+and **1** with `--require-gpu`. With real host/worker executable paths supplied,
+the resource consumer also returns **77** ordinarily and **1** in strict
+offscreen and strict `--window-frames 5` modes, before creating shared images.
+The strict driver returns `passed: false` with reason
+`9B native resource backend/replay pending on this host`. The opt-in
+`--probe-fallback` path runs the worker and exits **0**, reporting CPU fallback
+and **zero resources**; the resource-evidence parser rejects this as GPU
+acceptance. An invalid window count returns **2**. The ordinary PAL/resource
+CTest entries are **two skips**, not two accepted resource tests.
+
+**Shared-change and 9A regressions:** freshly built v1 layout, v1 transport,
+v2 resource wire and hermetic CPU SurfaceView CTests pass **4/4** on the real
+Darwin socket/descriptor adapter. The 9A Metal consumer passes offscreen
+**3/3** and native-window **3/3**, with **5/5** presentations per window run.
+All six runs pass GPU composition, clip/opacity/order, input, resize, twenty
+updates and producer replacement/cleanup; each records **+176 KiB RSS,
++0 threads, +0 descriptors**. Every run's strict native browser mapping
+observer verifies all three roles, **4,634 file/role observations**, both
+CRT-owned GL stubs and no Host ABI violations. This is the existing CPU-shm
+upload final compositor, **not** a shared GPU resource pass.
+
+The rebuilt CPU WebView passes three producer recoveries and twenty complete
+lifetimes at **+0 KiB / +0 threads / +0 descriptors**. B7 is **not an entirely
+green regression batch**: its first run exits **1** after 82 completed
+lifetimes (`FAILED the page loaded`, `FAILED every iteration completed`).
+The matching macOS crash report identifies a pre-exec spawn child (PID 75675,
+not the B7 UI process PID 75102) with `SIGSEGV` in
+`unindex_free_block -> malloc_unlocked -> malloc ->
+__crt_seqpacket_export_env -> __crt_sys_posix_spawn`. This is actionable
+runtime evidence, not merely a slow page or an acceptance-observer timeout.
+The same unmodified binaries/SDK and native observer complete a second B7 run
+**100/100**, **+32 KiB RSS / +1 thread / +0 descriptors**, at most two children.
+Both runs pass static Host ABI (18 listed artifacts) and native UI/Web/Network
+mapping audits (1,668 and 1,667 file/role observations, no violations).
+The first result remains failed in `regressions.json`; the successful repeat
+is separate, not substituted for it. No root cause or fix is claimed. The
+spawn child's inherited allocator state and its post-fork allocations need a
+focused follow-up; these paths predate the 9B commits, and this replay does
+not establish that 9B introduced the failure.
+
+The requested in-tree worker/consumer and Skia objects were rebuilt after the
+pull; cumulative SDKs `01-c` through `05-ui` were republished and each passes
+`verify_dist.py`. The browser executables under `/private/tmp/webB3f/build`
+reuse the previously accepted 9A product build; this pass is not a fresh
+WebKit rebuild or a completed public resource-CLI run. Resource evidence (4),
+9A evidence (17), GPU backend boundary (7), stage-source closure (8), driver
+(2) and licensing (15) unit suites pass **53 tests**; the unchanged patch
+manifest remeasures **23 patches / 63 modified / 24 CRT-owned files** against
+the pristine pinned product source. No public ABI, WebKit patch/pin or
+acceptance limit was changed. No physical camera or audio-output test ran.
+
+Evidence: `out/macos-host-ninja-debug/tranche9b-replay-20261016/` contains
+`configure.log`, `build.log`, `probes.py` / `probes.json` / `probes.log`, the
+individual `pal-*.log` / `resource-*.log` outputs, `resource-ctest.log`,
+`wire-ctest.log`, `sdk-verify.log`, `*-unit.log` and `patch-manifest.log`.
+`regressions.py` / `regressions.log` and each
+`9a-{offscreen,window}-{1,2,3}/result.json`, raw `vmmap-*` and stdout/stderr
+retain the native 9A evidence. `regressions.json` / `cpu-b7/` retain the initial
+CPU/B7 results; `b7-spawn-child-crash.ips` preserves the OS crash report;
+`b7-repeat.log` / `b7-repeat/result.json` retain the independent repeat.
+These generated files are local ignored
+artifacts, not committed fixtures. The strict native reproduction after
+building `crtgfx_skia_shared_image_test` is:
+
+```sh
+out/macos-host-ninja-debug/libcrtgfx/crtgfx_skia_shared_image_test --require-gpu
+# Expected at that checkpoint: exit 1, shared memory/semaphore/fence unavailable.
+```
+
+At that checkpoint, the three-host 9A baseline remained accepted, while the
+macOS Metal leaf of 9B and 9C remained open. The subsequent implementation and
+native resource evidence follow below. Linux was not re-executed on this Mac;
+no global Tranche 9 or `06-web` packaging completion was claimed.
+
+#### 9B macOS/arm64 Metal shared-resource implementation (2026-10-16)
+
+Implemented behind the existing `crtgfx_skia_shared_image` interface, without
+changing WebKit source, upstream pins, the 72-byte image descriptor, the
+256-byte v2 packet, the frozen v1 CPU transport or public `crtweb.h`.
+The adapter owns IOSurface BGRA8 textures and independent monotonic ready /
+release MTLSharedEvents. Ganesh submits and native signal commands use the
+same queue. Native CPU event waits are bounded before GPU waits are enqueued;
+no CPU ACK, callback or socket message grants GPU ownership. Device identity
+uses the Metal registry ID; driver identity hashes the OS driver generation.
+
+Two CRT descriptors (repeatable capability metadata plus a lease) redeem three
+Mach send rights through a random ephemeral bootstrap name, without installing
+a launchd service. Native event handles use Metal's public coding hook and
+`NSXPCCoder`, not guessed private fields. Export leases keep native references
+alive after producer-wrapper destruction; imported IOSurface/event references
+survive closure of all transfer descriptors. **Exporter process liveness is
+required until import completes**; pre-import death and device-loss recovery
+remain 9C. Bootstrap access or native-event absence returns unsupported.
+The precise ownership contract is in
+[Web API policy](../design/libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b).
+
+The private native Objective-C++ TU uses the Apple SDK. A separate C99 TU
+uses CRT headers for descriptor/pthread ABI and Bionic constants. First shared
+PAL execution exposed `socketpair` / `pthread_create` binding to libSystem
+because frameworks came before CRT libc; the shared target now puts CRT libc
+first, including isolated SDK-stage links. IOSurface is an explicit graphics
+prerequisite, not an expanded browser Host ABI allowance. The first SDK
+publication's undeclared-IOSurface failure is retained.
+
+The SDK loop also exposed two build-policy problems: Apple's install-time
+archive index timestamp changed full predecessor hashes, and libc++ configure
+could read `01-c` while its packaged publisher replaced it. Both lightweight
+and packaged installs now normalize Darwin indexes with selected `ranlib -D`;
+configure waits for the packaged C publisher where that target exists. Full
+predecessor byte hashing remains intact. Reinstalling all six C runtime
+static/shared inputs twice preserves their full hashes; the Darwin unit
+fixture forces an index rewrite and separately compares object payload bytes.
+
+Evidence is retained under
+`out/macos-host-ninja-debug/tranche9b-metal-20261016/`: native probes, failed
+build/shared-link checkpoints, PAL/wire runs, `replay.py` invoking the checked-in
+strict gate, per-run `result.json`, raw stdout/stderr and external native
+`vmmap-*`/PID checkpoints. This is a working-tree implementation on `436e7d9`,
+using the unchanged accepted browser product in `/private/tmp/webB3f/build`;
+it is not a fresh full WebKit rebuild. `DYLD_LIBRARY_PATH` is removed for
+native GPU runs. The observer validates application -> GPU worker -> host ->
+Web/Network parentage before sampling each browser's real maps; missing or
+foreign executable mappings fail closed.
+
+**Accepted native replay:** Apple M1 Pro, macOS/arm64, offscreen **3/3** and
+real Metal window **3/3**, every window **5/5** frames. Evidence was captured
+on October 16; completion notes were reconciled on October 17. Each strict
+run verifies twenty alternating browser updates, GPU-backed source/target,
+pixel identity, clipping/opacity/ordering, a stalled consumer, resize retirement
+and descendant teardown. Each imports six resources over two generations,
+releases twenty-three epochs and ends at three live images (peak four, limit
+six). Worker counters are **24 uploads / 23 releases/reuses / 0 GPU readbacks**;
+consumer CPU uploads are **0**. Pixel readback is acceptance-only.
+
+| Mode | Run | UI RSS | UI threads / FDs | Worker RSS | Worker threads / FDs | Frames |
+| --- | --- | --- | --- | --- | --- | --- |
+| Offscreen | 1 | +208 KiB | +0 / +0 | +256 KiB | -3 / -3 | n/a |
+| Offscreen | 2 | +160 KiB | +0 / +0 | +240 KiB | -3 / -3 | n/a |
+| Offscreen | 3 | +144 KiB | +0 / +0 | +96 KiB | -3 / -3 | n/a |
+| Metal window | 1 | +160 KiB | +0 / +0 | +32 KiB | -3 / -3 | 5/5 |
+| Metal window | 2 | +160 KiB | +0 / +0 | +96 KiB | -3 / -3 | 5/5 |
+| Metal window | 3 | +80 KiB | +0 / +0 | +64 KiB | -3 / -3 | 5/5 |
+
+These are process deltas across the twenty post-resize updates, not GPU-memory
+measurements. Bounds remain +24 MiB / +2 threads / +2 descriptors per process;
+the worker's negative deltas include completed capability-lease teardown.
+Every run passes static Host ABI and external native browser-map observation
+with zero violations: Host/Web/Network have 1545/1544/1544 mapped-file paths
+(4633 total), including OS shared-cache mappings, not that many direct dylib
+imports. Native parentage is checked before observation; the owned worker and
+observed browser descendants are stopped and reaped afterward.
+
+The independently linked PAL passes in **both static and shared CRT/graphics
+forms**: twenty native epochs, exact pixels, unsignaled and consumed-event
+timeouts, no overwrite before release, bad device/driver/allocation rejection,
+borrowed descriptor ownership, import after producer-wrapper destruction,
+continued use after transfer-FD closure, and all capability offers settling
+to zero. The shared consumer links the CRT-built pinned Skia/FreeType archives
+for normal Skia public API use alongside the graphics DSOs; this is not a
+standalone upstream Skia shared-build claim. `dyld_info -fixups` confirms the
+bridge's `fcntl/free/fstat/malloc/memfd_create/poll/pthread_create/socketpair/write`
+bind to **CRT libc**, not libSystem. Generated in-tree and isolated-stage
+link-command tests guard the ordering.
+
+Negative controls pass: missing prerequisite ordinary/strict exit **77/1**,
+invalid frame count **2**, missing browser **1**, and a deliberately mismatched
+declared device identity negotiates **CPU / zero resources** (ordinary **0**,
+strict **1**). The strict evidence parser rejects every case. The identity
+control uses the real native worker but does not claim a second physical GPU
+or an actual unsupported Metal device on this single-GPU machine.
+
+Wire/CPU CTests pass **4/4**, including exact Metal-two / D3D12-three / Vulkan-five
+descriptor shapes, CLOEXEC and malformed-transfer cleanup. An interim sandboxed
+listen test failed with `EPERM`; the native unrestricted repeat passes, and
+both logs are retained. All **99** focused unit tests, the unchanged WebKit
+patch manifest (**23 / 63 / 24**), final `01-c`..`05-ui` SDK regeneration and
+verification pass. Fresh GPU-ON/GPU-OFF configurations and native/stub object
+compilation pass; this is not a full fresh GPU-OFF or isolated product build.
+The earlier availability replay's CPU WebView/B7/9A results remain separately
+dated evidence, not additional full regressions silently counted here.
+
+`summary.json` and `offscreen-{1,2,3}/` / `window-{1,2,3}/` retain the six strict
+runs. `final-checks.log`, `final-pal-{static,shared}.log`,
+`shared-{backend,consumer}-fixups.log`, `final-wire-cpu-ctest.log`,
+`negative/result.json`, `final-verify-*.log`, `final-unit.log`,
+`reinstall-stability.log` and fresh-configuration/object logs retain the final
+checks. On October 17 the static/shared native PAL and 99 unit tests pass
+again; the native process scan finds no remaining test/browser processes.
+`closeout-pal-{static,shared}-20261017.log`, `closeout-unit-20261017.log` and
+`closeout-processes-20261017.log` retain that confirmation.
+The checked-in strict entry remains `tools/build_webkit_crt_port.py`
+with `--webkit --run-gpu-resource-tests [--gpu-resource-window-frames 5]` and
+the existing SDK/dependency/work arguments. The independent native PAL can
+be repeated with:
+
+```sh
+cmake --build --preset macos-host-ninja-debug --target crtgfx_skia_shared_image_test
+out/macos-host-ninja-debug/libcrtgfx/crtgfx_skia_shared_image_test --require-gpu
+```
+
+This closes the macOS **9B resource slice**, not accelerated WebCore, 9C,
+`06-web` packaging or a fresh Linux/Windows replay of this working tree.
+The earlier intermittent B7 spawn/allocator failure remains a separate
+follow-up, not fixed by this adapter. Exporter death before import, consumer
+disconnect recovery and hung/lost-driver handling remain open 9C contracts.
 
 ### 10. Distribution and security closure
 

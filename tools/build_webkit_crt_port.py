@@ -731,7 +731,20 @@ def macos_gpu_map_checkpoint(text: str, consumer_pid: int) -> list | None:
     return records
 
 
-def run_gpu_program_macos(command: list, runs: Path, env: dict) -> tuple:
+def macos_gpu_resource_map_checkpoint(text: str, consumer_pid: int) -> tuple | None:
+    lines = text.splitlines()
+    worker = lines[0].split() if lines else []
+    if (len(worker) != 2 or worker[0] != "GPUWorker" or not worker[1].isascii()
+            or not worker[1].isdigit() or int(worker[1]) <= 0 or int(worker[1]) == consumer_pid):
+        return None
+    worker_pid = int(worker[1])
+    records = macos_gpu_map_checkpoint("\n".join(lines[1:]), consumer_pid)
+    if not records or worker_pid in [pid for _, pid in records]:
+        return None
+    return worker_pid, records
+
+
+def run_gpu_program_macos(command: list, runs: Path, env: dict, resource_worker: bool = False) -> tuple:
     """Hold the browser at the post-update checkpoint while the host samples its real mappings."""
     mapped = []
     observation = {"verified": False, "reason": "missing or invalid browser map checkpoint"}
@@ -746,7 +759,12 @@ def run_gpu_program_macos(command: list, runs: Path, env: dict) -> tuple:
                 if ready.exists():
                     text = ready.read_text(encoding="utf-8")
                     (runs / "map-checkpoint.txt").write_text(text, encoding="utf-8")
-                    records = macos_gpu_map_checkpoint(text, process.pid)
+                    worker_pid = None
+                    if resource_worker:
+                        checkpoint = macos_gpu_resource_map_checkpoint(text, process.pid)
+                        worker_pid, records = checkpoint if checkpoint else (None, None)
+                    else:
+                        records = macos_gpu_map_checkpoint(text, process.pid)
                     if records:
                         snapshot = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="],
                                                   capture_output=True, text=True, check=False, timeout=10)
@@ -756,8 +774,9 @@ def run_gpu_program_macos(command: list, runs: Path, env: dict) -> tuple:
                             if len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit():
                                 processes[int(fields[0])] = (int(fields[1]), Path(fields[2]).name)
                         host_pid = next(pid for role, pid in records if role == "HostProcess")
-                        topology_ok = all(processes.get(pid) == (
-                            process.pid if role == "HostProcess" else host_pid,
+                        topology_ok = (not resource_worker or processes.get(worker_pid) == (process.pid, "crtweb_gpu_worker"))
+                        topology_ok &= all(processes.get(pid) == (
+                            (worker_pid if resource_worker else process.pid) if role == "HostProcess" else host_pid,
                             "crtweb_host" if role == "HostProcess" else role) for role, pid in records)
                         if topology_ok:
                             counts = []
@@ -851,8 +870,9 @@ def gpu_resource_evidence(text: str, target_os: str, window_frames: int = 0) -> 
     summaries = re.findall(r"^crtweb_gpu_resource_test: ok (.+)$", text, re.M)
     fields = dict(re.findall(r"(\w+)=([^ ]+)", summaries[0])) if len(summaries) == 1 else {}
     # backend= is the crtgfx backend enum (Vulkan 3, D3D12 1); sync= names the native handles: Vulkan's
-    # semaphore + fence pairs, or the one shared D3D12 fence per direction. Metal is still unsupported.
-    backends = {"linux": ("3", "native-fence-semaphore"), "windows": ("1", "native-shared-fence")}
+    # semaphore/fence pairs, shared D3D12 fences, or GPU-signaled Metal shared events.
+    backends = {"linux": ("3", "native-fence-semaphore"), "windows": ("1", "native-shared-fence"),
+                "macos": ("2", "native-shared-event")}
     backend, sync = backends.get(target_os, ("", ""))
     required = dict(backend=backend, source="browser-cpu", worker_upload="1", consumer_upload="0",
                     transport="shared-gpu", sync=sync, updates="20",
@@ -874,7 +894,7 @@ def gpu_resource_evidence(text: str, target_os: str, window_frames: int = 0) -> 
 
 def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
                           target_os: str = "linux", window_frames: int = 0) -> dict:
-    if target_os not in ("linux", "windows"):
+    if target_os not in ("linux", "windows", "macos"):
         return {"passed": False, "reason": "9B native resource backend/replay pending on this host"}
     exe = ".exe" if target_os == "windows" else ""
     build_root = sdk.parent.parent
@@ -901,19 +921,29 @@ def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env:
     command = [str(build_root / "libcrtweb" / ("crtweb_gpu_resource_test" + exe)), "--require-gpu"]
     if window_frames:
         command += ["--window-frames", str(window_frames)]
-    completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=240)
+    observation = None
+    if target_os == "macos":
+        run_env.pop("DYLD_LIBRARY_PATH", None)
+        completed, observation = run_gpu_program_macos(command, runs, run_env, resource_worker=True)
+    else:
+        completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=240)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     (runs / "stdout.log").write_text(completed.stdout, encoding="utf-8")
     (runs / "stderr.log").write_text(completed.stderr, encoding="utf-8")
     library = build / "lib/libcrtweb.so"
+    if target_os == "macos":
+        library = build / "lib/libcrtweb.dylib"
     if target_os == "windows":
         candidates = sorted((build / "bin").glob("*crtweb.dll")) + sorted((build / "lib").glob("*crtweb.dll"))
         library = candidates[0] if candidates else build / "bin/libcrtweb.dll"
     audit = jsc.host_abi_audit(sdk, prefix, build, [host, library], run_env, target_os)
     evidence = gpu_resource_evidence(completed.stdout + completed.stderr, target_os, window_frames)
     runtime = gpu_browser_map_evidence(completed.stdout, sdk, prefix, build, runs, target_os)
-    return {"passed": completed.returncode == 0 and evidence["verified"] and audit["ok"] and runtime["verified"],
+    if observation is not None:
+        runtime["observation"] = observation
+        runtime["verified"] = runtime["verified"] and observation["verified"]
+    return {"passed": completed.returncode == 0 and evidence["verified"] and audit["ok"] and runtime["verified"] is True,
             "returncode": completed.returncode, "evidence": evidence, "browser_runtime": runtime,
             "host_abi": {"ok": audit["ok"], "violations": audit["violations"]},
             "output": completed.stdout.splitlines()}
@@ -1166,7 +1196,7 @@ def main() -> int:
     parser.add_argument("--gpu-window-frames", type=int, default=0,
                         help="with --run-gpu-tests: also open a real GPU window for 1..300 frames")
     parser.add_argument("--run-gpu-resource-tests", action="store_true",
-                        help="with --webkit: strict independent Tranche 9B GPU resource/worker gate (Linux)")
+                        help="with --webkit: strict independent Tranche 9B GPU resource/worker gate")
     parser.add_argument("--gpu-resource-window-frames", type=int, default=0,
                         help="with --run-gpu-resource-tests: also present 1..300 native GPU frames")
     parser.add_argument("--reuse-tree", action="store_true", help="keep the composed tree and build directory")

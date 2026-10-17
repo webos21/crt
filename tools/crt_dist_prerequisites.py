@@ -164,7 +164,7 @@ _GFX_MEDIA = {
             "id": "macos-metal-runtime",
             "kind": "os-framework",
             "required_for": ["gpu-rendering"],
-            "components": ["Metal.framework"],
+            "components": ["Metal.framework", "IOSurface.framework"],
             "bundled": False,
         },
         {

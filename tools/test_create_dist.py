@@ -2,9 +2,13 @@
 """Focused tests for the SDK scripts tools/create_dist.py writes."""
 
 import shutil
+import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -13,6 +17,45 @@ import create_dist
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLS = {"cc": "clang", "cxx": "clang++", "ar": "llvm-ar", "ranlib": "llvm-ranlib"}
+
+
+class ComponentInstall(unittest.TestCase):
+    @mock.patch.dict(os.environ, {"KEEP_TOOLCHAIN": "yes", "ZERO_AR_DATE": "external"}, clear=True)
+    @mock.patch.object(create_dist.subprocess, "run")
+    def test_macos_install_uses_selected_deterministic_ranlib_without_mutating_parent(self, run):
+        with tempfile.TemporaryDirectory() as directory:
+            sdk = Path(directory); (sdk / "lib").mkdir(); (sdk / "lib/libc.a").touch()
+            create_dist.install_component("cmake", Path("build"), sdk, "crt-c", "macos", "selected-ranlib")
+            self.assertEqual(run.call_args.args[0], ["selected-ranlib", "-D", str(sdk / "lib/libc.a")])
+            self.assertEqual(run.call_count, 2)
+        self.assertEqual(os.environ["ZERO_AR_DATE"], "external")
+        self.assertTrue(run.call_args.kwargs["check"])
+
+    @mock.patch.dict(os.environ, {"KEEP_TOOLCHAIN": "yes"}, clear=True)
+    @mock.patch.object(create_dist.subprocess, "run")
+    def test_other_hosts_keep_their_install_environment(self, run):
+        for host in ("linux", "windows", ""):
+            create_dist.install_component("cmake", Path("build"), Path("sdk"), "crt-c", host)
+            self.assertEqual(run.call_args.args[0][:2], ["cmake", "--install"])
+            self.assertNotIn("env", run.call_args.kwargs)
+
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin ranlib integration")
+    def test_darwin_ranlib_repetition_preserves_full_archive_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "symbol.c").write_text("int archive_symbol(void) { return 42; }\n")
+            subprocess.run(["/usr/bin/clang", "-c", str(root / "symbol.c"), "-o", str(root / "symbol.o")], check=True)
+            subprocess.run(["/usr/bin/ar", "rcs", str(root / "test.a"), str(root / "symbol.o")], check=True)
+            (root / "lib").mkdir(); shutil.copy2(root / "test.a", root / "lib/test.a")
+            members = subprocess.check_output(["/usr/bin/ar", "-p", str(root / "lib/test.a")])
+            create_dist.normalize_macos_archives(root, "/usr/bin/ranlib")
+            before = (root / "lib/test.a").read_bytes()
+            time.sleep(1.1)
+            # A recopy/touch forces Apple's ranlib to rewrite its index.
+            os.utime(root / "lib/test.a", None)
+            create_dist.normalize_macos_archives(root, "/usr/bin/ranlib")
+            self.assertEqual((root / "lib/test.a").read_bytes(), before)
+            self.assertEqual(subprocess.check_output(["/usr/bin/ar", "-p", str(root / "lib/test.a")]), members)
 
 
 def write_sdk(target_os: str, arch: str, triple: str, version="development") -> Path:

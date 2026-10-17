@@ -4,6 +4,10 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -23,6 +27,7 @@ INTERNAL_HEADER_USERS = {
     "libcrtgfx/src/arch/linux/skia_shared_vulkan.cc",  # borrowed device view, no concrete layout
     "libcrtgfx/src/arch/windows/gpu_win32.c",
     "libcrtgfx/src/arch/windows/skia_shared_d3d12.cc",  # borrowed device view + adapter identity hook only
+    "libcrtgfx/src/arch/macos/skia_shared_metal.cc",  # borrowed Metal device/queue only
     "libcrtgfx/src/arch/macos/gpu_metal.c",
 }
 
@@ -143,6 +148,47 @@ class CrtgfxGpuBackendBoundaryTest(unittest.TestCase):
             if DIRECTORY_HAVE_DEFINE_RE.search(text_without_comments):
                 offenders.append(relative(path))
         self.assertEqual(offenders, [])
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("cmake") and shutil.which("ninja"),
+                         "Darwin CMake/Ninja link generation")
+    def test_metal_shared_link_puts_crt_before_framework_reexports(self) -> None:
+        for in_tree in (True, False):
+            with self.subTest(in_tree=in_tree), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory)
+                (source / "dummy.cc").write_text("int dummy;\n")
+                core = "add_library(c_shared SHARED dummy.cc)" if in_tree else ""
+                (source / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.25)
+project(metal_link CXX)
+set(CRT_TARGET_OS macos)
+set(CRTGFX_ENABLE_SKIA ON)
+set(CRTGFX_ENABLE_GPU_BACKEND ON)
+set(CRTGFX_ROOT "{ROOT / 'libcrtgfx'}")
+set(CRTGFX_SKIA_ROOT "{source}")
+set(CMAKE_SYSROOT "{source}/sdk")
+{core}
+add_library(crtgfx_skia_objects OBJECT dummy.cc)
+add_library(crtgfx_gpu_shared SHARED dummy.cc)
+add_library(crtmedia_shared SHARED dummy.cc)
+include("{ROOT / 'libcrtgfx/cmake/crtgfx_skia_targets.cmake'}")
+crt_add_crtgfx_skia_shared_target()
+file(GENERATE OUTPUT "${{CMAKE_BINARY_DIR}}/early-core.txt"
+  CONTENT "$<TARGET_PROPERTY:crtgfx_skia_shared,LINK_OPTIONS>")
+''')
+                build = source / "build"
+                result = subprocess.run(["cmake", "-S", str(source), "-B", str(build), "-G", "Ninja"],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                early = (build / "early-core.txt").read_text().split(";")[0]
+                if in_tree:
+                    self.assertEqual(Path(early).parent, build)
+                    self.assertIn("c_shared", Path(early).name)
+                else:
+                    self.assertEqual(early, f"{source}/sdk/lib/libc.dylib")
+                commands = subprocess.check_output(["ninja", "-C", str(build), "-t", "commands",
+                                                    "crtgfx_skia_shared"], text=True)
+                link = next(line for line in commands.splitlines() if "-framework Foundation" in line)
+                provider = "libc_shared" if in_tree else "/sdk/lib/libc.dylib"
+                self.assertLess(link.index(provider), link.index("-framework Foundation"))
 
 
 if __name__ == "__main__":

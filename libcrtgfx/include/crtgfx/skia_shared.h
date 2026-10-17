@@ -2,8 +2,8 @@
 
 /* Optional Ganesh shared-resource companion (Web Tranche 9B). No native GPU
  * pointer or Skia object crosses IPC. Metadata is fixed-width; handles are CRT
- * descriptors, not public Vulkan types. Initial implementation: Vulkan opaque
- * FD, BGRA8 optimal-tiled dedicated allocation, same device AND driver UUID.
+ * descriptors, not public native SDK types. Each allocation is BGRA8 and
+ * requires the same device AND driver identity on both sides.
  */
 #include "crtgfx/skia.h"
 #include "crtgfx/shared_image.h"
@@ -21,10 +21,15 @@ inline bool crtgfx_shared_image_desc_valid(const crtgfx_shared_image_desc& d) {
 }
 
 /* One UI/GPU-owner thread. The context must be created from the supplied device.
+ * One allocation has one producer/consumer pair, starting at read epoch one.
+ * Reconnecting a consumer requires a new allocation, not a late join to epochs.
  * D3D12 epochs are the monotonic values of the two shared fences: a consumer
  * waits for ready >= its read count + 1, a producer for release >= its write
  * count; a stale signal cannot satisfy a later epoch. Resources are left in the
  * COMMON state when ownership moves.
+ * Metal uses two monotonic MTLSharedEvents and same-queue native command
+ * buffers for GPU wait/signal. A CPU wait observes the actual event before
+ * enqueueing a GPU wait; no CPU ACK or callback grants ownership.
  * device and context must outlive the image and every
  * returned Skia reference. Producer/consumer never access a resource together.
  * CPU ACKs pace frames only: each reuse waits on a real imported VkFence, then
@@ -39,8 +44,10 @@ class crtgfx_skia_shared_image {
   /* New owned FDs, crtgfx_shared_image_handle_count(description()) of them (the
    * rest of the array is set to -1). Vulkan: memory, ready semaphore, release
    * semaphore, ready fence, release fence. D3D12: resource, ready fence, release
-   * fence (NT handles adopted as CRT descriptors). Caller closes them. Import
-   * borrows/duplicates its inputs. */
+   * fence (NT handles adopted as CRT descriptors). Metal: metadata and a lease
+   * socket for a bounded Mach-reference transfer (exporter lives until import).
+   * Caller closes them. Import borrows/duplicates its inputs. Imported Metal
+   * images/events have independent kernel ownership after the lease closes. */
   virtual crtgfx_result export_handles(int out_fds[CRTGFX_SHARED_IMAGE_HANDLE_COUNT]) = 0;
   virtual crtgfx_result begin_write(GrDirectContext*, uint32_t timeout_ms, sk_sp<SkSurface>*) = 0;
   virtual crtgfx_result end_write(GrDirectContext*, SkSurface*) = 0;

@@ -43,11 +43,24 @@ def copy_base(source: Path | None, destination: Path) -> None:
         destination.mkdir(parents=True)
 
 
-def install_component(cmake: str, build_dir: Path, destination: Path, component: str) -> None:
+def normalize_macos_archives(destination: Path, ranlib: str) -> None:
+    for archive in sorted((destination / "lib").glob("*.a")):
+        subprocess.run([ranlib, "-D", str(archive)], check=True)
+
+
+def install_component(cmake: str, build_dir: Path, destination: Path, component: str,
+                      target_os: str = "", ranlib: str = "ranlib") -> None:
+    # CMake's Darwin install script runs ranlib after copying each archive.
+    # Its symbol-table timestamp must not invalidate an otherwise unchanged
+    # predecessor SDK on every consumer build. Preserve full byte hashing.
     subprocess.run(
         [cmake, "--install", str(build_dir), "--prefix", str(destination), "--component", component],
         check=True,
     )
+    if target_os == "macos":
+        # Apple's install-time ranlib does not honor ZERO_AR_DATE reliably
+        # when CMake recopies the archive. -D explicitly normalizes metadata.
+        normalize_macos_archives(destination, ranlib)
 
 
 def copy_libcxx(install: Path, destination: Path, target_os: str) -> None:
@@ -581,7 +594,7 @@ def main() -> None:
     for relative in ("tmp", "data/local", "data/local/tmp"):
         (destination / relative).mkdir(parents=True, exist_ok=True)
     for component in args.component:
-        install_component(args.cmake, build_dir, destination, component)
+        install_component(args.cmake, build_dir, destination, component, args.target_os, args.ranlib or "ranlib")
     if args.libcxx_install:
         copy_libcxx(args.libcxx_install.resolve(), destination, args.target_os)
     copy_port_tools(args.port_prefix.resolve() if args.port_prefix else None, destination)

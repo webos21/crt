@@ -10,7 +10,13 @@
  *    fence, release fence). A D3D12 fence is both the GPU wait and the CPU wait
  *    and counts epochs monotonically, so no second object per direction exists.
  *    device_uuid is the adapter LUID + vendor + device id, driver_uuid the user-
- *    mode driver version + subsystem id + revision; memory_type stays 0. */
+ *    mode driver version + subsystem id + revision; memory_type stays 0.
+ *  - Metal, MACH_CAPABILITY: IOSurface BGRA8 plus two native MTLSharedEvents.
+ *    Two descriptors (repeatable capability metadata, reference lease) redeem
+ *    three independent Mach send rights from the exporting task. No raw port
+ *    name, pointer, pixel data or CPU fence is carried in this descriptor.
+ *    device_uuid uses the registry ID, driver_uuid the OS driver generation;
+ *    memory_type stays 0. The exporter must live until import completes. */
 #include "crtgfx/gpu.h"
 #include <stdint.h>
 
@@ -18,10 +24,12 @@
 #define CRTGFX_SHARED_IMAGE_BGRA8 1u
 #define CRTGFX_SHARED_IMAGE_OPAQUE_FD 1u
 #define CRTGFX_SHARED_IMAGE_NT_HANDLE 2u
+#define CRTGFX_SHARED_IMAGE_MACH_CAPABILITY 3u
 /* The most any backend transfers (array size); a descriptor's own count is
  * crtgfx_shared_image_handle_count(). */
 #define CRTGFX_SHARED_IMAGE_HANDLE_COUNT 5u
 #define CRTGFX_SHARED_IMAGE_D3D12_HANDLE_COUNT 3u
+#define CRTGFX_SHARED_IMAGE_METAL_HANDLE_COUNT 2u
 #define CRTGFX_SHARED_IMAGE_MAX_EXTENT 8192u
 
 typedef struct crtgfx_shared_image_desc {
@@ -38,12 +46,14 @@ static inline unsigned crtgfx_shared_image_handle_count(const crtgfx_shared_imag
     return CRTGFX_SHARED_IMAGE_HANDLE_COUNT;
   if (d->backend == CRTGFX_GPU_BACKEND_D3D12 && d->handle_kind == CRTGFX_SHARED_IMAGE_NT_HANDLE)
     return CRTGFX_SHARED_IMAGE_D3D12_HANDLE_COUNT;
+  if (d->backend == CRTGFX_GPU_BACKEND_METAL && d->handle_kind == CRTGFX_SHARED_IMAGE_MACH_CAPABILITY)
+    return CRTGFX_SHARED_IMAGE_METAL_HANDLE_COUNT;
   return 0;
 }
 
 static inline int crtgfx_shared_image_descriptor_valid(const crtgfx_shared_image_desc* d) {
   return d && d->version == CRTGFX_SHARED_IMAGE_VERSION && crtgfx_shared_image_handle_count(d)
-      && (d->backend != CRTGFX_GPU_BACKEND_D3D12 || !d->memory_type) && d->format == CRTGFX_SHARED_IMAGE_BGRA8
+      && (d->backend == CRTGFX_GPU_BACKEND_VULKAN || !d->memory_type) && d->format == CRTGFX_SHARED_IMAGE_BGRA8
       && d->width && d->height && d->width <= CRTGFX_SHARED_IMAGE_MAX_EXTENT
       && d->height <= CRTGFX_SHARED_IMAGE_MAX_EXTENT && d->memory_type < 32 && !d->reserved
       && d->allocation_size >= (uint64_t)d->width * d->height * 4

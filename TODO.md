@@ -144,13 +144,17 @@ uses the host replay order stated below and in the acceptance document.
     * [x] Linux/x86_64 Vulkan baseline.
     * [x] Windows/x64 D3D12 replay, CPU WebView/wire/lifecycle regressions and native Host ABI audit.
     * [x] macOS/arm64 Metal replay, CPU WebView/B7 regressions and native browser Host ABI evidence.
-  * [ ] **9B GPU resources:** separately negotiated shared/zero-copy GPU-buffer import,
-    actual GPU synchronization and producer/GPUProcess ownership; no private Skia ABI across IPC.
+  * [x] **9B GPU resources:** separately negotiated shared/zero-copy GPU-buffer import,
+    actual GPU synchronization and owned worker/consumer lifetimes; no private Skia ABI across IPC.
     * [x] Linux Vulkan resource channel, CRT GPU worker, native ready/release synchronization and strict replay.
     * [x] Windows D3D12 shared texture + shared-fence backend, NT handles as CRT descriptors, strict replay (offscreen 3/3, window 3/3).
-    * [ ] macOS Metal shared-resource backend and native replay.
+    * [x] macOS Metal IOSurface/shared-event backend, capability/lease transport and
+      strict native replay; static/shared PAL and evidence are in Web acceptance.
   * [ ] **9C closure:** device/process loss, bounded resource reuse and three-host replay.
     Sharing one Skia context is not an initial gate. Evidence stays in Web acceptance.
+  * [ ] **Replay follow-up:** investigate macOS B7's intermittent pre-exec
+    `__crt_seqpacket_export_env()` / allocator crash; retained failure and repeat
+    evidence belong to Web acceptance's macOS 9B availability replay.
 * [ ] **10. Distribution and security closure.**
   * [ ] Build `06-web` in isolation from the installed `05-ui` SDK and add the
     stage-source/prerequisite manifests.
