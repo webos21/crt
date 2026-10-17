@@ -11,6 +11,39 @@ substantive update.
 
 ## 2026-10-17
 
+### Web Tranche 9C: Linux owned-worker loss/recovery and complete lifetimes
+
+Confirmed the separate CRT GPU worker as the product GPU-process boundary;
+upstream GPUProcess/accelerated WebCore is not claimed. Added lost-context
+image/ACK rejection, BYE plus bounded transfer-FD draining without new imports,
+and explicit fresh-session recovery. Worker EOF retires its pool; browser
+ownership is discharged before GPU drains, and Web-process loss reloads with a
+retry/deadline bound. Device teardown stays after borrowed-resource/context
+destruction, not under live native handles.
+
+The independent strict 9C mode passes Linux **3/3**, each with twenty measured
+complete lifetimes, seven fault-policy warm-ups and final fresh pixels. RSS is
+**+20/+20/+20 KiB**, thread/fd deltas zero; descendant cleanup and native Host
+ABI/mapping audits pass with unchanged tested artifacts. Added deterministic
+unread-native-transfer cleanup and fail-closed evidence tests. CPU WebView,
+9A/9B native-window, PAL/wire/SurfaceView and SDK verification regressions pass.
+The initial interleaved map-log failure is preserved, not counted as acceptance.
+Detailed bounds, the controlled-loss (not physical-reset) distinction and
+native replay entry belong to
+[Linux 9C acceptance](docs/acceptance/crtweb_acceptance.md#9c-owned-worker-lifecycle-linux-implementationreplay-2026-10-17).
+Windows/macOS must replay the new 9C mode; global 9C/Tranche 9 remains open.
+`STATUS.md` and the public C/v1 wire contracts are unchanged.
+
+### Linux native fork/spawn heap-snapshot replay
+
+Replayed the synchronized native-COW allocator guard from `71f79c9` on
+Linux/x86_64. Fresh configure/build, the deterministic real-allocator regression
+**10/10**, and the full C-stage **138/138** pass. No Linux fix, public ABI or
+Windows memory-copy fork change was needed. This closes the separate queued
+Linux replay, not the three-host GPU-worker lifecycle gate. Evidence and
+reproduction belong to
+[Linux fork replay](docs/acceptance/crtweb_acceptance.md#linux-native-forkspawn-replay-2026-10-17).
+
 ### macOS B7 follow-up: stabilize the native fork/spawn heap snapshot
 
 The retained October 16 spawn-child crash points at the allocator free-list
@@ -35,7 +68,8 @@ and descriptors **+0**, at most two children. Every run passes native
 UI/Web/Network mapping and static Host ABI audits. SDK `01-c`..`05-ui`
 regeneration/verification pass; WebKit's malloc/free/realloc/calloc/spawn
 bindings point to CRT libc. Linux/Windows x86_64/aarch64 syntax checks pass,
-not native execution. Linux runtime replay remains in `TODO.md`.
+not native execution. Linux runtime replay was still queued at that checkpoint;
+the completed replay is recorded above.
 
 The deterministic fixture exposes the missing synchronization, not the exact
 historical invalid-pointer instruction; the 300 clean B7 lifetimes are bounded

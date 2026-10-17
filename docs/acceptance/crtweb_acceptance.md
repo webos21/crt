@@ -21,7 +21,7 @@ GTK/WPE, PlayStation, Windows, JSCOnly), so a CRT port fits its architecture.
                  WebKit
   +--------------------------------------+
   | WTF  JavaScriptCore  WebCore  WebKit |
-  | WebProcess  NetworkProcess  GPUProcess |
+  |     WebProcess  NetworkProcess        |
   +------------------+-------------------+
                      |
                 PlatformCRT
@@ -35,6 +35,9 @@ GTK/WPE, PlayStation, Windows, JSCOnly), so a CRT port fits its architecture.
 
 Application code sees only `libcrtweb` and the `crtui` WebView; no WebKit, WPE,
 or GLib type appears in a public header.
+The GPU-resource process is the separate CRT-owned `crtweb_gpu_worker`, not
+WebKit's upstream GPUProcess; the adopted lifecycle boundary is defined in
+[the 9C policy](../design/libcrtweb_api_policy.md#owned-gpu-process-lifecycle-tranche-9c).
 
 ## Scope
 
@@ -2886,8 +2889,10 @@ Keep three boundaries separate:
    resize while resources are outstanding, delayed/closed consumers and bounded
    repeated resource lifetimes. Replay the accepted path and relevant existing
    lifecycle/Host ABI gates on macOS/arm64 and Windows/x64 after Linux. The
-   GPUProcess part deferred by Tranche 5 remains required, not fulfilled by an
-   application-side GPU target.
+   deferred GPU-process lifetime gate is the CRT-owned worker selected in 9B,
+   explicitly confirmed on 2026-10-17. An application-side GPU target alone
+   does not fulfill it. Upstream GPUProcess activation/accelerated WebCore is
+   not claimed or required by this owned-worker boundary.
 
 Public ownership/completion policy belongs to
 [GPU final composition](../design/libcrtweb_api_policy.md#gpu-final-composition-tranche-9a).
@@ -3708,6 +3713,113 @@ For the real B7 observer, reuse the documented WebKit driver with
 records three focused `run_lifecycle_gate(..., "macos")` runs without
 republishing dependencies between them. Tranche **9C** and `06-web` packaging
 remain open; `STATUS.md` is intentionally unchanged.
+
+#### Linux native fork/spawn replay (2026-10-17)
+
+Replayed the `71f79c9` native-COW guard on Linux/x86_64 with a fresh
+`linux-host-ninja-debug` configure and rebuilt C runtime/tests. The deterministic
+real-allocator `fork_heap_snapshot_test` passes **10/10** (`2.01 s` per run),
+including exclusion of the held heap critical section, child allocation,
+allocating atfork callbacks, spawn callback suppression and socket inheritance
+after `dup2` actions. The full C-stage passes **138/138**. No fix, public ABI or
+Windows memory-copy fork change was needed on this host.
+
+Evidence: `out/web-crt-webcore/tranche9c-20261017/{configure,fork-core-build,fork-repeat,core-ctest}.log`.
+The subsequent fresh graphics build publishes/verifies the cumulative SDKs,
+so real GPU-worker/browser spawn replays use the updated CRT runtime as well.
+This closes the Linux native-fork replay item; it is not evidence of Windows
+native-COW behavior or a replacement for native 9C host replay.
+
+#### 9C owned-worker lifecycle: Linux implementation/replay (2026-10-17)
+
+The GPU-process boundary is explicitly the separate CRT-owned worker, confirmed
+2026-10-17. This resolves the earlier deferred GPUProcess terminology: it does
+not enable upstream WebKit GPUProcess, accelerated WebCore, WebGL or WebGPU.
+The earlier 9A/9B checkpoints retain their then-open wording; the current
+[lifecycle policy](../design/libcrtweb_api_policy.md#owned-gpu-process-lifecycle-tranche-9c)
+owns shutdown, recovery and context/device ordering. Browser -> worker is still
+CPU upload, and only worker -> app is shared GPU memory.
+
+`crtweb_gpu_resource_test --lifecycle --require-gpu` adds an independent strict
+9C program mode, not a rename of 9B success. It warms seven policies, measures
+twenty complete worker/resource lifetimes in one application process, and
+proves one more fresh session after the final controlled loss (**28 sessions**
+per run). Coverage includes normal exit, abrupt consumer disconnect, exact
+owned-worker SIGKILL, owned Host SIGKILL, Web-process SIGKILL/reload, controlled
+application context loss and native owner teardown/recreation, and resize while
+the consumer retains an old image. A deterministic native-transfer fixture
+prequeues three real resource announcements (**15 received Vulkan FDs**), then
+proves BYE, no imports, all transfer references closed and bounded native
+handle/lease-thread cleanup. It does not race a timed browser resize to guess
+whether handles were queued.
+
+Peer/worker/Host loss preserves independently imported, readable last GPU
+pixels on a healthy application context. Web-process loss changes a magenta
+page back to fresh green pixels through an actual replacement process. A lost
+context exposes no GPU image or ACK; all targets/imports and the context are
+dropped before the existing backend-owned destructive device hook is invoked.
+The next device/context/worker then produces real pixels again. This is
+**controlled context abandonment plus native owner teardown/recreation**, not
+a physical GPU reset or proof that arbitrary hung-driver calls are interruptible.
+The old allocations/epochs are never adopted by a replacement session.
+
+Linux/x86_64 strict replay is **3/3**, each **20/20** measured lifetimes plus
+warm-up/final recovery (84 worker sessions in the three runs). RSS delta is
+**+20/+20/+20 KiB**, thread and fd deltas **0** throughout; bounds remain
++24 MiB / +2 threads / +2 descriptors after warm-up. Complete per-case elapsed
+times are **200..951 ms** across these runs. Every observed Host/Web/Network
+descendant is gone/reaped, no worker remains between sessions, static Host ABI
+audits pass and each runtime-map audit records **103** file/role mappings with
+no violations. Browser roles still load only CRT GL stubs, not native GPU
+clients. SHA-256 records confirm the tested worker/consumer/browser/runtime
+artifacts do not change between replays.
+
+Fresh GPU-ON configure/build publishes and verifies SDKs `01-c`..`05-ui` with
+the synchronized native-fork runtime. The unchanged previously accepted browser
+binaries run against that SDK; no fresh full WebKit rebuild is claimed. CPU
+WebView's twenty-cycle lifecycle, strict 9A/9B native-window regressions (5/5
+frames each), native shared-image/wire/SurfaceView CTests **5/5**, licensing and
+patch-manifest checks also pass. Missing prerequisites remain a CTest **skip**,
+not 9C acceptance. The new strict parser requires every case/coverage/resource
+record and rejects 9B-only output, skipped/fallback evidence, incomplete fault
+coverage, excess resources/time and a falsely labelled physical reset.
+
+The initial runtime cases passed but the browser-map audit correctly rejected
+a shutdown log interleaved with an unfinished stdout map line. The final test
+flushes complete map records before teardown. That failed audit remains in
+`initial/combined.log`; `driver/` is the successful pre-queued-transfer-check
+checkpoint, not the final strengthened fixture. Final evidence under
+`out/web-crt-webcore/tranche9c-20261017/`: `build.log` / `build-final.log`,
+`replay.py` / `replay.log` / `replay.json`, `replay-{1,2,3}/{stdout,stderr}.log`
+and `result.json`, `driver-final.log` /
+`driver-final/acceptance-gpu-lifecycle.json`, `regression-{cpu,9a,9b}/`,
+`regression-audits.json`, `focused-ctest.log`, `skip-ctest.log`, `verify-sdk.log`.
+The generated replay harness uses the checked-in strict parser, browser-map
+and Host ABI audits rather than replacing them.
+
+**Remaining closure:** Windows/x64 and macOS/arm64 must run this new 9C mode
+and their relevant CPU/9A/9B/native Host ABI regressions. Their accepted 9B
+resource backends and earlier 9A device/process tests do not substitute for the
+new complete-lifetime/fault replay. Linux 9C is accepted; global 9C and Tranche 9
+remain open until both native replays are recorded. No packaged `06-web` or
+security closure is implied.
+
+Native replay entry after publishing the host's fresh `05-ui` SDK:
+
+```sh
+python3 tools/build_webkit_crt_port.py \
+  --sdk-root <host-build>/dist/05-ui --deps-prefix <web-deps-prefix> \
+  --work-root <existing-webkit-work> --webkit --reuse-tree \
+  --run-gpu-lifecycle-tests
+```
+
+This independent gate does not open camera/audio devices. It rebuilds the
+current worker/consumer and writes `acceptance-gpu-lifecycle.json`. macOS uses
+the native parent/name-checked vmmap checkpoint, with time for the fault warm-up;
+Windows uses the existing native process/module observations. Repeat the native
+gate three times without changing artifacts and retain all results. The CTest
+entry is `crtweb_gpu_lifecycle_test_runs` (300-second outer timeout), with the
+driver supplying `CRTWEB_HOST`, `CRTWEB_GPU_WORKER`, fonts and native observers.
 
 ### 10. Distribution and security closure
 

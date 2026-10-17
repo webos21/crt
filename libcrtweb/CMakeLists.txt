@@ -157,5 +157,9 @@ if(TARGET crtui_skia AND TARGET crtgfx_skia AND
     set_tests_properties(crtweb_gpu_resource_test_runs PROPERTIES
       WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" SKIP_RETURN_CODE 77 TIMEOUT 240)
     set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtweb_gpu_resource_test_runs)
+    add_test(NAME crtweb_gpu_lifecycle_test_runs COMMAND crtweb_gpu_resource_test --lifecycle)
+    set_tests_properties(crtweb_gpu_lifecycle_test_runs PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" SKIP_RETURN_CODE 77 TIMEOUT 300)
+    set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtweb_gpu_lifecycle_test_runs)
   endif()
 endif()

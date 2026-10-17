@@ -12,6 +12,7 @@
 #include "crtui/skia.h"
 #include "include/gpu/ganesh/GrDirectContext.h"
 #include <array>
+#include <chrono>
 #include <poll.h>
 #include <string>
 
@@ -22,13 +23,37 @@ class GpuSurfaceClient {
       : fd_(fd), device_(device), context_(context) {}
   GpuSurfaceClient(const GpuSurfaceClient&) = delete;
   GpuSurfaceClient& operator=(const GpuSurfaceClient&) = delete;
-  ~GpuSurfaceClient() {
-    retire_current();
-    if (!closed_) send(crtweb_gpu_message(CRTWEB_GPU_BYE));
+  ~GpuSurfaceClient() { shutdown(); }
+
+  /* Stop the owned channel, draining transfer descriptors without importing
+   * new images. This is essential on Windows, where SCM_RIGHTS duplicates a
+   * handle into the receiver before its record is read. The process owner
+   * still waits/reaps the worker separately. No reconnect reuses this pool.
+   * A lost context cannot acknowledge/release GPU work; BYE retires the whole
+   * session instead. A timeout is a failed shutdown, not a completion signal. */
+  bool shutdown(uint32_t timeout_ms = 6000) {
+    if (fd_ < 0) return shutdown_complete_;
+    bool lost = !context_ || context_->abandoned();
+    bool retired = retire_current();
+    if (!peer_eof_) crtweb_gpu_send(fd_, &bye_packet(), nullptr, 0);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (!peer_eof_ && std::chrono::steady_clock::now() < deadline) {
+      struct pollfd ready {fd_, POLLIN, 0};
+      int result = ::poll(&ready, 1, 10);
+      if (result < 0 && errno != EINTR) break;
+      if (result <= 0) continue;
+      crtweb_gpu_packet packet; int handles[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
+      int got = crtweb_gpu_recv(fd_, &packet, handles);
+      crtweb_gpu_close_handles(handles);
+      if (got == 1 && packet.type == CRTWEB_GPU_BUFFER_ADD) ++discarded_imports_;
+      if (!got || (got < 0 && errno != EPROTO)) peer_eof_ = true;
+    }
     image_.reset();
-    if (context_ && !context_->abandoned()) context_->flushAndSubmit(GrSyncCpu::kYes);
-    for (auto& buffer : buffers_) buffer.resource.reset();
-    if (fd_ >= 0) close(fd_);
+    if (!lost) context_->flushAndSubmit(GrSyncCpu::kYes);
+    for (auto& buffer : buffers_) buffer = Buffer();
+    close(fd_); fd_ = -1; closed_ = true;
+    shutdown_complete_ = peer_eof_ && (retired || lost);
+    return shutdown_complete_;
   }
 
   bool handshake(uint32_t width, uint32_t height, bool require_shared, int timeout_ms = 10000) {
@@ -40,6 +65,7 @@ class GpuSurfaceClient {
     return mode_ == CRTWEB_GPU_MODE_SHARED || (!require_shared && mode_ == CRTWEB_GPU_MODE_CPU);
   }
   bool poll(int timeout_ms = 0) {
+    if (!gpu_usable()) return false;
     bool any = false;
     while (!closed_) {
       struct pollfd pfd {fd_, POLLIN, 0};
@@ -48,7 +74,7 @@ class GpuSurfaceClient {
       crtweb_gpu_packet packet;
       int handles[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
       int received = crtweb_gpu_recv(fd_, &packet, handles);
-      if (received <= 0) { closed_ = true; break; }
+      if (received <= 0) { closed_ = true; peer_eof_ = received == 0; break; }
       bool ok = handle(packet, handles);
       crtweb_gpu_close_handles(handles);
       any = true;
@@ -58,18 +84,21 @@ class GpuSurfaceClient {
   }
   uint32_t mode() const { return mode_; }
   bool closed() const { return closed_; }
-  bool has_frame() const { return image_ != nullptr; }
+  bool gpu_lost() const { return gpu_lost_; }
+  bool has_frame() const { return image_ != nullptr && context_ && !context_->abandoned(); }
   uint64_t frame_serial() const { return serial_; }
   uint32_t frame_width() const { return width_; }
   uint32_t frame_height() const { return height_; }
   uint32_t generation() const { return generation_; }
   uint32_t imports() const { return imports_; }
   uint32_t releases() const { return releases_; }
+  uint32_t discarded_imports() const { return discarded_imports_; }
   uint32_t live_buffers() const {
     uint32_t count = 0; for (const auto& b : buffers_) if (b.resource) ++count; return count;
   }
   crtui_skia_surface_provider surface_provider() { return {this, acquire, release}; }
   bool frame_presented() {
+    if (!gpu_usable()) return false;
     if (!current_ || serial_ == acked_) return true;
     auto ack = crtweb_gpu_message(CRTWEB_GPU_ACK);
     ack.serial = serial_; ack.generation = generation_; ack.buffer_id = current_;
@@ -98,8 +127,18 @@ class GpuSurfaceClient {
     std::unique_ptr<crtgfx_skia_shared_image> resource;
   };
   bool send(const crtweb_gpu_packet& packet) {
-    if (closed_ || crtweb_gpu_send(fd_, &packet, nullptr, 0) != 0) { closed_ = true; return false; }
+    if (!gpu_usable() || closed_ || crtweb_gpu_send(fd_, &packet, nullptr, 0) != 0) { closed_ = true; return false; }
     return true;
+  }
+  static const crtweb_gpu_packet& bye_packet() {
+    static const auto bye = crtweb_gpu_message(CRTWEB_GPU_BYE);
+    return bye;
+  }
+  bool gpu_usable() {
+    if (context_ && !context_->abandoned()) return true;
+    gpu_lost_ = closed_ = true;
+    image_.reset();
+    return false;
   }
   bool retire_current() {
     if (!current_) return true;
@@ -160,7 +199,7 @@ class GpuSurfaceClient {
   }
   static SkImage* acquire(void* user, const crtui_surface_layer*) {
     auto* self = static_cast<GpuSurfaceClient*>(user);
-    if (!self->image_) return nullptr;
+    if (!self->gpu_usable() || !self->image_) return nullptr;
     self->image_->ref(); return self->image_.get();
   }
   static void release(void*, const crtui_surface_layer*, SkImage* image) { image->unref(); }
@@ -170,6 +209,8 @@ class GpuSurfaceClient {
   std::array<Buffer, CRTWEB_GPU_MAX_BUFFERS> buffers_;
   sk_sp<SkImage> image_;
   bool configured_ = false, closed_ = false;
+  bool peer_eof_ = false, gpu_lost_ = false, shutdown_complete_ = false;
+  uint32_t discarded_imports_ = 0;
   uint32_t mode_ = 0, current_ = 0, generation_ = 0, width_ = 0, height_ = 0, imports_ = 0, releases_ = 0;
   uint64_t serial_ = 0, acked_ = 0;
 };

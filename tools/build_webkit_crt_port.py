@@ -744,7 +744,8 @@ def macos_gpu_resource_map_checkpoint(text: str, consumer_pid: int) -> tuple | N
     return worker_pid, records
 
 
-def run_gpu_program_macos(command: list, runs: Path, env: dict, resource_worker: bool = False) -> tuple:
+def run_gpu_program_macos(command: list, runs: Path, env: dict, resource_worker: bool = False,
+                          checkpoint_timeout: int = 60) -> tuple:
     """Hold the browser at the post-update checkpoint while the host samples its real mappings."""
     mapped = []
     observation = {"verified": False, "reason": "missing or invalid browser map checkpoint"}
@@ -754,7 +755,7 @@ def run_gpu_program_macos(command: list, runs: Path, env: dict, resource_worker:
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             ready = Path(directory) / "ready"
-            deadline = time.monotonic() + 60
+            deadline = time.monotonic() + checkpoint_timeout
             while process.poll() is None and time.monotonic() < deadline:
                 if ready.exists():
                     text = ready.read_text(encoding="utf-8")
@@ -798,7 +799,7 @@ def run_gpu_program_macos(command: list, runs: Path, env: dict, resource_worker:
         finally:
             (Path(directory) / "release").touch()
             try:
-                stdout, stderr = process.communicate(timeout=240)
+                stdout, stderr = process.communicate(timeout=300 if "--lifecycle" in command else 240)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.communicate()
@@ -892,21 +893,49 @@ def gpu_resource_evidence(text: str, target_os: str, window_frames: int = 0) -> 
             "window_frames": window_frames, "shared_segment": "GPU worker -> application only"}
 
 
+def gpu_lifecycle_evidence(text: str, target_os: str) -> dict:
+    backends = {"linux": "3", "windows": "1", "macos": "2"}
+    summaries = re.findall(r"^crtweb_gpu_lifecycle_test: ok (.+)$", text, re.M)
+    fields = dict(re.findall(r"(\w+)=([^ ]+)", summaries[0])) if len(summaries) == 1 else {}
+    required = dict(backend=backends.get(target_os, ""), cycles="20",
+                    device_loss="controlled-context-and-owner", worker_loss="pass", browser_loss="pass",
+                    disconnect="pass", held_resize="pass", recovery="pass", cleanup="pass")
+    expected = {"normal": 3, "consumer-disconnect": 3, "worker-kill": 3, "host-kill": 3,
+                "web-kill": 3, "context-loss": 3, "held-resize": 2}
+    coverage = re.findall(r"^crtweb_gpu_lifecycle_test: coverage=([\w-]+) count=(\d+)$", text, re.M)
+    coverage_ok = len(coverage) == 7 and {k: int(v) for k, v in coverage} == expected
+    cases = re.findall(r"^crtweb_gpu_lifecycle_test: case=([\w-]+) result=(\w+) elapsed_ms=(\d+)$", text, re.M)
+    actual = {name: sum(c[0] == name for c in cases) for name in expected}
+    # Warm every exit policy once, twenty measured lifetimes, then prove fresh
+    # pixels once more after the last controlled device loss.
+    totals = {name: count + 1 + (name == "normal") for name, count in expected.items()}
+    cases_ok = len(cases) == 28 and actual == totals and all(c[1] == "pass" and int(c[2]) <= 30000 for c in cases)
+    stats = re.findall(r"^crtweb_gpu_lifecycle_test: cycles=20 rss=([+-]?\d+) KiB threads=([+-]?\d+) descriptors=([+-]?\d+)$", text, re.M)
+    bounded = len(stats) == 1 and all(int(v) <= limit for v, limit in zip(stats[0], (24 * 1024, 2, 2)))
+    transfers = text.count("crtweb_gpu_lifecycle_test: queued_transfers=3 imported=0 cleanup=pass\n") == 1
+    # A deliberately killed Host makes its worker exit nonzero. That expected
+    # worker diagnostic is not accepted as a failed lifecycle assertion.
+    failed = re.search(r"crtweb_gpu_(?:resource|lifecycle)_test: FAILED|result=fail|skipped|fallback", text)
+    verified = (target_os in backends and len(summaries) == 1 and all(fields.get(k) == v for k, v in required.items())
+                and coverage_ok and cases_ok and bounded and transfers and not failed)
+    return {"verified": bool(verified), "fields": fields, "coverage": coverage, "cases": cases,
+            "resources": stats, "device_loss": "controlled context abandonment + owner teardown/recreation, not physical reset"}
+
+
 def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env: dict,
-                          target_os: str = "linux", window_frames: int = 0) -> dict:
+                          target_os: str = "linux", window_frames: int = 0, lifecycle: bool = False) -> dict:
     if target_os not in ("linux", "windows", "macos"):
         return {"passed": False, "reason": "9B native resource backend/replay pending on this host"}
     exe = ".exe" if target_os == "windows" else ""
     build_root = sdk.parent.parent
-    # Skia objects first, alone: they read dist/02-cxx while the dist publisher can rewrite it; the CMake
-    # dependency now orders them, this keeps an older build tree from racing.
-    for target in ("crtgfx_skia_objects", "crtui_skia", "crtgfx_skia"):
-        subprocess.run(["cmake", "--build", str(build_root), "--target", target], env=dict(os.environ), check=False)
+    # Current CMake orders both Skia objects and consumers after the SDK
+    # publisher. One build preserves that ordering without republishing the
+    # entire predecessor SDK separately for each archive.
     built = subprocess.run(["cmake", "--build", str(build_root), "--target", "crtweb_gpu_resource_test"],
                            env=dict(os.environ), check=False)
     if built.returncode:
         return {"passed": False, "reason": "could not build GPU worker/resource consumer"}
-    runs = work / "gpu-resource-run"
+    runs = work / ("gpu-lifecycle-run" if lifecycle else "gpu-resource-run")
     runs.mkdir(exist_ok=True)
     (runs / "fonts.conf").write_text(font_configuration(str(ROOT / "libcrtgfx/assets/fonts"),
                                                        str(runs / "fontcache")), encoding="utf-8")
@@ -919,14 +948,17 @@ def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env:
     run_env["CRTWEB_HOST"] = str(host)
     run_env["CRTWEB_GPU_WORKER"] = str(build_root / "libcrtweb" / ("crtweb_gpu_worker" + exe))
     command = [str(build_root / "libcrtweb" / ("crtweb_gpu_resource_test" + exe)), "--require-gpu"]
+    if lifecycle:
+        command += ["--lifecycle"]
     if window_frames:
         command += ["--window-frames", str(window_frames)]
     observation = None
     if target_os == "macos":
         run_env.pop("DYLD_LIBRARY_PATH", None)
-        completed, observation = run_gpu_program_macos(command, runs, run_env, resource_worker=True)
+        completed, observation = run_gpu_program_macos(command, runs, run_env, resource_worker=True,
+                                                      checkpoint_timeout=180 if lifecycle else 60)
     else:
-        completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=240)
+        completed = subprocess.run(command, cwd=runs, env=run_env, capture_output=True, text=True, timeout=300 if lifecycle else 240)
     print(completed.stdout, end="")
     print(completed.stderr, end="", file=sys.stderr)
     (runs / "stdout.log").write_text(completed.stdout, encoding="utf-8")
@@ -938,7 +970,8 @@ def run_gpu_resource_gate(build: Path, sdk: Path, prefix: Path, work: Path, env:
         candidates = sorted((build / "bin").glob("*crtweb.dll")) + sorted((build / "lib").glob("*crtweb.dll"))
         library = candidates[0] if candidates else build / "bin/libcrtweb.dll"
     audit = jsc.host_abi_audit(sdk, prefix, build, [host, library], run_env, target_os)
-    evidence = gpu_resource_evidence(completed.stdout + completed.stderr, target_os, window_frames)
+    evidence = (gpu_lifecycle_evidence(completed.stdout + completed.stderr, target_os) if lifecycle else
+                gpu_resource_evidence(completed.stdout + completed.stderr, target_os, window_frames))
     runtime = gpu_browser_map_evidence(completed.stdout, sdk, prefix, build, runs, target_os)
     if observation is not None:
         runtime["observation"] = observation
@@ -1197,6 +1230,8 @@ def main() -> int:
                         help="with --run-gpu-tests: also open a real GPU window for 1..300 frames")
     parser.add_argument("--run-gpu-resource-tests", action="store_true",
                         help="with --webkit: strict independent Tranche 9B GPU resource/worker gate")
+    parser.add_argument("--run-gpu-lifecycle-tests", action="store_true",
+                        help="with --webkit: strict Tranche 9C owned GPU worker/device lifecycle gate")
     parser.add_argument("--gpu-resource-window-frames", type=int, default=0,
                         help="with --run-gpu-resource-tests: also present 1..300 native GPU frames")
     parser.add_argument("--reuse-tree", action="store_true", help="keep the composed tree and build directory")
@@ -1218,6 +1253,8 @@ def main() -> int:
         parser.error("--run-gpu-tests requires --webkit")
     if args.run_gpu_resource_tests and not args.webkit:
         parser.error("--run-gpu-resource-tests requires --webkit")
+    if args.run_gpu_lifecycle_tests and not args.webkit:
+        parser.error("--run-gpu-lifecycle-tests requires --webkit")
     if not 0 <= args.gpu_resource_window_frames <= 300 or (args.gpu_resource_window_frames and not args.run_gpu_resource_tests):
         parser.error("--gpu-resource-window-frames requires --run-gpu-resource-tests and a count in 0..300")
     if args.gpu_window_frames < 0 or args.gpu_window_frames > 300 or (args.gpu_window_frames and not args.run_gpu_tests):
@@ -1284,7 +1321,7 @@ def main() -> int:
         args.target = list(args.target or DEFAULT_TARGETS)
         if "crtweb_camera_probe" not in args.target:
             args.target.append("crtweb_camera_probe")
-    if args.run_gpu_tests or args.run_gpu_resource_tests:
+    if args.run_gpu_tests or args.run_gpu_resource_tests or args.run_gpu_lifecycle_tests:
         args.target = list(args.target or (["crtweb_host"] if not args.run_tests else DEFAULT_TARGETS))
         if "crtweb_host" not in args.target:
             args.target.append("crtweb_host")
@@ -1295,7 +1332,7 @@ def main() -> int:
         command += ["-k", "0"]
     command += list(args.target or DEFAULT_TARGETS)
     status = jsc.run(command, env=env, check=False).returncode
-    if status != 0 or not (args.run_tests or args.run_gpu_tests or args.run_gpu_resource_tests):
+    if status != 0 or not (args.run_tests or args.run_gpu_tests or args.run_gpu_resource_tests or args.run_gpu_lifecycle_tests):
         return status
     gpu_results = {}
     if args.run_gpu_tests:
@@ -1309,6 +1346,11 @@ def main() -> int:
         (work / "acceptance-gpu-resources.json").write_text(json.dumps(
             {"passed": gpu_results["gpu_resources"]["passed"], "programs": {
                 "gpu_resources": gpu_results["gpu_resources"]}}, indent=2) + "\n", encoding="utf-8")
+    if args.run_gpu_lifecycle_tests:
+        gpu_results["gpu_lifecycle"] = run_gpu_resource_gate(build, sdk, prefix, work, env, target_os, lifecycle=True)
+        (work / "acceptance-gpu-lifecycle.json").write_text(json.dumps(
+            {"passed": gpu_results["gpu_lifecycle"]["passed"], "programs": {
+                "gpu_lifecycle": gpu_results["gpu_lifecycle"]}}, indent=2) + "\n", encoding="utf-8")
     if not args.run_tests:
         passed = all(result["passed"] for result in gpu_results.values())
         print("GPU gates:", "PASSED" if passed else "FAILED")

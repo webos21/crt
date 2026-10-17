@@ -4,6 +4,7 @@
  */
 #include "crtweb/gpu_surface.h"
 #include "crtgfx/skia.h"
+#include "../../../libcrtgfx/src/gpu_test_control.h"
 #include "../common/crtweb_test_process.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImageInfo.h"
@@ -173,11 +174,15 @@ struct Child {
     close(listener); listener = -1;
     return fd;
   }
-  bool finish() {
+  bool finish(bool abnormal = false) {
     auto end = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     int status = 0;
     while (pid > 0) {
-      if (waitpid(pid, &status, WNOHANG) == pid) { pid = 0; return WIFEXITED(status) && WEXITSTATUS(status) == 0; }
+      if (waitpid(pid, &status, WNOHANG) == pid) {
+        pid = 0;
+        bool clean = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+        return abnormal ? !clean : clean;
+      }
       if (std::chrono::steady_clock::now() >= end) return false;
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -213,7 +218,7 @@ struct Scene {
 };
 
 bool draw(crtweb::GpuSurfaceClient& client, Scene& scene, GrDirectContext* context, SkSurface* target,
-          bool magenta, bool* matches) {
+          bool magenta, bool* matches, bool acknowledge = true) {
   auto provider = client.surface_provider();
   SkImage* image = provider.acquire(provider.user, nullptr);
   if (!check(image && image->isTextureBacked(), "GPU source, no consumer CPU upload")) return false;
@@ -238,7 +243,7 @@ bool draw(crtweb::GpuSurfaceClient& client, Scene& scene, GrDirectContext* conte
     fprintf(stderr, "crtweb_gpu_resource_test: waiting serial=%llu pixel_bgra=%u,%u,%u,%u\n",
         static_cast<unsigned long long>(client.frame_serial()), p[0], p[1], p[2], p[3]);
   }
-  return client.frame_presented();
+  return !acknowledge || client.frame_presented();
 }
 
 bool await_colour(crtweb::GpuSurfaceClient& client, Scene& scene, GrDirectContext* context, SkSurface* target,
@@ -374,20 +379,228 @@ bool run(const char* worker, const char* browser, crtgfx_gpu_device* device, GrD
   check(crtweb_test::children().empty(), "owned worker reaped");
   return ok && failures == 0;
 }
+
+enum class Fault { Normal, Disconnect, Worker, Host, Web, Context, Resize };
+const char* fault_name(Fault fault) {
+  switch (fault) {
+    case Fault::Normal: return "normal";
+    case Fault::Disconnect: return "consumer-disconnect";
+    case Fault::Worker: return "worker-kill";
+    case Fault::Host: return "host-kill";
+    case Fault::Web: return "web-kill";
+    case Fault::Context: return "context-loss";
+    case Fault::Resize: return "held-resize";
+  }
+  return "invalid";
+}
+std::vector<crtweb_test::Process> browser_tree(pid_t worker) {
+  std::vector<crtweb_test::Process> result;
+  for (const auto& host : crtweb_test::children(worker)) {
+    if (host.name != "crtweb_host") continue;
+    result.push_back(host);
+    for (const auto& child : crtweb_test::children(host.pid))
+      if (child.name == "WebProcess" || child.name == "NetworkProcess") result.push_back(child);
+  }
+  return result;
+}
+bool gone(const std::vector<crtweb_test::Process>& peers) {
+  auto end = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+  do {
+    bool all = true;
+    for (const auto& peer : peers) if (kill(peer.pid, 0) == 0 || errno != ESRCH) all = false;
+    if (all) return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  } while (std::chrono::steady_clock::now() < end);
+  for (const auto& peer : peers)
+    if (kill(peer.pid, 0) == 0) fprintf(stderr, "remaining owned descendant: %ld %s\n", static_cast<long>(peer.pid), peer.name.c_str());
+  return check(false, "all observed browser descendants stopped/reaped after fault");
+}
+bool lifecycle_session(const char* worker, const char* browser, crtgfx_gpu_device* device,
+                       GrDirectContext* context, Fault fault, bool maps = false) {
+  Child child;
+  int fd = child.launch(worker, browser);
+  if (!check(fd >= 0, "lifecycle worker launch")) return false;
+  auto started = std::chrono::steady_clock::now();
+  std::vector<crtweb_test::Process> peers;
+  bool ok = true;
+  {
+    crtweb::GpuSurfaceClient client(fd, device, context);
+    Scene scene;
+    auto target = crtgfx_skia_make_gpu_offscreen_surface(context, 160, 100);
+    ok = check(client.handshake(90, 70, true) && client.mode() == CRTWEB_GPU_MODE_SHARED, "lifecycle GPU negotiation")
+        && check(scene.create(), "lifecycle scene")
+        && check(await_colour(client, scene, context, target.get(), false), "fresh initial GPU pixels in new session");
+    peers = browser_tree(child.pid);
+    ok = check(peers.size() >= 3, "owned browser tree observed before fault") && ok;
+    if (ok && maps) {
+      std::vector<pid_t> observed;
+      ok = report_browser_maps(child.pid, observed);
+      fflush(stdout); // Finish map records before the child writes its shutdown report.
+    }
+    uint64_t before = client.frame_serial();
+    bool preserved = false;
+    if (ok && (fault == Fault::Worker || fault == Fault::Host || fault == Fault::Disconnect)) {
+      if (fault == Fault::Worker) ok = check(child.pid > 0 && kill(child.pid, SIGKILL) == 0, "kill exact owned GPU worker");
+      if (fault == Fault::Host) {
+        auto host = peers.front();
+        ok = check(host.name == "crtweb_host" && host.pid > 0 && kill(host.pid, SIGKILL) == 0, "kill exact owned browser host");
+      }
+      if (fault == Fault::Disconnect) ok = check(::shutdown(fd, SHUT_RDWR) == 0, "abrupt consumer socket disconnect");
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+      while (!client.closed() && std::chrono::steady_clock::now() < deadline) client.poll(10);
+      ok = check(client.closed(), "loss observed within deadline") && ok;
+      ok = draw(client, scene, context, target.get(), false, &preserved, false)
+          && check(preserved, "imported last image survives producer/connection death") && ok;
+    }
+    if (ok && fault == Fault::Web) {
+      ok = check(client.command(CRTWEB_GPU_EVALUATE, "document.body.style.background='#ff00ff'"), "paint before browser loss")
+          && check(await_colour(client, scene, context, target.get(), true, before), "magenta before browser loss");
+      before = client.frame_serial();
+      bool recovered = false;
+      for (const auto& peer : peers) {
+        if (!ok || peer.name != "WebProcess") continue;
+        ok = check(peer.pid > 0 && kill(peer.pid, SIGKILL) == 0, "kill owned Web process candidate");
+        // A prewarmed process is not necessarily the active page. A fresh green
+        // frame can only be a real reload of the fixture after the active loss.
+        if (ok && await_colour(client, scene, context, target.get(), false, before)) { recovered = true; break; }
+      }
+      ok = check(recovered, "replacement browser process paints new shared GPU pixels") && ok;
+      auto replacement = browser_tree(child.pid); peers.insert(peers.end(), replacement.begin(), replacement.end());
+    }
+    if (ok && fault == Fault::Resize) {
+      ok = check(client.resize(130, 90), "resize while old GPU image is retained");
+      std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      ok = draw(client, scene, context, target.get(), false, &preserved, false)
+          && check(preserved && client.frame_serial() == before, "old generation immutable while resize queued") && ok;
+      ok = check(await_colour(client, scene, context, target.get(), false, before, 130, 90), "replacement resource generation") && ok;
+      ok = check(client.generation() == 2 && client.live_buffers() <= CRTWEB_GPU_MAX_BUFFERS, "bounded old/new pools") && ok;
+    }
+    if (ok && fault == Fault::Context) {
+      // Controlled context-loss boundary, not an OS-wide physical GPU reset.
+      context->abandonContext(); client.poll(0);
+      auto provider = client.surface_provider();
+      SkImage* denied = provider.acquire(provider.user, nullptr);
+      ok = check(client.gpu_lost() && client.closed() && !client.has_frame() && !denied
+          && !client.frame_presented(), "lost context exposes no GPU image or ACK");
+      if (denied) provider.release(provider.user, nullptr, denied);
+    }
+    target.reset();
+    bool drained = client.shutdown();
+    // A killed/disconnected peer cannot receive BYE, but received descriptors
+    // must still be drained and local objects must have zero remaining slots.
+    ok = check(drained && client.live_buffers() == 0, "channel shutdown drains descriptors and clears all imports") && ok;
+  }
+  ok = check(child.finish(fault == Fault::Worker || fault == Fault::Host), "fault-specific owned worker exit/reap") && ok;
+  ok = gone(peers) && ok;
+  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+  printf("crtweb_gpu_lifecycle_test: case=%s result=%s elapsed_ms=%lld\n", fault_name(fault), ok ? "pass" : "fail", static_cast<long long>(ms));
+  fflush(stdout);
+  return ok && failures == 0;
+}
+bool drain_unread_transfers(crtgfx_gpu_device* device, GrDirectContext* context) {
+  auto baseline = crtweb_test::resources();
+  int sockets[2];
+  if (!check(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets) == 0, "queued-transfer socket pair")) return false;
+  bool ok = true;
+  std::unique_ptr<crtgfx_skia_shared_image> images[CRTWEB_GPU_POOL_SIZE];
+  for (unsigned i = 0; i < CRTWEB_GPU_POOL_SIZE; ++i) {
+    if (crtgfx_skia_shared_create(device, 32, 32, &images[i]) != CRTGFX_OK) { ok = false; break; }
+    int handles[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
+    if (images[i]->export_handles(handles) != CRTGFX_OK) { ok = false; break; }
+    auto packet = crtweb_gpu_message(CRTWEB_GPU_BUFFER_ADD);
+    packet.generation = 1; packet.buffer_id = i + 1; packet.payload.image = images[i]->description();
+    ok = crtweb_gpu_send(sockets[0], &packet, handles, crtgfx_shared_image_handle_count(&packet.payload.image)) == 0;
+    crtweb_gpu_close_handles(handles);
+    if (!ok) break;
+  }
+  bool goodbye = false;
+  std::thread sender([&] {
+    struct pollfd ready {sockets[0], POLLIN, 0};
+    if (poll(&ready, 1, 6000) > 0) {
+      crtweb_gpu_packet packet; int handles[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
+      goodbye = crtweb_gpu_recv(sockets[0], &packet, handles) == 1 && packet.type == CRTWEB_GPU_BYE;
+      crtweb_gpu_close_handles(handles);
+    }
+    close(sockets[0]);
+  });
+  {
+    // Deterministically prequeued real native handles, not a timing race with
+    // browser painting. In particular Windows already owns the duplicated NT
+    // handles here. A retiring client must drain even an unnegotiated channel.
+    crtweb::GpuSurfaceClient client(sockets[1], device, context);
+    ok = check(client.shutdown() && client.discarded_imports() == CRTWEB_GPU_POOL_SIZE
+        && client.imports() == 0 && client.live_buffers() == 0, "queued native transfer handles closed without import") && ok;
+  }
+  sender.join();
+  ok = check(goodbye, "queued-transfer peer received BYE") && ok;
+  for (auto& image : images) image.reset();
+  auto settled = crtweb_test::resources();
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while ((settled.descriptors > baseline.descriptors + 2 || settled.threads > baseline.threads + 2)
+      && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    settled = crtweb_test::resources();
+  }
+  ok = check(baseline.descriptors >= 0 && settled.descriptors >= 0 && settled.descriptors <= baseline.descriptors + 2
+      && baseline.threads >= 0 && settled.threads >= 0 && settled.threads <= baseline.threads + 2,
+      "queued-transfer native handles/lease threads are reclaimed") && ok;
+  if (ok) puts("crtweb_gpu_lifecycle_test: queued_transfers=3 imported=0 cleanup=pass");
+  return ok;
+}
+bool lifecycle(const char* worker, const char* browser, crtgfx_gpu_device*& device, sk_sp<GrDirectContext>& context) {
+  const Fault cases[] = {Fault::Normal, Fault::Disconnect, Fault::Worker, Fault::Host, Fault::Web, Fault::Context, Fault::Resize};
+  auto session = [&](Fault fault, bool maps) {
+    bool ok = lifecycle_session(worker, browser, device, context.get(), fault, maps);
+    if (ok && fault == Fault::Context) {
+      // The destructive backend hook is safe ONLY after all borrowed images,
+      // surfaces and the abandoned context have been destroyed.
+      context.reset();
+      ok = check(crtgfx_gpu_test_force_device_loss(device) == CRTGFX_OK, "owner-side native device teardown");
+      crtgfx_gpu_device_release(device); device = nullptr;
+      ok = check(crtgfx_gpu_device_create(0, &device) == CRTGFX_OK, "fresh native device after controlled loss") && ok;
+      if (device) context = crtgfx_skia_make_gpu_context(device);
+      ok = check(context != nullptr, "fresh Ganesh context after native device recreation") && ok;
+    }
+    return ok;
+  };
+  if (!drain_unread_transfers(device, context.get())) return false;
+  // Warm every exit/fault policy once before measuring complete lifetimes.
+  for (Fault fault : cases) if (!session(fault, false)) return false;
+  auto baseline = crtweb_test::resources();
+  unsigned counts[7] {};
+  for (unsigned i = 0; i < 20; ++i) {
+    unsigned index = i % 7;
+    if (!session(cases[index], i == 0)) return false;
+    ++counts[index];
+    if (!check(crtweb_test::children().empty(), "no worker or browser remains between lifetimes")) return false;
+  }
+  // In particular prove fresh GPU pixels after the final controlled loss.
+  if (!session(Fault::Normal, false)) return false;
+  auto after = crtweb_test::resources();
+  bool bounded = baseline.memoryKiB >= 0 && after.memoryKiB >= 0 && after.memoryKiB - baseline.memoryKiB <= 24 * 1024
+      && baseline.threads >= 0 && after.threads - baseline.threads <= 2 && after.threads >= 0
+      && baseline.descriptors >= 0 && after.descriptors >= 0 && after.descriptors - baseline.descriptors <= 2;
+  printf("crtweb_gpu_lifecycle_test: cycles=20 rss=%+ld KiB threads=%+ld descriptors=%+ld\n",
+      after.memoryKiB - baseline.memoryKiB, after.threads - baseline.threads, after.descriptors - baseline.descriptors);
+  for (unsigned i = 0; i < 7; ++i) printf("crtweb_gpu_lifecycle_test: coverage=%s count=%u\n", fault_name(cases[i]), counts[i]);
+  return check(bounded, "complete GPU/worker lifetimes have bounded resources") && failures == 0;
+}
 }
 
 extern "C" int main(int argc, char** argv) {
-  bool required = false, fallback = false, mismatch = false; unsigned frames = 0;
+  bool required = false, fallback = false, mismatch = false, lifecycle_mode = false; unsigned frames = 0;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--require-gpu")) required = true;
     else if (!strcmp(argv[i], "--probe-fallback")) fallback = true;
     else if (!strcmp(argv[i], "--probe-declared-mismatch")) mismatch = true;
+    else if (!strcmp(argv[i], "--lifecycle")) lifecycle_mode = true;
     else if (!strcmp(argv[i], "--window-frames") && i + 1 < argc) {
       char* end = nullptr; unsigned long n = strtoul(argv[++i], &end, 10);
       if (!end || *end || !n || n > 300) return 2;
       frames = static_cast<unsigned>(n);
     } else return 2;
   }
+  if (lifecycle_mode && (frames || fallback || mismatch)) return 2;
   const char* worker = getenv("CRTWEB_GPU_WORKER"), *browser = getenv("CRTWEB_HOST");
   if (!worker || !browser || !*worker || !*browser) return required ? 1 : 77;
   crtgfx_gpu_device* device = nullptr;
@@ -415,9 +628,15 @@ extern "C" int main(int argc, char** argv) {
     return ok && !required ? 0 : 1;
   }
   auto context = crtgfx_skia_make_gpu_context(device);
-  bool ok = context && run(worker, browser, device, context.get(), frames, fallback);
+  bool ok = context && (lifecycle_mode ? lifecycle(worker, browser, device, context)
+                                      : run(worker, browser, device, context.get(), frames, fallback));
   context.reset(); crtgfx_gpu_device_release(device);
   if (!ok) return 1;
+  if (lifecycle_mode) {
+    printf("crtweb_gpu_lifecycle_test: ok backend=%u cycles=20 device_loss=controlled-context-and-owner "
+        "worker_loss=pass browser_loss=pass disconnect=pass held_resize=pass recovery=pass cleanup=pass\n", identity.backend);
+    return 0;
+  }
   // backend= is the crtgfx backend enum of the negotiated descriptor (Vulkan 3, D3D12 1); sync= names what
   // the native handles actually were: Vulkan semaphore + fence pairs, or one shared D3D12 fence per direction.
   const char* sync = identity.backend == CRTGFX_GPU_BACKEND_D3D12 ? "native-shared-fence" :

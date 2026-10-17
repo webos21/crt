@@ -325,7 +325,44 @@ Unsupported sharing negotiates CPU mode with zero GPU resources; the caller
 must use the existing v1 WebView explicitly. It is never GPU acceptance.
 The strict resource gate is separate from 9A. Vulkan, D3D12 and Metal have native
 resource implementations; each must pass its own native replay, not CPU fallback.
-Device/process-loss recovery and full GPUProcess lifecycle closure remain
-separate work in [Web acceptance](../acceptance/crtweb_acceptance.md#9-gpu-integration).
-Normal teardown waits for the local queue; a hung/lost driver is not yet a
-bounded-recovery claim (9C).
+### Owned GPU process lifecycle (Tranche 9C)
+
+The product GPU-process boundary is the **CRT-owned GPU worker**, confirmed
+2026-10-17. Upstream WebKit GPUProcess activation is not a prerequisite for this
+boundary: `ENABLE_GPU_PROCESS` remains off, WebCore painting remains CPU, and
+neither private Skia objects nor native GPU clients enter the browser process.
+This is an explicit architecture decision, not a claim that upstream GPUProcess
+or accelerated WebCore has been implemented.
+
+An EOF/error closes a resource session. On a healthy application context the
+last already-imported frame remains independently owned and drawable after
+producer death. No old allocation or epoch joins a replacement connection:
+the process owner waits/reaps the old worker and constructs a new client/pool.
+The worker's CPU-browser socket closes on process death, letting the separate
+browser stop through its existing EOF/IPC shutdown. The process owner must
+observe/reap its worker and account for the browser descendants, not just close
+an application socket. Worker cleanup shuts down the browser before native GPU
+drains. A consumer EOF retires the entire session without authorizing reuse.
+
+The worker reloads a crashed Web process, keeping the previous GPU image until
+a replacement paint arrives; at most three automatic reloads are attempted,
+with a ten-second replacement-paint deadline. Host/worker loss is handled by
+the owning application restarting a fresh worker session, not by adopting old
+GPU handles. Failure remains observable as a closed client.
+
+`GpuSurfaceClient` checks Ganesh abandonment (which also detects native device
+loss) before exposing an image, polling or acknowledging work. A lost context
+offers no usable image/ACK. The owner drops all imported images and targets,
+then the context, then the native device, and creates a fresh pair/session.
+`shutdown(timeout_ms)` sends BYE even on a lost context, drains received transfer
+descriptors without importing new resources, and clears all slots. Draining is
+load-bearing for Windows's receiver-side duplicated handles. The default drain
+budget is six seconds; false is a failed shutdown, not GPU completion. The
+process owner still waits/reaps the child separately. Native ready/release
+completion keeps its two-second per-operation wait budget.
+
+Acceptance distinguishes controlled context abandonment plus backend-owned
+device teardown/recreation from a physical GPU reset. It does not promise that
+arbitrary calls into a hung OS driver can be interrupted. Native queue drains
+remain driver calls. Host replay and actual measurements belong to
+[Web acceptance](../acceptance/crtweb_acceptance.md#9-gpu-integration).

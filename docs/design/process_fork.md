@@ -139,8 +139,10 @@ wait for release. It also exercises allocating atfork callbacks, spawn's
 callback suppression and framed-socket inheritance after `dup2` file actions.
 CTest bounds it to 30 seconds. Windows reports a real CTest skip for this
 native-COW-specific fixture; its memory-copy tests remain separate. The
-macOS failure/replay evidence belongs to
-[Web acceptance](../acceptance/crtweb_acceptance.md#9b-macosarm64-availability-replay-2026-10-16).
+macOS failure/fix evidence belongs to
+[the B7 follow-up](../acceptance/crtweb_acceptance.md#b7-native-forkspawn-allocator-follow-up-2026-10-17);
+the native [Linux replay](../acceptance/crtweb_acceptance.md#linux-native-forkspawn-replay-2026-10-17)
+records the same regression and C-stage results on Linux.
 
 ---
 

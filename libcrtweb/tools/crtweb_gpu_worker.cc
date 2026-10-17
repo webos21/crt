@@ -41,11 +41,15 @@ struct Worker {
   uint32_t generation = 0, width = 0, height = 0, last_buffer = 0;
   uint64_t serial = 0, acked = 0, source_serial = 0;
   uint32_t uploads = 0, reused = 0, retired = 0, peak = 0;
-  bool bye = false;
+  uint32_t web_recoveries = 0;
+  bool bye = false, browser_failed = false, recovering = false;
+  std::chrono::steady_clock::time_point recovery_deadline;
   ~Worker() {
+    // Browser ownership must be discharged before entering native GPU drains.
+    browser.shutdown();
     if (context) context->flushAndSubmit(GrSyncCpu::kYes);
     for (auto& b : buffers) b.image.reset();
-    browser.shutdown(); context.reset();
+    context.reset();
     if (device) crtgfx_gpu_device_release(device);
     if (socket >= 0) close(socket);
   }
@@ -137,7 +141,8 @@ struct Worker {
       crtweb_gpu_packet p; int fds[CRTGFX_SHARED_IMAGE_HANDLE_COUNT];
       int got = crtweb_gpu_recv(socket, &p, fds);
       crtweb_gpu_close_handles(fds);
-      if (got <= 0 || !message(p)) return FAIL();
+      if (!got) { bye = true; return true; } // Consumer disconnect retires the session, never reuses its pool.
+      if (got < 0 || !message(p)) return FAIL();
       any = true;
     }
     return true;
@@ -163,6 +168,7 @@ struct Worker {
       target.reset(); provider.release(provider.user, nullptr, source);
       if (!ok) return FAIL();
       source_serial = browser.frame_serial(); browser.frame_presented();
+      recovering = false;
       auto p = crtweb_gpu_message(CRTWEB_GPU_FRAME);
       p.serial = ++serial; p.buffer_id = i + 1; p.generation = generation;
       b.busy = true; b.serial = serial; last_buffer = i + 1; ++uploads;
@@ -193,6 +199,12 @@ struct Worker {
       if (event == crtweb::WebView::LoadEvent::Failed)
         fprintf(stderr, "crtweb_gpu_worker: load failed url=%s message=%s\n", url.c_str(), message.c_str());
     };
+    browser.on_terminated = [&] {
+      // Keep the immutable last GPU frame while the browser replaces its Web process.
+      recovering = true;
+      recovery_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+      if (++web_recoveries > 3 || !browser.reload()) browser_failed = true;
+    };
     if (!context) { fprintf(stderr, "crtweb_gpu_worker: no GPU context for the worker device\n"); return FAIL(); }
     if (!browser.launch(browser_host, hello.payload.image.width, hello.payload.image.height, url)) {
       fprintf(stderr, "crtweb_gpu_worker: could not launch the browser host %s\n", browser_host);
@@ -202,9 +214,11 @@ struct Worker {
       if (!receive(2)) return FAIL();
       if (bye) break;
       browser.poll(0);
+      if (browser_failed || (recovering && std::chrono::steady_clock::now() >= recovery_deadline)) return FAIL();
       if (!collect() || !publish()) return FAIL();
     }
     printf("crtweb_gpu_worker: uploads=%u reused=%u retired=%u peak_buffers=%u gpu_readbacks=0\n", uploads, reused, retired, peak);
+    if (web_recoveries) printf("crtweb_gpu_worker: web_recoveries=%u\n", web_recoveries);
     return bye;
   }
 };

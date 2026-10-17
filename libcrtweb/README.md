@@ -28,6 +28,10 @@ negotiated `platform/crtweb_gpu_wire.h` channel; no private Skia object crosses
 IPC. Only worker -> app is shared GPU memory. Native synchronization and
 ownership rules, backend limits and explicit CPU fallback are defined by the
 [resource contract](../docs/design/libcrtweb_api_policy.md#gpu-buffers-and-synchronization-tranche-9b).
+The worker is the product GPU-process lifetime boundary, not upstream WebKit
+GPUProcess. Closed sessions require new allocations; lost contexts expose no
+image/ACK, and shutdown drains transfer handles before clearing imports.
+Policy and recovery ordering: [owned GPU lifecycle](../docs/design/libcrtweb_api_policy.md#owned-gpu-process-lifecycle-tranche-9c).
 
 ## Layout
 
