@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux-first isolated 05-ui -> 06-web development SDK builder.
+"""Isolated 05-ui -> 06-web development SDK builder (Linux/x64, macOS/arm64).
 
 Only the extracted source asset, installed predecessor, verified upstream source
 and build-host tools are inputs. No in-tree runtime build is used. Publication
@@ -25,6 +25,7 @@ from build_stage_04_gfx_media import tree_inventory, inventory_fingerprint
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import set_runtime_paths
 from crt_linux_runtime import normalize_cxx_aliases
+import crt_macho
 from create_dist import DIST_PORTING_TOOLS
 from fetch_ports import load_recipes, resolve_recipe_order
 import build_webkit_crt_port as web
@@ -153,8 +154,9 @@ def require_predecessor(sdk, manifest):
     names = {entry["name"] for entry in manifest.get("redistributed_dependencies", [])}
     if not {"freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib", "lvgl"} <= names:
         raise ValueError("06-web predecessor is missing its complete media/UI dependency provenance")
-    for file in ("lib/libc.so", "lib/libc++.so", "lib/libskia.a", "lib/libcrtui_skia.a",
-                 "lib/libcrtmedia.so", "include/include/core/SkSurface.h",
+    suffix = "dylib" if manifest.get("target", {}).get("os") == "macos" else "so"
+    for file in (f"lib/libc.{suffix}", f"lib/libc++.{suffix}", "lib/libskia.a", "lib/libcrtui_skia.a",
+                 f"lib/libcrtmedia.{suffix}", "include/include/core/SkSurface.h",
                  "include/crtgfx/shared_image.h", "include/crtgfx/skia_shared.h"):
         if not (sdk / file).is_file():
             raise ValueError(f"06-web requires the option-ON 05-ui predecessor: missing {file}")
@@ -168,9 +170,45 @@ def validate_layout(sdk, work, output):
             raise ValueError("predecessor SDK, work-root and output must be disjoint")
 
 
+def validate_source_cache(cache, asset):
+    """Reject incomplete, dirty or object-bearing checkouts before building ports."""
+    import fetch_webkit_commit as source
+    pin = source.product_source(json.loads((asset / "libcrtweb/third_party/webkit/recipe.json").read_text()))
+    checkout = cache / "checkout"
+    if not (checkout / ".git/HEAD").is_file():
+        raise ValueError("source cache requires a complete, self-contained Git checkout; omit --source-cache to fetch afresh")
+    try:
+        source.verify_commit(cache / "WebKit.git", pin)
+        if source.git(checkout, "rev-parse", "HEAD").strip() != pin["commit"]:
+            raise ValueError("source cache checkout does not match the product pin")
+        # Ignored/untracked build outputs are not a source-only cache either:
+        # the composer copies the checkout, not just tracked files.
+        if source.git(checkout, "status", "--porcelain", "--untracked-files=all", "--ignored").strip():
+            raise ValueError("source cache must be pristine and contain no generated/untracked files")
+    except subprocess.CalledProcessError as error:
+        raise ValueError("source cache Git metadata is incomplete; omit --source-cache to fetch afresh") from error
+
+
 def install_stage_tools(asset, staged):
     for name in DIST_PORTING_TOOLS:
         shutil.copy2(asset / "tools" / name, staged / "tools" / name)
+
+
+def copy_private_libraries(directory, destination, target_os):
+    # WebKit's Darwin install name ends in .dylib.SOVERSION. Preserve the
+    # actual image and relative aliases, not just names ending in .dylib.
+    for file in directory.glob("*.dylib*" if target_os == "macos" else "*.so*"):
+        if file.name.startswith(("libcurl", "libcrtweb", "libc++", "libunwind")) or not file.is_file():
+            continue
+        target = destination / file.name
+        if target.exists() or target.is_symlink():
+            continue
+        if file.is_symlink():
+            if file.resolve().parent != directory.resolve():
+                raise ValueError(f"private library alias escapes its source family: {file}")
+            target.symlink_to(file.resolve().name)
+        else:
+            shutil.copy2(file, target)
 
 
 def audit_target_discovery(cache, sdk, prefix, tree):
@@ -244,9 +282,10 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
         shutil.copy2(source, staged / relative)
         notices.append(relative.as_posix())
     deps = manifest.setdefault("redistributed_dependencies", [])
+    suffix = "dylib" if manifest["target"]["os"] == "macos" else "so"
     deps.append({"name": "webkit", "kind": "private-replaceable-web-runtime",
-                 "headers": ["include/crtweb/crtweb.h"], "link_artifacts": ["lib/libcrtweb.so"],
-                 "runtime_artifacts": ["libexec/crtweb/lib/libWebKit.so", "libexec/crtweb/lib/libcrtmedia.so", "libexec/crtweb/crtweb_host",
+                 "headers": ["include/crtweb/crtweb.h"], "link_artifacts": [f"lib/libcrtweb.{suffix}"],
+                 "runtime_artifacts": [f"libexec/crtweb/lib/libWebKit.{suffix}", f"libexec/crtweb/lib/libcrtmedia.{suffix}", "libexec/crtweb/crtweb_host",
                                        "libexec/crtweb/WebProcess", "libexec/crtweb/NetworkProcess"],
                  "notices": notices, "provenance": "share/crt/dependencies/webkit/recipe.json"})
     # SPDX 2.3 JSON: package-level composition, not a claim to classify every
@@ -333,21 +372,68 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
                                "development_candidate": True}
 
 
+def portable_web_macho(staged):
+    """Give only new Web images package-local dependencies and loader paths.
+
+    The private closure wins inside the browser; public SDK consumers retain
+    the predecessor's media/C++ ABI. Never mutate inherited runtime images.
+    """
+    private = staged / "libexec/crtweb"
+    files = [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess", "crtweb_gpu_worker")]
+    files += [staged / "examples/bin/crtweb_browser", staged / "lib/libcrtweb.dylib"]
+    files += [file for file in (private / "lib").iterdir() if file.is_file() and not file.is_symlink()]
+    for file in files:
+        ident = crt_macho.dylib_id(file)
+        changes = []
+        if ident:
+            changes += ["-id", "@rpath/" + file.name]
+        for dep in crt_macho.dependencies(file):
+            if dep == ident or dep.startswith(("/usr/lib/", "/System/Library/")):
+                continue
+            leaf = Path(dep).name
+            if not (private / "lib" / leaf).is_file() and not (staged / "lib" / leaf).is_file():
+                raise ValueError(f"unpackaged Mach-O dependency: {file.name}: {dep}")
+            if dep != "@rpath/" + leaf:
+                changes += ["-change", dep, "@rpath/" + leaf]
+        for value in crt_macho.rpaths(file):
+            changes += ["-delete_rpath", value]
+        if file.parent == private:
+            paths = (["@loader_path/../../lib"] if file.name == "crtweb_gpu_worker"
+                     else ["@loader_path/lib", "@loader_path/../../lib"])
+        elif file.parent == private / "lib":
+            paths = ["@loader_path", "@loader_path/../../../lib"]
+        elif file.name == "libcrtweb.dylib":
+            paths = ["@loader_path", "@loader_path/../libexec/crtweb/lib"]
+        else:
+            paths = ["@loader_path/../../lib"]
+        # ld64 rejects deleting and adding the same RPATH in one invocation.
+        # Separate edits also make this normalization safe to replay.
+        if changes:
+            run(["install_name_tool", *changes, file])
+        additions = [item for value in paths for item in ("-add_rpath", value)]
+        run(["install_name_tool", *additions, file])
+        run(["codesign", "--force", "--sign", "-", file])
+
+
 def validate_candidate(staged, work, asset, env):
     """Check a generated candidate without publishing or touching its inputs."""
     private = staged / "libexec/crtweb"
     # Only the new Web artifacts need this layout. Inherited static examples
     # can legitimately have no ELF runtime-search-path slot at all.
-    for file in [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess", "crtweb_gpu_worker")] + [staged / "examples/bin/crtweb_browser"]:
-        portable = "$ORIGIN/../../lib" if file.name in ("crtweb_gpu_worker", "crtweb_browser") else "$ORIGIN/lib:$ORIGIN/../../lib"
-        set_runtime_paths(file, portable)
-    set_runtime_paths(staged / "lib/libcrtweb.so", "$ORIGIN:$ORIGIN/../libexec/crtweb/lib")
-    for file in (private / "lib").glob("*.so*"):
-        if file.is_file() and not file.is_symlink():
-            set_runtime_paths(file, "$ORIGIN")
-    remove_staged_absolute_elf_rpaths(staged)
+    target_os = env.get("CRT_TARGET_OS", "linux")
+    if target_os == "macos":
+        portable_web_macho(staged)
+    else:
+        for file in [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess", "crtweb_gpu_worker")] + [staged / "examples/bin/crtweb_browser"]:
+            portable = "$ORIGIN/../../lib" if file.name in ("crtweb_gpu_worker", "crtweb_browser") else "$ORIGIN/lib:$ORIGIN/../../lib"
+            set_runtime_paths(file, portable)
+        set_runtime_paths(staged / "lib/libcrtweb.so", "$ORIGIN:$ORIGIN/../libexec/crtweb/lib")
+        for file in (private / "lib").glob("*.so*"):
+            if file.is_file() and not file.is_symlink():
+                set_runtime_paths(file, "$ORIGIN")
+        remove_staged_absolute_elf_rpaths(staged)
     candidate_env = dict(env)
-    for name in ("LD_LIBRARY_PATH", "LD_PRELOAD", "CRTWEB_PROCESS_DIR", "FONTCONFIG_FILE"):
+    for name in ("LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "CRTWEB_PROCESS_DIR", "FONTCONFIG_FILE"):
         candidate_env.pop(name, None)
     candidate_env["CRTWEB_HOST"] = str(private / "crtweb_host")
     # No build/prefix loader path: the package must work on its own.
@@ -367,8 +453,8 @@ def validate_candidate(staged, work, asset, env):
     write_json(work / "packaged-network.json", network_result)
     if not network_result["passed"]:
         raise ValueError("packaged HTTP/TLS regression failed")
-    audit = web.jsc.host_abi_audit(staged, staged, staged,
-        [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess")], candidate_env)
+    audit = web.jsc.host_abi_audit(staged, staged, private,
+        [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess")], candidate_env, target_os)
     write_json(work / "packaged-host-abi.json", audit)
     if not audit["ok"]:
         raise ValueError("packaged browser Host ABI audit failed")
@@ -393,9 +479,15 @@ def main():
     validate_layout(sdk, work, output)
     manifest = json.loads((sdk / "manifest.json").read_text())
     target = manifest["target"]
-    if target != {"os": "linux", "arch": "x86_64"} or platform.system() != "Linux" or platform.machine() not in ("x86_64", "AMD64"):
-        raise ValueError("initial 06-web stage is Linux/x86_64 native only; other-host/cross-target packaging gates remain open")
+    native = ((target == {"os": "linux", "arch": "x86_64"} and platform.system() == "Linux" and platform.machine() in ("x86_64", "AMD64"))
+              or (target == {"os": "macos", "arch": "aarch64"} and platform.system() == "Darwin" and platform.machine() == "arm64"))
+    if not native:
+        raise ValueError("06-web supports Linux/x86_64 and macOS/aarch64 native only; other-host/cross-target packaging gates remain open")
+    target_os = target["os"]
+    suffix = "dylib" if target_os == "macos" else "so"
     require_predecessor(sdk, manifest)
+    if args.source_cache:
+        validate_source_cache(args.source_cache.resolve(), asset)
     work.mkdir(parents=True, exist_ok=True)
     identity = {"source_sha256": args.source_sha256,
                 "predecessor_sha256": inventory_fingerprint(tree_inventory(sdk, normalize_manifest=True))}
@@ -423,8 +515,9 @@ def main():
     shutil.copytree(sdk, staged, symlinks=True)
     env = runtime_env(staged, manifest)
     env.update(CRT_CXX_RUNTIME_LINKAGE="shared", CRT_CXX_HOSTED="1")
-    run([sys.executable, asset / "tools/test_crt_cxx_shared_loader.py", "--sdk-root", staged,
-         "--wrapper", staged / "tools/crt-c++", "--output", work / "loader-preflight"], env)
+    if target_os == "linux":
+        run([sys.executable, asset / "tools/test_crt_cxx_shared_loader.py", "--sdk-root", staged,
+             "--wrapper", staged / "tools/crt-c++", "--output", work / "loader-preflight"], env)
     # SDK-mode recipe tests resolve @ROOT@ at the SDK, not the source asset.
     # These are temporary test fixtures, not headers or runtime dependencies.
     shutil.copytree(asset / "libcrtgfx/assets/fonts", staged / "libcrtgfx/assets/fonts", dirs_exist_ok=True)
@@ -456,19 +549,21 @@ def main():
     # Keep OpenSSL curl private/static inside WebKit. The predecessor's media
     # library already owns a different libcurl SONAME (mbedTLS); overwriting it
     # or resolving both backends by loader order is not a packaging contract.
+    private_flags = ("-Wl,-unexported_symbol,_curl*" if target_os == "macos" else
+                     "-Wl,--allow-shlib-undefined -Wl,--exclude-libs,ALL")
     run([sys.executable, asset / "tools/build_webkit_crt_port.py", "--sdk-root", staged,
          "--deps-prefix", prefix, "--work-root", web_work, "--gperf", tools["gperf"],
          "--webkit", "--reuse-tree", "--recompose", "--target", "crtweb_host", "--target", "crtweb_api_test",
          "--define", "CURL_LIBRARY_RELEASE=" + (prefix / "curl-openssl/lib/libcurl.a").as_posix(),
          "--define", "pkgcfg_lib_PC_CURL_curl=" + (prefix / "curl-openssl/lib/libcurl.a").as_posix(),
-         "--define", "CMAKE_SHARED_LINKER_FLAGS=-Wl,--allow-shlib-undefined -Wl,--exclude-libs,ALL",
+         "--define", "CMAKE_SHARED_LINKER_FLAGS=" + private_flags,
          "-j", args.dependency_jobs], env)
     build = web_work / "build"
     write_json(work / "target-discovery.json", audit_target_discovery(build / "CMakeCache.txt", staged, prefix,
                                                                     web_work / "src/webkit-crt"))
     (web_work / "fonts.conf").write_text(web.font_configuration(
         str(asset / "libcrtgfx/assets/fonts"), str(work / "font-cache")))
-    run_env = web.gate_environment(build, staged, prefix, web_work, env, "linux")
+    run_env = web.gate_environment(build, staged, prefix, web_work, env, target_os)
     run([build / "bin/crtweb_api_test"], run_env, work)
     native = work / "consumer-build"
     # The SDK-Skia application/GPU worker uses the normal static CRT runtime,
@@ -479,7 +574,7 @@ def main():
     run(["cmake", "--fresh", "-S", asset / "distribution/stages/06-web", "-B", native, "-G", "Ninja",
          "-DCMAKE_TOOLCHAIN_FILE=" + str(staged / "crt-toolchain.cmake"),
          "-DCMAKE_INSTALL_PREFIX=" + str(staged), "-DCRT_STAGE_SOURCE_ROOT=" + str(asset),
-         "-DCRT_STAGE_TARGET_OS=linux", "-DCRT_STAGE_TARGET_ARCH=x86_64"], consumer_env)
+         "-DCRT_STAGE_TARGET_OS=" + target_os, "-DCRT_STAGE_TARGET_ARCH=" + target["arch"]], consumer_env)
     # Two small consumers: also invalidate environment-only wrapper settings,
     # which Ninja cannot see in an otherwise unchanged command line.
     run(["cmake", "--build", native, "--clean-first", "-j", args.dependency_jobs], consumer_env)
@@ -490,23 +585,16 @@ def main():
     private_lib.mkdir(exist_ok=True)
     for name in ("crtweb_host", "WebProcess", "NetworkProcess"):
         shutil.copy2(build / "bin" / name, private / name)
-    shutil.copy2(build / "lib/libcrtweb.so", staged / "lib/libcrtweb.so")
+    shutil.copy2(build / f"lib/libcrtweb.{suffix}", staged / f"lib/libcrtweb.{suffix}")
     for directory in (prefix / "lib", build / "lib"):
-        for file in directory.glob("*.so*"):
-            if file.name.startswith(("libcurl", "libcrtweb", "libc++", "libunwind")) or not file.is_file():
-                continue
-            destination = private_lib / file.name
-            if not destination.exists():
-                if file.is_symlink():
-                    destination.symlink_to(file.resolve().name)
-                else:
-                    shutil.copy2(file, destination)
+        copy_private_libraries(directory, private_lib, target_os)
     # The browser's software-only crtmedia/VA closure is private. Never put
     # libva stubs in SDK/lib and disable hardware decode for ordinary apps.
-    shutil.copy2(staged / "lib/libcrtmedia.so", private_lib / "libcrtmedia.so")
-    normalize_cxx_aliases(staged)
-    for file in (staged / "lib").glob("*.so*"):
-        if file.name in ("libcrtweb.so", "libcrtmedia.so"):
+    shutil.copy2(staged / f"lib/libcrtmedia.{suffix}", private_lib / f"libcrtmedia.{suffix}")
+    if target_os == "linux":
+        normalize_cxx_aliases(staged)
+    for file in (staged / "lib").glob("*.dylib*" if target_os == "macos" else "*.so*"):
+        if not file.is_file() or file.name in (f"libcrtweb.{suffix}", f"libcrtmedia.{suffix}"):
             continue
         destination = private_lib / file.name
         if not destination.exists() and not destination.is_symlink():
@@ -547,7 +635,7 @@ def main():
                     built_from={"stage": "05-ui", "source_recipe": args.recipe_location,
                     "source_sha256": args.source_sha256, "predecessor_content_sha256": predecessor["content_sha256"],
                     "predecessor_version": predecessor["version"]},
-                    external_prerequisites=external_prerequisites_for("linux", "06-web", target["arch"]))
+                    external_prerequisites=external_prerequisites_for(target_os, "06-web", target["arch"]))
     manifest["web_runtime"]["build_host_tools"] = "share/crt/web-host-tools.json"
     write_json(staged / "share/crt/web-host-tools.json", json.loads((work / "host-tools.json").read_text()))
     write_json(staged / "manifest.json", manifest)

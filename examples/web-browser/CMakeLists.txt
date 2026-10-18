@@ -13,6 +13,9 @@ add_executable(crtweb_browser main.cc)
 if(CRT_STAGE_TARGET_OS STREQUAL "linux")
   set_target_properties(crtweb_browser PROPERTIES
     BUILD_RPATH "$ORIGIN/../../lib;${CMAKE_SYSROOT}/lib" INSTALL_RPATH "$ORIGIN/../../lib")
+elseif(CRT_STAGE_TARGET_OS STREQUAL "macos")
+  set_target_properties(crtweb_browser PROPERTIES
+    BUILD_RPATH "@loader_path/../../lib;${CMAKE_SYSROOT}/lib" INSTALL_RPATH "@loader_path/../../lib")
 endif()
 target_compile_features(crtweb_browser PRIVATE cxx_std_17)
 target_include_directories(crtweb_browser PRIVATE "${CMAKE_SYSROOT}/include/crtweb")

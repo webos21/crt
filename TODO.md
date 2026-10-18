@@ -159,12 +159,14 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **Native fork regression replay:** Linux heap-snapshot repeat and C-stage pass;
     native-COW fix/replay evidence is in Web acceptance. Windows memory-copy fork is unchanged.
 * [ ] **10. Distribution and security closure.**
-  * [ ] Implement/replay isolated `05-ui -> 06-web` packaging on Windows/macOS;
-    Linux/x86_64 development SDK and manifests pass ([evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-build-and-relocation-replay-2026-10-18)).
+  * [x] Linux/x86_64 isolated `05-ui -> 06-web` development SDK, installed/relocated
+    browser, external consumer and manifests ([evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-build-and-relocation-replay-2026-10-18)).
+  * [x] macOS/arm64 isolated development SDK, installed/space-path relocation,
+    external consumer, HTTP/TLS and Host ABI ([evidence](docs/acceptance/crtweb_acceptance.md#macosarm64-isolated-build-and-relocation-replay-2026-10-18)).
+  * [ ] Windows isolated `05-ui -> 06-web` SDK/browser, dependency, loader-path
+    and Host ABI implementation/replay.
   * [ ] Prove the build-host/target split with x86_64-host -> Linux/aarch64-target:
     host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
-  * [ ] Close Windows/macOS SDK/browser, dependency, install-name/RPATH and Host ABI
-    acceptance; Linux installed/relocated SDK and external consumer pass.
   * [ ] Native Windows replay of the implemented 75-function `libcrtmedia.dll`
     export boundary; cross-generated PE fixtures are not native acceptance.
   * [ ] Finish inherited-runtime notice/source/SBOM review before publication;

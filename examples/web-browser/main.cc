@@ -145,6 +145,22 @@ extern "C" int main(int argc, char** argv) {
       crtgfx_window_pump_events(1);
     }
   }
+  // A native external map observer needs a live, painted browser. Without an
+  // explicit checkpoint the short smoke can exit before vmmap has sampled it.
+  if (smoke && loaded && painted && scripted) {
+    if (const char* checkpoint = getenv("CRTWEB_SAMPLE_MAP_CHECKPOINT")) {
+      std::string ready = std::string(checkpoint) + ".ready";
+      std::string release = std::string(checkpoint) + ".release";
+      FILE* file = fopen(ready.c_str(), "w");
+      if (!file) return 1;
+      fprintf(file, "%d\n", (int)getpid());
+      if (fclose(file)) return 1;
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(90);
+      while (access(release.c_str(), F_OK) && std::chrono::steady_clock::now() < deadline)
+        web.poll(10);
+      if (access(release.c_str(), F_OK)) failed = true;
+    }
+  }
   web.shutdown();
   if (window) crtgfx_window_destroy(window);
   if (smoke) {

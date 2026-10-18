@@ -57,6 +57,81 @@ class SecurityTests(unittest.TestCase):
 
 
 class PackagingTests(unittest.TestCase):
+    def test_macos_ipc_exception_is_unlinked_nonexecutable_and_pid_scoped(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory).resolve()
+            for name, permissions, present, allowed in (
+                ("crt_memfd_77_000001.tmp", "rw-", False, True),
+                ("crt_memfd_77_000001.tmp", "r-x", False, False),
+                ("crt_memfd_78_000001.tmp", "rw-", False, False),
+                ("other.tmp", "rw-", False, False),
+                ("crt_memfd_77_000001.tmp", "rw-", True, False),
+            ):
+                file = temporary / name
+                if present:
+                    file.touch()
+                row = f"mapped file 1000-2000 [ 4K] {permissions}/rwx SM=SHM {file}\n"
+                result = subprocess.CompletedProcess([], 0, row, "")
+                anonymous = []
+                with patch.object(stage.web.subprocess, "run", return_value=result), \
+                     patch.object(stage.web.tempfile, "gettempdir", return_value=str(temporary)):
+                    paths = stage.web.macos_mapped_files(77, anonymous=anonymous)
+                self.assertEqual(bool(anonymous), allowed)
+                self.assertEqual(paths, [] if allowed else [str(file)])
+
+    def test_macos_versioned_image_and_alias_are_packaged_together(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / "source", Path(directory) / "target"
+            source.mkdir()
+            target.mkdir()
+            real = source / "libWebKit.dylib.SOVERSION"
+            real.write_bytes(b"versioned Mach-O fixture")
+            (source / "libWebKit.dylib").symlink_to(real.name)
+            (source / "libcurl.dylib").write_bytes(b"must stay private/static")
+            (source / "unrelated.dylib.dSYM").mkdir()
+            stage.copy_private_libraries(source, target, "macos")
+            self.assertEqual((target / real.name).read_bytes(), real.read_bytes())
+            self.assertTrue((target / "libWebKit.dylib").is_symlink())
+            self.assertTrue((target / real.name).samefile(target / "libWebKit.dylib"))
+            self.assertFalse((target / "libcurl.dylib").exists())
+            self.assertFalse((target / "unrelated.dylib.dSYM").exists())
+
+    def test_incomplete_source_cache_fails_before_expensive_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            (cache / "checkout/.git").mkdir(parents=True)
+            with self.assertRaisesRegex(ValueError, "self-contained"):
+                stage.validate_source_cache(cache, ROOT)
+
+    def test_macos_web_paths_are_private_and_do_not_mutate_predecessor(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            sdk = Path(directory)
+            private = sdk / "libexec/crtweb"
+            (private / "lib").mkdir(parents=True)
+            (sdk / "lib").mkdir()
+            webkit = private / "lib/libWebKit.dylib"
+            webkit.touch()
+            (sdk / "lib/libc.dylib").touch()
+            with patch.object(stage.crt_macho, "dylib_id", return_value=None), \
+                 patch.object(stage.crt_macho, "dependencies", return_value=[str(sdk / "lib/libc.dylib")]), \
+                 patch.object(stage.crt_macho, "rpaths", return_value=["/old/build/lib"]), \
+                 patch.object(stage, "run") as run:
+                stage.portable_web_macho(sdk)
+            edits = [call.args[0] for call in run.call_args_list if call.args[0][0] == "install_name_tool"]
+            self.assertEqual(len(edits), 14)
+            self.assertTrue(all(command[-1] != sdk / "lib/libc.dylib" for command in edits))
+            commands = [command for command in edits if command[-1] == webkit]
+            self.assertIn("@loader_path/../../../lib", commands[1])
+            self.assertIn("@rpath/libc.dylib", commands[0])
+            self.assertIn("-delete_rpath", commands[0])
+            self.assertTrue(all(not ("-delete_rpath" in command and "-add_rpath" in command) for command in edits))
+            with patch.object(stage.crt_macho, "dylib_id", return_value=None), \
+                 patch.object(stage.crt_macho, "dependencies", return_value=["/opt/host/libcurl.dylib"]):
+                with self.assertRaisesRegex(ValueError, "unpackaged"):
+                    stage.portable_web_macho(sdk)
+
     def test_stage_metadata_tools_are_updated_without_replacing_compilers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

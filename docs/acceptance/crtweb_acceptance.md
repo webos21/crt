@@ -4057,8 +4057,9 @@ tree/listing and carried-patch hashes are rechecked. CMake/Ninja, Python, Perl
 and Ruby run on the build host. Host gperf and ICU tools are built in a separate
 host directory with the host compiler/runtime; target ICU explicitly uses that
 ICU cross-build root for data generation. Target ports and JSC/WebCore/WebKit
-use the predecessor's CRT toolchain. The initial entrypoint rejects other
-hosts/architectures rather than treating a native build as cross-target proof.
+use the predecessor's CRT toolchain. The initial Linux-only entrypoint is now
+extended to native macOS/arm64 as recorded below; other host/target pairs are
+rejected rather than treating a native build as cross-target proof.
 In particular, inherited native port recipes can still execute CRT-built make
 or gperf on the same architecture; this is not the complete cross-build split.
 The explicit host gperf passed to WebKit and ICU host data tools do not establish
@@ -4154,8 +4155,9 @@ advisories did not mark the existing **2.54.0** pin affected. However, the
 records both facts and cannot grant public-release approval. Before publication,
 update/reverify the pin and source/patch correspondence, replay the product and
 package gates, and confirm upstream's still-undocumented support window.
-Windows/x64 and macOS/arm64 native packaging and x86_64-host -> Linux/aarch64-
-target isolated proof also remain required. **Tranche 10 is not closed.**
+Windows/x64 native packaging and x86_64-host -> Linux/aarch64-target isolated
+proof remain required; macOS/arm64 development acceptance is recorded below.
+**Tranche 10 is not closed.**
 
 #### Linux/x86_64 isolated build and relocation replay (2026-10-18)
 
@@ -4233,6 +4235,112 @@ interrupted to align packaged metadata tools with the final manifest. Final
 v10 uses the official entrypoint without those diagnostic repairs. No upstream
 patch, owned public ABI or acceptance limit was changed. No new GPU/physical-device,
 Windows/macOS or aarch64-cross acceptance is claimed.
+
+#### macOS/arm64 isolated build and relocation replay (2026-10-18)
+
+Native replay on macOS 27.0.1/Apple M1 Pro produced
+`out/tranche10-macos-20261018/sdk06` through the official source-stage entrypoint.
+The input `predecessor05` is an immutable copy of the refreshed, option-ON
+in-tree `05-ui` publisher output. This proves the isolated **05 -> 06**
+transition, not a new clean isolated 01 -> 05 chain. Host gperf/ICU tools are
+separate host builds; target libraries use the installed CRT wrappers. No
+existing WebKit object or binary is imported. This is native arm64 proof, not
+the remaining x86_64-host -> Linux/aarch64 cross-target gate.
+
+The final local dirty-development source asset is
+`assets-v4/crt-tranche10-macos-v4-macos-06-web-source.tar.xz`, SHA-256
+`bcc2932cf3312e1ae495777272fcefc3ebbd1a378722f826ff80077d76cd223a`.
+The full predecessor-content identity is
+`d8d12a481f4bb76c2f53d7cb431b240220c25f9ec5c20aaf2fb49c6a189a793b`.
+Input inventory is identical before/after the pass; compiler wrappers remain
+unchanged. A fresh 8,301-action WebKit build completed in the v2 checkpoint;
+the accepted v4 asset completed 1,369 incremental actions after verified
+packaging-only source correspondence and freshly clean-built both small
+consumers. It is not claimed as another clean full WebKit build. Reproduce
+with the retained input tree (choose a nonexistent output):
+
+```sh
+python3 tools/crt-stage-build.py \
+  --sdk-root out/tranche10-macos-20261018/predecessor05 \
+  --recipe out/tranche10-macos-20261018/assets-v4/06-web.json \
+  --asset out/tranche10-macos-20261018/assets-v4/crt-tranche10-macos-v4-macos-06-web-source.tar.xz \
+  --work-root /private/tmp/crtw10m --output /absolute/path/to/new-sdk06 \
+  --reuse-work-root --dependency-jobs 6
+```
+
+For a fresh empty work root, omit `--reuse-work-root`. A changed follow-up
+asset must name v4 with `--previous-source-asset`; the accepted run upgraded
+from the retained v3 asset that way. The optional old `/private/tmp/webB3f`
+source cache lacked complete Git checkout metadata and was rejected, not
+trusted or patched into a build. The product checkout was fetched afresh at
+the pinned commit/tree/listing. The new early cache validator also rejects
+modified, untracked or ignored generated content. Source cache metadata is not
+a reason to import old objects or weaken provenance.
+
+The accepted SDK passes 21 selected native dependency smokes, C API execution,
+the installed CPU browser, HTTP/TLS **10/10**, export/header checks, strict
+static Host ABI and `verify_dist.py`. Public exports are exactly **37**;
+private WebKit exports no `curl_*` and has no direct shared-curl dependency.
+The existing mbedTLS media curl stays in common `lib/`; WebKit owns a private
+static OpenSSL curl. Versioned Mach-O images, including
+`libWebKit.dylib.SOVERSION`, and their relative aliases are preserved together.
+New Web images use ordered package-relative install names/RPATHs and are
+ad-hoc signed after editing. Inherited runtime images are not rewritten.
+
+The native ps/vmmap observer holds the painted sample at an explicit
+checkpoint and validates Host/Web/Network ancestry, mappings and cleanup.
+Each role maps exactly one SDK libc++ and libc++abi image. Darwin's existing
+libSystem unwinder contract is unchanged; no separate CRT libunwind image is
+claimed. Apple framework/shared-cache mappings, including the OS's transitive
+C++ runtime, are recorded separately, not counted as CRT images. Direct Mach-O
+dependencies still undergo the strict Host ABI firewall; media frameworks are
+allowed only at the existing `libcrtmedia` PAL boundary. Fontconfig uses
+bundled fonts and an owned non-executable cache. PID-scoped, immediately
+unlinked, non-executable CRT `memfd` data is recorded separately; live,
+executable, unrelated or foreign-PID temporary files do not get that exception.
+
+Copied the output with symlinks preserved to
+`out/tranche10-macos-20261018/relocated SDK/06-web`, and built its installed
+`examples/web-browser` in a fresh external directory using only that SDK's
+toolchain/headers/libraries. With the **entire** `/private/tmp/crtw10m` tree
+temporarily renamed out of reach, the original installed browser, relocated
+browser and external consumer each pass load/script/exact background pixels,
+all three roles, one CRT C++ image per family and complete owned descendant
+cleanup. No loader-path override is used. Both SDKs pass Host ABI and
+distribution checks, and the rebuilt relocated C API probe passes HTTP/TLS
+**10/10** again. The original work tree is restored.
+
+The **3,532-entry** output inventory is byte/alias-identical across copying
+and runtime checks; its canonical inventory SHA-256 is
+`21258622d84ed0e9e3de596004d094d65527e136394b3e097cce2e0a2de570d0`.
+Evidence lives under `out/tranche10-macos-20261018/`: `replay-result.json`,
+`relocation-replay.log`, `{installed,relocated,external}-observation/`,
+`{installed,relocated}-host-abi.json`, `relocated-network.json`,
+`public-exports.json`, input/output inventories and the retained source assets.
+Official build logs and pre-publication reports are retained alongside them.
+Native C-stage **138/138** and **113** focused distribution/source/security/
+licensing/Web-helper cases (**112 pass, one expected Darwin-nm/Windows-export
+fixture skip**) pass. The patch gate remains **23 patches / 63 modified /
+24 CRT-owned files**.
+
+Failed checkpoints are not acceptance: v1 exposed incomplete source-cache Git
+metadata; v2 omitted the real `.dylib.SOVERSION` image; v3 exposed Apple's
+prohibition on deleting and adding the same RPATH in one invocation. Separate
+diagnostic copies confirmed the RPATH repair and the existing narrow IPC
+classification before v4's official run. Those logs/copies remain separate.
+No new upstream patch, public ABI, runtime/PAL policy or acceptance limit was
+changed. This is CPU package/consumer acceptance, not new GPU-loss, physical
+camera/audio, Windows or cross-target evidence.
+
+The candidate includes the 64 hash-checked WebKit notices, target-port recipes/
+notices, source correspondence and SPDX 2.3 package composition. Its fresh
+2026-10-18 advisory snapshot checks all 50 linked advisories, passes for the
+2.54.0 pin, and still reports 2.54.1 as the newest micro. `NOASSERTION` remains
+honest unreviewed license metadata, and `public_release_allowed` is **false**.
+Windows native packaging, cross-target proof, inherited runtime/shell notice
+closure, current stable-pin revalidation and upstream support confirmation
+remain required. **Tranche 10/public release is not closed.** `STATUS.md` is
+unchanged.
 
 ## Host order
 

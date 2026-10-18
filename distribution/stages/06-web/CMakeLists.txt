@@ -13,6 +13,9 @@ add_executable(crtweb_gpu_worker "${CRT_STAGE_SOURCE_ROOT}/libcrtweb/tools/crtwe
 if(CRT_STAGE_TARGET_OS STREQUAL "linux")
   set_target_properties(crtweb_gpu_worker PROPERTIES
     BUILD_RPATH "$ORIGIN/../../lib;${CMAKE_SYSROOT}/lib" INSTALL_RPATH "$ORIGIN/../../lib")
+elseif(CRT_STAGE_TARGET_OS STREQUAL "macos")
+  set_target_properties(crtweb_gpu_worker PROPERTIES
+    BUILD_RPATH "@loader_path/../../lib;${CMAKE_SYSROOT}/lib" INSTALL_RPATH "@loader_path/../../lib")
 endif()
 target_compile_features(crtweb_gpu_worker PRIVATE cxx_std_17)
 target_include_directories(crtweb_gpu_worker PRIVATE

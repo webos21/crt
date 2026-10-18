@@ -40,10 +40,12 @@ def audit_exports(dist: Path, target_os: str) -> dict:
     exported = names(library, target_os)
     result = {"header_leaks": leaks, "foreign_exports": sorted(exported - owned),
               "missing_exports": sorted(owned - exported), "public_functions": len(owned)}
-    if target_os == "linux":
-        private = dist / "libexec/crtweb/lib/libWebKit.so"
-        result["private_curl_exports"] = sorted(name for name in names(private, "linux") if name.startswith("curl_"))
-        result["colliding_curl_needed"] = [name for name in needed_libraries(private) if name.startswith("libcurl.so")]
+    if target_os in ("linux", "macos"):
+        from crt_macho import dependencies
+        private = dist / ("libexec/crtweb/lib/libWebKit.dylib" if target_os == "macos" else "libexec/crtweb/lib/libWebKit.so")
+        result["private_curl_exports"] = sorted(name for name in names(private, target_os) if name.startswith("curl_"))
+        needed = dependencies(private) if target_os == "macos" else needed_libraries(private)
+        result["colliding_curl_needed"] = [name for name in needed if Path(name).name.startswith("libcurl")]
     result["passed"] = bool(owned) and not any(result.get(key) for key in (
         "header_leaks", "foreign_exports", "missing_exports", "private_curl_exports", "colliding_curl_needed"))
     return result

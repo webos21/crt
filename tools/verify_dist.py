@@ -373,6 +373,16 @@ def validate_web_stage(dist: Path, manifest: dict, redistributed: dict, suffix: 
             require(soname)
             if not plain.samefile(soname):
                 raise SystemExit(f"duplicate C++ runtime images: {plain.name}/{soname.name}")
+    elif manifest["target"]["os"] == "macos":
+        for name in ("libWebKit.dylib", "libcrtmedia.dylib"):
+            require(dist / "libexec/crtweb/lib" / name)
+        for name in ("libc++", "libc++abi"):
+            plain = dist / "lib" / (name + ".dylib")
+            versioned = dist / "lib" / (name + ".1.dylib")
+            require(plain)
+            require(versioned)
+            if not plain.samefile(versioned):
+                raise SystemExit(f"duplicate C++ runtime images: {plain.name}/{versioned.name}")
 
 
 def main() -> None:

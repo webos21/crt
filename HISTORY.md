@@ -11,6 +11,39 @@ substantive update.
 
 ## 2026-10-18
 
+### Web Tranche 10: macOS/arm64 isolated development SDK replay
+
+Implemented the native macOS `05-ui -> 06-web` source-stage path: SDK-only
+application/Metal-worker link interfaces, private versioned dylib families,
+ordered portable install names/RPATHs and ad-hoc signing. Preserved
+`libWebKit.dylib.SOVERSION` and its relative alias; separated RPATH deletion
+and addition for Apple's tool. WebKit's static OpenSSL curl remains private,
+and the inherited media curl/runtime images are unchanged. Added native
+checkpointed ps/vmmap observation, using the existing strictly PID-scoped,
+unlinked/non-executable CRT IPC classification. Incomplete or non-pristine
+source caches now fail before the expensive dependency phase.
+
+The official final asset produces `out/tranche10-macos-20261018/sdk06` from an
+immutable installed option-ON predecessor. Dependencies pass 21 native smokes;
+a fresh 8,301-action WebKit build and final 1,369-action incremental rebuild
+pass C API execution. Installed/space-path-relocated SDKs and an SDK-only
+external consumer pass load/script/exact pixels, three-role mapping/cleanup,
+Host ABI and distribution verification with the entire original work tree
+hidden. HTTP/TLS passes 10/10 before publication and again after relocation.
+The 3,532-entry SDK inventory is unchanged by copying/runtime checks; input
+SDK and compiler wrappers are unchanged. Public exports are exactly 37, with
+no private curl export/shared-curl dependency. C-stage 138/138 and 113 focused
+tests (112 pass, one expected Darwin-nm/Windows-export fixture skip) pass.
+
+Failed cache/version-alias/RPATH/IPC-observer checkpoints and diagnostic SDKs
+remain separate from official acceptance. No new upstream patch, public ABI,
+runtime/backend policy or acceptance bound changed. This closes the macOS
+development-package slice, not Tranche 10/public release: Windows packaging,
+cross-target proof, inherited-runtime notices and stable-pin/support closure
+remain open. Detailed inputs, hashes, commands and limits are in
+[macOS T10 acceptance](docs/acceptance/crtweb_acceptance.md#macosarm64-isolated-build-and-relocation-replay-2026-10-18).
+`STATUS.md` is unchanged.
+
 ### Web Tranche 10: Linux-first isolated development SDK
 
 Implemented the installed `05-ui -> 06-web` source stage, complete predecessor

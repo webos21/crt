@@ -51,4 +51,13 @@ elseif(CRT_STAGE_TARGET_OS STREQUAL "macos")
     "-framework Foundation" "-framework AppKit" "-framework QuartzCore" "-framework CoreGraphics" objc)
   set_property(TARGET crtgfx_gpu APPEND PROPERTY INTERFACE_LINK_LIBRARIES "-framework Metal" "-framework IOSurface")
   set_property(TARGET crtgfx_skia APPEND PROPERTY INTERFACE_LINK_LIBRARIES "-framework CoreVideo")
+  set_property(TARGET crtmedia APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+    "${CMAKE_SYSROOT}/lib/libavformat.a" "${CMAKE_SYSROOT}/lib/libavcodec.a"
+    "${CMAKE_SYSROOT}/lib/libswresample.a" "${CMAKE_SYSROOT}/lib/libavutil.a"
+    "${CMAKE_SYSROOT}/lib/libcurl.a" "${CMAKE_SYSROOT}/lib/libmbedtls.a"
+    "${CMAKE_SYSROOT}/lib/libmbedx509.a" "${CMAKE_SYSROOT}/lib/libmbedcrypto.a"
+    "${CMAKE_SYSROOT}/lib/libz.a"
+    "-framework AudioToolbox" "-framework VideoToolbox" "-framework CoreMedia"
+    "-framework CoreVideo" "-framework CoreFoundation" "-framework AVFoundation"
+    "-framework Foundation" objc)
 endif()
