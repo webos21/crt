@@ -229,6 +229,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME crt_binary_dependencies_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_binary_dependencies.py"
   )
+  add_test(NAME crtweb_stage_distribution_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_stage_06_web.py"
+  )
   add_test(NAME crtgfx_gpu_backend_boundary_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_gpu_backend_boundary.py"
   )
@@ -238,6 +241,7 @@ if(Python3_Interpreter_FOUND)
     crt_libcxx_predecessor_unit_runs
     crt_libcxx_fetch_unit_runs
     crt_binary_dependencies_unit_runs
+    crtweb_stage_distribution_unit_runs
     crtgfx_gpu_backend_boundary_unit_runs
     PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -1447,9 +1451,18 @@ if(Python3_Interpreter_FOUND)
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
       --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
+      --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/06-web.json"
+    DEPENDS crt-stage-06-source
     COMMENT "Creating the pinned 04-gfx-media -> 05-ui source asset and recipe"
     USES_TERMINAL
   )
+  add_custom_target(crt-stage-06-source
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
+      --root "${CMAKE_SOURCE_DIR}" --stage 06-web --target-os "${CRT_TARGET_OS}"
+      --source-root "${CMAKE_BINARY_DIR}/external" --output-dir "${CRT_STAGE_SOURCE_ROOT}"
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
+    COMMENT "Creating the pinned 05-ui -> 06-web source asset and recipe"
+    USES_TERMINAL)
   add_custom_target(crt-c-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
@@ -1683,11 +1696,20 @@ if(Python3_Interpreter_FOUND)
   endif()
   add_custom_target(crt-gfx-media-build DEPENDS ${CRT_GFX_MEDIA_BUILD_DEPENDS})
   add_custom_target(crt-gfx-media-test DEPENDS crt-gfx-test crt-media-test)
+  set(CRT_FULL_MEDIA_DIST_ARGS)
+  if(CRTGFX_ENABLE_SKIA AND CRTMEDIA_ENABLE_FFMPEG AND CRTMEDIA_ENABLE_CURL)
+    list(GET CRTGFX_SKIA_LIBRARIES 0 CRT_STAGE_SKIA_LIBRARY)
+    list(APPEND CRT_FULL_MEDIA_DIST_ARGS
+      --media-dependency-prefix "${CRTMEDIA_FFMPEG_PORT_PREFIX}"
+      --media-source-root "${CMAKE_BINARY_DIR}/port-tests/src"
+      --skia-source "${CRTGFX_SKIA_ROOT}" --skia-library "${CRT_STAGE_SKIA_LIBRARY}")
+  endif()
   add_custom_target(crt-gfx-media-dist
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/04-gfx-media" --base "${CRT_DIST_ROOT}/03-gfx-simple"
       --component crt-gfx --component crt-media --cmake "${CMAKE_COMMAND}" --stage 04-gfx-media
+      ${CRT_FULL_MEDIA_DIST_ARGS}
       --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
@@ -1730,10 +1752,11 @@ if(Python3_Interpreter_FOUND)
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/05-ui" --base "${CRT_DIST_ROOT}/04-gfx-media"
       --component crt-ui --cmake "${CMAKE_COMMAND}" --stage 05-ui
+      --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/06-web.json"
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
       --dist "${CRT_DIST_ROOT}/05-ui" --stage 05-ui
-    DEPENDS crt-gfx-media-dist crt-ui-build
+    DEPENDS crt-gfx-media-dist crt-ui-build crt-stage-06-source
     USES_TERMINAL
   )
 endif()

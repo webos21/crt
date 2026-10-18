@@ -200,7 +200,7 @@ def publish_tree(staged: Path, output: Path) -> None:
         prefix=f".{output.name}-publish-", dir=output.parent))
     candidate = publish_root / output.name
     try:
-        shutil.copytree(staged, candidate)
+        shutil.copytree(staged, candidate, symlinks=True)
         if sys.platform == "darwin":
             rewrite_stale_macho_rpaths(candidate, staged, output)
         os.replace(candidate, output)
@@ -412,7 +412,7 @@ def main() -> None:
                 base = Path(directory).resolve()
                 return {name for name in names if (base / name).resolve() == work_root_resolved}
 
-            shutil.copytree(sdk, staged, ignore=skip_work_root)
+            shutil.copytree(sdk, staged, ignore=skip_work_root, symlinks=True)
         manifest_path = staged / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         env = runtime_env(staged, manifest)
@@ -454,6 +454,11 @@ def main() -> None:
                 "source_sha256": args.source_sha256,
             }
             add_lvgl_dependency(staged, lvgl_root, lvgl_recipe, manifest)
+            successor = asset / "stages/recipes/06-web.json"
+            if successor.is_file():
+                destination = staged / "stages/recipes/06-web.json"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(successor, destination)
             manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
         with timings.measure("rebuild and run installed ui-basic example"):

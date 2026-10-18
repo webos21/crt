@@ -67,6 +67,10 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--asset", type=Path, help="local asset override; still checked against the recipe")
+    parser.add_argument("--source-cache", type=Path,
+                        help="06-web only: verified upstream WebKit product source cache (no objects)")
+    parser.add_argument("--previous-source-asset", type=Path,
+                        help="06-web only: previous pinned asset for a verified packaging-only retry")
     # Forwarded only if given -- not every stage entrypoint understands it
     # (currently just tools/build_stage_04_gfx_media.py; see its own
     # --reuse-work-root help text for what it does and why it exists).
@@ -92,6 +96,8 @@ def main() -> None:
         validate_recipe(recipe)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
+    if (args.source_cache or args.previous_source_asset) and recipe["output_stage"] != "06-web":
+        parser.error("--source-cache is supported only by 06-web")
     if manifest.get("stage") != recipe["input_stage"]:
         raise SystemExit(f"recipe requires {recipe['input_stage']}, SDK is {manifest.get('stage')}")
     sdk_os = manifest.get("target", {}).get("os")
@@ -131,6 +137,10 @@ def main() -> None:
         "--recipe-location", recipe_location,
         "--source-sha256", recipe["source"]["sha256"],
     ]
+    if args.source_cache:
+        command += ["--source-cache", str(args.source_cache.resolve())]
+    if args.previous_source_asset:
+        command += ["--previous-source-asset", str(args.previous_source_asset.resolve())]
     if args.reuse_work_root:
         command.append("--reuse-work-root")
     if args.dependency_jobs is not None:

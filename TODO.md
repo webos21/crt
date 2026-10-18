@@ -159,20 +159,21 @@ uses the host replay order stated below and in the acceptance document.
   * [x] **Native fork regression replay:** Linux heap-snapshot repeat and C-stage pass;
     native-COW fix/replay evidence is in Web acceptance. Windows memory-copy fork is unchanged.
 * [ ] **10. Distribution and security closure.**
-  * [ ] Build `06-web` in isolation from the installed `05-ui` SDK and add the
-    stage-source/prerequisite manifests.
+  * [ ] Implement/replay isolated `05-ui -> 06-web` packaging on Windows/macOS;
+    Linux/x86_64 development SDK and manifests pass ([evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-build-and-relocation-replay-2026-10-18)).
   * [ ] Prove the build-host/target split with x86_64-host -> Linux/aarch64-target:
     host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
-  * [ ] Package `libcrtweb` and a browser sample; pass `verify_dist.py`, dependency,
-    RPATH/install-name and Host ABI audits on Linux, Windows and macOS.
-  * [ ] Restrict Windows `libcrtmedia.dll` exports to its owned API: the FFmpeg-enabled
-    SDK exports 5,981 names (only 90 `crtmedia_*`); a clean PE import audit is not export hygiene.
-    Keep FFmpeg/SDK GUID symbols private, as the macOS export boundary already does.
-  * [ ] Publish provenance, notices, source correspondence, SBOM and CVE/advisory state.
+  * [ ] Close Windows/macOS SDK/browser, dependency, install-name/RPATH and Host ABI
+    acceptance; Linux installed/relocated SDK and external consumer pass.
+  * [ ] Native Windows replay of the implemented 75-function `libcrtmedia.dll`
+    export boundary; cross-generated PE fixtures are not native acceptance.
+  * [ ] Finish inherited-runtime notice/source/SBOM review before publication;
+    the Web candidate carries its provenance, notices, SPDX and advisory snapshot.
+  * [ ] Update the stable-series WebKit pin to the newest micro release and confirm
+    upstream support before public release; evidence/decisions stay in Web acceptance.
 
-Web follow-up (not a gate): `tools/check_webkit_security.py` -- compare the pinned
-version with the upstream WPE advisory feed; becomes a package gate before the
-first public `06-web` release.
+`tools/check_webkit_security.py` is the development-package advisory snapshot;
+public-release conditions remain under Tranche 10 above.
 
 Small UI follow-ups (not gates): teach `tools/prepare_release_assets.py` the
 `05-ui` SDK, and make a default-configuration `crt-ui-dist` fail with a clear

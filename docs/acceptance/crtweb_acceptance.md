@@ -4046,6 +4046,194 @@ for the build host and never enter the SDK or target ABI audit; ICU, libc++, JSC
 WebCore and WebKit are built for the target. Acceptance includes an
 x86_64-host -> Linux/aarch64-target isolated build.
 
+#### Linux-first development packaging contract (2026-10-18)
+
+The first implementation is deliberately a **development candidate**, not a
+three-host or public-release closure. `tools/build_stage_06_web.py` consumes an
+installed, option-ON `05-ui` SDK and an extracted/pinned `06-web` source asset.
+It has no dependency on the repository's runtime objects or an existing WebKit
+build. A source-only Git checkout cache is permitted, but its pinned commit,
+tree/listing and carried-patch hashes are rechecked. CMake/Ninja, Python, Perl
+and Ruby run on the build host. Host gperf and ICU tools are built in a separate
+host directory with the host compiler/runtime; target ICU explicitly uses that
+ICU cross-build root for data generation. Target ports and JSC/WebCore/WebKit
+use the predecessor's CRT toolchain. The initial entrypoint rejects other
+hosts/architectures rather than treating a native build as cross-target proof.
+In particular, inherited native port recipes can still execute CRT-built make
+or gperf on the same architecture; this is not the complete cross-build split.
+The explicit host gperf passed to WebKit and ICU host data tools do not establish
+the remaining aarch64 proof by themselves.
+
+The predecessor must install the current `crtgfx/shared_image.h` and
+`crtgfx/skia_shared.h`, the SDK Skia archive/headers, media archives and notices,
+and LVGL provenance. Old option-OFF or pre-9B SDKs are not silently combined
+with headers/libraries from a repository build. The in-tree option-ON publisher
+was extended to provide this installed development interface, including the
+media libcurl shared-SONAME closure. This is not a new clean replay of every
+preceding isolated source stage.
+
+The application owns SDK Skia (milestone 148); WebKit privately builds its own
+Skia (milestone 154). `libcrtweb`/WebKit and the Web/Network processes remain
+replaceable together behind the C/process boundary. The sample is a separate-
+process CPU-shared-memory WebView; `--smoke` checks a local page load, script-
+changed title and exact background pixels without a window. It does not claim
+GPU rendering, physical GPU reset or new 9C evidence. The owned GPU worker is
+packaged separately. The application/GPU worker keeps the accepted static CRT
+runtime; the shared-runtime WebKit build environment is not propagated into
+these native window/GPU PAL consumers. User-provided PEM trust is mandatory for
+HTTPS; the sample has no sandbox and is for local/trusted content, not general
+untrusted browsing.
+
+Packaging must not overwrite the media stack's mbedTLS `libcurl` with WebKit's
+OpenSSL `libcurl` under the same SONAME. The Linux stage selects the latter's
+static archive privately in WebKit and excludes archive globals from its dynamic
+exports. The media SONAME/manifest remains intact. No host generator executable
+is copied into the target SDK. A relocatable fontconfig file names only the
+bundled fonts, not build-host font paths.
+FindCURL can append pkg-config's shared library even after
+`CURL_LIBRARY_RELEASE` selects the static archive. The stage binds
+`pkgcfg_lib_PC_CURL_curl` to that same archive too; the installed WebKit must
+have neither a direct `libcurl.so` dependency nor exported private curl symbols.
+
+WebKit, VA stubs and a browser-private copy of the media library are installed under
+`libexec/crtweb/lib/`; only `libcrtweb.so` is added to the SDK's common `lib/`.
+The normal media library and GPU worker retain their real hardware backend.
+Linux C++ runtime copies made by older SDK publishers are checked byte-for-byte
+and normalized to one image with relative aliases. The producers/copy paths in
+stages 02 through 05 now preserve those aliases instead of dereferencing them.
+Neither repair changes the installed input SDK. The packaged-browser observer
+checks the three CPU browser roles, one mapped image per LLVM runtime family,
+SDK-only library mappings and owned descendant cleanup. Its font cache is
+run-owned, non-executable data, not a host-library exception.
+Deleted, non-executable CRT IPC mappings (`memfd`, `crt_memfd_*` and the
+`WK2SharedMemory` shm fallback) are classified separately; executable, live or
+unrelated temporary files do not receive that exception. Output-stage metadata
+tools are updated from the asset without replacing the predecessor's compiler
+wrappers. The prerequisite manifest declares only the target architecture's
+existing ELF interpreter SONAME for the shared-runtime TLS import.
+
+The Windows media export fix is shared by in-tree and isolated `04-gfx-media`
+builds. `crtmedia_public_symbols.txt` enumerates the 75 public header functions;
+the generated `.def` intersects it with the configuration's defined symbols so
+FFmpeg-OFF builds do not require optional codec symbols. Internal `crtmedia_*`
+helpers, FFmpeg/curl globals and SDK GUIDs are not a public API. A cross-generated
+PE fixture is a useful unit check, **not Windows native DLL/export acceptance**.
+
+The first fresh Linux dependency build exposed a real shared-runtime wrapper
+defect before WebKit: GNU ld rejected `libc++abi.so`'s `__tls_get_addr` when
+linking an ICU tool. The existing empty loader stub named the interpreter but
+advertised no import. The wrapper now creates an explicit-target, link-only
+import stub for that one TLS symbol in private per-link storage; it does not
+link host libc or relax unrelated unresolved-symbol checks. The actual shared
+CRT TLS/thread-destructor test and missing-import negative control pass, with
+stub cleanup on both paths (`out/tranche10/loader-probe-v2/result.json`). This is
+a toolchain-boundary fix, not a new public libc/PAL symbol or loader implementation;
+policy lives in [C++ runtime](../design/cxx_runtime.md#linux-shared-runtime-loader-imports).
+
+Each candidate carries the 64 inventoried WebKit notices checked against their
+hashes, target-port notices/recipes, the product pin and patch/overlay records,
+source-correspondence instructions, a package-level **SPDX 2.3 JSON** composition
+and a dated WebKit advisory snapshot. Mixed/unreviewed license expressions stay
+`NOASSERTION`; that is not a legal-compliance certification. The full per-file
+scan and bundled-component inventory remain authoritative provenance inputs.
+`verify_dist.py` validates the manifest/layout, dependencies, portable runtime
+paths, no host generators, security evidence and SBOM presence. A security
+snapshot must have been current at packaging time; immutable old packages do
+not become structurally invalid merely because time passes.
+The SPDX composition covers WebKit, its target ports and the predecessor's
+declared redistributed dependencies; it is not a completed inventory/license
+review of the inherited C/C++ runtime and shell. That inherited notice closure
+also remains a publication gate. Source correspondence records the full
+predecessor-content SHA-256 as well as the source asset's identity.
+
+On 2026-10-18 the official [WPE advisory index](https://wpewebkit.org/security/)
+listed WSA-2026-0006 as newest. The version-bound check of all 50 linked
+advisories did not mark the existing **2.54.0** pin affected. However, the
+[release index](https://wpewebkit.org/releases/) already lists **2.54.1**
+(2026-10-06): advisory success is not stable-series freshness. The snapshot
+records both facts and cannot grant public-release approval. Before publication,
+update/reverify the pin and source/patch correspondence, replay the product and
+package gates, and confirm upstream's still-undocumented support window.
+Windows/x64 and macOS/arm64 native packaging and x86_64-host -> Linux/aarch64-
+target isolated proof also remain required. **Tranche 10 is not closed.**
+
+#### Linux/x86_64 isolated build and relocation replay (2026-10-18)
+
+The official source-stage entrypoint produced `out/tranche10/sdk06-v10` from
+the installed option-ON `out/tranche10/predecessor05-v2`, not an in-tree runtime
+build. The predecessor itself was generated by the in-tree publisher; this is
+proof of the isolated **05 -> 06** transition, not a new clean 01 -> 05 chain.
+The first isolated WebKit build completed 8,305 actions. The accepted final
+asset reused verified dependency inputs and completed 1,369 incremental WebKit
+actions, then freshly configured/clean-built the two SDK-only consumers.
+It is not claimed as another clean full WebKit build.
+
+The local, dirty-development source asset has SHA-256
+`7ab65fb0330d35e7c641f5d1c8bb856128efd2ada15615837ad1d775dfa9d67b`.
+Its full predecessor-content identity is
+`f0ba95615f086c3f9428351427450729e3f49b0802b88b97232c0e9c61857347`.
+The input SDK and all four compiler wrappers remain unchanged. Source recipe,
+archive and final log are under `out/tranche10/assets-v10/` and
+`out/tranche10/native-v10.log`; reproduce the accepted transition with:
+
+```sh
+python3 tools/crt-stage-build.py \
+  --sdk-root out/tranche10/predecessor05-v2 \
+  --recipe out/tranche10/assets-v10/06-web.json \
+  --asset out/tranche10/assets-v10/crt-tranche10-v10-linux-06-web-source.tar.xz \
+  --previous-source-asset out/tranche10/assets-v9/crt-tranche10-v9-linux-06-web-source.tar.xz \
+  --source-cache out/web-crt-webcore/product \
+  --work-root out/tranche10/native-v2 --output /absolute/path/to/new-sdk06 \
+  --reuse-work-root --dependency-jobs 12
+```
+
+On an empty work-root, omit the reuse/previous-asset options. The optional
+source cache contains only verified upstream sources. A local asset is not a
+published release: regenerate a clean committed source asset and complete the
+remaining gates before publication. Reusing this work-root after the accepted
+run can omit `--previous-source-asset` for the unchanged v10 asset. A changed
+follow-up asset must name v10, rather than v9, as its previous input.
+
+The accepted SDK passes the 21 selected native dependency smokes, C API test,
+installed browser load/script/exact-pixel smoke, three-role runtime observer,
+HTTP/TLS **10/10**, static Host ABI and `verify_dist.py`. The C library exports
+exactly **37** public functions, with no private header/export leakage; WebKit
+exports no `curl_*` and has no direct shared-curl dependency. No host generator
+is bundled, no VA stub is installed in common `lib/`, and each CPU browser role
+maps one image per LLVM runtime family. All observed descendants retire.
+
+Copied the SDK with symlinks preserved to `out/tranche10/relocated SDK` and
+freshly built its `examples/web-browser` outside the SDK with only its installed
+toolchain/headers/libraries. With the entire original `native-v2` directory
+temporarily renamed out of reach, both the installed example and external
+consumer pass the observer and load/script/pixels, and the separately rebuilt
+C API probe passes HTTP/TLS **10/10** again. Relocated `verify_dist.py` passes;
+the original build directory was restored. No loader-path override is used.
+The 3,583-entry SDK inventory remains byte/alias-identical across the copy;
+its SHA-256 is
+`f4b636ae42cde5222a8739e2401581c76a652c98a6598f3f892ebaaceea8a575`.
+Selected binary hashes and input/copy invariance are in
+`out/tranche10/final-artifacts.json`. Relocation commands/results and native
+observations are in `relocation-final.log`, `relocated-{installed,external}-observation/`
+and `relocated-network.json` under `out/tranche10/`.
+
+Fresh CMake/C-stage **138/138**, the registered distribution CTest, **75**
+focused distribution tests (**74 pass, one expected macOS-only skip**), 15
+licensing tests and six Web driver/lifecycle-evidence tests pass. The unchanged
+patch gate measures **23 patches / 63 modified / 24 CRT-owned files** against
+the pristine pinned product checkout. Logs remain under `out/tranche10/`.
+
+Failed investigation checkpoints are not acceptance: missing PNG/SQLite roots
+and temporary font fixtures were corrected in owned stage glue; the first
+consumer link leaked the browser's shared-runtime setting into a static app;
+the initial RPATH pass touched an inherited static example; the observer
+initially rejected deleted CRT IPC data; and FindCURL initially retained a
+shared curl alongside its static archive. The v9 run was deliberately
+interrupted to align packaged metadata tools with the final manifest. Final
+v10 uses the official entrypoint without those diagnostic repairs. No upstream
+patch, owned public ABI or acceptance limit was changed. No new GPU/physical-device,
+Windows/macOS or aarch64-cross acceptance is claimed.
+
 ## Host order
 
 Linux first (WPE is the reference), with an early three-host JavaScriptCore

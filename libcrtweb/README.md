@@ -12,7 +12,10 @@ The product also registers CRT-owned playback and permission-gated video-camera
 sources over the installed `crtmedia` APIs. Host acceptance, lifecycle/resource
 measurements and media limits live in the acceptance document linked above;
 active work lives in [`TODO.md`](../TODO.md), not a second checklist here.
-A packaged `06-web` SDK remains the separate Tranche 10 deliverable.
+The development source-stage entrypoint is `tools/build_stage_06_web.py`;
+[SDK layout/build instructions](../docs/guides/distribution.md) and
+[distribution/security gates](../docs/acceptance/crtweb_acceptance.md#10-distribution-and-security-closure)
+define its packaging boundary. A development candidate is not a public release.
 
 `crtweb/skia.h` is the optional GPU final-composition companion for a WebView:
 it uses the application's SDK Ganesh context, composes into an offscreen or
@@ -71,7 +74,7 @@ Current and planned layout, following the tranche order:
 
 - `include/crtweb/` -- the public API: `crtweb.h` (plain C runtime/view API) and `webview.h` (the
   header-only `crtui` WebView). No WebKit, WPE or GLib type may appear here; the driver's webview gate
-  checks the headers and `libcrtweb.so`'s exports, and `tools/verify_dist.py` will enforce it for `06-web`
+  checks the headers and `libcrtweb.so`'s exports, and `tools/verify_dist.py` enforces it for `06-web`
   as it does for LVGL in `05-ui`. Rules: `docs/design/libcrtweb_api_policy.md`.
 - `src/` -- the runtime/view implementation over `PlatformCRT` (`crtweb.cpp`, the only file that
   sees WebKit); built by the port's CMake into `libcrtweb.so`.

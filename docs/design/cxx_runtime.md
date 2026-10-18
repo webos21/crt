@@ -188,6 +188,27 @@ On Linux a stray `-lm`/`-ldl` from an upstream makefile is dropped in a static-r
 and a `-shared` link gets `crtbegin_so.o` for the per-object `__dso_handle` that C++ static
 destructors register against.
 
+### Linux shared-runtime loader imports
+
+The system ELF interpreter remains the documented loader boundary until CRT
+owns an ELF loader. Shared libc++abi/ICU can call the loader's general-dynamic
+TLS entry point, `__tls_get_addr`; CRT does not implement or export a second
+copy. A shared-runtime executable records the target loader SONAME through a
+**link-only import stub**. Its sole advertised TLS symbol satisfies the static
+linker's dependency check; no stub code is copied into the executable or SDK,
+and runtime binding goes to the interpreter already mapped by the OS.
+
+An empty stub recorded `DT_NEEDED` but still failed GNU ld's shared-library
+undefined-symbol check during the isolated Web ICU build. The stub now declares
+that one import rather than disabling all undefined-shared-library checks.
+It is generated with an explicit target triple and LLD, without host headers
+or libc, in a private per-link temporary directory and reclaimed on successful
+or failed links. No predictable shared `/tmp` file is trusted. The regression
+entrypoint is `tools/test_crt_cxx_shared_loader.py`: real shared CRT TLS/thread
+destructors pass, an unrelated missing shared import still fails, and no host
+libc/GNU C++ runtime or temporary stub remains in the executable's dependencies.
+This is not implementation or acceptance of a CRT-owned ELF loader.
+
 ### Windows emulated TLS ownership
 
 Windows CRT-targeted code is compiled with `-femulated-tls` because this

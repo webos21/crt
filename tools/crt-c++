@@ -1102,23 +1102,31 @@ if [ "$target_os" = linux ]; then
   # for that symbol only when some object lists it as DT_NEEDED -- glibc's own libc.so.6 does,
   # CRT's libc.so does not -- so first use of `thread_local` with a destructor
   # (__cxa_thread_atexit in WebCore) died with "symbol lookup error". Name the loader as a needed
-  # object through an empty stub that carries the loader's soname: nothing of the host is linked
-  # and the soname resolves to the interpreter already mapped.
+  # object through a link-only import stub that carries the loader's soname:
+  # nothing of the host is linked and the soname resolves to the interpreter
+  # already mapped. The stub must advertise __tls_get_addr too: an empty DSO
+  # cannot satisfy GNU ld's shared-library undefined-symbol check. Do NOT use
+  # --allow-shlib-undefined, which would hide unrelated missing API symbols.
   if [ "$runtime_linkage" = shared ]; then
     case "${CRT_TARGET_ARCH:-$(uname -m)}" in
       *aarch64*|*arm64*|*ARM64*) loader_arch=aarch64; loader_soname="ld-linux-aarch64.so.1" ;;
       *) loader_arch=x86_64; loader_soname="ld-linux-x86-64.so.2" ;;
     esac
-    loader_stub="${TMPDIR:-/tmp}/crt-loader-needed-$(id -u)-${loader_arch}.so"
-    if [ ! -f "$loader_stub" ]; then
-      loader_stub_tmp="${loader_stub}.$$"
-      printf '' | "$cxx" -x c - -shared -nostdlib -fPIC "-Wl,-soname,${loader_soname}" \
-        -o "$loader_stub_tmp" 2>/dev/null && mv -f "$loader_stub_tmp" "$loader_stub"
-      rm -f "$loader_stub_tmp"
+    # Private per-link storage: never trust a predictable world-writable /tmp
+    # cache. Explicit target selection also works for an x86_64 build host
+    # producing an aarch64 executable. No host headers/runtime are used.
+    loader_stub_dir=$(mktemp -d "${TMPDIR:-/tmp}/crt-loader-needed-${loader_arch}.XXXXXX")
+    loader_stub="${loader_stub_dir}/loader.so"
+    if ! printf '%s\n' 'void *__tls_get_addr(void *index) { return index; }' | \
+      "$cxx" "--target=${loader_arch}-linux-gnu" -fuse-ld=lld -x c - \
+        -shared -nostdlib -ffreestanding -fno-stack-protector -fPIC \
+        "-Wl,-soname,${loader_soname}" -o "$loader_stub"; then
+      rm -f "$loader_stub"
+      rmdir "$loader_stub_dir"
+      echo "crt-c++: failed to create the target loader import stub" >&2
+      exit 1
     fi
-    if [ -f "$loader_stub" ]; then
-      set -- "$@" -Wl,--no-as-needed "$loader_stub" -Wl,--as-needed
-    fi
+    set -- "$@" -Wl,--no-as-needed "$loader_stub" -Wl,--as-needed
   fi
   set -- "$@" -Wl,--start-group
   if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
@@ -1145,9 +1153,18 @@ if [ "$target_os" = linux ]; then
   fi
   set -- "$@" "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -Wl,--end-group
   if [ "$runtime_linkage" = shared ]; then
-    run_cxx -nostdlib -nostartfiles -nodefaultlibs \
+    # run_cxx execs the compiler. Keep a parent only on this path so the
+    # link-only stub is removed on both success and linker failure.
+    if (run_cxx -nostdlib -nostartfiles -nodefaultlibs \
       -Wl,-e,_start -Wl,--gc-sections \
-      "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
+      "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"); then
+      loader_link_status=0
+    else
+      loader_link_status=$?
+    fi
+    rm -f "$loader_stub"
+    rmdir "$loader_stub_dir"
+    exit "$loader_link_status"
   fi
   # Use the project's primary ELF linker for a static C++ runtime and ignore
   # LLVM archive .deplibs metadata: every required CRT archive is already in

@@ -145,7 +145,7 @@ def main() -> None:
     work.mkdir(parents=True, exist_ok=True)
     temp_root = Path(tempfile.mkdtemp(prefix="crt-stage-02-cxx-", dir=work))
     staged = temp_root / "sdk"
-    shutil.copytree(sdk, staged)
+    shutil.copytree(sdk, staged, symlinks=True)
     integration = temp_root / "integration"
     shutil.copytree(asset / "tools", integration / "tools")
     shutil.copytree(asset / "libstdc++", integration / "libstdc++")
@@ -228,7 +228,7 @@ def main() -> None:
     run(test_command)
     run([sys.executable, str(integration / "tools" / "verify_dist.py"),
          "--dist", str(staged), "--stage", "02-cxx"])
-    shutil.copytree(staged, output)
+    shutil.copytree(staged, output, symlinks=True)
     if sys.platform == "darwin":
         # See rewrite_stale_macho_rpaths()'s own comment. Rewritten after
         # the copy (unlike the sibling 03/04 stages' own publish_tree(),

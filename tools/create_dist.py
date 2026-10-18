@@ -77,7 +77,7 @@ def copy_libcxx(install: Path, destination: Path, target_os: str) -> None:
     for item in libraries.iterdir():
         if item.is_file() and item.name.startswith(("libc++", "libunwind", "unwind")):
             copied_item = destination / "lib" / item.name
-            if target_os == "macos" and item.is_symlink() and "/" not in os.readlink(item):
+            if target_os in ("linux", "macos") and item.is_symlink() and "/" not in os.readlink(item):
                 # libc++.dylib -> libc++.1.dylib -> libc++.1.0.dylib: a dereferenced copy is a second file
                 # with the same install name, which dyld loads as a second image (and a consumer that
                 # recorded @rpath/libc++.dylib, like libcrtmedia, then maps two C++ runtimes). Keep the link.
@@ -515,7 +515,7 @@ set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
             ["CRT_CC", "CRT_CXX", "CRT_AR", "CRT_RANLIB", "CRT_WINDOWS_SDK_LIBPATH"]
             if target_os == "windows" else []
         ),
-        "external_prerequisites": external_prerequisites_for(target_os, stage),
+        "external_prerequisites": external_prerequisites_for(target_os, stage, target_arch),
         "redistributed_dependencies": redistributed_dependencies,
         "optional_tools": {
             "porting": {
@@ -540,6 +540,45 @@ set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
     (destination / "VERSION").write_text(release_version + "\n", encoding="utf-8")
 
 
+def copy_media_development_dependencies(root: Path, destination: Path, prefix: Path,
+                                      sources: Path, skia_source: Path, skia_library: Path,
+                                      dependencies: list) -> list:
+    """Option-ON in-tree SDKs must also be usable as an isolated predecessor.
+
+    Never copy a whole build prefix (which can contain host generators or a
+    conflicting OpenSSL curl). Copy only the existing media/Skia contract.
+    """
+    for relative in ("include/freetype2", "include/libavformat", "include/libavcodec",
+                     "include/libswresample", "include/libavutil", "include/curl",
+                     "include/mbedtls", "include/psa", "include/zlib.h", "include/zconf.h",
+                     "lib/libfreetype.a", "lib/libavformat.a", "lib/libavcodec.a",
+                     "lib/libswresample.a", "lib/libavutil.a", "lib/libcurl.a",
+                     "lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a", "lib/libz.a"):
+        source = prefix / relative
+        if not source.exists():
+            raise SystemExit(f"option-ON predecessor dependency missing: {source}")
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(source, target)
+    shutil.copy2(skia_library, destination / "lib/libskia.a")
+    shutil.copytree(skia_source / "modules/skcms", destination / "include/modules/skcms", dirs_exist_ok=True)
+    # Linux crtmedia.so deliberately links the media transport dynamically.
+    # Its SONAME closure must travel too; never substitute the host libcurl.
+    for pattern in ("libcurl.so*", "libmbed*.so*", "libz.so*"):
+        for source in (prefix / "lib").glob(pattern):
+            if source.is_file():
+                copied = destination / "lib" / source.name
+                shutil.copy2(source, copied)
+                remove_absolute_runtime_paths(copied, require_origin=True)
+    from build_stage_04_gfx_media import add_redistributed_dependencies
+    manifest = {"redistributed_dependencies": dependencies}
+    add_redistributed_dependencies(root, destination, sources, skia_source, manifest)
+    return manifest["redistributed_dependencies"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
@@ -554,6 +593,10 @@ def main() -> None:
     parser.add_argument("--wayland-xdg-shell-install", type=Path)
     parser.add_argument("--wayland-build-dir", type=Path)
     parser.add_argument("--stage-recipe", action="append", default=[], type=Path)
+    parser.add_argument("--media-dependency-prefix", type=Path)
+    parser.add_argument("--media-source-root", type=Path)
+    parser.add_argument("--skia-source", type=Path)
+    parser.add_argument("--skia-library", type=Path)
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--stage", required=True)
     parser.add_argument("--target-os", required=True)
@@ -599,6 +642,19 @@ def main() -> None:
         copy_libcxx(args.libcxx_install.resolve(), destination, args.target_os)
     copy_port_tools(args.port_prefix.resolve() if args.port_prefix else None, destination)
     redistributed_dependencies = list(inherited_dependencies)
+    if (destination / "share/crt/dependencies/lvgl/recipe.json").is_file():
+        redistributed_dependencies = [item for item in redistributed_dependencies if item["name"] != "lvgl"]
+        redistributed_dependencies.append({"name": "lvgl", "kind": "private-static-port",
+            "headers": [], "link_artifacts": [], "runtime_artifacts": [],
+            "notices": ["share/licenses/lvgl/LICENCE.txt"],
+            "provenance": "share/crt/dependencies/lvgl/recipe.json"})
+    if args.media_dependency_prefix:
+        if not all((args.media_source_root, args.skia_source, args.skia_library)):
+            raise SystemExit("full media SDK needs --media-source-root, --skia-source, --skia-library")
+        redistributed_dependencies = copy_media_development_dependencies(
+            root, destination, args.media_dependency_prefix.resolve(),
+            args.media_source_root.resolve(), args.skia_source.resolve(),
+            args.skia_library.resolve(), redistributed_dependencies)
     xkbcommon = copy_xkbcommon(
         args.xkbcommon_install.resolve() if args.xkbcommon_install else None,
         args.xkbcommon_source.resolve() if args.xkbcommon_source else None,

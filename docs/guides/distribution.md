@@ -23,7 +23,7 @@ external toolchain contract.
 | `03-gfx-simple` | `02-cxx` plus one window, keyboard/mouse input, and a CPU-writable software framebuffer | Industrial HMI and simple native UI |
 | `04-gfx-media` | `03-gfx-simple` plus the GPU API, Skia CPU/GPU rendering, Vulkan/D3D12/Metal presentation, and FFmpeg media | accelerated UI and playback |
 | `05-ui` | 04-gfx-media + crtui + private LVGL 9.6, CRT-owned layout/style/v1 widgets, input/focus/resize, external-surface composition and `MediaView`, the optional Skia/media companions | native application UI |
-| `06-web` (in progress, Tranches 0-2 closed; no SDK yet) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
+| `06-web` (development source stage; release gates in [Web acceptance](../acceptance/crtweb_acceptance.md#10-distribution-and-security-closure)) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
 `05-ui` is accepted: the repository builds it in-tree (`crt-ui-dist`) and as an
 isolated `04-gfx-media -> 05-ui` stage on Windows/x64, macOS/arm64 and
@@ -236,8 +236,56 @@ The first supported transitions are `01-c -> 02-cxx`, then
 libc++/libc++abi/libunwind source package and build `02-cxx`; `02-cxx` can
 fetch the Simple Graphics and advanced Graphics/Media packages and build them
 in dependency order. The `04-gfx-media -> 05-ui` transition follows the same model and is
-implemented; the `05-ui -> 06-web` transition will follow it once the `06-web`
-source stage is introduced.
+implemented. `05-ui -> 06-web` has a Linux/x86_64-first development entrypoint,
+`tools/build_stage_06_web.py`. It requires the option-ON predecessor (including
+the shared-image headers, Skia/media archives and dependency provenance), not a
+default-OFF SDK. The ordinary option-ON `crt-ui-dist` now packages that complete
+development link interface too. An old `05-ui` SDK must be rebuilt, not supplemented
+with headers/libraries from a build tree.
+
+For a local Web development candidate:
+
+```sh
+python3 tools/crt-stage-build.py --sdk-root /absolute/path/to/05-ui \
+  --recipe /absolute/path/to/06-web.json \
+  --asset /absolute/path/to/06-web-source.tar.xz \
+  --work-root /absolute/path/to/web-work \
+  --output /absolute/path/to/06-web --dependency-jobs 4 --reuse-work-root
+```
+
+`--source-cache /absolute/path/to/webkit-product` optionally supplies the existing
+verified upstream Git/source cache; no WebKit object or library is imported from
+it. The entrypoint checks the product commit/tree/listing and patch hashes again.
+It builds host gperf and ICU generators outside the SDK, then target dependency
+ports and WebKit with the predecessor's CRT wrappers. Reuse requires identical
+source-asset and predecessor-content identities. For a packaging-only repair,
+`--previous-source-asset` can prove the previous archive's identity and unchanged
+compiled sources/configuration before reusing the heavy build. Adding explicit
+dependency roots is allowed; changing/removing compiled inputs is not. The SDK
+staging tree is copied afresh from the unchanged predecessor on every retry.
+Binding FindCURL's pkg-config discovery alias to the same already-selected
+static archive is also a permitted link-only repair. The native `make` and
+`openssl` commands are build/verification tools; `openssl` creates fresh
+loopback certificates and is not bundled in the SDK.
+Host/cross-target configurations
+not implemented by the initial Linux path fail explicitly instead of running a
+target generator as a host tool or selecting host libraries.
+
+The public C library is `lib/libcrtweb.so`. Browser helpers live in
+`libexec/crtweb/{crtweb_host,WebProcess,NetworkProcess,crtweb_gpu_worker}`;
+WebKit and its private dependencies live in `libexec/crtweb/lib/`.
+The CPU browser's media/VA-stub closure is confined there, not placed in the
+SDK's common library directory. Ordinary media applications retain their real
+hardware backend. Versioned/unversioned LLVM runtime names share one library
+image through relative symlinks, preserved when copying/publishing the SDK.
+The Linux manifest explicitly declares the target architecture's existing ELF
+interpreter for shared-runtime TLS imports, not a dependency on host libc/libstdc++.
+The public application sample is `examples/web-browser`; it uses a separate
+WebView process and never links WebKit's private Skia. HTTPS needs an explicit
+application PEM trust bundle, and the example has no sandbox. This is not a
+security-hardened browser or an authorization to publish a release. Native
+Windows/macOS packaging, cross-target proof, the stable micro-version update
+and support-window confirmation remain the acceptance document's release gates.
 
 The SHA-256 is over the exact release asset bytes, not merely a Git ref. Git
 commit IDs remain provenance metadata, while the digest is the download

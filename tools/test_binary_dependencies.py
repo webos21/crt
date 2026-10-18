@@ -143,7 +143,11 @@ class BinaryDependencyTests(unittest.TestCase):
         required = set(STAGE_VALIDATION_PROJECT_PATHS)
         for stage, spec in STAGES.items():
             with self.subTest(stage=stage):
-                self.assertTrue(required.issubset(spec["project_paths"]))
+                # A stage may bundle the containing tools/ directory rather
+                # than naming every validator separately (06-web).
+                self.assertTrue(all(any(name == entry or
+                    name.startswith(entry.rstrip("/") + "/")
+                    for entry in spec["project_paths"]) for name in required))
 
     def test_elf_needed_parser_and_classification(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -290,12 +290,30 @@ function(crt_add_crtmedia_targets)
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
+    WINDOWS_EXPORT_ALL_SYMBOLS OFF
   )
   if(CRT_TARGET_OS STREQUAL "windows")
+    # Export the owned C API, not the thousands of FFmpeg/curl/GUID globals
+    # pulled in from static archives. The same list drives in-tree and isolated
+    # builds. Prefix filtering alone would also export private crtmedia_* helpers.
+    set(_crtmedia_def "${CMAKE_CURRENT_BINARY_DIR}/crtmedia.def")
+    add_custom_command(OUTPUT "${_crtmedia_def}"
+      COMMAND "${CMAKE_COMMAND}" "-DNM=${CMAKE_NM}"
+        "-DARCHIVE=$<TARGET_FILE:crtmedia>"
+        "-DPUBLIC_SYMBOLS=${CRTMEDIA_ROOT}/cmake/crtmedia_public_symbols.txt"
+        "-DOUTPUT=${_crtmedia_def}"
+        -P "${CRTMEDIA_ROOT}/cmake/crtmedia_exports.cmake"
+      DEPENDS crtmedia "${CRTMEDIA_ROOT}/cmake/crtmedia_public_symbols.txt"
+        "${CRTMEDIA_ROOT}/cmake/crtmedia_exports.cmake"
+      VERBATIM)
+    target_sources(crtmedia_shared PRIVATE "${_crtmedia_def}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+      "${CRTMEDIA_ROOT}/cmake/crtmedia_public_symbols.txt")
     set_target_properties(crtmedia_shared PROPERTIES
       ARCHIVE_OUTPUT_NAME crtmedia_dll
     )
+    install(FILES "${CRTMEDIA_ROOT}/cmake/crtmedia_public_symbols.txt"
+      DESTINATION share/crt COMPONENT crt-media)
   endif()
   if(CRT_TARGET_OS STREQUAL "macos")
     # Mach-O exports every global by default (an ELF consumer is protected by link order and soname

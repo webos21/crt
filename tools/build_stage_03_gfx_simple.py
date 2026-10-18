@@ -142,7 +142,7 @@ def publish_tree(staged: Path, output: Path) -> None:
     ))
     candidate = publish_root / output.name
     try:
-        shutil.copytree(staged, candidate)
+        shutil.copytree(staged, candidate, symlinks=True)
         if sys.platform == "darwin":
             # Rewrite while still under the hidden publish_root, targeting
             # the real final `output` path, so the atomic os.replace()
@@ -257,7 +257,7 @@ def main() -> None:
     temp_root = Path(tempfile.mkdtemp(
         prefix="crt-stage-03-gfx-simple-", dir=work_root))
     staged = temp_root / "sdk"
-    shutil.copytree(sdk, staged)
+    shutil.copytree(sdk, staged, symlinks=True)
     manifest_path = staged / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     target_os = manifest["target"]["os"]

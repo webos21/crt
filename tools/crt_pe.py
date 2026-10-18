@@ -5,6 +5,70 @@ import struct
 from pathlib import Path
 
 
+def exported_symbols(path: Path) -> list[str]:
+    """Read named PE exports (including forwarders); reject malformed tables.
+
+    No external objdump/Windows loader is needed, so package policy can also
+    test PE fixtures on Linux. An ordinal-only export is reported explicitly.
+    """
+    data = path.read_bytes()
+    if data[:2] != b"MZ":
+        raise ValueError("expected a PE binary for the export audit")
+    try:
+        pe = struct.unpack_from("<I", data, 0x3c)[0]
+        if data[pe:pe + 4] != b"PE\0\0":
+            raise ValueError("invalid PE signature")
+        coff = pe + 4
+        count = struct.unpack_from("<H", data, coff + 2)[0]
+        size = struct.unpack_from("<H", data, coff + 16)[0]
+        optional = coff + 20
+        kind = struct.unpack_from("<H", data, optional)[0]
+        if kind not in (0x10b, 0x20b):
+            raise ValueError("unsupported PE optional header")
+        directory = optional + (112 if kind == 0x20b else 96)
+        if optional + size > len(data) or directory + 8 > optional + size:
+            raise ValueError("truncated PE optional header")
+        rva, length = struct.unpack_from("<II", data, directory)
+        if not rva:
+            return []
+        sections = []
+        for index in range(count):
+            pos = optional + size + index * 40
+            virtual_size, address, raw_size, raw = struct.unpack_from("<IIII", data, pos + 8)
+            sections.append((address, raw_size, raw))
+
+        def offset(address, size=1):
+            for start, raw_size, raw in sections:
+                if start <= address and address + size <= start + raw_size:
+                    result = raw + address - start
+                    if result + size <= len(data):
+                        return result
+            raise ValueError("PE export RVA outside file-backed section")
+
+        table = offset(rva, 40)
+        base, functions, names, function_rva, name_rva, ordinal_rva = struct.unpack_from("<IIIIII", data, table + 16)
+        if functions > len(data) // 4 or names > len(data) // 4:
+            raise ValueError("invalid PE export counts")
+        addresses = offset(function_rva, functions * 4)
+        named = set()
+        exports = []
+        pointers = offset(name_rva, names * 4) if names else 0
+        ordinals = offset(ordinal_rva, names * 2) if names else 0
+        for index in range(names):
+            ordinal = struct.unpack_from("<H", data, ordinals + index * 2)[0]
+            if ordinal >= functions:
+                raise ValueError("PE export ordinal outside table")
+            named.add(ordinal)
+            name = struct.unpack_from("<I", data, pointers + index * 4)[0]
+            exports.append(_cstring(data, offset(name)))
+        for index in range(functions):
+            if index not in named and struct.unpack_from("<I", data, addresses + index * 4)[0]:
+                exports.append(f"ordinal:{base + index}")
+        return exports
+    except struct.error as error:
+        raise ValueError("truncated PE export table") from error
+
+
 def _cstring(data: bytes, offset: int) -> str:
     if offset < 0 or offset >= len(data):
         raise ValueError("PE import name is outside the file")

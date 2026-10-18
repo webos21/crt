@@ -163,6 +163,28 @@ def relocate_absolute_runtime_paths(path: Path, replacement: str) -> bool:
     return changed
 
 
+def set_runtime_paths(path: Path, replacement: str) -> bool:
+    """Set an existing ELF RPATH/RUNPATH slot, including mixed origin/absolute paths.
+
+    Packaging knows the final layout. Unlike relocate_absolute_runtime_paths,
+    it must not silently retain a mixed build-tree entry; never grows the file.
+    """
+    contents = _read_elf(path)
+    if contents is None:
+        return False
+    data = bytearray(contents)
+    encoded = replacement.encode("utf-8")
+    slots = _runtime_path_slots(data)
+    if not slots:
+        raise ValueError(f"ELF has no runtime path slot: {path}")
+    for start, size, _value in slots:
+        if len(encoded) > size:
+            raise ValueError(f"portable runtime path does not fit in {path}")
+        data[start:start + len(encoded) + 1] = encoded + b"\0"
+    path.write_bytes(data)
+    return True
+
+
 def remove_absolute_runtime_paths(path: Path, require_origin: bool = False) -> bool:
     """Remove absolute ELF RPATH/RUNPATH entries without growing the file."""
     contents = _read_elf(path)

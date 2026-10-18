@@ -11,6 +11,34 @@ substantive update.
 
 ## 2026-10-18
 
+### Web Tranche 10: Linux-first isolated development SDK
+
+Implemented the installed `05-ui -> 06-web` source stage, complete predecessor
+link interface, separate-process browser example and packaged GPU worker.
+Fixed the shared-CRT GNU linker TLS import with a narrow link-only loader stub
+and positive/negative runtime tests. Preserved LLVM runtime aliases through
+stage copying/publication, isolated browser VA stubs and private static OpenSSL
+curl, and kept the application/GPU worker on its accepted static CRT runtime.
+Windows media now generates exports from the 75 public API names; both PE
+driver fixtures pass, but native Windows acceptance remains open.
+
+The official Linux entrypoint produces `out/tranche10/sdk06-v10`. Installed and
+space-path-relocated SDKs pass browser load/script/pixels, three-role mapping
+and cleanup, HTTP/TLS 10/10 and distribution/Host ABI audits. An external sample
+rebuilt solely with the installed SDK also passes with the original build tree
+hidden. Input SDK/compiler wrappers stay unchanged; the 3,583-entry output
+inventory is identical after copying. C-stage 138/138, 75 focused distribution
+cases (one expected skip), 15 licensing and six Web helper tests pass.
+
+The candidate includes checked Web notices, source correspondence, SPDX 2.3
+composition and a fail-closed advisory snapshot. This closes the Linux
+development-package slice, **not Tranche 10 or public release**: other-host
+packaging implementation/replay, aarch64 cross proof, inherited-runtime notice
+closure and current stable pin/support decisions remain. Detailed inputs,
+checkpoint separation, commands, hashes and limits belong to
+[Linux T10 acceptance](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-build-and-relocation-replay-2026-10-18).
+`STATUS.md` remains unchanged.
+
 ### Web Tranche 9: Windows/x64 native replay and three-host closure
 
 Replayed `9b76335` on Windows/x64 with the current CRT SDK, native D3D12

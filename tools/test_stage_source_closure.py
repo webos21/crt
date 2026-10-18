@@ -49,6 +49,7 @@ CONDITIONAL_ON_OTHER_OSES = {
 #: installs both trees with install(DIRECTORY ...); the test below checks that).
 PREDECESSOR_SDK_HEADERS = {
     "05-ui": ("libcrtgfx/include/", "libcrtmedia/include/"),
+    "06-web": ("libcrtgfx/include/", "libcrtmedia/include/", "libcrtui/include/"),
 }
 
 QUOTED_INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
@@ -138,15 +139,16 @@ class StageSourceClosure(unittest.TestCase):
         # stage ever stopped installing them, the isolated 05-ui build would only
         # find out hours later.
         text = (ROOT / "distribution/stages/04-gfx-media/CMakeLists.txt").read_text(encoding="utf-8")
+        text += (ROOT / "distribution/stages/05-ui/CMakeLists.txt").read_text(encoding="utf-8")
         for stage, prefixes in PREDECESSOR_SDK_HEADERS.items():
             for prefix in prefixes:
                 directory = prefix.rstrip("/")
-                root_variable = {"libcrtgfx": "CRTGFX_ROOT", "libcrtmedia": "CRTMEDIA_ROOT"}[
+                root_variable = {"libcrtgfx": "CRTGFX_ROOT", "libcrtmedia": "CRTMEDIA_ROOT", "libcrtui": "CRTUI_ROOT"}[
                     directory.split("/")[0]]
                 with self.subTest(stage=stage, prefix=prefix):
                     self.assertRegex(
                         text,
-                        r'install\(DIRECTORY "\$\{' + root_variable + r'\}/include/" DESTINATION include\)')
+                        r'install\(DIRECTORY "\$\{' + root_variable + r'\}/include/" DESTINATION include(?: PATTERN "\.gitkeep" EXCLUDE)?\)')
 
     def test_05_ui_bundles_every_source_the_shared_crtui_list_names(self):
         # libcrtui/cmake/crtui_sources.cmake is the one list both the in-tree

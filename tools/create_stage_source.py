@@ -158,6 +158,8 @@ STAGES = {
             "libcrtgfx/assets/fonts",
             "libcrtgfx/third_party/skia",
             "libcrtmedia/cmake/crtmedia_targets.cmake",
+            "libcrtmedia/cmake/crtmedia_exports.cmake",
+            "libcrtmedia/cmake/crtmedia_public_symbols.txt",
             "libcrtmedia/include",
             "libcrtmedia/src/runtime.c",
             "libcrtmedia/src/frame.c",
@@ -365,12 +367,32 @@ STAGES = {
         # tree is duplicated into this release asset.
         "source_paths": (),
     },
+    "06-web": {
+        "input_stage": "05-ui",
+        "entrypoint": "tools/build_stage_06_web.py",
+        "project_paths": (
+            "LICENSE.md", "tools", "libcrtweb",
+            "porting/recipes", "porting/tests", "porting/shims",
+            "examples/web-browser", "distribution/stages/06-web",
+            "libcrtgfx/assets/fonts",
+            "libstdc++/tests/shared_loader_import_test.cc",
+            "libstdc++/tests/shared_loader_unresolved.cc",
+            # Public SDK link interfaces, not predecessor implementation sources.
+            "distribution/stages/05-ui/crt_upper_imports.cmake",
+            "libcrtmedia/cmake/crtmedia_public_symbols.txt",
+            "libcrtgfx/src/gpu_test_control.h",
+            "libcrtgfx/src/arch/linux/gpu_vulkan_test.h",
+            "libcrtgfx/src/arch/windows/gpu_win32_test.h",
+        ),
+        "source_paths": (),
+    },
     "05-ui": {
         "input_stage": "04-gfx-media",
         "entrypoint": "tools/build_stage_05_ui.py",
         "project_paths": (
             "LICENSE.md",
             "distribution/stages/05-ui/CMakeLists.txt",
+            "distribution/stages/05-ui/crt_upper_imports.cmake",
             "tools/build_stage_05_ui.py",
             # The pinned LVGL release is fetched live (like Skia in 04); only
             # its recipe and the fetcher travel in the asset.
@@ -442,7 +464,7 @@ def add_path(tar: tarfile.TarFile, source: Path, archive: PurePosixPath) -> None
     if source.is_dir():
         paths.extend(sorted(
             (path for path in source.rglob("*")
-             if not any(part in (".git", ".hg", ".svn")
+             if not any(part in (".git", ".hg", ".svn", "__pycache__")
                         for part in path.relative_to(source).parts)),
             key=lambda p: p.as_posix(),
         ))

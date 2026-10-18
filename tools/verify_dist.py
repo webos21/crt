@@ -2,6 +2,7 @@
 """Verify the structural and toolchain-boundary invariants of a CRT stage."""
 
 import argparse
+from datetime import datetime, timezone, timedelta
 import json
 import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -19,7 +20,7 @@ BANNED_TOOLS = {
 }
 
 SUPPORTED_STAGES = (
-    "01-c", "02-cxx", "03-gfx-simple", "04-gfx-media", "05-ui",
+    "01-c", "02-cxx", "03-gfx-simple", "04-gfx-media", "05-ui", "06-web",
 )
 SUPPORTED_TARGET_OSES = {"linux", "macos", "windows"}
 EXTERNAL_PREREQUISITE_KINDS = {
@@ -227,7 +228,7 @@ def validate_external_prerequisites(manifest: dict) -> dict[str, dict]:
 
     target_os = manifest["target"]["os"]
     stage = manifest["stage"]
-    expected = external_prerequisites_for(target_os, stage)
+    expected = external_prerequisites_for(target_os, stage, manifest.get("target", {}).get("arch"))
     expected_by_id = {item["id"]: item for item in expected}
     if by_id.keys() != expected_by_id.keys():
         missing = sorted(expected_by_id.keys() - by_id.keys())
@@ -292,6 +293,86 @@ def validate_ui_stage(dist: Path, manifest: dict, redistributed: dict, suffix: s
             if name not in redistributed:
                 raise SystemExit(
                     f"isolated 05-ui lost the 04-gfx-media {name} dependency record")
+
+
+def validate_web_stage(dist: Path, manifest: dict, redistributed: dict, suffix: str) -> None:
+    """06-web development-candidate closure; never infer release approval."""
+    if manifest.get("built_from", {}).get("stage") != "05-ui":
+        raise SystemExit("06-web must record the installed 05-ui predecessor")
+    if not re.fullmatch(r"[0-9a-f]{64}", manifest["built_from"].get("predecessor_content_sha256", "")):
+        raise SystemExit("06-web must record the predecessor content identity")
+    for relative in (
+        "include/crtweb/crtweb.h", "include/crtweb/webview.h", "include/crtweb/gpu_surface.h",
+        "include/crtweb/crtweb_surface_wire.h", "include/crtweb/crtweb_gpu_wire.h",
+        "examples/web-browser/main.cc", "examples/web-browser/CMakeLists.txt",
+        "share/crt/cmake/crt_upper_imports.cmake", "share/crt/web-sbom.spdx.json",
+        "share/crt/web-security.json", "share/crt/web-source-correspondence.json",
+        "share/crt/web-host-tools.json",
+    ):
+        require(dist / relative)
+    for name in ("crtweb_host", "WebProcess", "NetworkProcess", "crtweb_gpu_worker"):
+        require(dist / "libexec/crtweb" / (name + suffix))
+    require(dist / "examples/bin" / ("crtweb_browser" + suffix))
+    require_any(dist / "lib", ("libcrtweb.so", "libcrtweb.dylib", "*crtweb*dll*"), "shared crtweb")
+    if "webkit" not in redistributed or not redistributed["webkit"]["notices"]:
+        raise SystemExit("06-web must declare WebKit provenance and license notices")
+    for directory in ("webkit", "wpe", "glib-2.0"):
+        if (dist / "include" / directory).exists():
+            raise SystemExit(f"private web dependency headers leaked: {directory}")
+    runtime = manifest.get("web_runtime", {})
+    if runtime.get("development_candidate") is not True:
+        raise SystemExit("06-web public-release gates are not yet accepted")
+    correspondence = json.loads((dist / "share/crt/web-source-correspondence.json").read_text())
+    if correspondence.get("predecessor", {}).get("content_sha256") != manifest["built_from"]["predecessor_content_sha256"]:
+        raise SystemExit("Web source correspondence names a different predecessor")
+    security = json.loads((dist / "share/crt/web-security.json").read_text())
+    recipe = json.loads((dist / redistributed["webkit"]["provenance"]).read_text())
+    if security.get("passed") is not True or security.get("version") != recipe["version"]:
+        raise SystemExit("WebKit security evidence is failed or for another pin")
+    try:
+        checked = datetime.fromisoformat(security["checked_utc"])
+        age = datetime.fromisoformat(manifest["created_utc"]) - checked
+    except (ValueError, TypeError, KeyError) as error:
+        raise SystemExit("invalid WebKit security check time") from error
+    if age < timedelta(minutes=-5) or age > timedelta(days=7):
+        raise SystemExit("WebKit security evidence was stale or from the future at packaging")
+    advisories = security.get("advisories", [])
+    if not advisories or any(item.get("affected") is not False for item in advisories):
+        raise SystemExit("WebKit advisory evidence is missing or affected")
+    if security.get("public_release_allowed") is not False:
+        raise SystemExit("an advisory snapshot cannot grant public-release approval")
+    from check_webkit_security import version
+    for advisory in advisories:
+        try:
+            if any(version(recipe["version"]) < version(bound) for bound in advisory["fixed_versions"]):
+                raise SystemExit("security evidence contradicts its affected-version bounds")
+        except (KeyError, TypeError, ValueError) as error:
+            raise SystemExit("invalid advisory fixed-version evidence") from error
+    sbom = json.loads((dist / "share/crt/web-sbom.spdx.json").read_text())
+    if sbom.get("spdxVersion") != "SPDX-2.3" or not sbom.get("packages"):
+        raise SystemExit("06-web is missing its SPDX 2.3 dependency composition")
+    for name in ("gperf", "icupkg", "genrb", "pkgdata", "python", "perl", "ruby"):
+        if (dist / "bin" / (name + suffix)).exists():
+            raise SystemExit(f"build-host tool leaked into target SDK: {name}")
+    if manifest["target"]["os"] == "windows":
+        from crt_pe import exported_symbols
+        owned = set((dist / "share/crt/crtmedia_public_symbols.txt").read_text().split())
+        exported = set(exported_symbols(dist / "bin/libcrtmedia.dll"))
+        if exported != owned:
+            raise SystemExit(f"crtmedia DLL export boundary: extra={sorted(exported - owned)}, missing={sorted(owned - exported)}")
+    elif manifest["target"]["os"] == "linux":
+        for name in ("libWebKit.so", "libcrtmedia.so", "libva.so.2", "libva-drm.so.2"):
+            require(dist / "libexec/crtweb/lib" / name)
+        for name in ("libva.so.2", "libva-drm.so.2"):
+            if (dist / "lib" / name).exists():
+                raise SystemExit("browser VA stubs must not replace the SDK hardware media backend")
+        for name in ("libc++", "libc++abi", "libunwind"):
+            plain = dist / "lib" / (name + ".so")
+            soname = dist / "lib" / (name + ".so.1")
+            require(plain)
+            require(soname)
+            if not plain.samefile(soname):
+                raise SystemExit(f"duplicate C++ runtime images: {plain.name}/{soname.name}")
 
 
 def main() -> None:
@@ -484,6 +565,12 @@ def main() -> None:
                                         "libcrtmedia.dylib"), "shared crtmedia")
     if args.stage >= "05-ui":
         validate_ui_stage(dist, manifest, redistributed, suffix)
+    if args.stage == "06-web":
+        validate_web_stage(dist, manifest, redistributed, suffix)
+        from crt_web_exports import audit_exports
+        result = audit_exports(dist, manifest["target"]["os"])
+        if not result["passed"]:
+            raise SystemExit("Web SDK export/private-dependency boundary failed: " + json.dumps(result))
     print(f"CRT distribution verified: {dist}")
 
 

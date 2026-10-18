@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crt_elf import relocate_absolute_runtime_paths, remove_absolute_runtime_paths, runtime_paths
+from crt_elf import relocate_absolute_runtime_paths, remove_absolute_runtime_paths, runtime_paths, set_runtime_paths
 from verify_dist import validate_elf_runtime_paths
 
 
@@ -33,6 +33,16 @@ def write_elf(path: Path, runpath: str) -> None:
 
 
 class ElfRuntimePathTests(unittest.TestCase):
+    def test_set_mixed_runtime_path_for_private_package_layout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "libcrtweb.so"
+            write_elf(binary, "$ORIGIN:/a/long/build/tree/lib:/another/private/build/path")
+            size = binary.stat().st_size
+            self.assertTrue(set_runtime_paths(binary, "$ORIGIN:$ORIGIN/../libexec/crtweb/lib"))
+            self.assertEqual(runtime_paths(binary), ["$ORIGIN:$ORIGIN/../libexec/crtweb/lib"])
+            self.assertEqual(binary.stat().st_size, size)
+            with self.assertRaises(ValueError):
+                set_runtime_paths(binary, "a" * 500)
     def test_rewrite_removes_absolute_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             binary = Path(temporary) / "libexample.so"

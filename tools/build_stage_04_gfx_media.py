@@ -279,7 +279,7 @@ def publish_tree(staged: Path, output: Path) -> None:
     ))
     candidate = publish_root / output.name
     try:
-        shutil.copytree(staged, candidate)
+        shutil.copytree(staged, candidate, symlinks=True)
         if sys.platform == "darwin":
             # Rewrite while still under the hidden publish_root, targeting
             # the real final `output` path, so the atomic os.replace()
@@ -1140,7 +1140,7 @@ def main() -> None:
                 base = Path(directory).resolve()
                 return {name for name in names if (base / name).resolve() == work_root_resolved}
 
-            shutil.copytree(sdk, staged, ignore=_skip_work_root)
+            shutil.copytree(sdk, staged, ignore=_skip_work_root, symlinks=True)
         env = runtime_env(staged, manifest)
 
         with timings.measure("fetch and verify FreeType/FFmpeg sources"):

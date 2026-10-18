@@ -10,6 +10,7 @@ STAGE_ORDER = {
     "03-gfx-simple": 3,
     "04-gfx-media": 4,
     "05-ui": 5,
+    "06-web": 6,
 }
 
 
@@ -248,7 +249,23 @@ _GFX_MEDIA = {
 }
 
 
-def external_prerequisites_for(target_os: str, stage: str) -> list[dict]:
+_WEB = {
+    "windows": (),
+    "macos": (),
+    "linux": ({
+        # The shared-CRT browser executables explicitly record the OS ELF
+        # interpreter for TLS imports. This is the existing loader boundary,
+        # not permission to depend on glibc or a host C++ runtime.
+        "id": "linux-elf-loader",
+        "kind": "os-runtime",
+        "required_for": ["shared-web-runtime-tls"],
+        "components": ["ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1"],
+        "bundled": False,
+    },),
+}
+
+
+def external_prerequisites_for(target_os: str, stage: str, target_arch: str | None = None) -> list[dict]:
     """Return the exact cumulative external-runtime contract for one SDK."""
     if target_os not in _BASE:
         raise ValueError(f"unsupported prerequisite target OS: {target_os}")
@@ -261,4 +278,12 @@ def external_prerequisites_for(target_os: str, stage: str) -> list[dict]:
         prerequisites.extend(_GFX_SIMPLE[target_os])
     if STAGE_ORDER[stage] >= STAGE_ORDER["04-gfx-media"]:
         prerequisites.extend(_GFX_MEDIA[target_os])
-    return deepcopy(prerequisites)
+    if STAGE_ORDER[stage] >= STAGE_ORDER["06-web"]:
+        prerequisites.extend(_WEB[target_os])
+    prerequisites = deepcopy(prerequisites)
+    if target_os == "linux" and STAGE_ORDER[stage] >= 6 and target_arch is not None:
+        loaders = {"x86_64": "ld-linux-x86-64.so.2", "aarch64": "ld-linux-aarch64.so.1"}
+        if target_arch not in loaders:
+            raise ValueError(f"unsupported Linux ELF loader architecture: {target_arch}")
+        prerequisites[-1]["components"] = [loaders[target_arch]]
+    return prerequisites

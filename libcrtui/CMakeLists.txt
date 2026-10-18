@@ -127,6 +127,12 @@ install(DIRECTORY include/ DESTINATION include
   COMPONENT crt-ui
   PATTERN ".gitkeep" EXCLUDE
 )
+if(CRTUI_ENABLE_LVGL)
+  install(FILES "${CRTUI_LVGL_ROOT}/LICENCE.txt"
+    DESTINATION share/licenses/lvgl COMPONENT crt-ui)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lvgl/recipe.json"
+    DESTINATION share/crt/dependencies/lvgl COMPONENT crt-ui)
+endif()
 
 # Tranche 5B: keep Skia/GPU out of plain libcrtui. This optional companion
 # owns only the final composition algorithm; producer frames remain borrowed

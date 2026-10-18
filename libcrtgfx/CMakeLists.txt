@@ -1476,7 +1476,7 @@ install(FILES include/crtgfx/window.h
   DESTINATION include/crtgfx
   COMPONENT crt-gfx-simple
 )
-install(FILES include/crtgfx/gpu.h
+install(FILES include/crtgfx/gpu.h include/crtgfx/shared_image.h
   DESTINATION include/crtgfx
   COMPONENT crt-gfx
 )
@@ -1486,7 +1486,7 @@ if(CRTGFX_ENABLE_SKIA)
     LIBRARY DESTINATION lib COMPONENT crt-gfx
     RUNTIME DESTINATION bin COMPONENT crt-gfx
   )
-  install(FILES include/crtgfx/skia.h
+  install(FILES include/crtgfx/skia.h include/crtgfx/skia_shared.h
     DESTINATION include/crtgfx
     COMPONENT crt-gfx
   )
