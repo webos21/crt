@@ -1,8 +1,8 @@
 # crtweb Acceptance (Stage `06-web`)
 
-**Status: in progress. Tranches 0-8 are closed, including the public `crtweb`
+**Status: in progress. Tranches 0-9 are closed, including the public `crtweb`
 API and `crtui` WebView plus public-API/process lifecycle acceptance on
-Linux/x86_64, macOS/arm64 and Windows/x64. GPU integration is in progress (Tranche 9); a packaged
+Linux/x86_64, macOS/arm64 and Windows/x64. GPU integration is accepted (Tranche 9); a packaged
 `06-web` SDK follows in Tranche 10.** Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
@@ -3922,9 +3922,118 @@ python3 tools/build_webkit_crt_port.py \
 ```
 
 This closes the **macOS 9C slice** and replays its 9A/9B baselines.
-**Windows/x64's native 9C replay remains open**, so global 9C/Tranche 9 is not
-closed. Linux/Windows were not executed on this Mac. `06-web` packaging,
+At that checkpoint Windows/x64 and global 9C/Tranche 9 remained open; the
+subsequent Windows replay below closes them. Linux/Windows were not executed on this Mac. `06-web` packaging,
 security closure and `STATUS.md` are unchanged.
+
+#### 9C Windows/x64 native replay (2026-10-18)
+
+Replay from `9b76335` closes the remaining native 9C host; this is not
+a repetition of the earlier Windows 9A/9B acceptance. The fresh predecessor
+configuration preserves the imported-libc++/Skia/GPU/FFmpeg/LVGL settings.
+Current worker/consumers build and SDKs `01-c`..`05-ui` verify. The official
+entry rebuilt 2,152 browser/JSC/bundled-Skia steps against that SDK and linked
+WebKit, Web/Network/Host and B7 executables. This is an incremental product
+rebuild, not a clean full build or isolated `06-web` build.
+
+The initial rebuilt-browser 9C run failed before the lifecycle cases: the
+unread-transfer fixture sampled 219 native handles before its first socket
+and 231 after cleanup. A separate GPU-free CRT `socketpair`/close probe starts
+at 53 handles, reaches 68 once and stays at 68 over eight repetitions. Windows
+CRT lazily initializes process-wide Winsock services; that cold-start cost
+must not be counted as leaked GPU transfers. The Windows-only fixture now
+opens and closes a transport pair before sampling its baseline, retaining
+the original +2 handle/thread bounds and printing before/after resources.
+No runtime code, GPU fallback or loss policy changes. The repaired checkpoint
+passes three strict 9C repetitions with zero handle growth. The official
+driver then passes independently (+248 KiB/+2 threads/+0 handles, native
+mapping and Host ABI clean). Failed logs
+remain in `out/web-windows-tranche9c-initial/` and
+`out/web-windows-tranche9c-diagnostic/`; the GPU-free probe log is
+`out/web-windows-tranche9c-socket-baseline.log` and repaired checkpoint is
+`out/web-windows-tranche9c-transport-fixed/`.
+
+```powershell
+python tools/build_webkit_crt_port.py --sdk-root out/windows-host-ninja-debug/dist/05-ui --deps-prefix out/windows-host-ninja-debug/port-tests/install --work-root C:/crtw/b3w --reuse-tree --webkit --target crtweb_host --target WebProcess --target NetworkProcess --target crtweb_lifecycle_test --run-gpu-lifecycle-tests -j 8
+```
+
+Build logs: `out/web-windows-tranche9c-configure.log`,
+`out/web-windows-tranche9c-sdk-build.log` and
+`out/web-windows-tranche9c-driver.log`; the successful official repeat is
+`out/web-windows-tranche9c-driver-final.log` with its JSON/stdout/stderr preserved
+in `out/web-windows-tranche9c-official-final/`. Focused evidence/backend/closure/license/
+driver helpers pass **68/68**; their log is `out/web-windows-tranche9c-helpers.log`.
+The unchanged manifest remains 23 patches / 63 modified / 24 CRT-owned files.
+Native D3D12 PAL passes twenty shared-fence epochs and exact pixels with three
+transfer handles. PAL/wire/SurfaceView CTests pass **5/5**; no-browser resource/
+lifecycle CTests report **two skips**, not native acceptance. Strict missing
+prerequisites return 1 and invalid lifecycle/window mode returns 2. Logs have
+the `web-windows-tranche9c-{pal-strict,focused-ctest,skip-ctest,negative-controls}`
+prefix. The Windows native-COW allocator fixture is inapplicable to memory-copy
+fork; its skip must not be described as a Windows native-COW replay.
+The refreshed C-stage has **156 passes / 1 expected native-COW skip / 0 failures**
+(`out/web-windows-tranche9c-core-ctest.log`, 157 entries). This correctness run
+overlapped browser compilation; its elapsed time is not a performance baseline.
+
+**Final strict 9C: 3/3**, each with seven policy warm-ups, twenty measured
+complete lifetimes and final fresh pixels: **84 worker sessions** across three
+runs. All normal, consumer-disconnect, exact owned worker/Host termination,
+Web-process replacement/reload, context-loss/recreation and held-image resize
+cases pass. Case elapsed times are **734..3,038 ms**, below the unchanged
+30-second limit. RSS is **-8/+120/+196 KiB**, threads **+2** and handles **+0**
+per run, within +24 MiB/+2/+2 bounds. These are bounded resources, not a
+zero-thread-growth claim. The deterministic three-announcement fixture drains
+nine transferred native D3D12 handles without imports, receives BYE and returns
+to its baseline **231 handles / 8 threads** on all three runs. Imported pixels
+survive producer/connection death in the healthy app; an abandoned context
+exposes neither image nor ACK. All observed browser descendants and workers
+are gone between lifetimes.
+
+Native execution reports backend **1** with device identity
+`ca9e00000000000086800000923e0000` and driver identity
+`5c08650000001f008680122200000000` on Windows 11 Pro build 26100. Native
+Host/Web/Network mapping passes **144 file/role observations per GPU run**
+without violations; static Host ABI passes. CRT browser GL stubs remain in use;
+transitive System32 DLL mappings are classified separately from direct imports,
+not claimed as accelerated WebCore.
+
+**Regressions on the same rebuilt browser:**
+
+- 9A **offscreen 3/3 + native D3D12 window 3/3**, each window **5/5** frames;
+  pixels/composition/input/updates/resize/recovery/cleanup and browser audits pass.
+- 9B **offscreen 3/3 + native D3D12 window 3/3**, each window **5/5** frames;
+  shared textures/fences, twenty updates, resource reuse/retirement/ownership and
+  audits pass. App RSS is +4 KiB, worker RSS +108..204 KiB, threads +0 and
+  handles -1..0 during the update measurements.
+- CPU WebView passes three forced-process recoveries and twenty complete
+  lifetimes at **-28 KiB/-2 threads/+0 handles**. Refreshed B7 passes
+  **100/100**, **-52 KiB/-3 threads/+0 handles**, at most two children;
+  runtime mapping passes **143 observations**, and all **18** produced PE
+  executables/DLLs pass the static Host ABI gate.
+
+Final local evidence is `out/web-windows-tranche9c-final/summary.json`,
+`9{a,b,c}-*/{result.json,stdout.log,stderr.log,launch.json}`, `cpu/`, `b7.json`,
+`artifacts-{before,after}.json` and `closeout.json`. All **15** strict GPU
+invocations plus CPU and B7 pass; **14** selected artifact SHA-256 hashes stay
+unchanged before/after the matrix and at closeout. The read-only native process
+inventory finds no remaining test/browser/GPU-worker process in the replay
+build trees. The generated `out/web_windows_tranche9c_replay.py` uses checked-in
+strict evidence/map/Host ABI predicates, with no builds between measurements.
+Its socket scratch under `out/web9c-run/` respects the fixed 108-byte AF_UNIX
+address limit; launch records retain exact working directories. SDK and browser
+locations are unchanged, and this is not a path-with-spaces acceptance run.
+Native children inherit the console as in the official driver; no child names,
+cleanup requirements, bounds or deadlines are excluded to obtain a pass.
+
+This closes **Windows 9C and, with the prior Linux/macOS evidence, global 9C /
+Tranche 9**. Only the test's Windows cold-transport baseline changes; Linux/
+macOS fixture control flow, runtime code, wire/public ABI and upstream patches
+are unchanged. Physical GPU reset, arbitrary hung-driver recovery, audio and
+camera are outside this replay. The D3D12 hook removes a logical device only
+after borrowed objects/context destruction and then recreates the native owner;
+it is controlled loss, not a physical reset guarantee. The owned GPU-process
+boundary is `crtweb_gpu_worker`, not upstream WebKit GPUProcess or accelerated
+WebCore. `06-web` packaging/security (Tranche 10) and `STATUS.md` remain unchanged.
 
 ### 10. Distribution and security closure
 

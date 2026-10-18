@@ -129,7 +129,7 @@ uses the host replay order stated below and in the acceptance document.
     and Windows/x64: macOS/arm64 and Windows/x64 replayed (2026-10-13).
 * [x] **5. Multi-process lifecycle.** Closed on Linux/x86_64 2026-10-13:
   public API recovery, bounded teardown and 100x runtime/view cycles; evidence
-  in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`. GPUProcess joins in Tranche 9.
+  in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`. The owned GPU worker joins in Tranche 9.
 * [x] **6. Windows/x64 replay.** Closed 2026-10-14: the combined eight-entry
   public API/WebView lifecycle, B5-B7 and static/runtime PE Host ABI gate is green;
   evidence and fixes are in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
@@ -138,7 +138,7 @@ uses the host replay order stated below and in the acceptance document.
 * [x] **8. CRT subsystem substitution.** Closed on Linux/x86_64, macOS/arm64 and
   Windows/x64: network, playback, capture and shared allocator replay evidence in
   `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
-* [ ] **9. GPU integration.**
+* [x] **9. GPU integration.** Three-host native acceptance is closed; evidence stays in Web acceptance.
   * [x] **9A GPU final composition:** CPU-shared-memory WebView upload into the CRT
     GPU compositor; evidence stays in Web acceptance.
     * [x] Linux/x86_64 Vulkan baseline.
@@ -150,12 +150,12 @@ uses the host replay order stated below and in the acceptance document.
     * [x] Windows D3D12 shared texture + shared-fence backend, NT handles as CRT descriptors, strict replay (offscreen 3/3, window 3/3).
     * [x] macOS Metal IOSurface/shared-event backend, capability/lease transport and
       strict native replay; static/shared PAL and evidence are in Web acceptance.
-  * [ ] **9C closure:** device/process loss, bounded resource reuse and three-host replay.
+  * [x] **9C closure:** device/process loss, bounded resource reuse and three-host replay.
     CRT GPU worker is the owned GPU-process boundary; sharing one Skia context is not an initial gate.
     Evidence stays in Web acceptance.
     * [x] Linux owned-worker/context-loss recovery, unread-transfer draining and complete-lifetime replay.
     * [x] macOS/arm64 Metal native 9C replay with rebuilt browser, CPU/9A/9B and Host ABI regressions.
-    * [ ] Windows/x64 native 9C replay with CPU/9A/9B/Host ABI regressions.
+    * [x] Windows/x64 native 9C replay with CPU/9A/9B/Host ABI regressions.
   * [x] **Native fork regression replay:** Linux heap-snapshot repeat and C-stage pass;
     native-COW fix/replay evidence is in Web acceptance. Windows memory-copy fork is unchanged.
 * [ ] **10. Distribution and security closure.**

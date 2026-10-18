@@ -11,6 +11,36 @@ substantive update.
 
 ## 2026-10-18
 
+### Web Tranche 9: Windows/x64 native replay and three-host closure
+
+Replayed `9b76335` on Windows/x64 with the current CRT SDK, native D3D12
+worker/consumers and a 2,152-step incremental browser rebuild. The initial
+unread-transfer fixture counted cold Winsock initialization as a handle leak.
+A GPU-free socketpair/close probe grows once and stays flat; the Windows-only
+test now initializes and closes its transport before the resource baseline.
+The original +2 handle/thread bounds remain, with explicit before/after
+diagnostics. No runtime implementation, public ABI, upstream patch or GPU
+fallback/loss policy changed. Failed checkpoints remain separate from passes.
+
+The official 9C entry passes. Final immutable-artifact replay passes strict
+9C **3/3** (84 complete worker sessions), 9A and 9B each **offscreen 3/3 +
+native-window 3/3**, CPU WebView recovery/twenty lifetimes and B7 **100/100**.
+9C RSS is **-8/+120/+196 KiB**, threads **+2** and handles **+0** per run,
+within the unchanged bounds. Static/runtime Host ABI passes, all fourteen
+selected artifact hashes stay unchanged and no test/browser/worker remains.
+The refreshed C-stage has **156 passes / 1 expected native-COW skip**; native
+PAL/wire/SurfaceView **5/5** and focused helpers **68/68** pass. Default
+no-browser GPU CTests remain skips, not acceptance.
+
+Together with the accepted Linux and macOS replays, this closes **9C and
+Tranche 9**. The boundary is the CRT-owned GPU worker and controlled context/
+logical-device owner recovery, not upstream GPUProcess, accelerated WebCore,
+physical GPU reset or arbitrary hung-driver recovery. Tranche 10 isolated
+`06-web` packaging/security remains open. Commands, measurements and retained
+evidence belong to [Windows 9C acceptance](docs/acceptance/crtweb_acceptance.md#9c-windowsx64-native-replay-2026-10-18).
+`STATUS.md` is unchanged; no Linux/macOS execution or physical audio/camera
+test is claimed by this Windows replay.
+
 ### Web Tranche 9C: macOS/arm64 Metal native replay
 
 Native replay ran on October 17; this record was finalized on October 18.
@@ -38,8 +68,8 @@ Missing-prerequisite CTest entries remain **two skips**, not GPU passes.
 Detailed bounds, immutable artifact hashes, native observations, reproduction
 and checkpoint separation belong to
 [macOS 9C acceptance](docs/acceptance/crtweb_acceptance.md#9c-macosarm64-metal-native-replay-2026-10-17).
-Only Windows/x64 9C replay remains before three-host 9C/Tranche 9 closure;
-no Linux/Windows execution, `06-web` packaging or physical camera/audio
+At that checkpoint only Windows/x64 9C remained; its completion is recorded above.
+No Linux/Windows execution, `06-web` packaging or physical camera/audio
 validation is claimed here. `STATUS.md` is unchanged.
 
 ## 2026-10-17
@@ -65,7 +95,7 @@ Detailed bounds, the controlled-loss (not physical-reset) distinction and
 native replay entry belong to
 [Linux 9C acceptance](docs/acceptance/crtweb_acceptance.md#9c-owned-worker-lifecycle-linux-implementationreplay-2026-10-17).
 At that checkpoint Windows/macOS still needed the new 9C mode; macOS's
-completed replay is recorded above, while Windows/global 9C remain open.
+completed replay and the later Windows/global 9C closure are recorded above.
 `STATUS.md` and the public C/v1 wire contracts are unchanged.
 
 ### Linux native fork/spawn heap-snapshot replay

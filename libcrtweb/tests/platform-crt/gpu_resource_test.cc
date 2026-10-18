@@ -498,6 +498,17 @@ bool lifecycle_session(const char* worker, const char* browser, crtgfx_gpu_devic
   return ok && failures == 0;
 }
 bool drain_unread_transfers(crtgfx_gpu_device* device, GrDirectContext* context) {
+#if defined(_WIN32)
+  // The first CRT socketpair starts process-wide Winsock services. Their
+  // persistent handles are transport initialization, not leaked GPU transfers:
+  // a GPU-free open/close probe grows once, then stays flat. Initialize that
+  // transport before the baseline, retaining the exact same +2 cleanup bound.
+  int warm[2];
+  if (!check(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, warm) == 0,
+             "initialize Windows socket transport before transfer baseline")) return false;
+  bool closed_first = close(warm[0]) == 0, closed_second = close(warm[1]) == 0;
+  if (!check(closed_first && closed_second, "transport warm-up sockets closed")) return false;
+#endif
   auto baseline = crtweb_test::resources();
   int sockets[2];
   if (!check(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets) == 0, "queued-transfer socket pair")) return false;
@@ -541,6 +552,9 @@ bool drain_unread_transfers(crtgfx_gpu_device* device, GrDirectContext* context)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     settled = crtweb_test::resources();
   }
+  printf("crtweb_gpu_lifecycle_test: queued-transfer resources before=%ld/%ld/%ld after=%ld/%ld/%ld (KiB/threads/handles)\n",
+      baseline.memoryKiB, baseline.threads, baseline.descriptors,
+      settled.memoryKiB, settled.threads, settled.descriptors);
   ok = check(baseline.descriptors >= 0 && settled.descriptors >= 0 && settled.descriptors <= baseline.descriptors + 2
       && baseline.threads >= 0 && settled.threads >= 0 && settled.threads <= baseline.threads + 2,
       "queued-transfer native handles/lease threads are reclaimed") && ok;
