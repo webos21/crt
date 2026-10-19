@@ -354,6 +354,19 @@ def validate_web_stage(dist: Path, manifest: dict, redistributed: dict, suffix: 
     for name in ("gperf", "icupkg", "genrb", "pkgdata", "python", "perl", "ruby"):
         if (dist / "bin" / (name + suffix)).exists():
             raise SystemExit(f"build-host tool leaked into target SDK: {name}")
+    if manifest["target"] == {"os": "linux", "arch": "aarch64"}:
+        evidence_path = runtime.get("cross_build_evidence")
+        if evidence_path != "share/crt/web-cross-build.json":
+            raise SystemExit("Linux/aarch64 06-web requires x86_64-host cross-build evidence")
+        evidence = json.loads((dist / evidence_path).read_text())
+        if (evidence.get("passed") is not True or
+                evidence.get("build_host") != {"os": "linux", "arch": "x86_64"} or
+                evidence.get("target") != {"os": "linux", "arch": "aarch64"}):
+            raise SystemExit("Linux/aarch64 host/target split evidence is invalid")
+        if set(evidence.get("host_generators", {})) != {"gperf", "perl", "python", "ruby", "genrb", "icupkg", "pkgdata"}:
+            raise SystemExit("Linux/aarch64 cross-build evidence is missing a host generator")
+        if set(evidence.get("target_artifacts", {})) != {"icu", "libc++", "JavaScriptCore", "WebCore", "WebKit"}:
+            raise SystemExit("Linux/aarch64 cross-build evidence is missing a target artifact")
     if manifest["target"]["os"] == "windows":
         from crt_pe import exported_symbols
         owned = set((dist / "share/crt/crtmedia_public_symbols.txt").read_text().split())

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated 05-ui -> 06-web development SDK builder (native Linux/macOS/Windows).
+"""Isolated 05-ui -> 06-web development SDK builder.
 
 Only the extracted source asset, installed predecessor, verified upstream source
 and build-host tools are inputs. No in-tree runtime build is used. Publication
@@ -67,7 +67,7 @@ def compile_input(name):
         return False
     return ((name.startswith(("libcrtweb/", "porting/", "distribution/", "examples/web-browser/",
                               "libcrtgfx/", "libcrtmedia/")) and not name.endswith(".md")) or
-            name in {"tools/build_webkit_jsc.py", "tools/build_webkit_crt_port.py", "tools/fetch_ports.py",
+            name in {"tools/crt-cc", "tools/crt-c++", "tools/build_webkit_jsc.py", "tools/build_webkit_crt_port.py", "tools/fetch_ports.py",
                      "tools/fetch_webkit_commit.py", "tools/crt-port-build.py", "tools/crt_icu_host_pkgdata.py"})
 
 
@@ -278,6 +278,11 @@ def build_host_tools(asset, sources, work, recipes, jobs):
     tools.update(gperf=str(work / "host/gperf/install/bin/gperf"),
                  icu_cross_build=str(work / "host/icu"),
                  cc=env["CC"], cxx=env["CXX"])
+    tools["host_executables"] = {
+        "gperf": tools["gperf"],
+        "perl": shutil.which("perl"), "python": sys.executable, "ruby": shutil.which("ruby"),
+        **{name: str(work / "host/icu/bin" / name) for name in ("genrb", "icupkg", "pkgdata")},
+    }
     write_json(work / "host-tools.json", tools)
     return tools
 
@@ -395,17 +400,48 @@ def build_windows_host_tools(sources, work, recipes, jobs):
     return tools
 
 
-def windows_fontconfig_recipe(recipe, sdk, work, gperf):
+def fontconfig_host_generator_recipe(recipe, sdk, work, gperf, target_os):
     """Both bare configure probes and Make's GPERF use the BUILD-host tool."""
     recipe = json.loads(json.dumps(recipe))
+    recipe["dependencies"] = [name for name in recipe["dependencies"] if name != "gperf"]
+    if target_os != "windows":
+        recipe["build"]["env"]["GPERF"] = str(Path(gperf))
+        recipe["build"]["path_prepend"] = [str(Path(gperf).parent)]
+        return recipe
     relay = work / "host/fontconfig-tools/gperf"
     relay.parent.mkdir(parents=True, exist_ok=True)
     command = ["/system/bin/mksh", web.crt_path(sdk / "tools/crt-native-tool"), web.crt_path(Path(gperf))]
     relay.write_text('#!/system/bin/mksh\nexec ' + shlex.join(command) + ' "$@"\n', encoding="utf-8", newline="\n")
     relay.chmod(0o755)
-    recipe["dependencies"] = [name for name in recipe["dependencies"] if name != "gperf"]
     recipe["build"]["env"]["GPERF"] = shlex.join(["/system/bin/mksh", web.crt_path(relay)])
     recipe["build"]["path_prepend"] = [web.crt_path(relay.parent)]
+    return recipe
+
+
+def build_kind(target, host_system=None, host_machine=None):
+    host_system = host_system or platform.system()
+    host_machine = (host_machine or platform.machine()).lower()
+    normalized = "x86_64" if host_machine in ("x86_64", "amd64") else "aarch64" if host_machine in ("aarch64", "arm64") else host_machine
+    native = ((target == {"os": "linux", "arch": "x86_64"} and host_system == "Linux" and normalized == "x86_64")
+              or (target == {"os": "macos", "arch": "aarch64"} and host_system == "Darwin" and normalized == "aarch64")
+              or (target == {"os": "windows", "arch": "x86_64"} and host_system == "Windows" and normalized == "x86_64"))
+    if native:
+        return "native"
+    if target == {"os": "linux", "arch": "aarch64"} and host_system == "Linux" and normalized == "x86_64":
+        return "cross-linux-aarch64"
+    raise ValueError("06-web supports native Linux/x86_64, macOS/aarch64, Windows/x86_64, "
+                     "and x86_64-host -> Linux/aarch64-target")
+
+
+def linux_cross_recipe(recipe):
+    """Give Autoconf an explicit cross identity without changing upstream."""
+    recipe = json.loads(json.dumps(recipe))
+    build = recipe["build"]
+    if build["system"] == "configure" and build.get("configure_script", "./configure") == "./configure" \
+            and recipe["name"] != "zlib":
+        build["configure_args"] += ["--build=x86_64-pc-linux-gnu", "--host=aarch64-linux-gnu"]
+    elif recipe["name"] == "zlib":
+        build.setdefault("env", {})["CHOST"] = "aarch64-linux-gnu"
     return recipe
 
 
@@ -581,20 +617,8 @@ def portable_web_macho(staged):
 def validate_candidate(staged, work, asset, env):
     """Check a generated candidate without publishing or touching its inputs."""
     private = staged / "libexec/crtweb"
-    # Only the new Web artifacts need this layout. Inherited static examples
-    # can legitimately have no ELF runtime-search-path slot at all.
     target_os = env.get("CRT_TARGET_OS", "linux")
-    if target_os == "macos":
-        portable_web_macho(staged)
-    elif target_os == "linux":
-        for file in [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess", "crtweb_gpu_worker")] + [staged / "examples/bin/crtweb_browser"]:
-            portable = "$ORIGIN/../../lib" if file.name in ("crtweb_gpu_worker", "crtweb_browser") else "$ORIGIN/lib:$ORIGIN/../../lib"
-            set_runtime_paths(file, portable)
-        set_runtime_paths(staged / "lib/libcrtweb.so", "$ORIGIN:$ORIGIN/../libexec/crtweb/lib")
-        for file in (private / "lib").glob("*.so*"):
-            if file.is_file() and not file.is_symlink():
-                set_runtime_paths(file, "$ORIGIN")
-        remove_staged_absolute_elf_rpaths(staged)
+    normalize_candidate_paths(staged, target_os)
     candidate_env = dict(env)
     for name in ("LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "CRTWEB_PROCESS_DIR", "FONTCONFIG_FILE"):
         candidate_env.pop(name, None)
@@ -636,6 +660,82 @@ def validate_candidate(staged, work, asset, env):
     run([sys.executable, asset / "tools/verify_dist.py", "--dist", staged, "--stage", "06-web"], env)
 
 
+def normalize_candidate_paths(staged, target_os):
+    """Apply package-local loader paths without executing target programs."""
+    private = staged / "libexec/crtweb"
+    if target_os == "macos":
+        portable_web_macho(staged)
+    elif target_os == "linux":
+        for file in [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess", "crtweb_gpu_worker")] + [staged / "examples/bin/crtweb_browser"]:
+            portable = "$ORIGIN/../../lib" if file.name in ("crtweb_gpu_worker", "crtweb_browser") else "$ORIGIN/lib:$ORIGIN/../../lib"
+            set_runtime_paths(file, portable)
+        set_runtime_paths(staged / "lib/libcrtweb.so", "$ORIGIN:$ORIGIN/../libexec/crtweb/lib")
+        for file in (private / "lib").glob("*.so*"):
+            if file.is_file() and not file.is_symlink():
+                set_runtime_paths(file, "$ORIGIN")
+        remove_staged_absolute_elf_rpaths(staged)
+
+
+def readelf_machines(path):
+    readelf = shutil.which("llvm-readelf") or shutil.which("readelf")
+    if not readelf:
+        raise ValueError("cross-target proof requires llvm-readelf or readelf")
+    result = subprocess.run([readelf, "-h", str(path)], capture_output=True, text=True, check=True)
+    machines = sorted(set(re.findall(r"^\s*Machine:\s*(.+?)\s*$", result.stdout, re.M)))
+    if not machines:
+        raise ValueError(f"no ELF machine identity found: {path}")
+    return machines
+
+
+def first_artifact(root, patterns):
+    for pattern in patterns:
+        found = sorted(path for path in root.rglob(pattern) if path.is_file() and not path.is_symlink())
+        if found:
+            return found[0]
+    raise ValueError(f"target artifact missing under {root}: {patterns}")
+
+
+def prove_linux_cross_split(staged, prefix, build, work, tools):
+    """Record executable host generators and AArch64 target artifacts."""
+    if platform.system() != "Linux" or platform.machine().lower() not in ("x86_64", "amd64"):
+        raise ValueError("cross-target evidence must be generated on a Linux/x86_64 build host")
+    host = {}
+    for name, value in tools["host_executables"].items():
+        path = Path(value).resolve() if value else None
+        if path is None or not path.is_file():
+            raise ValueError(f"build-host generator missing: {name}")
+        if any(path.is_relative_to(root.resolve()) for root in (staged, prefix)):
+            raise ValueError(f"build-host generator entered the target tree: {name}: {path}")
+        machines = readelf_machines(path)
+        if machines != ["Advanced Micro Devices X86-64"]:
+            raise ValueError(f"build-host generator is not x86_64: {name}: {machines}")
+        host[name] = {"path": str(path), "sha256": digest(path), "machines": machines}
+    artifacts = {
+        "icu": first_artifact(prefix / "lib", ("libicuuc.so.*", "libicuuc.so")),
+        "libc++": first_artifact(staged / "lib", ("libc++.so.*",)),
+        "JavaScriptCore": first_artifact(build / "lib", ("libJavaScriptCore.so.*", "libJavaScriptCore.so")),
+        "WebCore": first_artifact(build, ("libWebCore.a",)),
+        "WebKit": first_artifact(build / "lib", ("libWebKit.so.*", "libWebKit.so")),
+    }
+    target = {}
+    for name, path in artifacts.items():
+        machines = readelf_machines(path)
+        if machines != ["AArch64"]:
+            raise ValueError(f"target artifact is not AArch64: {name}: {machines}")
+        target[name] = {"path": str(path), "sha256": digest(path), "machines": machines}
+    evidence = {"passed": True, "build_host": {"os": "linux", "arch": "x86_64"},
+                "target": {"os": "linux", "arch": "aarch64"},
+                "host_generators": host, "target_artifacts": target,
+                "target_execution": "not attempted on the build host"}
+    write_json(work / "cross-build-evidence.json", evidence)
+    return evidence
+
+
+def validate_cross_candidate(staged, work, asset, env):
+    normalize_candidate_paths(staged, "linux")
+    run([sys.executable, asset / "tools/verify_dist.py", "--dist", staged, "--stage", "06-web"], env)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("sdk-root", "asset-root", "work-root", "output"):
@@ -654,11 +754,8 @@ def main():
     validate_layout(sdk, work, output)
     manifest = json.loads((sdk / "manifest.json").read_text())
     target = manifest["target"]
-    native = ((target == {"os": "linux", "arch": "x86_64"} and platform.system() == "Linux" and platform.machine() in ("x86_64", "AMD64"))
-              or (target == {"os": "macos", "arch": "aarch64"} and platform.system() == "Darwin" and platform.machine() == "arm64")
-              or (target == {"os": "windows", "arch": "x86_64"} and platform.system() == "Windows" and platform.machine() in ("AMD64", "x86_64")))
-    if not native:
-        raise ValueError("06-web supports native Linux/x86_64, macOS/aarch64 and Windows/x86_64 only; cross-target proof remains open")
+    mode = build_kind(target)
+    cross = mode == "cross-linux-aarch64"
     target_os = target["os"]
     windows = target_os == "windows"
     exe = ".exe" if windows else ""
@@ -691,9 +788,15 @@ def main():
         staged.rename(checkpoint)
         print(f"Retained previous generated SDK checkpoint: {checkpoint}", flush=True)
     shutil.copytree(sdk, staged, symlinks=True)
+    if cross:
+        # Compiler wrappers are build interfaces, not target runtime objects.
+        # The 06 source asset carries the cross-aware revision; libc/libc++ and
+        # every other target artifact remain inherited byte-for-byte.
+        for name in ("crt-cc", "crt-c++"):
+            shutil.copy2(asset / "tools" / name, staged / "tools" / name)
     env = runtime_env(staged, manifest)
     env.update(CRT_CXX_RUNTIME_LINKAGE="shared", CRT_CXX_HOSTED="1")
-    if target_os == "linux":
+    if target_os == "linux" and not cross:
         run([sys.executable, asset / "tools/test_crt_cxx_shared_loader.py", "--sdk-root", staged,
              "--wrapper", staged / "tools/crt-c++", "--output", work / "loader-preflight"], env)
     # SDK-mode recipe tests resolve @ROOT@ at the SDK, not the source asset.
@@ -726,6 +829,10 @@ def main():
             " --compiler-dir " + web.crt_path(Path(tools["cc"]).parent) +
             " -- $(PKGDATA_OPTS) -q -c -s $(CURDIR)/out/build/$(ICUDATA_PLATFORM_NAME) -d $(ICUPKGDATA_OUTDIR)"]
     write_json(target_recipes / "icu.json", icu)
+    if cross:
+        for recipe in ordered:
+            path = target_recipes / (recipe["name"] + ".json")
+            write_json(path, linux_cross_recipe(json.loads(path.read_text())))
     if windows:
         openssl = json.loads((target_recipes / "openssl.json").read_text())
         # Its Unix CRT target requires a POSIX-path BUILD-host Perl, not
@@ -734,17 +841,21 @@ def main():
         openssl["build"]["target_overrides"]["windows"]["make_args"] = ["PERL=" + invoke + " " + tools["posix_perl"]]
         openssl["build"]["target_overrides"]["windows"]["env"]["PERL5LIB"] = tools["posix_perl_lib"]
         write_json(target_recipes / "openssl.json", openssl)
-        fontconfig = json.loads((target_recipes / "fontconfig.json").read_text())
-        write_json(target_recipes / "fontconfig.json", windows_fontconfig_recipe(fontconfig, staged, work, tools["gperf"]))
+    fontconfig = json.loads((target_recipes / "fontconfig.json").read_text())
+    write_json(target_recipes / "fontconfig.json",
+               fontconfig_host_generator_recipe(fontconfig, staged, work, tools["gperf"], target_os))
     # The SDK-mode port builder resolves project-owned shims/tests from its
     # root. These are source inputs copied from the asset, not host headers.
     shutil.copytree(asset / "porting/shims", staged / "porting/shims", dirs_exist_ok=True)
     shutil.copytree(asset / "porting/tests", staged / "porting/tests", dirs_exist_ok=True)
     shutil.copytree(asset / "libcrtweb/platform/gles-stub", staged / "libcrtweb/platform/gles-stub", dirs_exist_ok=True)
-    run([sys.executable, asset / "tools/crt-port-build.py", "--sdk-root", staged,
+    port_command = [sys.executable, asset / "tools/crt-port-build.py", "--sdk-root", staged,
          "--source-root", sources, "--work-root", work / "ports", "--install-prefix", prefix,
-         "--recipe-dir", target_recipes, "--jobs", args.dependency_jobs, "--test",
-         *[value for name in selected if name != "gperf" for value in ("--port", name)]], env)
+         "--recipe-dir", target_recipes, "--jobs", args.dependency_jobs]
+    if not cross:
+        port_command.append("--test")
+    port_command += [value for name in selected if name != "gperf" for value in ("--port", name)]
+    run(port_command, env)
     web_work = work / "webkit"
     if args.source_cache and not (web_work / "product").exists():
         shutil.copytree(args.source_cache.resolve(), web_work / "product", symlinks=True)
@@ -753,30 +864,38 @@ def main():
     # or resolving both backends by loader order is not a packaging contract.
     private_flags = ("" if windows else "-Wl,-unexported_symbol,_curl*" if target_os == "macos" else
                      "-Wl,--allow-shlib-undefined -Wl,--exclude-libs,ALL")
-    run([sys.executable, asset / "tools/build_webkit_crt_port.py", "--sdk-root", staged,
+    web_command = [sys.executable, asset / "tools/build_webkit_crt_port.py", "--sdk-root", staged,
          "--deps-prefix", prefix, "--work-root", web_work, "--gperf", tools["gperf"],
          "--webkit", "--reuse-tree", "--recompose", "--target", "crtweb_host", "--target", "crtweb_api_test",
          "--define", "CURL_LIBRARY_RELEASE=" + (prefix / "curl-openssl/lib/libcurl.a").as_posix(),
          "--define", "pkgcfg_lib_PC_CURL_curl=" + (prefix / "curl-openssl/lib/libcurl.a").as_posix(),
          "--define", "CMAKE_SHARED_LINKER_FLAGS=" + private_flags,
-         "-j", args.dependency_jobs], env)
+         "-j", args.dependency_jobs]
+    if cross:
+        web_command[web_command.index("-j"):web_command.index("-j")] = [
+            "--define", "CMAKE_SYSTEM_NAME=Linux", "--define", "CMAKE_SYSTEM_PROCESSOR=aarch64"]
+    run(web_command, env)
     build = web_work / "build"
     write_json(work / "target-discovery.json", audit_target_discovery(build / "CMakeCache.txt", staged, prefix,
                                                                     web_work / "src/webkit-crt"))
     (web_work / "fonts.conf").write_text(web.font_configuration(
         target_path(asset / "libcrtgfx/assets/fonts", target_os), target_path(work / "font-cache", target_os)))
     run_env = web.gate_environment(build, staged, prefix, web_work, env, target_os)
-    run([build / ("bin/crtweb_api_test" + exe)], run_env, work)
+    if not cross:
+        run([build / ("bin/crtweb_api_test" + exe)], run_env, work)
     native = work / "consumer-build"
     # The SDK-Skia application/GPU worker uses the normal static CRT runtime,
     # just like the accepted in-tree consumers. Only the separate CPU browser
     # processes require WebKit's shared runtime. Do not leak that build setting
     # into a native window/GPU PAL consumer with transitive host-driver libs.
     consumer_env = dict(env, CRT_CXX_RUNTIME_LINKAGE="static")
-    run(["cmake", "--fresh", "-S", asset / "distribution/stages/06-web", "-B", native, "-G", "Ninja",
+    consumer_configure = ["cmake", "--fresh", "-S", asset / "distribution/stages/06-web", "-B", native, "-G", "Ninja",
          "-DCMAKE_TOOLCHAIN_FILE=" + (staged / "crt-toolchain.cmake").as_posix(),
          "-DCMAKE_INSTALL_PREFIX=" + staged.as_posix(), "-DCRT_STAGE_SOURCE_ROOT=" + asset.as_posix(),
-         "-DCRT_STAGE_TARGET_OS=" + target_os, "-DCRT_STAGE_TARGET_ARCH=" + target["arch"]], consumer_env)
+         "-DCRT_STAGE_TARGET_OS=" + target_os, "-DCRT_STAGE_TARGET_ARCH=" + target["arch"]]
+    if cross:
+        consumer_configure += ["-DCMAKE_SYSTEM_NAME=Linux", "-DCMAKE_SYSTEM_PROCESSOR=aarch64"]
+    run(consumer_configure, consumer_env)
     # Two small consumers: also invalidate environment-only wrapper settings,
     # which Ninja cannot see in an otherwise unchanged command line.
     run(["cmake", "--build", native, "--clean-first", "-j", args.dependency_jobs], consumer_env)
@@ -852,9 +971,16 @@ def main():
                     "predecessor_version": predecessor["version"]},
                     external_prerequisites=external_prerequisites_for(target_os, "06-web", target["arch"]))
     manifest["web_runtime"]["build_host_tools"] = "share/crt/web-host-tools.json"
+    if cross:
+        evidence = prove_linux_cross_split(staged, prefix, build, work, tools)
+        write_json(staged / "share/crt/web-cross-build.json", evidence)
+        manifest["web_runtime"]["cross_build_evidence"] = "share/crt/web-cross-build.json"
     write_json(staged / "share/crt/web-host-tools.json", json.loads((work / "host-tools.json").read_text()))
     write_json(staged / "manifest.json", manifest)
-    validate_candidate(staged, work, asset, env)
+    if cross:
+        validate_cross_candidate(staged, work, asset, env)
+    else:
+        validate_candidate(staged, work, asset, env)
     output.parent.mkdir(parents=True, exist_ok=True)
     publish_tree(staged, output)
     print(f"CRT development stage ready: {output}; public release NOT authorized")

@@ -88,7 +88,8 @@ class PackagingTests(unittest.TestCase):
             root = Path(directory)
             recipe = {"dependencies":["make","gperf","freetype"],
                       "build":{"env":{"GPERF":"target/gperf"},"path_prepend":["target/bin"]}}
-            result = stage.windows_fontconfig_recipe(recipe,root/"sdk",root/"work",root/"native/gperf.exe")
+            result = stage.fontconfig_host_generator_recipe(
+                recipe, root/"sdk", root/"work", root/"native/gperf.exe", "windows")
             self.assertEqual(result["dependencies"],["make","freetype"])
             self.assertEqual(recipe["dependencies"],["make","gperf","freetype"])
             self.assertEqual(result["build"]["path_prepend"],[stage.web.crt_path(root/"work/host/fontconfig-tools")])
@@ -97,6 +98,24 @@ class PackagingTests(unittest.TestCase):
             self.assertNotIn(b"\r",relay)
             self.assertIn(b"crt-native-tool",relay)
             self.assertIn(b"native/gperf.exe",relay)
+
+    def test_linux_fontconfig_never_builds_or_runs_target_gperf(self):
+        recipe = {"dependencies": ["make", "gperf", "freetype"],
+                  "build": {"env": {"GPERF": "target/gperf"}, "path_prepend": ["target/bin"]}}
+        result = stage.fontconfig_host_generator_recipe(
+            recipe, Path("/sdk"), Path("/work"), Path("/host/bin/gperf"), "linux")
+        self.assertEqual(result["dependencies"], ["make", "freetype"])
+        self.assertEqual(result["build"]["env"]["GPERF"], "/host/bin/gperf")
+        self.assertEqual(result["build"]["path_prepend"], ["/host/bin"])
+
+    def test_linux_cross_recipes_name_build_and_target(self):
+        autoconf = {"name": "icu", "build": {"system": "configure", "configure_args": []}}
+        result = stage.linux_cross_recipe(autoconf)
+        self.assertIn("--build=x86_64-pc-linux-gnu", result["build"]["configure_args"])
+        self.assertIn("--host=aarch64-linux-gnu", result["build"]["configure_args"])
+        zlib = stage.linux_cross_recipe(
+            {"name": "zlib", "build": {"system": "configure", "configure_args": [], "env": {}}})
+        self.assertEqual(zlib["build"]["env"]["CHOST"], "aarch64-linux-gnu")
 
     def test_native_configure_interpreter_reads_host_not_crt_root_paths(self):
         import importlib.util
@@ -471,6 +490,45 @@ class PackagingTests(unittest.TestCase):
             self.assertIn("native Linux/x86_64", result.stderr)
             self.assertNotIn("missing lib/libc.so", result.stderr)
 
+    def test_supported_build_host_target_pairs_are_explicit(self):
+        self.assertEqual(stage.build_kind({"os": "linux", "arch": "aarch64"}, "Linux", "x86_64"),
+                         "cross-linux-aarch64")
+        self.assertEqual(stage.build_kind({"os": "linux", "arch": "x86_64"}, "Linux", "amd64"),
+                         "native")
+        with self.assertRaisesRegex(ValueError, "x86_64-host -> Linux/aarch64-target"):
+            stage.build_kind({"os": "linux", "arch": "aarch64"}, "Linux", "aarch64")
+
+    def test_linux_wrappers_select_aarch64_on_an_x86_64_build_host(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sdk = root / "sdk"
+            (sdk / "include").mkdir(parents=True)
+            resource = root / "resource"
+            (resource / "include").mkdir(parents=True)
+            arguments = root / "arguments"
+            compiler = root / "compiler"
+            compiler.write_text("#!/bin/sh\n"
+                                "if [ \"${1:-}\" = -print-resource-dir ]; then echo \"$FAKE_RESOURCE\"; exit 0; fi\n"
+                                "printf '%s\\n' \"$@\" > \"$FAKE_ARGUMENTS\"\n")
+            compiler.chmod(0o755)
+            bindir = root / "bin"
+            bindir.mkdir()
+            uname = bindir / "uname"
+            uname.write_text("#!/bin/sh\nprintf '%s\\n' x86_64\n")
+            uname.chmod(0o755)
+            source = root / "fixture.c"
+            source.write_text("int fixture;\n")
+            for wrapper, compiler_variable in (("crt-cc", "CRT_HOST_CC"), ("crt-c++", "CRT_HOST_CXX")):
+                env = dict(os.environ, CRT_SYSROOT=str(sdk), CRT_TARGET_OS="linux", CRT_TARGET_ARCH="aarch64",
+                           FAKE_RESOURCE=str(resource), FAKE_ARGUMENTS=str(arguments),
+                           PATH=str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+                env[compiler_variable] = str(compiler)
+                subprocess.run([ROOT / "tools" / wrapper, "-c", source, "-o", root / (wrapper + ".o")],
+                               env=env, check=True)
+                actual = arguments.read_text().splitlines()
+                self.assertIn("--target=aarch64-linux-gnu", actual)
+                self.assertIn("-fuse-ld=lld", actual)
+
     def test_host_environment_does_not_inherit_target_flags(self):
         from unittest.mock import patch
         with patch.dict("os.environ", {"CRT_TARGET_ARCH": "aarch64", "CC": "crt-cc", "CFLAGS": "--sysroot=bad", "CPATH": "bad"}):
@@ -600,6 +658,18 @@ class PackagingTests(unittest.TestCase):
                         "checked_utc": now.isoformat(), "advisories": [{"affected": False, "fixed_versions": ["2.54.0"]}]}
             stage.write_json(root / "share/crt/web-security.json", evidence)
             validate_web_stage(root, manifest, redistributed, "")
+            cross_manifest = copy.deepcopy(manifest)
+            cross_manifest["target"] = {"os": "linux", "arch": "aarch64"}
+            with self.assertRaisesRegex(SystemExit, "cross-build evidence"):
+                validate_web_stage(root, cross_manifest, redistributed, "")
+            cross_manifest["web_runtime"]["cross_build_evidence"] = "share/crt/web-cross-build.json"
+            stage.write_json(root / "share/crt/web-cross-build.json", {
+                "passed": True, "build_host": {"os": "linux", "arch": "x86_64"},
+                "target": {"os": "linux", "arch": "aarch64"},
+                "host_generators": {name: {} for name in ("gperf", "perl", "python", "ruby", "genrb", "icupkg", "pkgdata")},
+                "target_artifacts": {name: {} for name in ("icu", "libc++", "JavaScriptCore", "WebCore", "WebKit")},
+            })
+            validate_web_stage(root, cross_manifest, redistributed, "")
             missing_identity = copy.deepcopy(manifest)
             del missing_identity["built_from"]["predecessor_content_sha256"]
             with self.assertRaisesRegex(SystemExit, "predecessor content"):

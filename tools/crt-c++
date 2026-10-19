@@ -31,18 +31,15 @@ fi
 
 cxx="${CRT_HOST_CXX:-clang++}"
 compiler_rt_builtins=""
+target_arch="${CRT_TARGET_ARCH:-}"
+if [ -z "$target_arch" ]; then
+  case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
+    *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
+    *) target_arch=x86_64 ;;
+  esac
+fi
 if [ "$target_os" = windows ]; then
   export CRT_SPAWN_NATIVE_WINDOWS=1
-  target_arch="${CRT_TARGET_ARCH:-}"
-  if [ -z "$target_arch" ]; then
-    # See the matching comment in tools/crt-cc: check both `uname -m` and
-    # `uname -s` together so this works under either this project's own
-    # toybox `uname` or a host MSYS/Git-Bash `uname`.
-    case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
-      *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
-      *) target_arch=x86_64 ;;
-    esac
-  fi
 fi
 set +e
 resource_dir="$("$cxx" -print-resource-dir 2>/dev/null)"
@@ -413,7 +410,18 @@ case "$target_os" in
       fi
     fi
     ;;
-  linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
+  linux)
+    common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1"
+    case "$(uname -m 2>/dev/null)" in
+      aarch64|arm64) host_arch=aarch64 ;;
+      *) host_arch=x86_64 ;;
+    esac
+    if [ "$target_arch" != "$host_arch" ]; then
+      # Match crt-cc: target code comes only from the installed SDK while
+      # Clang/LLD execute on the build host.
+      common_flags="$common_flags --target=${target_arch}-linux-gnu -fuse-ld=lld"
+    fi
+    ;;
   windows)
     cxx_main_lib=""
     cxx_abi_selected=""

@@ -32,22 +32,15 @@ if [ -z "$target_os" ]; then
 fi
 
 cc="${CRT_HOST_CC:-clang}"
+target_arch="${CRT_TARGET_ARCH:-}"
+if [ -z "$target_arch" ]; then
+  case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
+    *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
+    *) target_arch=x86_64 ;;
+  esac
+fi
 if [ "$target_os" = windows ]; then
   export CRT_SPAWN_NATIVE_WINDOWS=1
-  target_arch="${CRT_TARGET_ARCH:-}"
-  if [ -z "$target_arch" ]; then
-    # Check both `uname -m` (the semantically correct field, and what this
-    # project's own toybox `uname` reports -- it prints `uname -s` as the
-    # bare "Windows", no ARM64 suffix) and `uname -s` (MSYS/Git-Bash's own
-    # `uname`, which instead puts the arch on the end of -s, e.g.
-    # "MINGW64_NT-10.0-26200-ARM64", and reports "x86_64" from -m even on
-    # an ARM64 host under x86_64 emulation) together, so this works
-    # whichever `uname` ends up on PATH when this script runs.
-    case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
-      *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
-      *) target_arch=x86_64 ;;
-    esac
-  fi
 fi
 set +e
 resource_dir="$("$cc" -print-resource-dir 2>/dev/null)"
@@ -498,7 +491,21 @@ case "$target_os" in
       fi
     fi
     ;;
-  linux) common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1" ;;
+  linux)
+    common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1"
+    case "$(uname -m 2>/dev/null)" in
+      aarch64|arm64) host_arch=aarch64 ;;
+      *) host_arch=x86_64 ;;
+    esac
+    if [ "$target_arch" != "$host_arch" ]; then
+      # The installed SDK owns every header, startup object and runtime
+      # library. The explicit triple changes code generation only and keeps
+      # an x86_64 build host from silently producing x86_64 objects for a
+      # Linux/aarch64 SDK. LLD is architecture-neutral and does not require a
+      # host cross-binutils package.
+      common_flags="$common_flags --target=${target_arch}-linux-gnu -fuse-ld=lld"
+    fi
+    ;;
   windows)
     common_flags="$common_flags -DCRT_TARGET_OS_WINDOWS=1"
     # A stock Windows LLVM install's clang.exe defaults to its own host

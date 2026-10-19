@@ -400,21 +400,10 @@ def copy_source(src, dst):
 def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell=False):
     env = os.environ.copy()
     packaged_sdk = (root / "manifest.json").is_file()
-    if target_os == "windows":
-        # tools/crt-cc/tools/crt-c++ read $CRT_TARGET_ARCH to pick
-        # --target=<arch>-w64-mingw32; if unset, they fall back to
-        # auto-detecting the *host's* arch via `uname`. That fallback is
-        # only correct when the host and requested target arch happen to
-        # match -- it silently builds the wrong architecture during a
-        # same-OS cross-arch build (e.g. this project's own
-        # -DCRT_TARGET_ARCH=x86_64 CMake preset, or --target-arch x86_64
-        # passed straight to this script, from an aarch64 host). mingw_triple
-        # is already resolved once from the same --target-arch/
-        # CRT_TARGET_ARCH/platform.machine() priority chain (see
-        # detect_target_arch()/mingw_triple_for_arch()), so forward that
-        # same answer here instead of letting crt-cc re-derive its own,
-        # potentially different one via `uname`.
-        env["CRT_TARGET_ARCH"] = mingw_triple.removesuffix("-w64-mingw32")
+    # The wrappers must never re-derive the target from the build host. This
+    # was originally Windows-only, but Linux/x86_64 -> Linux/aarch64 needs the
+    # same explicit identity for Clang code generation and CMake processors.
+    env["CRT_TARGET_ARCH"] = mingw_triple.removesuffix("-w64-mingw32")
     use_msys_paths = is_native_windows_configure(target_os) and not use_crt_shell
     path_for_shell = path_for_crt_shell if (is_native_windows_configure(target_os) and use_crt_shell) else path_for_msys_shell
     root_env = path_for_shell(root) if is_native_windows_configure(target_os) else str(root)
