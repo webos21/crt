@@ -49,10 +49,30 @@ extern "C" int main(int argc, char** argv) {
 #endif
     host = owned_host.c_str();
   }
+#if defined(_WIN32)
+  // PE has no RPATH. Activate this host's installed DLL closure before
+  // spawning it, without any product-build/prefix path or global DLL hook.
+  std::string host_directory = host;
+  host_directory = host_directory.substr(0, host_directory.find_last_of("/\\"));
+  std::string runtime_path = host_directory + "/lib;" + host_directory + "/../../bin";
+  if (const char* previous = getenv("PATH")) runtime_path += std::string(";") + previous;
+  if (setenv("PATH", runtime_path.c_str(), 1)) return 1;
+#endif
   if (!getenv("FONTCONFIG_FILE")) {
     std::string path = host;
     auto slash = path.find_last_of("/\\");
     path = path.substr(0, slash) + "/../../share/crt/web-fonts.conf";
+#if defined(_WIN32)
+    // Fontconfig is a CRT/POSIX port, not the native Windows library. Its
+    // configuration path uses the CRT drive namespace, even when argv was a
+    // native executable path. Keep the host executable path itself unchanged.
+    for (char& character : path) if (character == '\\') character = '/';
+    if (path.size() > 2 && path[1] == ':') {
+      char drive = path[0];
+      if (drive >= 'A' && drive <= 'Z') drive += 'a' - 'A';
+      path = std::string("/") + drive + path.substr(2);
+    }
+#endif
     setenv("FONTCONFIG_FILE", path.c_str(), 1);
   }
   crtweb::WebView web;

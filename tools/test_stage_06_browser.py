@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run an installed Linux/macOS browser and observe its owned CPU browser roles.
+"""Run an installed native browser and observe its owned CPU browser roles.
 
 No build-tree loader path, GPU, audio or camera is used. The application can
 map its declared window PAL; Host/Web/Network map SDK files, the OS loader and
@@ -70,6 +70,162 @@ def processes():
         except (OSError, ValueError, IndexError):
             continue
     return result
+
+
+def windows_native():
+    """Read native process/module snapshots; never inspect unrelated modules."""
+    import ctypes as c
+    from ctypes import wintypes as w
+    class Process(c.Structure):
+        _fields_ = [("dwSize", w.DWORD), ("cntUsage", w.DWORD), ("pid", w.DWORD), ("heap", c.c_size_t),
+                    ("module", w.DWORD), ("threads", w.DWORD), ("parent", w.DWORD), ("priority", w.LONG),
+                    ("flags", w.DWORD), ("name", w.WCHAR * 260)]
+    class Module(c.Structure):
+        _fields_ = [("dwSize", w.DWORD), ("module", w.DWORD), ("pid", w.DWORD), ("global_refs", w.DWORD),
+                    ("process_refs", w.DWORD), ("base", c.c_void_p), ("size", w.DWORD), ("handle", w.HMODULE),
+                    ("name", w.WCHAR * 256), ("path", w.WCHAR * 260)]
+    kernel = c.WinDLL("kernel32", use_last_error=True)
+    for name, arguments, result in (
+        ("CreateToolhelp32Snapshot", [w.DWORD, w.DWORD], w.HANDLE),
+        ("Process32FirstW", [w.HANDLE, c.POINTER(Process)], w.BOOL),
+        ("Process32NextW", [w.HANDLE, c.POINTER(Process)], w.BOOL),
+        ("Module32FirstW", [w.HANDLE, c.POINTER(Module)], w.BOOL),
+        ("Module32NextW", [w.HANDLE, c.POINTER(Module)], w.BOOL),
+        ("OpenProcess", [w.DWORD, w.BOOL, w.DWORD], w.HANDLE),
+        ("CloseHandle", [w.HANDLE], w.BOOL),
+        ("GetProcessTimes", [w.HANDLE] + [c.POINTER(w.FILETIME)] * 4, w.BOOL),
+        ("TerminateProcess", [w.HANDLE, w.UINT], w.BOOL),
+    ):
+        function = getattr(kernel, name)
+        function.argtypes, function.restype = arguments, result
+    def snapshot(pid=None):
+        handle = kernel.CreateToolhelp32Snapshot(0x18 if pid is not None else 2, pid or 0)
+        if handle == c.c_void_p(-1).value:
+            raise c.WinError(c.get_last_error())
+        item = Module() if pid is not None else Process()
+        item.dwSize = c.sizeof(item)
+        first, following = ((kernel.Module32FirstW, kernel.Module32NextW) if pid is not None else
+                            (kernel.Process32FirstW, kernel.Process32NextW))
+        result = [] if pid is not None else {}
+        try:
+            if not first(handle, c.byref(item)):
+                raise c.WinError(c.get_last_error())
+            while True:
+                if pid is not None:
+                    result.append(item.path)
+                else:
+                    result[item.pid] = (item.parent, item.name)
+                if not following(handle, c.byref(item)):
+                    if c.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                        raise c.WinError(c.get_last_error())
+                    break
+        finally:
+            kernel.CloseHandle(handle)
+        return result
+    def identity(pid, terminate=False):
+        handle = kernel.OpenProcess(0x1000 | (1 if terminate else 0), False, pid)
+        if not handle:
+            return None
+        times = [w.FILETIME() for _ in range(4)]
+        try:
+            if not kernel.GetProcessTimes(handle, *[c.byref(item) for item in times]):
+                raise c.WinError(c.get_last_error())
+            return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        finally:
+            kernel.CloseHandle(handle)
+    def terminate(pid, expected):
+        handle = kernel.OpenProcess(0x1001, False, pid)
+        if not handle:
+            return
+        times = [w.FILETIME() for _ in range(4)]
+        try:
+            if (kernel.GetProcessTimes(handle, *[c.byref(item) for item in times]) and
+                ((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime) == expected):
+                kernel.TerminateProcess(handle, 1)
+        finally:
+            kernel.CloseHandle(handle)
+    return snapshot, identity, terminate
+
+
+def observe_windows(sdk, work, program, env):
+    snapshot, identity, terminate = windows_native()
+    checkpoint = work / "map-checkpoint"
+    ready, release = Path(str(checkpoint) + ".ready"), Path(str(checkpoint) + ".release")
+    for file in (ready, release):
+        file.unlink(missing_ok=True)
+    env = dict(env, CRTWEB_SAMPLE_MAP_CHECKPOINT=str(checkpoint))
+    roles = {"crtweb_host.exe": "HostProcess", "WebProcess.exe": "WebProcess", "NetworkProcess.exe": "NetworkProcess"}
+    owned, mapped, images, os_maps, violations = {}, set(), {}, set(), set()
+    verified = False
+    system = Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve()
+    with (work / "stdout.log").open("w") as stdout, (work / "stderr.log").open("w") as stderr:
+        process = subprocess.Popen([str(program), "--smoke"], cwd=work, env=env, stdout=stdout, stderr=stderr)
+        deadline = time.monotonic() + 90
+        while process.poll() is None and time.monotonic() < deadline:
+            current = snapshot()
+            descendants = {process.pid}
+            for _ in range(8):
+                descendants.update(pid for pid, info in current.items() if info[0] in descendants)
+            for pid in descendants - {process.pid}:
+                stamp = identity(pid)
+                if stamp is not None:
+                    owned[pid] = (stamp, current[pid][1])
+            if ready.exists():
+                verified = ready.read_text().strip() == str(process.pid)
+                break
+            time.sleep(0.02)
+        if verified:
+            for pid, (stamp, name) in owned.items():
+                role = roles.get(name)
+                if role is None or identity(pid) != stamp:
+                    continue
+                try:
+                    paths = snapshot(pid)
+                except OSError as error:
+                    violations.add(f"{role}: module snapshot failed: {error}")
+                    continue
+                for path in paths:
+                    file = Path(path).resolve()
+                    mapped.add((role, str(file)))
+                    if file.is_relative_to(system) and file.suffix.lower() == ".dll":
+                        os_maps.add((role, str(file)))
+                    elif not file.is_relative_to(sdk):
+                        violations.add(f"{role}: {path}")
+                    for family in ("libc++", "libc++abi", "libunwind"):
+                        if file.name.lower() == family + ".dll":
+                            images.setdefault((role, family), set()).add(str(file).lower())
+        release.write_text("release\n")
+        try:
+            status = process.wait(timeout=30)
+            timed_out = False
+        except subprocess.TimeoutExpired:
+            process.kill()
+            status, timed_out = process.wait(), True
+    observed = sorted({role for role, _ in mapped})
+    for role in observed:
+        for family in ("libc++", "libc++abi", "libunwind"):
+            if len(images.get((role, family), set())) != 1:
+                violations.add(f"{role}: expected one {family} image")
+    remaining = {}
+    for _ in range(100):
+        remaining = {pid: data for pid, data in owned.items() if identity(pid) == data[0]}
+        if not remaining:
+            break
+        time.sleep(0.02)
+    for pid, (stamp, _) in remaining.items():
+        terminate(pid, stamp)  # failure cleanup only, never accepted as a pass
+    text = (work / "stdout.log").read_text()
+    result = {"passed": verified and status == 0 and not timed_out and not violations and not remaining
+              and observed == ["HostProcess", "NetworkProcess", "WebProcess"]
+              and "crtweb_browser: load=pass pixels=pass script=pass" in text,
+              "checkpoint_verified": verified, "returncode": status, "timed_out": timed_out,
+              "roles": observed, "violations": sorted(violations), "remaining_owned_processes": sorted(remaining),
+              "mapped_files": len(mapped), "single_cxx_runtime_per_role": not any("image" in value for value in violations),
+              "os_transitive_mappings": [dict(role=role, path=path) for role, path in sorted(os_maps)]}
+    (work / "maps.log").write_text("".join(f"MAPPED {role} {file}\n" for role, file in sorted(mapped)))
+    (work / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps({key: value for key, value in result.items() if key != "os_transitive_mappings"}, indent=2))
+    return 0 if result["passed"] else 1
 
 
 def observe_macos(sdk, work, program, env, font_cache):
@@ -190,17 +346,30 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--program", type=Path, help="external rebuilt sample, instead of the installed one")
     args = parser.parse_args()
-    if sys.platform not in ("linux", "darwin"):
-        raise ValueError("native browser observer requires Linux or macOS")
+    if sys.platform not in ("linux", "darwin", "win32"):
+        raise ValueError("native browser observer requires Linux, macOS or Windows")
     sdk, work = args.sdk_root.resolve(), args.output.resolve()
     work.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     for name in ("LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "CRTWEB_PROCESS_DIR", "FONTCONFIG_FILE"):
         env.pop(name, None)
-    env["CRTWEB_HOST"] = str(sdk / "libexec/crtweb/crtweb_host")
+    windows = sys.platform == "win32"
+    env["CRTWEB_HOST"] = str(sdk / ("libexec/crtweb/crtweb_host.exe" if windows else "libexec/crtweb/crtweb_host"))
     font_config, font_cache = observer_font_config(sdk, work)
-    env["FONTCONFIG_FILE"] = str(font_config)
-    program = args.program.resolve() if args.program else sdk / "examples/bin/crtweb_browser"
+    if windows:
+        from build_webkit_crt_port import crt_path
+        tree = ET.parse(font_config)
+        tree.find("dir").text = crt_path(sdk / "share/fonts/crtweb")
+        tree.find("cachedir").text = crt_path(font_cache)
+        tree.write(font_config, encoding="unicode")
+        env["FONTCONFIG_FILE"] = crt_path(font_config)
+        # Native PE search policy, package-owned paths only, no build prefix.
+        env["PATH"] = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
+    else:
+        env["FONTCONFIG_FILE"] = str(font_config)
+    program = args.program.resolve() if args.program else sdk / ("examples/bin/crtweb_browser.exe" if windows else "examples/bin/crtweb_browser")
+    if windows:
+        return observe_windows(sdk, work, program, env)
     if sys.platform == "darwin":
         return observe_macos(sdk, work, program, env, font_cache)
     roles = {"crtweb_host": "HostProcess", "WebProcess": "WebProcess", "NetworkProcess": "NetworkProcess"}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated 05-ui -> 06-web development SDK builder (Linux/x64, macOS/arm64).
+"""Isolated 05-ui -> 06-web development SDK builder (native Linux/macOS/Windows).
 
 Only the extracted source asset, installed predecessor, verified upstream source
 and build-host tools are inputs. No in-tree runtime build is used. Publication
@@ -15,6 +15,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -51,17 +52,23 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def target_path(path, target_os):
+    # CRT ports (notably fontconfig's absolute-path test) use /c/... on
+    # Windows. Native build-host fixture paths must cross that boundary too.
+    return web.crt_path(path) if target_os == "windows" else str(path)
+
+
 def compile_input(name):
     """Source identity for a packaging-only retry, never an object cache key."""
-    if name in ("distribution/stages/06-web/CMakeLists.txt", "examples/web-browser/CMakeLists.txt"):
+    if name in ("distribution/stages/06-web/CMakeLists.txt", "examples/web-browser/CMakeLists.txt", "examples/web-browser/main.cc"):
         # These two-object consumer projects are freshly configured below;
-        # Ninja rechecks their changed compile/link commands, independently
-        # of the heavy WebKit/dependency phase being reused.
+        # Their unconditional clean build below also covers changed sample
+        # source, independently of the heavy WebKit/dependency phase reused.
         return False
     return ((name.startswith(("libcrtweb/", "porting/", "distribution/", "examples/web-browser/",
                               "libcrtgfx/", "libcrtmedia/")) and not name.endswith(".md")) or
             name in {"tools/build_webkit_jsc.py", "tools/build_webkit_crt_port.py", "tools/fetch_ports.py",
-                     "tools/fetch_webkit_commit.py", "tools/crt-port-build.py"})
+                     "tools/fetch_webkit_commit.py", "tools/crt-port-build.py", "tools/crt_icu_host_pkgdata.py"})
 
 
 def driver_roots(source):
@@ -79,7 +86,7 @@ def compile_driver_identity(source):
     tree = ast.parse(source)
     selected = []
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name in ("run", "host_environment", "build_host_tools"):
+        if isinstance(node, ast.FunctionDef) and node.name in ("run", "host_environment", "build_host_tools", "build_windows_host_tools", "windows_fontconfig_recipe"):
             selected.append(node)
         if isinstance(node, ast.FunctionDef) and node.name == "main":
             active = False
@@ -154,9 +161,11 @@ def require_predecessor(sdk, manifest):
     names = {entry["name"] for entry in manifest.get("redistributed_dependencies", [])}
     if not {"freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib", "lvgl"} <= names:
         raise ValueError("06-web predecessor is missing its complete media/UI dependency provenance")
-    suffix = "dylib" if manifest.get("target", {}).get("os") == "macos" else "so"
-    for file in (f"lib/libc.{suffix}", f"lib/libc++.{suffix}", "lib/libskia.a", "lib/libcrtui_skia.a",
-                 f"lib/libcrtmedia.{suffix}", "include/include/core/SkSurface.h",
+    target_os = manifest.get("target", {}).get("os")
+    suffix = "dylib" if target_os == "macos" else "so"
+    runtime = ("bin/libc.dll", "bin/libc++.dll", "bin/libcrtmedia.dll") if target_os == "windows" else (
+        f"lib/libc.{suffix}", f"lib/libc++.{suffix}", f"lib/libcrtmedia.{suffix}")
+    for file in (*runtime, "lib/libskia.a", "lib/libcrtui_skia.a", "include/include/core/SkSurface.h",
                  "include/crtgfx/shared_image.h", "include/crtgfx/skia_shared.h"):
         if not (sdk / file).is_file():
             raise ValueError(f"06-web requires the option-ON 05-ui predecessor: missing {file}")
@@ -197,7 +206,8 @@ def install_stage_tools(asset, staged):
 def copy_private_libraries(directory, destination, target_os):
     # WebKit's Darwin install name ends in .dylib.SOVERSION. Preserve the
     # actual image and relative aliases, not just names ending in .dylib.
-    for file in directory.glob("*.dylib*" if target_os == "macos" else "*.so*"):
+    pattern = "*.dll" if target_os == "windows" else "*.dylib*" if target_os == "macos" else "*.so*"
+    for file in directory.glob(pattern):
         if file.name.startswith(("libcurl", "libcrtweb", "libc++", "libunwind")) or not file.is_file():
             continue
         target = destination / file.name
@@ -221,7 +231,7 @@ def audit_target_discovery(cache, sdk, prefix, tree):
                 ("LIBRARY", "LIBRARIES", "INCLUDE_DIR", "INCLUDEDIR", "LIBDIR"))):
             continue
         for entry in value.split(";"):
-            if entry.startswith("/"):
+            if entry.startswith("/") or Path(entry).is_absolute():
                 path = Path(entry).resolve()
                 if not any(path.is_relative_to(root.resolve()) for root in (sdk, prefix, tree)):
                     raise ValueError(f"target dependency escaped the SDK/prefix/source: {name}={entry}")
@@ -242,6 +252,8 @@ def host_environment():
 
 
 def build_host_tools(asset, sources, work, recipes, jobs):
+    if os.name == "nt":
+        return build_windows_host_tools(sources, work, recipes, jobs)
     env = host_environment()
     tools = web.jsc.require_host_tools()
     for name, configure_options in (("gperf", []), ("icu", ["--disable-tests", "--disable-samples",
@@ -263,6 +275,133 @@ def build_host_tools(asset, sources, work, recipes, jobs):
     return tools
 
 
+def build_windows_host_tools(sources, work, recipes, jobs):
+    """Native MinGW host generators, never CRT target executables/SDK inputs.
+
+    Git's shell is a hosted configure tool only; target ports still use the
+    installed CRT mksh/make and unmodified upstream recipes.
+    """
+    env = host_environment()
+    bash = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe"
+    gcc, gxx = shutil.which("gcc"), shutil.which("g++")
+    make = shutil.which("gmake") or shutil.which("mingw32-make")
+    if not bash.is_file() or not all((gcc, gxx, make)):
+        raise ValueError("Windows host generators require Git Bash and native MinGW gcc/g++/make")
+    import ctypes
+    shell = bash.parent.parent / "usr/bin/sh.exe"
+    needed = ctypes.windll.kernel32.GetShortPathNameW(str(shell), None, 0)
+    if not needed:
+        raise ctypes.WinError()
+    buffer = ctypes.create_unicode_buffer(needed)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(shell), buffer, needed):
+        raise ctypes.WinError()
+    host_shell = buffer.value.replace("\\", "/")
+    perl = shell.parent / "perl.exe"
+    if not perl.is_file():
+        raise ValueError("Windows OpenSSL configure requires Git's POSIX-path Perl (build-host only)")
+    needed = ctypes.windll.kernel32.GetShortPathNameW(str(perl), None, 0)
+    if not needed:
+        raise ctypes.WinError()
+    buffer = ctypes.create_unicode_buffer(needed)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(perl), buffer, needed):
+        raise ctypes.WinError()
+    posix_perl = buffer.value.replace("\\", "/")
+    probe = subprocess.run([posix_perl, "-MFile::Spec", "-e", 'print File::Spec->catfile("foo","bar")'],
+                           env=env, capture_output=True, text=True, check=True)
+    if probe.stdout != "foo/bar" or " " in posix_perl:
+        raise ValueError("OpenSSL host Perl must produce POSIX paths and have a space-free command alias")
+    perl_env = dict(env)
+    # A configured BUILD-host module search root is not a target dependency.
+    # Probe the full requirement before expensive compilation; never install
+    # modules globally or silently mix another interpreter's native extensions.
+    perl_lib = os.environ.get("CRT_WEB_HOST_PERL_LIB", "")
+    if perl_lib:
+        perl_lib = Path(perl_lib).resolve()
+        if not perl_lib.is_dir():
+            raise ValueError("CRT_WEB_HOST_PERL_LIB is not a build-host module directory")
+        perl_env["PERL5LIB"] = web.crt_path(perl_lib)
+    else:
+        perl_env.pop("PERL5LIB", None)
+    modules = subprocess.run([posix_perl, "-MIPC::Cmd", "-MExtUtils::MakeMaker", "-e", "print 1"],
+                             env=perl_env, capture_output=True, text=True)
+    if modules.returncode or modules.stdout != "1":
+        raise ValueError("OpenSSL POSIX host Perl needs IPC::Cmd/ExtUtils::MakeMaker; configure "
+                         "CRT_WEB_HOST_PERL_LIB for a prepared host module root: " + modules.stderr[-2000:])
+    perl_module_inputs = ({file.relative_to(perl_lib).as_posix(): digest(file)
+                           for file in perl_lib.rglob("*") if file.is_file()} if perl_lib else {})
+    # ICU's make recipes expand $(SHELL) unquoted. Select the installed shell's
+    # Windows alias, not a short SDK/work directory; relocation still tests the
+    # real spaced SDK path. Never patch the upstream generated/source files.
+    if " " in host_shell:
+        raise ValueError("ICU host make requires a space-free shell alias (Windows 8.3 name)")
+    env.update(CC="gcc", CXX="g++", AR="ar", RANLIB="ranlib", MAKE=Path(make).as_posix())
+    env["PATH"] = os.pathsep.join((str(bash.parent.parent / "usr/bin"), str(Path(gcc).parent), env.get("PATH", "")))
+    tools = web.jsc.require_host_tools()
+    def hosted_shell(command, cwd):
+        # Git's bash launcher prepends its own MinGW DLLs after receiving
+        # env. Restore this compiler's runtime precedence INSIDE the shell;
+        # otherwise a freshly linked ICU tool exits 127 with Git's C++ DLLs.
+        script = "export PATH=" + shlex.quote(web.crt_path(Path(gcc).parent)) + ":$PATH; exec " + shlex.join(command)
+        run([bash, "--noprofile", "--norc", "-c", script], env, cwd)
+    for name, options in (("gperf", []), ("icu", ["--disable-tests", "--disable-samples", "--disable-extras",
+                                                "--disable-shared", "--enable-static"])):
+        build = work / "host" / name
+        build.mkdir(parents=True, exist_ok=True)
+        # Host tools must also run from CRT make's native-tool boundary, not
+        # only from the Git configure shell. Bind their compiler runtime by
+        # adjacency; these GNU DLLs never enter the target dependency prefix.
+        runtime_bin = build / ("install/bin" if name == "gperf" else "bin")
+        runtime_bin.mkdir(parents=True, exist_ok=True)
+        for library in ("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll"):
+            file = Path(gcc).parent / library
+            if not file.is_file():
+                raise ValueError(f"native host compiler runtime missing: {file}")
+            shutil.copy2(file, runtime_bin / library)
+        source = sources / recipes[name]["source"]["source_dir"]
+        if name == "icu":
+            source /= "source"
+        commands = []
+        if not (build / ".configured").exists():
+            hosted_shell([
+                (source / "configure").as_posix(), "--build=x86_64-w64-mingw32", "--host=x86_64-w64-mingw32",
+                "--srcdir=" + os.path.relpath(source, build).replace("\\", "/"),
+                "--prefix=" + (build / "install").as_posix(), *options], build)
+            (build / ".configured").write_text("configured\n")
+        # ICU's MinGW fragment links -licu* even in static-only mode. Match
+        # its supported make-level naming variable, not patched sources or
+        # aliases to target libraries. This applies to host generators only.
+        host_defines = ["STATIC_PREFIX=", "STATIC_PREFIX_WHEN_USED="] if name == "icu" else []
+        commands.append([Path(make).as_posix(), f"-j{jobs}", "SHELL=" + host_shell, *host_defines])
+        if name == "gperf":
+            commands.append([Path(make).as_posix(), "install", "SHELL=" + host_shell])
+        for command in commands:
+            hosted_shell(command, build)
+    tools.update(gperf=str(work / "host/gperf/install/bin/gperf.exe"), icu_cross_build=web.crt_path(work / "host/icu"),
+                 cc=gcc, cxx=gxx, shell=host_shell, posix_perl=posix_perl,
+                 posix_perl_sha256=digest(Path(posix_perl)),
+                 posix_perl_version=web.jsc.tool_version([posix_perl, "-e", "print $^V"]),
+                 posix_perl_lib=web.crt_path(perl_lib) if perl_lib else "",
+                 perl_module_inputs=perl_module_inputs,
+                 generator_runtime="native MinGW/UCRT; never redistributed")
+    tools["runtime_dlls"] = {file.name: digest(file) for file in (work / "host/icu/bin").glob("*.dll")}
+    write_json(work / "host-tools.json", tools)
+    return tools
+
+
+def windows_fontconfig_recipe(recipe, sdk, work, gperf):
+    """Both bare configure probes and Make's GPERF use the BUILD-host tool."""
+    recipe = json.loads(json.dumps(recipe))
+    relay = work / "host/fontconfig-tools/gperf"
+    relay.parent.mkdir(parents=True, exist_ok=True)
+    command = ["/system/bin/mksh", web.crt_path(sdk / "tools/crt-native-tool"), web.crt_path(Path(gperf))]
+    relay.write_text('#!/system/bin/mksh\nexec ' + shlex.join(command) + ' "$@"\n', encoding="utf-8", newline="\n")
+    relay.chmod(0o755)
+    recipe["dependencies"] = [name for name in recipe["dependencies"] if name != "gperf"]
+    recipe["build"]["env"]["GPERF"] = shlex.join(["/system/bin/mksh", web.crt_path(relay)])
+    recipe["build"]["path_prepend"] = [web.crt_path(relay.parent)]
+    return recipe
+
+
 def package_provenance(asset, staged, tree, sources, ordered, manifest, report, args, predecessor):
     provenance = staged / "share/crt/dependencies/webkit"
     provenance.mkdir(parents=True, exist_ok=True)
@@ -282,11 +421,16 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
         shutil.copy2(source, staged / relative)
         notices.append(relative.as_posix())
     deps = manifest.setdefault("redistributed_dependencies", [])
+    windows = manifest["target"]["os"] == "windows"
     suffix = "dylib" if manifest["target"]["os"] == "macos" else "so"
+    web_links = ["bin/libcrtweb.dll", "lib/libcrtweb.dll.a"] if windows else [f"lib/libcrtweb.{suffix}"]
+    web_runtime = (["libexec/crtweb/lib/libcrtweb.dll", "libexec/crtweb/lib/libcrtmedia.dll"] +
+                   ["libexec/crtweb/" + name + ".exe" for name in ("crtweb_host", "WebProcess", "NetworkProcess")]) if windows else [
+        f"libexec/crtweb/lib/libWebKit.{suffix}", f"libexec/crtweb/lib/libcrtmedia.{suffix}", "libexec/crtweb/crtweb_host",
+        "libexec/crtweb/WebProcess", "libexec/crtweb/NetworkProcess"]
     deps.append({"name": "webkit", "kind": "private-replaceable-web-runtime",
-                 "headers": ["include/crtweb/crtweb.h"], "link_artifacts": [f"lib/libcrtweb.{suffix}"],
-                 "runtime_artifacts": [f"libexec/crtweb/lib/libWebKit.{suffix}", f"libexec/crtweb/lib/libcrtmedia.{suffix}", "libexec/crtweb/crtweb_host",
-                                       "libexec/crtweb/WebProcess", "libexec/crtweb/NetworkProcess"],
+                 "headers": ["include/crtweb/crtweb.h"], "link_artifacts": web_links,
+                 "runtime_artifacts": web_runtime,
                  "notices": notices, "provenance": "share/crt/dependencies/webkit/recipe.json"})
     # SPDX 2.3 JSON: package-level composition, not a claim to classify every
     # WebKit file. Mixed/unreviewed expressions remain NOASSERTION; the full
@@ -423,7 +567,7 @@ def validate_candidate(staged, work, asset, env):
     target_os = env.get("CRT_TARGET_OS", "linux")
     if target_os == "macos":
         portable_web_macho(staged)
-    else:
+    elif target_os == "linux":
         for file in [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess", "crtweb_gpu_worker")] + [staged / "examples/bin/crtweb_browser"]:
             portable = "$ORIGIN/../../lib" if file.name in ("crtweb_gpu_worker", "crtweb_browser") else "$ORIGIN/lib:$ORIGIN/../../lib"
             set_runtime_paths(file, portable)
@@ -435,26 +579,38 @@ def validate_candidate(staged, work, asset, env):
     candidate_env = dict(env)
     for name in ("LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "CRTWEB_PROCESS_DIR", "FONTCONFIG_FILE"):
         candidate_env.pop(name, None)
-    candidate_env["CRTWEB_HOST"] = str(private / "crtweb_host")
+    windows = target_os == "windows"
+    exe = ".exe" if windows else ""
+    candidate_env["CRTWEB_HOST"] = str(private / ("crtweb_host" + exe))
     # No build/prefix loader path: the package must work on its own.
-    run([staged / "examples/bin/crtweb_browser", "--smoke"], candidate_env, work)
+    sample_env = dict(candidate_env)
+    if windows:
+        sample_env["PATH"] = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
+    run([staged / ("examples/bin/crtweb_browser" + exe), "--smoke"], sample_env, work)
     run([sys.executable, asset / "tools/test_stage_06_browser.py", "--sdk-root", staged,
          "--output", work / "packaged-browser-observation"], candidate_env)
     # Static/private OpenSSL curl is a packaging change: replay actual HTTP
     # redirects/POST/cookies and positive/negative TLS using only the installed
     # C API and installed browser processes, not the WebKit build directory.
-    probe = work / "packaged-network-probe"
-    run([staged / "tools/crt-c++", asset / "libcrtweb/tests/webkit/crtweb_network_test.cpp",
+    probe = work / ("packaged-network-probe" + exe)
+    if windows:
+        # A direct C-API import (unlike the static app) needs standard PE
+        # package activation before its first instruction. No build prefix.
+        candidate_env["PATH"] = os.pathsep.join((str(private / "lib"), str(staged / "bin"), candidate_env.get("PATH", "")))
+    runtime_link = [] if windows else ["-Wl,-rpath," + str(staged / "lib")]
+    run([staged / ("tools/crt-c++.cmd" if windows else "tools/crt-c++"), asset / "libcrtweb/tests/webkit/crtweb_network_test.cpp",
          "-I" + str(staged / "include"), "-L" + str(staged / "lib"), "-lcrtweb",
-         "-Wl,-rpath," + str(staged / "lib"), "-o", probe], candidate_env)
+         *runtime_link, "-o", probe], candidate_env)
     network_env = dict(candidate_env, CRTWEB_PROCESS_DIR=str(private),
-                       FONTCONFIG_FILE=str(work / "packaged-browser-observation/fonts.conf"))
-    network_result = network.run_gate(probe, network_env, work)
+                       FONTCONFIG_FILE=web.crt_path(work / "packaged-browser-observation/fonts.conf") if windows else
+                       str(work / "packaged-browser-observation/fonts.conf"))
+    network_result = network.run_gate(probe, network_env, work,
+                                      path_for_target=lambda path: target_path(path, target_os))
     write_json(work / "packaged-network.json", network_result)
     if not network_result["passed"]:
         raise ValueError("packaged HTTP/TLS regression failed")
     audit = web.jsc.host_abi_audit(staged, staged, private,
-        [private / name for name in ("crtweb_host", "WebProcess", "NetworkProcess")], candidate_env, target_os)
+        [private / (name + exe) for name in ("crtweb_host", "WebProcess", "NetworkProcess")], candidate_env, target_os)
     write_json(work / "packaged-host-abi.json", audit)
     if not audit["ok"]:
         raise ValueError("packaged browser Host ABI audit failed")
@@ -480,10 +636,13 @@ def main():
     manifest = json.loads((sdk / "manifest.json").read_text())
     target = manifest["target"]
     native = ((target == {"os": "linux", "arch": "x86_64"} and platform.system() == "Linux" and platform.machine() in ("x86_64", "AMD64"))
-              or (target == {"os": "macos", "arch": "aarch64"} and platform.system() == "Darwin" and platform.machine() == "arm64"))
+              or (target == {"os": "macos", "arch": "aarch64"} and platform.system() == "Darwin" and platform.machine() == "arm64")
+              or (target == {"os": "windows", "arch": "x86_64"} and platform.system() == "Windows" and platform.machine() in ("AMD64", "x86_64")))
     if not native:
-        raise ValueError("06-web supports Linux/x86_64 and macOS/aarch64 native only; other-host/cross-target packaging gates remain open")
+        raise ValueError("06-web supports native Linux/x86_64, macOS/aarch64 and Windows/x86_64 only; cross-target proof remains open")
     target_os = target["os"]
+    windows = target_os == "windows"
+    exe = ".exe" if windows else ""
     suffix = "dylib" if target_os == "macos" else "so"
     require_predecessor(sdk, manifest)
     if args.source_cache:
@@ -533,7 +692,31 @@ def main():
     shutil.copytree(asset / "porting/recipes", target_recipes, dirs_exist_ok=True)
     icu = json.loads((target_recipes / "icu.json").read_text())
     icu["build"]["configure_args"].append("--with-cross-build=" + tools["icu_cross_build"])
+    if windows:
+        # These two commands now execute native HOST ICU tools, not the CRT
+        # target tools the ordinary same-architecture port recipe launches.
+        # Use the established narrow native-tool boundary: spawn hint and
+        # POSIX-drive argument conversion, without exposing host headers/libs.
+        invoke = "/system/bin/mksh " + web.crt_path(staged / "tools/crt-native-tool")
+        icu["build"]["target_overrides"]["windows"]["make_args"] = [
+            "INVOKE=" + invoke, "PKGDATA_INVOKE=",
+            "PKGDATA=" + invoke + " " + web.crt_path(Path(sys.executable)) + " " +
+            web.crt_path(asset / "tools/crt_icu_host_pkgdata.py") +
+            " --sdk " + web.crt_path(staged) + " --host-program " + web.crt_path(work / "host/icu/bin/pkgdata.exe") +
+            " --shell-dir " + shlex.quote(web.crt_path(Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin")) +
+            " --compiler-dir " + web.crt_path(Path(tools["cc"]).parent) +
+            " -- $(PKGDATA_OPTS) -q -c -s $(CURDIR)/out/build/$(ICUDATA_PLATFORM_NAME) -d $(ICUPKGDATA_OUTDIR)"]
     write_json(target_recipes / "icu.json", icu)
+    if windows:
+        openssl = json.loads((target_recipes / "openssl.json").read_text())
+        # Its Unix CRT target requires a POSIX-path BUILD-host Perl, not
+        # Strawberry's Win32 File::Spec. Generators remain outside the SDK.
+        openssl["build"]["configure_interpreter"] = tools["posix_perl"]
+        openssl["build"]["target_overrides"]["windows"]["make_args"] = ["PERL=" + invoke + " " + tools["posix_perl"]]
+        openssl["build"]["target_overrides"]["windows"]["env"]["PERL5LIB"] = tools["posix_perl_lib"]
+        write_json(target_recipes / "openssl.json", openssl)
+        fontconfig = json.loads((target_recipes / "fontconfig.json").read_text())
+        write_json(target_recipes / "fontconfig.json", windows_fontconfig_recipe(fontconfig, staged, work, tools["gperf"]))
     # The SDK-mode port builder resolves project-owned shims/tests from its
     # root. These are source inputs copied from the asset, not host headers.
     shutil.copytree(asset / "porting/shims", staged / "porting/shims", dirs_exist_ok=True)
@@ -549,7 +732,7 @@ def main():
     # Keep OpenSSL curl private/static inside WebKit. The predecessor's media
     # library already owns a different libcurl SONAME (mbedTLS); overwriting it
     # or resolving both backends by loader order is not a packaging contract.
-    private_flags = ("-Wl,-unexported_symbol,_curl*" if target_os == "macos" else
+    private_flags = ("" if windows else "-Wl,-unexported_symbol,_curl*" if target_os == "macos" else
                      "-Wl,--allow-shlib-undefined -Wl,--exclude-libs,ALL")
     run([sys.executable, asset / "tools/build_webkit_crt_port.py", "--sdk-root", staged,
          "--deps-prefix", prefix, "--work-root", web_work, "--gperf", tools["gperf"],
@@ -562,9 +745,9 @@ def main():
     write_json(work / "target-discovery.json", audit_target_discovery(build / "CMakeCache.txt", staged, prefix,
                                                                     web_work / "src/webkit-crt"))
     (web_work / "fonts.conf").write_text(web.font_configuration(
-        str(asset / "libcrtgfx/assets/fonts"), str(work / "font-cache")))
+        target_path(asset / "libcrtgfx/assets/fonts", target_os), target_path(work / "font-cache", target_os)))
     run_env = web.gate_environment(build, staged, prefix, web_work, env, target_os)
-    run([build / "bin/crtweb_api_test"], run_env, work)
+    run([build / ("bin/crtweb_api_test" + exe)], run_env, work)
     native = work / "consumer-build"
     # The SDK-Skia application/GPU worker uses the normal static CRT runtime,
     # just like the accepted in-tree consumers. Only the separate CPU browser
@@ -572,8 +755,8 @@ def main():
     # into a native window/GPU PAL consumer with transitive host-driver libs.
     consumer_env = dict(env, CRT_CXX_RUNTIME_LINKAGE="static")
     run(["cmake", "--fresh", "-S", asset / "distribution/stages/06-web", "-B", native, "-G", "Ninja",
-         "-DCMAKE_TOOLCHAIN_FILE=" + str(staged / "crt-toolchain.cmake"),
-         "-DCMAKE_INSTALL_PREFIX=" + str(staged), "-DCRT_STAGE_SOURCE_ROOT=" + str(asset),
+         "-DCMAKE_TOOLCHAIN_FILE=" + (staged / "crt-toolchain.cmake").as_posix(),
+         "-DCMAKE_INSTALL_PREFIX=" + staged.as_posix(), "-DCRT_STAGE_SOURCE_ROOT=" + asset.as_posix(),
          "-DCRT_STAGE_TARGET_OS=" + target_os, "-DCRT_STAGE_TARGET_ARCH=" + target["arch"]], consumer_env)
     # Two small consumers: also invalidate environment-only wrapper settings,
     # which Ninja cannot see in an otherwise unchanged command line.
@@ -584,16 +767,29 @@ def main():
     private_lib = private / "lib"
     private_lib.mkdir(exist_ok=True)
     for name in ("crtweb_host", "WebProcess", "NetworkProcess"):
-        shutil.copy2(build / "bin" / name, private / name)
-    shutil.copy2(build / f"lib/libcrtweb.{suffix}", staged / f"lib/libcrtweb.{suffix}")
-    for directory in (prefix / "lib", build / "lib"):
+        shutil.copy2(build / "bin" / (name + exe), private / (name + exe))
+    if windows:
+        shutil.copy2(build / "bin/libcrtweb.dll", staged / "bin/libcrtweb.dll")
+        shutil.copy2(build / "lib/libcrtweb.dll.a", staged / "lib/libcrtweb.dll.a")
+    else:
+        shutil.copy2(build / f"lib/libcrtweb.{suffix}", staged / f"lib/libcrtweb.{suffix}")
+    for directory in ((prefix / "bin", prefix / "lib", build / "bin", build / "lib") if windows else (prefix / "lib", build / "lib")):
         copy_private_libraries(directory, private_lib, target_os)
     # The browser's software-only crtmedia/VA closure is private. Never put
     # libva stubs in SDK/lib and disable hardware decode for ordinary apps.
-    shutil.copy2(staged / f"lib/libcrtmedia.{suffix}", private_lib / f"libcrtmedia.{suffix}")
+    media = staged / ("bin/libcrtmedia.dll" if windows else f"lib/libcrtmedia.{suffix}")
+    shutil.copy2(media, private_lib / media.name)
     if target_os == "linux":
         normalize_cxx_aliases(staged)
-    for file in (staged / "lib").glob("*.dylib*" if target_os == "macos" else "*.so*"):
+    if windows:
+        for file in (staged / "bin").glob("*.dll"):
+            # A self-contained private PE search directory. Equal inherited
+            # names must really be the same image, not overwrite-by-order.
+            destination = private_lib / file.name
+            if destination.exists() and digest(destination) != digest(file):
+                raise ValueError(f"conflicting private/inherited DLL: {file.name}")
+            shutil.copy2(file, destination)
+    for file in ([] if windows else (staged / "lib").glob("*.dylib*" if target_os == "macos" else "*.so*")):
         if not file.is_file() or file.name in (f"libcrtweb.{suffix}", f"libcrtmedia.{suffix}"):
             continue
         destination = private_lib / file.name

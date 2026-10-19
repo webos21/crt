@@ -28,3 +28,11 @@ are recorded in the SDK's `share/crt/web-security.json` and Web acceptance.
 An externally rebuilt sample needs `CRTWEB_HOST` explicitly. It finds the
 package's relative fontconfig configuration beside that host; no build-machine
 font path, host WebKit, GLib, GTK or WPE header is part of the application API.
+
+On Windows use the SDK's `crt-c++.cmd` toolchain with the external LLVM and
+`CRT_WINDOWS_SDK_LIBPATH` environment declared by its manifest. The static
+example activates the selected host's package-private DLL directory for its
+child processes itself; no build-prefix PATH is needed. A direct C API DLL
+consumer instead needs normal PE activation before it starts: prepend the
+installed SDK's `libexec/crtweb/lib` and `bin` to PATH. Never use the original
+dependency or WebKit build directories as runtime search paths.

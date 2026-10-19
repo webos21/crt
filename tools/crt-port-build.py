@@ -178,6 +178,17 @@ def path_for_crt_shell(path):
     return str(path).replace("\\", "/")
 
 
+def root_for_configure(root, target_os, use_crt_shell, interpreter=None):
+    # Native Perl/Python open recipe inputs on the BUILD host. /porting/...
+    # is meaningful only inside CRT mksh's rootfs, not to those interpreters.
+    # Keep compiler commands in their existing CRT namespace independently.
+    if target_os == "windows":
+        if use_crt_shell and not interpreter and (root / "manifest.json").is_file():
+            return ""
+        return path_for_crt_shell(root)
+    return str(root)
+
+
 def windows_short_path(path):
     if os.name != "nt":
         return str(path)
@@ -867,7 +878,18 @@ def apply_source_patches(work, recipe, target_os=None):
 _ENV_FLAG_ACCUMULATOR_VARS = {"CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "LIBS"}
 
 
-def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_build_dir=None, sysroot=None, port_prefix=None):
+def prepend_recipe_path(env, directories, target_os, use_crt_shell=False):
+    if not directories:
+        return
+    if target_os == "windows" and use_crt_shell:
+        # PATH belongs to POSIX mksh here, not a native Win32 consumer.
+        # C:/prefix/bin;/system/bin breaks both the drive and applet entries.
+        env["PATH"] = ":".join([path_for_msys_shell(path) for path in directories] + [env.get("PATH", "")])
+    else:
+        env["PATH"] = os.pathsep.join(directories + [env.get("PATH", "")])
+
+
+def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_build_dir=None, sysroot=None, port_prefix=None, use_crt_shell=False):
     build = recipe["build"]
     # @ROOT@/@PORT_PREFIX@/etc. substitution (same tokens
     # configure_args/make_args/install_args already get via
@@ -896,8 +918,7 @@ def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_b
     # configure and build, so a probe that runs a bare tool name finds the CRT-built one (gperf for
     # fontconfig) and not whichever version the build host ships.
     path_prepend = [subst(item) for item in build.get("path_prepend", [])]
-    if path_prepend:
-        env["PATH"] = os.pathsep.join(path_prepend + [env.get("PATH", "")])
+    prepend_recipe_path(env, path_prepend, target_os, use_crt_shell)
     for name, value in build.get("target_overrides", {}).get(target_os, {}).get("env", {}).items():
         value = subst(value)
         if name in _ENV_FLAG_ACCUMULATOR_VARS and env.get(name):
@@ -1170,12 +1191,8 @@ def build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env,
         # (cflags/env/make_args/install_args/test, just below) already
         # gets this right via path_for_crt_shell() on windows; configure_
         # args just never matched that -- fixed to match here.
-        if (target_os == "windows" and use_crt_shell and
-                (root / "manifest.json").is_file()):
-            root_for_configure = ""
-        else:
-            root_for_configure = path_for_crt_shell(root) if target_os == "windows" else str(root)
-        configure = [arg.replace("@ROOT@", root_for_configure) for arg in configure]
+        configure_root = root_for_configure(root, target_os, use_crt_shell, build.get("configure_interpreter"))
+        configure = [arg.replace("@ROOT@", configure_root) for arg in configure]
         configure = [arg.replace("@PORT_PREFIX@", port_prefix_text) for arg in configure]
         # @AR@: same class of gap as @ROOT@ just above, found immediately
         # after fixing it (2026-09-01, ffmpeg.json's own --ar= need) --
@@ -1834,7 +1851,7 @@ def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix,
 
     sysroot = port_sysroot_for(recipe, sysroot, preset_build_dir)
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
-    apply_recipe_env(env, recipe, target_os, root, preset_build_dir, work_build_dir, sysroot, port_prefix)
+    apply_recipe_env(env, recipe, target_os, root, preset_build_dir, work_build_dir, sysroot, port_prefix, use_crt_shell)
     cc_argv = command_value_argv(env["CC"], preset_build_dir, target_os)
     cxx_argv = command_value_argv(env["CXX"], preset_build_dir, target_os)
     test_root = work_build_dir / "tests" / port_name
@@ -1878,6 +1895,17 @@ def run_port_tests(root, preset_build_dir, work_build_dir, sysroot, port_prefix,
         extra_dirs = [str(d).replace("@PORT_PREFIX@", str(port_prefix)) for d in test.get("library_dirs", [])]
         run_checked_output([str(binary)], test_root, port_test_env(test_env, port_prefix, target_os, extra_dirs),
                            test.get("expect_stdout"), f"{port_name}: test run {test_name}")
+
+
+def windows_cmake_archiver(root, env):
+    if not (root / "manifest.json").is_file():
+        return path_for_crt_shell(root / "tools/crt-ar.cmd")
+    # Packaged SDKs expose the declared external LLVM archiver, just like
+    # their installed crt-toolchain.cmake; they do not ship crt-ar.cmd.
+    archiver = env.get("CRT_AR") or find_windows_host_tool(("llvm-ar.exe", "llvm-ar"))
+    if not archiver or not Path(archiver).is_file():
+        raise ValueError("Windows SDK CMake ports require an external LLVM archiver (CRT_AR)")
+    return path_for_crt_shell(archiver)
 
 
 def build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, jobs=None):
@@ -1936,7 +1964,7 @@ def build_cmake_port(root, preset_build_dir, work, port_prefix, recipe, env, tar
         tools = root / "tools"
         env["CC"] = path_for_crt_shell(tools / "crt-cc.cmd")
         env["CXX"] = path_for_crt_shell(tools / "crt-c++.cmd")
-        env["AR"] = path_for_crt_shell(tools / "crt-ar.cmd")
+        env["AR"] = windows_cmake_archiver(root, env)
         env.setdefault("CRT_HOST_PYTHON", sys.executable)
         env["RANLIB"] = find_windows_host_tool(("llvm-ranlib.exe", "llvm-ranlib"))
         port_prefix = Path(path_for_crt_shell(port_prefix))
@@ -2097,7 +2125,7 @@ def build_port(root, preset_build_dir, work_build_dir, source_root, sysroot, por
     progress(f"{port}: build system {build['system']}")
     sysroot = port_sysroot_for(recipe, sysroot, preset_build_dir)
     env = make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os, mingw_triple, use_crt_shell)
-    apply_recipe_env(env, recipe, target_os, root, preset_build_dir, work_build_dir, sysroot, port_prefix)
+    apply_recipe_env(env, recipe, target_os, root, preset_build_dir, work_build_dir, sysroot, port_prefix, use_crt_shell)
     if build["system"] == "configure":
         build_configure_port(root, preset_build_dir, work, port_prefix, recipe, env, target_os, mingw_triple, use_crt_shell, configure_only, jobs)
     elif build["system"] == "amalgamation":

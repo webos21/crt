@@ -18,6 +18,10 @@ elseif(CRT_STAGE_TARGET_OS STREQUAL "macos")
     BUILD_RPATH "@loader_path/../../lib;${CMAKE_SYSROOT}/lib" INSTALL_RPATH "@loader_path/../../lib")
 endif()
 target_compile_features(crtweb_browser PRIVATE cxx_std_17)
+if(CRT_STAGE_TARGET_OS STREQUAL "windows")
+  # Same ABI/header mode used to build the SDK's Skia archive (not MSVC).
+  target_compile_definitions(crtweb_browser PRIVATE SK_BUILD_FOR_UNIX)
+endif()
 target_include_directories(crtweb_browser PRIVATE "${CMAKE_SYSROOT}/include/crtweb")
 if(CRT_STAGE_SOURCE_ROOT)
   target_include_directories(crtweb_browser PRIVATE

@@ -57,9 +57,167 @@ class SecurityTests(unittest.TestCase):
 
 
 class PackagingTests(unittest.TestCase):
+    def test_owned_icu_text_bytes_match_evidence_on_windows(self):
+        from crt_icu_host_pkgdata import write_owned_text
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "options.inc"
+            write_owned_text(path, "a=1\nb=2\n")
+            self.assertEqual(path.read_bytes(), b"a=1\nb=2\n")
+
+    def test_windows_fontconfig_binds_both_probes_and_make_to_host_gperf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recipe = {"dependencies":["make","gperf","freetype"],
+                      "build":{"env":{"GPERF":"target/gperf"},"path_prepend":["target/bin"]}}
+            result = stage.windows_fontconfig_recipe(recipe,root/"sdk",root/"work",root/"native/gperf.exe")
+            self.assertEqual(result["dependencies"],["make","freetype"])
+            self.assertEqual(recipe["dependencies"],["make","gperf","freetype"])
+            self.assertEqual(result["build"]["path_prepend"],[stage.web.crt_path(root/"work/host/fontconfig-tools")])
+            self.assertIn("fontconfig-tools/gperf",result["build"]["env"]["GPERF"])
+            relay=(root/"work/host/fontconfig-tools/gperf").read_bytes()
+            self.assertNotIn(b"\r",relay)
+            self.assertIn(b"crt-native-tool",relay)
+            self.assertIn(b"native/gperf.exe",relay)
+
+    def test_native_configure_interpreter_reads_host_not_crt_root_paths(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("crt_port_build_test", ROOT / "tools/crt-port-build.py")
+        ports = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ports)
+        with tempfile.TemporaryDirectory() as directory:
+            sdk = Path(directory) / "SDK with spaces"
+            sdk.mkdir()
+            (sdk / "manifest.json").write_text("{}")
+            self.assertEqual(ports.root_for_configure(sdk,"windows",True), "")
+            self.assertEqual(ports.root_for_configure(sdk,"windows",True,"perl"), sdk.as_posix())
+            self.assertEqual(ports.root_for_configure(sdk,"windows",False,"perl"), sdk.as_posix())
+            self.assertEqual(ports.root_for_configure(sdk,"linux",True,"perl"), str(sdk))
+
+    def test_recipe_prepend_retains_crt_applets_and_drive_namespace(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("crt_port_build_path_test", ROOT / "tools/crt-port-build.py")
+        ports = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ports)
+        env = {"PATH": "/system/bin:/bin:/usr/bin"}
+        ports.prepend_recipe_path(env, ["C:/SDK with spaces/bin"], "windows", True)
+        self.assertEqual(env["PATH"], "/c/SDK with spaces/bin:/system/bin:/bin:/usr/bin")
+        env = {"PATH": "native"}
+        ports.prepend_recipe_path(env, ["C:/SDK with spaces/bin"], "windows", False)
+        self.assertEqual(env["PATH"], "C:/SDK with spaces/bin" + ports.os.pathsep + "native")
+
+    def test_windows_sdk_cmake_uses_external_archiver_not_missing_repo_wrapper(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("crt_port_build_ar_test", ROOT / "tools/crt-port-build.py")
+        ports = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ports)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            self.assertEqual(ports.windows_cmake_archiver(root,{}),(root/"tools/crt-ar.cmd").as_posix())
+            (root/"manifest.json").write_text("{}")
+            archiver=root/"host tool/llvm-ar.exe"
+            archiver.parent.mkdir()
+            archiver.touch()
+            self.assertEqual(ports.windows_cmake_archiver(root,{"CRT_AR":str(archiver)}),archiver.as_posix())
+            with self.assertRaises(ValueError):
+                ports.windows_cmake_archiver(root,{"CRT_AR":str(root/"missing.exe")})
+
+    def test_target_data_paths_use_crt_namespace_not_native_host_paths(self):
+        from pathlib import PureWindowsPath, PurePosixPath
+        native = PureWindowsPath("C:/SDK with spaces/ca.pem")
+        self.assertEqual(stage.target_path(native, "windows"), "/c/SDK with spaces/ca.pem")
+        self.assertEqual(stage.target_path(PurePosixPath("/sdk/ca.pem"), "linux"), "/sdk/ca.pem")
+
+    def test_native_icu_shared_install_replaces_stub_with_real_named_data(self):
+        from crt_icu_host_pkgdata import install_shared_data
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, target = root / "generated", root / "prefix/bin"
+            source.mkdir()
+            target.mkdir(parents=True)
+            (source / "icudt78.dll").write_bytes(b"MZ real generated data")
+            (source / "libicudt.dll.a").write_bytes(b"!<arch>\n generated import archive")
+            (target / "icudt78.dll").write_bytes(b"MZ stub")
+            args = ["-m","dll","-L","icudt","-r","78","-d",str(source),"-I",str(target)]
+            result = install_shared_data(args,"SO=dll\nLIBPREFIX=\n")
+            self.assertEqual(len(result),2)
+            self.assertEqual((target/"icudt78.dll").read_bytes(),(source/"icudt78.dll").read_bytes())
+            self.assertEqual((target.parent/"lib/libicudt.dll.a").read_bytes(),(source/"libicudt.dll.a").read_bytes())
+            self.assertEqual(install_shared_data(["-m","static","-I",str(target)],""),{})
+            with self.assertRaises(ValueError):
+                install_shared_data(args,"SO=so\nLIBPREFIX=lib\n")
+
+    def test_native_icu_options_translate_only_crt_commands_and_fail_closed(self):
+        from crt_icu_host_pkgdata import native_config, native_arguments
+        self.assertEqual(native_arguments([r"C:\source\data", "-p", r"literal\value"]),
+                         ["C:/source/data", "-p", r"literal\value"])
+        sdk = Path("SDK with spaces")
+        original = ("SO=dll\nCOMPILE=/system/bin/mksh /tools/crt-cc -c -DU_BIONIC=1\n"
+                    "GENLIB=/system/bin/mksh /tools/crt-cc -shared\n"
+                    "AR=/system/bin/mksh /tools/crt-native-tool C:/LLVM/llvm-ar.exe\n"
+                    "RANLIB=/system/bin/mksh /tools/crt-native-tool C:/LLVM/llvm-ranlib.exe\n")
+        actual = native_config(original, sdk, Path("owned build"))
+        self.assertIn("SO=dll\n", actual)
+        self.assertIn("crt-cc.sh' -c -DU_BIONIC=1", actual)
+        self.assertIn("crt-cc.sh' -shared", actual)
+        self.assertNotIn("/system/bin/mksh /tools/", actual)
+        self.assertIn("SDK with spaces/system/bin/mksh.exe", actual)
+        for bad in (original.replace("COMPILE=/system/bin/mksh /tools/crt-cc", "COMPILE=gcc"),
+                    original.replace("AR=/system/bin/mksh /tools/crt-native-tool C:/LLVM/llvm-ar.exe\n", ""),
+                    original + "COMPILE=/system/bin/mksh /tools/crt-cc -c\n"):
+            with self.assertRaises(ValueError):
+                native_config(bad, sdk, Path("owned build"))
+
+    def test_packaging_retry_only_reuses_heavy_inputs_not_sample_objects(self):
+        self.assertFalse(stage.compile_input("examples/web-browser/main.cc"))
+        self.assertFalse(stage.compile_input("examples/web-browser/CMakeLists.txt"))
+        self.assertTrue(stage.compile_input("libcrtweb/src/crtweb.cpp"))
+        self.assertTrue(stage.compile_input("libcrtweb/include/crtweb/webview.h"))
+        script = (ROOT / "tools/build_stage_06_web.py").read_text()
+        self.assertIn('"--build", native, "--clean-first"', script)
+
+    def test_windows_predecessor_uses_pe_layout_and_complete_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sdk = Path(directory)
+            manifest = {"stage": "05-ui", "target": {"os": "windows"},
+                        "redistributed_dependencies": [{"name": name} for name in
+                            ("freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib", "lvgl")]}
+            files = ("bin/libc.dll", "bin/libc++.dll", "bin/libcrtmedia.dll", "lib/libskia.a",
+                     "lib/libcrtui_skia.a", "include/include/core/SkSurface.h",
+                     "include/crtgfx/shared_image.h", "include/crtgfx/skia_shared.h")
+            for name in files:
+                path = sdk / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            stage.require_predecessor(sdk, manifest)
+            (sdk / "bin/libcrtmedia.dll").unlink()
+            with self.assertRaisesRegex(ValueError, "bin/libcrtmedia.dll"):
+                stage.require_predecessor(sdk, manifest)
+
+    def test_windows_private_dll_copy_excludes_colliding_curl_and_public_wrapper(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / "source", Path(directory) / "target"
+            source.mkdir()
+            target.mkdir()
+            for name in ("libxml2-16.dll", "libcurl.dll", "libcrtweb.dll", "libc++.dll", "gperf.exe"):
+                (source / name).write_bytes(name.encode())
+            stage.copy_private_libraries(source, target, "windows")
+            self.assertEqual([path.name for path in target.iterdir()], ["libxml2-16.dll"])
+
+    @unittest.skipUnless(sys.platform == "win32", "native Windows observer")
+    def test_native_windows_observer_snapshots_real_process_identity_and_modules(self):
+        import os
+        from test_stage_06_browser import windows_native
+        snapshot, identity, _ = windows_native()
+        self.assertIn(os.getpid(), snapshot())
+        self.assertGreater(identity(os.getpid()), 0)
+        modules = snapshot(os.getpid())
+        self.assertTrue(any(Path(path).name.lower() == "kernel32.dll" for path in modules))
+
     def test_macos_ipc_exception_is_unlinked_nonexecutable_and_pid_scoped(self):
         from unittest.mock import patch
-        with tempfile.TemporaryDirectory() as directory:
+        # A Darwin-shaped /path resolves on the current Windows drive. Keep
+        # the fixture there too (CI can use D: for cwd and C: for TEMP).
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             temporary = Path(directory).resolve()
             for name, permissions, present, allowed in (
                 ("crt_memfd_77_000001.tmp", "rw-", False, True),
@@ -71,14 +229,17 @@ class PackagingTests(unittest.TestCase):
                 file = temporary / name
                 if present:
                     file.touch()
-                row = f"mapped file 1000-2000 [ 4K] {permissions}/rwx SM=SHM {file}\n"
+                posix_file = file.as_posix()
+                if sys.platform == "win32":
+                    posix_file = posix_file[2:]  # native fixture, Darwin-shaped row
+                row = f"mapped file 1000-2000 [ 4K] {permissions}/rwx SM=SHM {posix_file}\n"
                 result = subprocess.CompletedProcess([], 0, row, "")
                 anonymous = []
                 with patch.object(stage.web.subprocess, "run", return_value=result), \
                      patch.object(stage.web.tempfile, "gettempdir", return_value=str(temporary)):
                     paths = stage.web.macos_mapped_files(77, anonymous=anonymous)
                 self.assertEqual(bool(anonymous), allowed)
-                self.assertEqual(paths, [] if allowed else [str(file)])
+                self.assertEqual(paths, [] if allowed else [posix_file])
 
     def test_macos_versioned_image_and_alias_are_packaged_together(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -262,14 +423,14 @@ class PackagingTests(unittest.TestCase):
             root = Path(directory)
             sdk = root / "sdk"
             sdk.mkdir()
-            stage.write_json(sdk / "manifest.json", {"stage": "05-ui", "target": {"os": "windows", "arch": "x86_64"}})
+            stage.write_json(sdk / "manifest.json", {"stage": "05-ui", "target": {"os": "freebsd", "arch": "x86_64"}})
             result = subprocess.run([sys.executable, str(ROOT / "tools/build_stage_06_web.py"),
                                      "--sdk-root", str(sdk), "--asset-root", str(root / "asset"),
                                      "--work-root", str(root / "work"), "--output", str(root / "output"),
                                      "--recipe-location", "local-test", "--source-sha256", "0" * 64],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("native only", result.stderr)
+            self.assertIn("native Linux/x86_64", result.stderr)
             self.assertNotIn("missing lib/libc.so", result.stderr)
 
     def test_host_environment_does_not_inherit_target_flags(self):

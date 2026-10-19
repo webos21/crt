@@ -270,6 +270,16 @@ Binding FindCURL's pkg-config discovery alias to the same already-selected
 static archive is also a permitted link-only repair. The native `make` and
 `openssl` commands are build/verification tools; `openssl` creates fresh
 loopback certificates and is not bundled in the SDK.
+The native Windows development path is under replay (see Web acceptance).
+Its build-host tools additionally require Git Bash, native MinGW gcc/g++/make,
+and a POSIX-path Perl for OpenSSL's Unix CRT target; WebKit's own generators
+still use native Windows Perl. A trimmed Git Perl can use a prepared host-only
+module root through `CRT_WEB_HOST_PERL_LIB`; the entrypoint probes
+`IPC::Cmd`/`ExtUtils::MakeMaker` and records its files' hashes. No global module
+installation is changed and neither these modules nor host compiler runtime
+DLLs are shipped in the target SDK. Git shell/Perl commands need working 8.3
+aliases because their generated Make command lines do not quote tool paths;
+this does not substitute a short alias for the SDK path under replay.
 Host/cross-target configurations
 not implemented by these native paths fail explicitly instead of running a
 target generator as a host tool or selecting host libraries.

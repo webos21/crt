@@ -24,7 +24,9 @@ target_link_libraries(crtweb_gpu_worker PRIVATE crtui_skia crtgfx_skia crtmedia)
 if(CRT_STAGE_TARGET_OS STREQUAL "linux")
   target_compile_definitions(crtweb_gpu_worker PRIVATE CRTGFX_HAVE_VULKAN=1 SK_USE_INTERNAL_VULKAN_HEADERS)
 elseif(CRT_STAGE_TARGET_OS STREQUAL "windows")
-  target_compile_definitions(crtweb_gpu_worker PRIVATE CRTGFX_HAVE_D3D12=1)
+  # Match the installed Skia archive's CRT/MinGW header configuration,
+  # not SkFeatures.h's MSVC-only _WIN32 auto-detection.
+  target_compile_definitions(crtweb_gpu_worker PRIVATE SK_BUILD_FOR_UNIX CRTGFX_HAVE_D3D12=1)
 else()
   target_compile_definitions(crtweb_gpu_worker PRIVATE CRTGFX_HAVE_METAL=1)
 endif()

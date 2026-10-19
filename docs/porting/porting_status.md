@@ -785,6 +785,15 @@ shared; OpenSSL and `curl-openssl` **static only** (`crt-windows-<arch>` OpenSSL
 are skipped on Windows with a recorded reason); fontconfig and libwpe as on the other hosts; `crt-egl` builds
 `libEGL.dll`/`libGLESv2.dll` with import libraries. Host tools: `pkgconf`, Perl (OpenSSL `Configure`), Python.
 
+Windows isolated-SDK replay (2026-10-19) reconfirms ICU static/shared Unicode
+and the static OpenSSL TLS 1.3 smoke. OpenSSL's shared variant remains explicitly
+unsupported above. Native configure interpreters need physical SDK input paths,
+not CRT-virtual `/porting/...`; OpenSSL uses POSIX-path host Perl and invokes
+its make-time generators through `crt-native-tool`. Host prerequisites and the
+prepared Perl module root are described in
+[distribution](../guides/distribution.md); diagnostic versus source-stage
+acceptance is distinguished in [Web acceptance](../acceptance/crtweb_acceptance.md).
+
 The B3 ports (`fontconfig`, `libwpe`, `crt-egl`; group `web`) are also `shared-pass` on macOS/arm64 (2026-10-12):
 `fontconfig` needs `path_prepend` (the CRT gperf ahead of Xcode's, new recipe field) and `-D__linux__=1` for its
 `statfs` branch, `libwpe` and the `crt-egl` test need `-D__unix__=1` for `eglplatform.h`, and `crt-egl`'s

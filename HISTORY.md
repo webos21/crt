@@ -9,7 +9,88 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-19
+
+### Web Tranche 10: Windows SDK port-tool fixes and runtime blocker evidence
+
+Fixed recipe PATH prepending for Windows CRT mksh (POSIX drive spelling and
+separator), bound fontconfig's bare/configured gperf calls to the native host
+generator through an owned relay, and selected external LLVM AR for SDK-mode
+CMake ports rather than a repository-only wrapper. Fontconfig's real shared
+font match, HarfBuzz shared shaping, libjpeg static/shared round trips and
+libpsl shared suffix smokes pass in the retained diagnostic tree. Pinned LF
+bytes for ICU's owned options/relay files so evidence hashes match Windows
+file bytes. All 83 focused regression cases pass.
+
+The full Windows SDK replay is **not** complete: libwebp header installation
+repeats libpng's earlier `Error 5`, and task-specific Windows error records
+confirm mksh `0xc0000005` access violations. Fork/exec/PAL restoration is a
+candidate, not a stack-proven root cause. Recorded the failed checkpoints,
+preserved source-stage identities and revoked reuse of out-of-band diagnostic
+trees. No Windows `06-web` SDK is published and no active build is left running.
+The immutable predecessor is retained; no core runtime or upstream source was
+changed. Native runtime triage must precede a fresh final stage build. Evidence
+and limits are in
+[Windows blocker](docs/acceptance/crtweb_acceptance.md#current-windows-blocker-2026-10-19).
+`TODO.md` keeps that gate open; `STATUS.md` is unchanged.
+
+### Web Tranche 10: Windows host-generator / target ICU boundary
+
+Separated WebKit's native MinGW gperf/ICU generators from CRT target ports, with
+host-only compiler-runtime DLL adjacency and the configured Git shell. The
+owned pkgdata bridge preserves generated options, calls only CRT target
+wrappers and completes MinGW pkgdata's omitted shared-data installation.
+The missing install had left a small stub DLL in the prefix: replacing it
+with the actual generated data DLL made the same static/shared Unicode
+consumers pass. Fresh official source-stage v4 now passes both consumers too.
+No host compiler/runtime is used for the target data and no upstream source
+or core runtime change was needed.
+
+Fresh SDK-only browser/GPU-worker compile/link preflight also passes after
+CMake path spelling and Skia consumer-header configuration fixes; execution
+is still pending. Focused helper tests pass 77 cases. Detailed checkpoints,
+source identities and logs are in
+[Windows T10 acceptance](docs/acceptance/crtweb_acceptance.md#windowsx64-isolated-build-and-relocation-replay-in-progress-2026-10-18).
+This is not completion of the isolated Windows SDK or Tranche 10. `STATUS.md`
+is unchanged.
+
+### Web Tranche 10: native host Perl / CRT OpenSSL recipe replay
+
+Fixed packaged-SDK configure-root substitution for native build-host
+interpreters. OpenSSL's Unix CRT target additionally needs POSIX-path Perl,
+its build-host modules and the normal `crt-native-tool` generator boundary;
+direct native Perl invocation from CRT make lost output redirections.
+With explicit host-tool inputs the original recipe configures, builds,
+installs and passes its TLS 1.3 static smoke in a fresh diagnostic work
+directory. The documented Windows shared-build exclusion remains unchanged.
+Recipe status and the porting matrix now reflect this native static proof.
+
+This resolves the OpenSSL diagnostic, not Windows source-stage acceptance:
+these changed compile inputs require a fresh official source asset/work-root.
+Detailed failure checkpoints, host-tool prerequisites and the successful
+`out/web-windows-tranche10-openssl-diagnostic-v5.log` are recorded in
+[Windows T10 acceptance](docs/acceptance/crtweb_acceptance.md#windowsx64-isolated-build-and-relocation-replay-in-progress-2026-10-18).
+No upstream or CRT runtime source was patched; `STATUS.md` is unchanged.
+
 ## 2026-10-18
+
+### Web Tranche 10: Windows native media DLL export boundary
+
+The existing Windows configuration had CURL disabled and was correctly rejected
+as an incomplete isolated Web predecessor. Built the original CRT curl/mbedTLS
+recipes with static/shared HTTP/HTTPS smokes, enabled the complete predecessor
+configuration and republished/verified `01-c`..`05-ui`. Its immutable input copy
+matches the original inventory. The generated media `.def` now has native proof:
+exactly 75 public exports, a real DLL-import consumer resolves every name and
+passes 100 frame geometry/ownership-callback/release cycles. Cross-generated
+PE fixtures are no longer the only evidence for this boundary.
+
+This closes only the Windows media export sub-gate. Isolated Windows `06-web`
+build, package/relocation and browser/network/Host ABI replay remain in progress;
+cross-target, inherited notices and stable-pin/support release gates remain open.
+Logs, host-tool setup findings and current build entry are in
+[Windows T10 acceptance](docs/acceptance/crtweb_acceptance.md#windowsx64-isolated-build-and-relocation-replay-in-progress-2026-10-18).
+No core runtime/public ABI/upstream source patch was changed. `STATUS.md` is unchanged.
 
 ### Web Tranche 10: macOS/arm64 isolated development SDK replay
 

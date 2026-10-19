@@ -137,7 +137,8 @@
   ],
   "status": {
     "linux": "shared-pass",
-    "macos": "shared-pass"
+    "macos": "shared-pass",
+    "windows": "static-pass"
   },
   "notes": [
     "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's curl backend (OpenSSLHelper, CurlSSLVerifier, CertificateInfoCurl) and WebCrypto (crypto/openssl) use the OpenSSL API; Source/cmake/OptionsWin.cmake and OptionsPlayStation.cmake find_package(OpenSSL REQUIRED).",

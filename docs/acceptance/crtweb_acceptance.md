@@ -4342,6 +4342,262 @@ closure, current stable-pin revalidation and upstream support confirmation
 remain required. **Tranche 10/public release is not closed.** `STATUS.md` is
 unchanged.
 
+#### Windows/x64 isolated build and relocation replay (in progress, 2026-10-18)
+
+Replay starts from `65cd4c6`. The existing Windows predecessor has Skia/FFmpeg/
+LVGL enabled but CURL disabled, so its publisher does not install the complete
+media dependency/provenance set. The new stage correctly rejects it before
+building WebKit; it is not accepted as an option-ON predecessor. Building the
+missing curl/mbedTLS layer with the original CRT recipes and explicit Windows
+SDK import-library path precedes a fresh full predecessor publication.
+
+Native Windows packaging implementation/replay is ongoing. Host gperf/ICU
+generators are configured separately with the native MinGW compiler/runtime;
+Git Bash is a build-host configure tool only. Target ports retain the installed
+CRT mksh/make and CRT wrappers. The existing pinned WebKit cache passes the
+source-only/pristine verification; no previous browser objects are inputs.
+The Windows layout uses a private package DLL directory (PE has no ELF RPATH),
+with exact module/process identity observations and the same public API/export
+boundaries. No installed/relocated SDK or public release success is claimed yet.
+
+The rebuilt full option-ON predecessor verifies and its immutable input copy
+is byte/alias-identical. Native `libcrtmedia.dll` exports exactly the 75 reviewed
+public functions, with no FFmpeg/curl/GUID/private helper exports. A separate
+CRT-linked consumer imports the actual DLL through `libcrtmedia_dll.dll.a`,
+resolves all 75 names with `dlsym`, and passes 100 frame geometry/release cycles,
+including callbacks into caller-owned code and zeroed released wrappers.
+`out/tranche10-windows/media-dll-smoke.json` records its real PE imports and
+successful native output. This closes the Windows media export sub-gate, not
+the isolated Web SDK gate. CRT curl/mbedTLS static/shared smokes and HTTP/HTTPS
+round trips pass; the latest closeout runs 81 focused helper cases (including
+36 stage cases/native Windows observer) plus 2 WebKit driver cases, all passing.
+
+The incremental host-generator probe built native MinGW/UCRT gperf and ICU;
+that is not fresh acceptance. The first official fresh build exposed its stale
+archive-name assumption at `gentest` before target compilation. ICU's upstream
+MinGW fragment needs both supported make variables `STATIC_PREFIX=` and
+`STATIC_PREFIX_WHEN_USED=` in static-only mode; its unquoted `$(SHELL)` requires the installed Git shell's
+space-free Windows alias. Git's launcher also prepends its own incompatible
+MinGW C++ DLLs: the same host `icupkg` exits 127 under that search order and 0
+with the selected compiler's runtime directory first. The owned host launcher
+sets that precedence inside the shell. Neither GNU runtime nor host tools are
+copied into the target SDK; no source patch or target ABI workaround is used.
+These are host-tool constraints, not a successful spaced host-tool build.
+
+The official local source asset v1 has SHA-256
+`fcd19e92d5d994ff06b939326f21b12189c2cfe419ab69242d9e663b20148806`.
+It attempted a build from `out/tranche10-windows/predecessor05` in `C:/crtw/t10w`,
+using explicitly supplied `CRT_CC`, `CRT_CXX`, `CRT_AR`, `CRT_RANLIB` and
+`CRT_WINDOWS_SDK_LIBPATH` as required by the predecessor manifest. The first
+invocation rejected the omitted LLVM environment before compilation; the
+identical-input retry retains that SDK checkpoint but fails in the host phase;
+no target compilation or isolated SDK acceptance is claimed for v1. A new v2
+asset/work-root will verify the corrected host naming without stale archives.
+Logs: `out/web-windows-tranche10-native-v1-tools.log` and
+`out/web-windows-tranche10-{preflight-final,media-dll-smoke-final,host-probe-v6}.log`.
+
+The v2 fresh host build passes, but target ICU stops with Windows error 53
+when CRT make invokes native `icupkg`: the host compiler's runtime DLLs are
+not in that isolated shell's search path. The v3 host phase binds those DLLs
+by adjacency under `host/` only and records their hashes; they must never
+enter target dependencies or the SDK. Native MinGW `pkgdata` in turn executes
+compiler commands through Git Bash. The owned `crt_icu_host_pkgdata.py` derives
+an options file/CRT-shell relays with physical SDK launcher paths and preserved
+compiler flags, rather than changing upstream source/generated options or using
+host gcc for target data. It normalizes native path separators, selects the
+intended Git shell and restores the CRT namespace inside the target wrappers.
+
+The minimum real static/DLL data-generation probe passes; its DLL imports
+only `KERNEL32.dll`, not host UCRT/GNU C++ libraries, and the original options
+remain byte-identical. A complete data make in the retained v2 tree also passes
+as a **diagnostic**, not source-stage acceptance. Logs are
+`out/web-windows-tranche10-icu-native-probe-v4.log` and
+`out/web-windows-tranche10-icu-data-make-diagnostic.log`.
+The new official v3 run uses fresh `C:/crtw/t10w3` and asset SHA-256
+`d8d8d2292bf1a47f2eccc2b50360a5647d617300a179aa62f4cf2cf8770537c3`;
+its log is `out/web-windows-tranche10-native-v3.log`. Fresh target ICU builds,
+and its static Unicode smoke passes, but the shared smoke reports
+`U_FILE_ACCESS_ERROR`: MinGW host `pkgdata` links the real data DLL but omits
+the shared `-I` install step, leaving the 20,480-byte stub in the prefix instead
+of the 33,127,936-byte data DLL. The owned host bridge now completes only that
+explicitly named DLL/import-archive installation and verifies copied hashes.
+Installing the real data DLL makes the **same already-built** static/shared
+Unicode consumers pass; this retained-tree diagnostic is not stage acceptance
+(`out/tranche10-windows/icu-install-diagnostic.json`). No upstream option file,
+source or target runtime is patched.
+
+The official v4 source asset has SHA-256
+`2f38e604ab0a078b59ac90fad4c4f93fda26e42ef95bd52e8782c8aba6dc8125`
+and starts from fresh `C:/crtw/t10w4`; its log is
+`out/web-windows-tranche10-native-v4.log`. The input predecessor remains
+unchanged. Output publication and installed/relocated acceptance are still
+pending. A later packaging-only retry will also carry the CRT drive-path
+conversion for fontconfig data and loopback CA fixtures; its heavy compile-input
+identity must match v4, and the small consumers must still be freshly rebuilt.
+The running extracted v4 asset is not edited in place. On 2026-10-19 its fresh
+target ICU static/shared Unicode consumers both pass, reproducing the install
+fix through the official source-stage path. Windows Core replay passes
+156 tests with one expected native-COW skip; the existing memory-copy fork
+mechanism is unchanged (`out/web-windows-tranche10-core-ctest.log`).
+
+The independent fresh SDK-only consumer preflight builds both browser and GPU
+worker from the installed predecessor, without any WebKit build-tree library.
+It exposed native backslashes in CMake `-D` source paths and missing
+`SK_BUILD_FOR_UNIX` in these two Skia consumers. POSIX CMake path spelling and
+the same header configuration as the installed CRT Skia archive fix both;
+no MSVC header/host CRT is added. The successful four-action compile/link log
+is `out/web-windows-tranche10-consumer-preflight-final.log`. This is not browser
+execution or GPU replay. These small consumers will be clean-built again by
+the packaging-only retry; earlier setup/configure/compile failures remain
+diagnostics, not acceptance.
+
+Prepared retry asset v6 has SHA-256
+`4b3bfa04b14754016febbdd83f69071e174d9e56fa3d5d49b6fd98f0893d16e9`.
+Comparison of the two archives confirms all 188 heavy compile inputs and the
+driver's compile-phase identity are identical to v4
+(`out/web-windows-tranche10-retry-identity.log`). V5 is an intermediate source
+archive only, not an accepted or executed build. This comparison was valid for
+v6, but the later native-Perl/port-builder changes below alter heavy compile
+inputs: **they require a fresh source asset/work-root**, not that packaging retry.
+
+V4 stops during OpenSSL configure: native host Perl cannot open the packaged
+SDK's CRT-virtual `/porting/...` config path. The port builder now substitutes
+a physical host root for `configure_interpreter` while retaining CRT compiler
+commands. Strawberry Perl's Win32 File::Spec is incompatible with OpenSSL's
+Unix target; Git's POSIX Perl needs `IPC::Cmd`/`ExtUtils::MakeMaker` modules.
+The existing build-host-only `C:/crtw/perl-overlay` supplies them through the
+explicit `CRT_WEB_HOST_PERL_LIB` input; file hashes and the Perl binary/version
+are recorded, not shipped. No global package installation or upstream patch
+is used. WebKit's generators still use their accepted native Windows Perl.
+
+OpenSSL configure passes with that separation. Calling host Perl directly
+from CRT make loses generated-file redirections; invoking it through the
+existing `crt-native-tool` boundary preserves them (nonempty `builddata.pm`
+and `installdata.pm`). A fresh OpenSSL **diagnostic** build at
+`ports-openssl-native-probe` configures/builds/installs and passes the native
+TLS 1.3 static smoke (`TLS_AES_256_GCM_SHA384`), logged in
+`out/web-windows-tranche10-openssl-diagnostic-v5.log`. The documented Windows
+shared-test exclusion remains explicit; it is not a new shared-build pass.
+This result is not an accepted source-stage SDK. Earlier Perl/module/direct-launch failures
+are preserved in `out/web-windows-tranche10-openssl-diagnostic*.log`.
+
+The new official fresh run uses `C:/crtw/t10w8` and source asset v8 SHA-256
+`7478be3cfbee3cd64de63dcc654bc96288e03b6f6e5fae71313d006608a65666`.
+It sets `CRT_WEB_HOST_PERL_LIB=C:/crtw/perl-overlay` in addition to the five
+explicit external LLVM/Windows SDK inputs listed above. Log:
+`out/web-windows-tranche10-native-v8.log`; intended output:
+`out/tranche10-windows/sdk06-v8`. V7 was prepared but never executed. V4 and
+its subsequently modified diagnostic dependencies are not reused as build
+inputs; only the verified source-only WebKit cache and immutable predecessor
+are reused. Final publication/installed/relocated acceptance remains pending.
+
+V8 again passes both ICU Unicode smokes, then stops in libpng's man5 install
+at `mkdir -p` with `Error 5`, without a useful child diagnostic. The directory
+exists and the exact single CRT mkdir command passes on replay. One owned
+orphan mksh (PID 16620, parent 8000 already absent, creation 08:11 KST) remains
+with its only thread `Wait/Suspended`; after path/PID/parent checks only that
+process is retired. This is a failed checkpoint, not a successful cleanup gate
+or a claimed PAL fix. The root cause is unconfirmed. An identical-asset/input
+retry uses `--reuse-work-root` and
+`out/web-windows-tranche10-native-v8-retry1.log`; it must pass without such
+intervention. The initial log and staged SDK checkpoint are retained.
+Retry 1 passes libpng install and both round-trip smokes without intervention,
+then configures/builds/installs OpenSSL through the source-stage's host boundary.
+It is currently building curl/OpenSSL; this is not yet a complete Web dependency
+or SDK acceptance. V8's host-tools record hashes 258 external Perl module files
+and three host compiler runtime DLLs, separately from target provenance. The
+additional WebKit driver unit suite passes 2/2 alongside the 77 focused cases.
+The retry's curl/OpenSSL static IPv4 and IPv6 HTTPS smokes pass; both shared
+variants retain their documented Windows exclusion. The ordinary fontconfig
+dependency recipe still builds/runs a CRT-linked gperf on this native host,
+separately from WebKit's host gperf. That auxiliary executable is not copied
+into the SDK. It is **not** proof of the complete host/target generator split:
+the open cross-target gate must also rebind fontconfig's generator, rather
+than execute an aarch64 target tool on an x86_64 build host.
+
+Retry 1 builds/installs gperf, expat and FreeType, then fails immediately in
+fontconfig configure: recipe `path_prepend` uses native Windows `;`/`C:/...`
+before a CRT mksh POSIX PATH, hiding `printf`, `sed` and `expr`. The port builder
+now uses `/c/...` plus `:` for Windows CRT-shell recipe PATH values, retaining
+native host PATH behavior otherwise. Its new regression passes (33 stage
+helper cases; 78 focused cases plus 2 WebKit driver cases). No applet/API or
+upstream patch is added. These changed tool inputs invalidate source-stage
+reuse; v8 is now a retained diagnostic tree, not an accepted build. The
+remaining-port diagnostic uses the current builder and pinned v8 inputs,
+logging `out/web-windows-tranche10-remaining-ports-diagnostic.log`. A new
+official asset/work-root remains necessary before final SDK acceptance.
+The original stage identity files for the out-of-band diagnostic roots
+`t10w2`, `t10w3`, `t10w4` and `t10w8` are preserved as
+`inputs-before-diagnostic.json`; their active identity is explicitly revoked
+(`diagnostic_only`, null source identity). Even an old driver must refuse to
+treat those modified outputs as an identical-input source-stage retry. The
+classification log is `out/web-windows-tranche10-diagnostic-identities.log`.
+
+The corrected PATH exposes a second fontconfig boundary: its CRT-linked gperf
+exits `53` with the CRT shell PATH, whereas the same binary/input succeeds
+with a native SDK DLL PATH (`STATUS_DLL_NOT_FOUND` for direct native launch).
+The prepared native host gperf succeeds through a CRT-shell/native-tool relay
+on that same input. The Windows stage now derives fontconfig's recipe to drop
+its target-gperf dependency and binds both bare configure probes and Make's
+`GPERF` to the owned host relay. Linux/macOS recipe behavior is unchanged;
+the cross-target gate must still cover those hosts' generator bindings.
+Logs: `out/web-windows-tranche10-fontconfig-gperf-diagnostic{,-v2}.log` and
+`out/web-windows-tranche10-remaining-ports-diagnostic-v2.log`.
+
+ICU's owned options/relay writers also pin LF output so their recorded UTF-8
+hashes describe actual Windows file bytes, not a CRLF-translated variant.
+The Windows byte-level regression and host-gperf recipe regression both pass
+(35 stage helper cases). This metadata repair changes the helper input and
+must be present in the new fresh official build, not retroactively attributed
+to v8. No target runtime or upstream source is modified.
+
+With the host relay, fontconfig configures/builds/installs and passes its real
+font-match shared smoke. The next HarfBuzz CMake configure exposes an SDK-mode
+archiver assumption: repository `tools/crt-ar.cmd` is not installed in the SDK.
+The CMake port path now selects the declared external LLVM `CRT_AR` (with LLVM
+discovery fallback), matching the packaged `crt-toolchain.cmake`, while keeping
+the repository wrapper in repository mode. A space-path regression covers
+that selection; 36 stage cases now pass. Remaining-port diagnostic v3 uses
+this correction (`out/web-windows-tranche10-remaining-ports-diagnostic-v3.log`).
+The final official source-stage build is still pending, not accepted from
+these diagnostics.
+
+#### Current Windows blocker (2026-10-19)
+
+Remaining-port diagnostic v3 passes HarfBuzz shared shaping, libjpeg-turbo
+static/shared round trips and libpsl shared suffix tests, then repeats the
+unexplained `Error 5` in libwebp's header installation. Its libraries compiled;
+`install-sh` copying `types.h` fails. This is the second affected package
+after libpng, not evidence of a codec API failure or missing source/header.
+
+The task-specific Windows Application Error records confirm **mksh access
+violations (`0xc0000005`)**, rather than a plain permission-error diagnosis.
+The 277 matching event records include two in `ntdll.dll` and 275 with an
+unknown module/zero offset; event count is not a count of separately diagnosed
+defects. Exported evidence is
+`out/web-windows-tranche10-native-crash-events.json` (record IDs, timestamps,
+fault PID/path/code/offset). No dump/stack-based root cause is established.
+Fork/exec state restoration and the shell/PAL startup boundary are candidates,
+not a confirmed explanation and not an excuse to patch upstream configure.
+
+No retries or host-shell substitution are used to call this a successful SDK.
+The failed diagnostic command is interrupted after child exit; closeout finds
+no remaining SDK mksh/make/toybox process
+(`out/web-windows-tranche10-failed-process-closeout.json`). The earlier explicitly
+retired libpng orphan remains a failed-checkpoint detail above. No active
+source-stage build or published Windows `06-web` SDK remains. A bounded native
+runtime reproduction/stack investigation is needed before a final fresh
+source-stage run; if the runtime changes, rebuild and freeze a new predecessor
+rather than mutate the accepted input. Windows/public Tranche 10 remains open.
+Final closeout reconfirms the immutable predecessor's complete 3,353-entry
+byte/alias inventory, unchanged v8 source archive hash, absent accepted Windows
+output and revoked diagnostic identities
+(`out/tranche10-windows/closeout.json`, `out/web-windows-tranche10-closeout.log`).
+
+Current local logs use `out/web-windows-tranche10-*`; failed predecessor,
+missing import-path and host-configure diagnostics remain separate from final
+acceptance. `TODO.md` retains the open Windows gates and `STATUS.md` is unchanged.
+
 ## Host order
 
 Linux first (WPE is the reference), with an early three-host JavaScriptCore

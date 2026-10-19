@@ -165,10 +165,14 @@ uses the host replay order stated below and in the acceptance document.
     external consumer, HTTP/TLS and Host ABI ([evidence](docs/acceptance/crtweb_acceptance.md#macosarm64-isolated-build-and-relocation-replay-2026-10-18)).
   * [ ] Windows isolated `05-ui -> 06-web` SDK/browser, dependency, loader-path
     and Host ABI implementation/replay.
+    Full predecessor/export and tool-boundary sub-gates are verified. Repeated native
+    mksh access violations during port installation block a final fresh build;
+    bounded Windows PAL/fork/exec triage must precede SDK/space-path consumer acceptance.
   * [ ] Prove the build-host/target split with x86_64-host -> Linux/aarch64-target:
     host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
-  * [ ] Native Windows replay of the implemented 75-function `libcrtmedia.dll`
-    export boundary; cross-generated PE fixtures are not native acceptance.
+    Include fontconfig's generator on every host; its Windows host binding is under replay.
+  * [x] Native Windows replay of the 75-function `libcrtmedia.dll` export boundary;
+    DLL-import consumer/API resolution and ownership callback evidence stay in Web acceptance.
   * [ ] Finish inherited-runtime notice/source/SBOM review before publication;
     the Web candidate carries its provenance, notices, SPDX and advisory snapshot.
   * [ ] Update the stable-series WebKit pin to the newest micro release and confirm

@@ -40,7 +40,13 @@ def audit_exports(dist: Path, target_os: str) -> dict:
     exported = names(library, target_os)
     result = {"header_leaks": leaks, "foreign_exports": sorted(exported - owned),
               "missing_exports": sorted(owned - exported), "public_functions": len(owned)}
-    if target_os in ("linux", "macos"):
+    if target_os == "windows":
+        from crt_pe import imported_libraries as pe_needed
+        # Windows links WebKit's archive privately into libcrtweb.dll; no
+        # libWebKit DLL/export-all boundary is introduced by packaging.
+        result["private_curl_exports"] = sorted(name for name in exported if name.startswith("curl_"))
+        result["colliding_curl_needed"] = [name for name in pe_needed(library) if "curl" in name.lower()]
+    elif target_os in ("linux", "macos"):
         from crt_macho import dependencies
         private = dist / ("libexec/crtweb/lib/libWebKit.dylib" if target_os == "macos" else "libexec/crtweb/lib/libWebKit.so")
         result["private_curl_exports"] = sorted(name for name in names(private, target_os) if name.startswith("curl_"))

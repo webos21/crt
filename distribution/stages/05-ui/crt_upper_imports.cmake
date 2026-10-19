@@ -46,6 +46,14 @@ elseif(CRT_STAGE_TARGET_OS STREQUAL "windows")
   set_property(TARGET crtgfx APPEND PROPERTY INTERFACE_LINK_LIBRARIES -Wl,user32.lib -Wl,gdi32.lib -Wl,d3d11.lib -Wl,dxgi.lib)
   set_property(TARGET crtgfx_gpu APPEND PROPERTY INTERFACE_LINK_LIBRARIES -Wl,d3d12.lib)
   set_property(TARGET crtgfx_skia APPEND PROPERTY INTERFACE_LINK_LIBRARIES -Wl,d3dcompiler.lib -Wl,uuid.lib)
+  set_property(TARGET crtmedia APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+    "${CMAKE_SYSROOT}/lib/libavformat.a" "${CMAKE_SYSROOT}/lib/libavcodec.a"
+    "${CMAKE_SYSROOT}/lib/libswresample.a" "${CMAKE_SYSROOT}/lib/libavutil.a"
+    "${CMAKE_SYSROOT}/lib/libcurl.a" "${CMAKE_SYSROOT}/lib/libmbedtls.a"
+    "${CMAKE_SYSROOT}/lib/libmbedx509.a" "${CMAKE_SYSROOT}/lib/libmbedcrypto.a"
+    "${CMAKE_SYSROOT}/lib/libz.a"
+    -Wl,ole32.lib -Wl,d3d11.lib -Wl,dxgi.lib -Wl,mfuuid.lib -Wl,strmiids.lib
+    -Wl,mfplat.lib -Wl,mfreadwrite.lib -Wl,mf.lib -Wl,uuid.lib)
 elseif(CRT_STAGE_TARGET_OS STREQUAL "macos")
   set_property(TARGET crtgfx APPEND PROPERTY INTERFACE_LINK_LIBRARIES
     "-framework Foundation" "-framework AppKit" "-framework QuartzCore" "-framework CoreGraphics" objc)
