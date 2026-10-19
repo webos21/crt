@@ -794,6 +794,14 @@ prepared Perl module root are described in
 [distribution](../guides/distribution.md); diagnostic versus source-stage
 acceptance is distinguished in [Web acceptance](../acceptance/crtweb_acceptance.md).
 
+Windows/x64 libwebp's current configure recipe also passes a fresh SDK-mode
+configure/make -j4/install and static/shared round-trip replay (2026-10-19),
+after the PAL fork HANDLE/RNG/DIR/committed-stack corrections. The immutable
+option-ON 05-ui input stays unchanged; a separate execution SDK and new port
+work/install roots are used. This is not full isolated 06-web acceptance;
+the crash proof, failed diagnostic trials and final 26,782-process replay
+are in [the investigation](../bringup/windows_mksh_tranche10_crash.md).
+
 The B3 ports (`fontconfig`, `libwpe`, `crt-egl`; group `web`) are also `shared-pass` on macOS/arm64 (2026-10-12):
 `fontconfig` needs `path_prepend` (the CRT gperf ahead of Xcode's, new recipe field) and `-D__linux__=1` for its
 `statfs` branch, `libwpe` and the `crt-egl` test need `-D__unix__=1` for `eglplatform.h`, and `crt-egl`'s

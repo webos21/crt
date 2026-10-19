@@ -96,9 +96,7 @@ crash reproducer or a passing regression. That pre-existing descriptor
 gap is a separate follow-up; the C-level inherited-fd fixture above is
 the decisive RNG crash reproduction.
 
-## Separate evidence: historical native heap read fault
-
-### Confirmed directory-search ownership crash (fix in progress)
+## Additional confirmed defect: directory-search ownership (fixed)
 
 A further minimal old-SDK consumer opens a DIR, reads one entry, forks,
 then calls readdir in the child. A full dump now establishes another
@@ -115,9 +113,30 @@ Evidence: `out/mksh-still-dir-before.log`,
 `out/mksh-fault-30812-{0,1}.dmp`, `out/mksh-still-dir-stack.log`.
 This is a write access violation at `ntdll + 0x1ceed`, not proof of the
 same caller as the historical RtlAllocateHeap read fault below. A child
-must not operate on the parent's opaque native search state. Rebinding
-and position/rewind/close regressions are the next implementation slice;
-they are not yet accepted with the HANDLE/RNG changes.
+must not operate on the parent's opaque native search state.
+
+The fix advances a private epoch in the low-level memory-copy child,
+including raw _Fork. DIR records the owning epoch and logical entry count.
+On child read it opens new native search state and replays that count;
+child rewind starts a new owned search and direct close does not FindClose
+the borrowed parent pointer. No copied native heap object is touched.
+For an unchanged directory this preserves independent stream position;
+it is not a mutation snapshot and cannot reopen a renamed/unavailable
+saved path (EIO). Replay costs O(entries already read), once per copied
+stream that is actually read. Public DIR remains opaque and unchanged.
+
+`fork_runtime_reset_test` adds Windows opendir/fdopendir cases for fork and
+_Fork: resume, rewind without a prior rebind, close without a prior rebind,
+copied EOF, and parent position/close after each child. The old dirent
+implementation linked into the same test faults; the fixed test passes
+100 consecutive repetitions. The minimal old-SDK reproducer recompiled
+against the fix exits normally. Full C stage remains 156 passed / one
+expected skip. All three changed source files also compile with the
+strict Windows/arm64 flags; that is not a native arm64 execution claim.
+Evidence: `out/mksh-still-dir-{build,test,repeat,core}.log`,
+`out/mksh-still-dir-minimal-after.log`,
+`out/mksh-still-dir-regression-before.log`,
+`out/mksh-fault-22036-0.dmp` (negative regression).
 
 Bionic's [dirent implementation](https://android.googlesource.com/platform/bionic/+/master/libc/bionic/dirent.cpp)
 keeps stream buffering/position around an owned descriptor; the
@@ -125,6 +144,119 @@ keeps stream buffering/position around an owned descriptor; the
 permits independent child directory-stream positioning. The Windows fix
 must preserve the copied logical position without treating host search
 state as an inheritable descriptor. No upstream patch is justified.
+
+## Additional confirmed defect: stale stack extent in a nested fork
+
+After repackaging the first three fixes, a new immutable-input attempt at
+`out/tranche10-windows/predecessor05-pal-fixed` / `C:/crtw/t10-pal-fixed`
+fails during fresh libwebp configure, before compilation/installation.
+The debugger observes 166 created processes and a real PC=0 execute fault.
+Full dumps are `out/mksh-fault-6748-{0,1}.dmp`. This is stronger evidence
+than the original Application Error record's unknown-module/zero offset,
+but does not retrospectively identify every old event's caller.
+
+A corrected, non-breakpoint debugger baseline reproduces the same PC=0
+at the same configure point (`out/mksh-still-null-corrected-baseline.log`,
+`out/mksh-fault-35436-{0,1}.dmp`). Separate process-local diagnostic
+ResumeThread interposition and a one-shot NtContinue breakpoint show:
+
+```
+parent TEB.StackLimit = 0x15f000
+saved resume SP       = 0x15db90
+child return slot     = 0x15ebb8 (below the copied extent)
+before ResumeThread   = unreadable, ERROR_PARTIAL_COPY (299)
+before NtContinue     = zero; saved PC itself is nonzero and correct
+after fork epilogue   = ret reads zero -> execute fault at PC=0
+```
+
+The prior memory-copy child has real committed stack pages below its
+initial TEB limit, because VirtualAllocEx did not update that TEB field.
+A nested fork trusted the stale field and omitted live frames. This is
+not a failed native DLL lookup or an upstream configure error. Evidence:
+`out/mksh-still-stack-limit-before.log`,
+`out/mksh-still-loader-own-config-shell.log`,
+`out/mksh-still-null-{stack,memory,startup,resume,frame}.log`.
+
+Both architecture backends now query the saved SP's allocation, then walk
+reservation regions from AllocationBase to locate the contiguous committed
+readable extent. They copy that extent through StackBase and fail if child
+reservation clamping would exclude a live resume frame. This retains
+already committed loader headroom, not an arbitrary extra stack margin.
+[VirtualQueryEx](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualqueryex)
+only scans forward from the requested page: using its SP query alone is
+insufficient. An intermediate SP-page-only attempt exposed native loader
+writes below that page (`out/mksh-still-stack-loader-stack.log`); the
+reservation walk is the accepted implementation, not that attempt.
+
+`fork_runtime_reset_test` adds a bounded two-generation fork with a live
+16 KiB marker. A short-lived frame first commits headroom, then returns,
+so descendants stay inside existing committed memory: automatic guard-page
+growth remains a separate known limit. The same final fixture fails when
+linked with the old stack implementation, and passes 100 repetitions with
+the fix. Core remains 156 passed / one expected skip. Logs:
+`out/mksh-still-stack-final-regression-before.log`,
+`out/mksh-still-final-stack-{repeat,core}.log`.
+
+The diagnostic debugger was also audited against the official
+[debug-event handle lifecycle](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-waitfordebugevent).
+It now keeps its own DuplicateHandle reference and leaves event process/thread
+handles to ContinueDebugEvent's automatic close. An earlier instrumented
+attempt with invalid read/dump handles is discarded
+(`out/mksh-still-loader-return-slots.log`); the corrected baseline above
+does not patch target code and still faults. Build-host instrumentation is
+not linked into product binaries, and early debug passes are not acceptance.
+
+The failed trial's runtime files match their builds, but the crash leaves
+one empty `data/local/shpicurb.tmp`, so its complete inventory is no longer
+equal to its initial snapshot. Report:
+`out/tranche10-windows/pal-fixed-fresh-port.json` (exit 1, unchanged false).
+The directory is retired diagnostic state, not a predecessor for future
+acceptance; no original `predecessor05` bytes are changed or restored from it.
+
+The first stack-fixed fresh trial (`predecessor05-pal-stack-fixed` /
+`t10-pal-stack-fixed`) completes configure in 84.6 seconds and reaches make,
+but the diagnostic debugger exhausts its 20,000 cumulative-process slots.
+Its generic `STOP fault=1 ... children=20000` line is a capacity stop, not
+an observed access violation: there is no FAULT event in that trial's log.
+It is incomplete, not a passing build or runtime-crash regression. The
+debugger now reuses exited tracking slots and retains only owned live
+process handles. The next trial uses a separate execution SDK copied into
+its work root, leaving the frozen input untouched even if shell scratch
+files remain after interruption. No product code changes for these
+diagnostic-capacity/input-isolation corrections.
+
+## Fresh port replay after all four corrections
+
+The final option-ON predecessor is frozen at
+`out/tranche10-windows/predecessor05-pal-replay-final`. Its libc.a/libc.dll,
+mksh and make hashes match the newly built outputs, including an explicit
+make rebuild (not an old install stamp). A separate execution copy at
+`C:/crtw/t10-pal-replay-final/sdk` is used with new port work and dependency
+prefixes. The pinned libwebp source and recipe are unchanged for the build;
+no old object/install tree or host-shell substitution is used.
+
+Configure completes in 87.9 s, make -j4 in 92.3 s and make install in 14.7 s.
+Both static and shared round trips report `libwebp_roundtrip_test: ok`
+(238-byte lossless result, decoder 10600). The corrected debugger observes
+26,782 created processes, root exit 0, no FAULT or DEBUG_INVALID_HANDLE
+events, and no capacity/deadline stop. The frozen input's complete
+3,353-entry inventory is unchanged. Local evidence:
+
+- `out/mksh-still-final-stack-sdk.log`: final predecessor package validation.
+- `out/mksh-still-fresh-libwebp-final.log`: fresh configure/build/install/tests.
+- `out/tranche10-windows/pal-replay-final-fresh-port.json`: exit 0,
+  input unchanged, runtime-build identity match, separate execution SDK.
+- `out/tranche10-windows/predecessor05-pal-replay-final-inventory.json`:
+  byte/alias inventory for the new immutable input.
+- `out/mksh-still-final-original-input.log`: the original predecessor's
+  3,353 entries and v8 source identity remain unchanged; revoked diagnostic
+  identities remain revoked, with no accepted Windows 06-web output.
+
+This is the bounded fresh-port runtime checkpoint, not full isolated
+Windows 06-web/relocation acceptance or proof of every historical heap
+event's cause. No source-stage builder/browser run is left active by it.
+
+## Separate evidence: historical native heap read fault
 
 The original SDK's shell also reproduced the previously logged access
 violation at `ntdll + 0x31577`, identified as `RtlAllocateHeap + 0x27`:
@@ -210,10 +342,10 @@ inventory is reconfirmed unchanged by `out/verify_web10_closeout.py`.
 
 ## Open gates
 
-The HANDLE and RNG-cache defects are fixed and regression-tested; the whole crash
-incident and Windows Tranche 10 are **not closed**. Next, publish a newly
-built, option-ON predecessor into a new immutable path, verify its runtime
-identity, then use a fresh source asset and fresh isolated work root.
+The HANDLE, RNG-cache, DIR-search and nested-stack defects are fixed and regression-tested; the whole crash
+incident and Windows Tranche 10 are **not closed**. The new option-ON input
+and bounded fresh libwebp replay pass. Next use that immutable predecessor
+with a fresh source asset and fresh isolated work root for the full stage.
 Do not revive v2/v3/v4/v8's revoked diagnostic identities. A recurrence of
 either native heap or unknown-module faults requires native stack/full-memory
 capture rather than unbounded retries. Only a successful fresh build and

@@ -11,6 +11,64 @@ substantive update.
 
 ## 2026-10-19
 
+### Windows nested fork: copy the actual committed stack, not stale TEB limits
+
+Fresh libwebp configure exposed a reproducible PC=0 execute fault after the
+HANDLE/RNG/DIR fixes. A full dump, a normal corrected debugger replay and
+bounded before-ResumeThread/NtContinue observations establish the omitted
+return slot: the memory-copy child retains its initial native TEB StackLimit
+(0x15f000), above the nested fork's live SP (0x15db90). Its next child never
+receives the return address at 0x15ebb8; the native loader commits zero-filled
+pages before resuming the otherwise valid saved PC.
+
+Both x64 and arm64 fork backends now walk the parent stack reservation's
+VirtualQueryEx regions to locate the contiguous committed readable extent
+containing the saved SP. They copy that extent, including existing loader
+headroom, and reject child-reservation clamping that would drop live frames.
+No arbitrary stack enlargement, native loader redesign or upstream patch is
+used. Guard-page preservation/automatic future stack growth remains a
+separate, documented limit.
+
+The nested-fork regression preserves a 16 KiB live marker with already
+committed headroom so it tests copy completeness, not the guard-growth limit.
+The old stack implementation fails; the final implementation passes 100
+repetitions together with the HANDLE/RNG/DIR regressions. Full C stage passes
+156 tests with one expected skip. The final ARM64 backend and test compile
+with the strict CI-shaped flags; native arm64 execution remains pending.
+The final option-ON predecessor matches freshly built libc/mksh/make and its
+3,353-entry inventory remains unchanged. Fresh libwebp configure (87.9 s),
+make -j4 (92.3 s), install (14.7 s) and both static/shared round trips pass
+in a separate execution SDK/work root. The corrected native debugger observes
+26,782 processes without access violations or invalid-handle events.
+Full isolated Windows 06-web/relocation replay and the distinct historical
+RtlAllocateHeap caller remain separate acceptance gates; evidence,
+discarded diagnostic attempts and limitations are in
+[the investigation](docs/bringup/windows_mksh_tranche10_crash.md).
+
+### Windows fork: rebind process-owned directory search state
+
+A minimal old-SDK DIR consumer faults in FindNextFileA/RtlEnterCriticalSection
+after fork because the copied DIR references the parent's opaque native
+search state. Windows directory streams now track a private low-level fork
+epoch, reopen on child read and replay the copied logical entry count.
+Child rewind creates owned search state; child close never FindCloses the
+borrowed pointer. Raw _Fork is covered without depending on atfork hooks.
+No upstream patch or public header/ABI change is made.
+
+The permanent Windows fork-runtime regression covers opendir/fdopendir,
+fork/_Fork, copied position, direct rewind/close, repeated EOF and unchanged
+parent position in a private three-file fixture. The same regression faults
+with the old dirent implementation and passes 100 consecutive repetitions
+with the fix; the minimal reproducer also passes. C stage: 156 passed, one
+expected native-COW skip. PAL, dirent and test strict Windows/arm64 source
+compilation passes; native arm64 execution remains for CI/device replay.
+
+Replay is linear in entries already read, not a native directory snapshot:
+mutation/order changes are not guaranteed, and a renamed/unavailable saved
+path yields EIO. The historical RtlAllocateHeap fault is still a separate
+unproven causal connection. Fresh package replay remains open; see
+[the investigation](docs/bringup/windows_mksh_tranche10_crash.md).
+
 ### Windows fork: rebind the native RNG cache in the child process
 
 Isolated an additional, deterministic unknown-module access violation:

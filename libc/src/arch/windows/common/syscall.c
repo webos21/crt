@@ -745,6 +745,11 @@ static int winsock_initialized;
 typedef BOOL(CRT_WINAPI* crt_rtl_gen_random_fn)(void*, unsigned long);
 static crt_rtl_gen_random_fn rtl_gen_random;
 static DWORD rng_process_id;
+static unsigned long long windows_fork_epoch;
+
+unsigned long long __crt_windows_fork_epoch(void) {
+  return __atomic_load_n(&windows_fork_epoch, __ATOMIC_RELAXED);
+}
 #if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
 static int ntdll_initialized;
 #endif
@@ -7902,6 +7907,7 @@ long __crt_sys_fork(void) {
   fd_set_inherit_for_fork(inherit_touched, old_inherit_flags);
   result = __crt_windows_memcopy_fork(&child_pid, &child_process);
   if (result == 0) {
+    __atomic_add_fetch(&windows_fork_epoch, 1, __ATOMIC_RELAXED);
     /* _Fork() bypasses the higher-level child hooks. Invalidate here as
      * well as checking the PID at use, so reuse of an older ancestor's
      * PID can never make its copied DLL address appear current. */

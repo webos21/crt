@@ -11,6 +11,7 @@
 #define CRT_DIRENT_BUFFER_SIZE 4096
 
 #if defined(CRT_TARGET_OS_WINDOWS)
+#include <private/crt_fork_memcopy.h>
 typedef void* HANDLE;
 typedef unsigned long DWORD;
 typedef int BOOL;
@@ -58,6 +59,8 @@ struct __crt_DIR {
   HANDLE handle;
   int fd;
   int first_pending;
+  size_t position;
+  unsigned long long fork_epoch;
   char pattern[CRT_WIN_MAX_PATH + 3];
   struct crt_win_find_data find_data;
   struct dirent entry;
@@ -154,6 +157,8 @@ DIR* opendir(const char* path) {
   dir->fd = fd;
   memcpy(dir->pattern, pattern, strlen(pattern) + 1);
   dir->first_pending = 1;
+  dir->position = 0;
+  dir->fork_epoch = __crt_windows_fork_epoch();
   return dir;
 }
 
@@ -193,7 +198,35 @@ DIR* fdopendir(int fd) {
   dir->fd = fd;
   memcpy(dir->pattern, pattern, strlen(pattern) + 1);
   dir->first_pending = 1;
+  dir->position = 0;
+  dir->fork_epoch = __crt_windows_fork_epoch();
   return dir;
+}
+
+/* FindFirstFile returns process-owned native search state, not an
+ * inheritable kernel descriptor. Reopen in the child and resume at the
+ * copied logical position; never pass a parent's pointer to FindNext/Close.
+ * POSIX permits independently positioned parent/child directory streams. */
+static int windows_dir_rebind(DIR* dirp) {
+  unsigned long long epoch = __crt_windows_fork_epoch();
+  size_t skipped;
+  HANDLE handle;
+  if (dirp->fork_epoch == epoch) return 1;
+  handle = FindFirstFileA(dirp->pattern, &dirp->find_data);
+  if (handle == INVALID_HANDLE_VALUE) {
+    errno = EIO;
+    return 0;
+  }
+  dirp->handle = handle;
+  dirp->fork_epoch = epoch;
+  dirp->first_pending = 1;
+  for (skipped = 0; skipped < dirp->position; ++skipped) {
+    if (!FindNextFileA(handle, &dirp->find_data)) {
+      dirp->first_pending = 0;
+      return 0;
+    }
+  }
+  return 1;
 }
 
 struct dirent* readdir(DIR* dirp) {
@@ -201,6 +234,7 @@ struct dirent* readdir(DIR* dirp) {
     errno = EBADF;
     return 0;
   }
+  if (!windows_dir_rebind(dirp)) return 0;
   if (dirp->first_pending) {
     dirp->first_pending = 0;
   } else if (!FindNextFileA(dirp->handle, &dirp->find_data)) {
@@ -209,6 +243,7 @@ struct dirent* readdir(DIR* dirp) {
   dirp->entry.d_ino = 0;
   dirp->entry.d_type = windows_dirent_type(dirp->find_data.file_attributes);
   copy_name(dirp->entry.d_name, dirp->find_data.file_name);
+  ++dirp->position;
   return &dirp->entry;
 }
 
@@ -217,7 +252,7 @@ int closedir(DIR* dirp) {
     errno = EBADF;
     return -1;
   }
-  if (!FindClose(dirp->handle)) {
+  if (dirp->fork_epoch == __crt_windows_fork_epoch() && !FindClose(dirp->handle)) {
     close(dirp->fd);
     free(dirp);
     errno = EIO;
@@ -240,9 +275,11 @@ void rewinddir(DIR* dirp) {
     errno = EIO;
     return;
   }
-  (void)FindClose(dirp->handle);
+  if (dirp->fork_epoch == __crt_windows_fork_epoch()) (void)FindClose(dirp->handle);
   dirp->handle = handle;
   dirp->first_pending = 1;
+  dirp->position = 0;
+  dirp->fork_epoch = __crt_windows_fork_epoch();
 }
 
 int dirfd(DIR* dirp) {

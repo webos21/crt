@@ -20,4 +20,8 @@
  *   negative     -- -errno; no child was created. */
 long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_process);
 
+/* Process-local generation of copied Win32 state; advances in the raw
+ * fork child too. Opaque host objects must be rebound before reuse. */
+unsigned long long __crt_windows_fork_epoch(void);
+
 #endif

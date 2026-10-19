@@ -172,12 +172,14 @@ uses the host replay order stated below and in the acceptance document.
       deterministic regression, repeated replay and C stage pass ([investigation](docs/bringup/windows_mksh_tranche10_crash.md)).
     * [x] Reproduce and fix the parent-only RNG DLL address used after fork/_Fork;
       inherited `/dev/urandom` and new getrandom calls pass 100 regression repetitions.
-    * [ ] Fix the separately reproduced copied DIR search-handle crash;
-      child readdir faults in FindNextFileA/RtlEnterCriticalSection. Rebinding is under implementation.
-    * [ ] Finish fresh predecessor/port replay and check native-heap fault recurrence;
-      the historical RtlAllocateHeap fault still requires a decisive native stack if it recurs.
-    * [ ] Rebuild a new immutable predecessor SDK after any runtime fix, then run
-      a fresh isolated Windows build and installed/space-path consumer acceptance.
+    * [x] Fix copied DIR search-handle ownership after fork/_Fork;
+      position/rewind/close/EOF regressions pass 100 repeats and the C stage.
+    * [x] Fix nested-fork live stack omission caused by stale native TEB StackLimit;
+      actual committed-region copy passes the before/after regression and 100 repeats.
+    * [x] Freeze a new runtime-matched predecessor and finish fresh libwebp
+      configure/build/install + static/shared replay; no AV in 26,782 observed processes.
+    * [ ] Run a fresh isolated Windows build and installed/space-path consumer acceptance;
+      capture a full native caller stack if the historical RtlAllocateHeap fault recurs.
   * [ ] Prove the build-host/target split with x86_64-host -> Linux/aarch64-target:
     host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
     Include fontconfig's generator on every host; its Windows host binding is under replay.

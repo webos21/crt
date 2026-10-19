@@ -4576,8 +4576,8 @@ The 277 matching event records include two in `ntdll.dll` and 275 with an
 unknown module/zero offset; event count is not a count of separately diagnosed
 defects. Exported evidence is
 `out/web-windows-tranche10-native-crash-events.json` (record IDs, timestamps,
-fault PID/path/code/offset). No dump/stack-based root cause is established.
-Fork/exec state restoration and the shell/PAL startup boundary are candidates,
+fault PID/path/code/offset). At that checkpoint no dump/stack-based root cause
+had been established. Fork/exec state restoration and the shell/PAL startup boundary were candidates,
 not a confirmed explanation and not an excuse to patch upstream configure.
 
 No retries or host-shell substitution are used to call this a successful SDK.
@@ -4600,6 +4600,31 @@ regression evidence, C-stage pass and diagnostic libwebp installation replay.
 It additionally reproduces a parent-only RNG DLL address fault in a minimal
 fork consumer and fixes native-cache rebinding for inherited descriptors
 and getrandom, including raw _Fork (100 regression repetitions pass).
+It separately fixes copied DIR native-search state: child read/rewind/close
+and EOF pass 100 fork-runtime repetitions, while the same test with the old
+dirent implementation faults in the native search path. Full C stage remains
+156 passed / one expected skip; Windows/arm64 compilation is not native replay.
+The next fresh libwebp configure still faults at an actual PC=0. Bounded
+stack-copy observations isolate a fourth defect: a nested memory-copy fork
+trusts stale TEB.StackLimit and omits live frames. Copying the actual committed
+extent fixes its regression (100 repeats and C stage pass). The failed
+`predecessor05-pal-fixed`/`t10-pal-fixed` trial remains diagnostic-only;
+an orphan empty `data/local/shpicurb.tmp` also makes its inventory check fail.
+Neither that trial nor its runtime-only corrections are Windows SDK acceptance.
+
+The final fresh port replay uses a newly frozen option-ON predecessor
+`out/tranche10-windows/predecessor05-pal-replay-final`, a separate execution
+SDK at `C:/crtw/t10-pal-replay-final/sdk`, and a fresh port work/install root.
+Its libc archive/DLL, mksh and make hashes match the final runtime build.
+Libwebp configure (87.9 s), make -j4 (92.3 s), install (14.7 s), and static
+and shared round trips all pass. The corrected native debugger records
+26,782 created processes, root exit 0, no access violation/invalid-handle
+events; the input's full 3,353-entry inventory is unchanged. Report:
+`out/tranche10-windows/pal-replay-final-fresh-port.json`; log:
+`out/mksh-still-fresh-libwebp-final.log`. This closes the bounded fresh-port
+runtime replay, **not** the full Windows `05-ui -> 06-web` stage or relocated
+consumer acceptance. The earlier stack-fixed trial stopped at the debugger's
+cumulative-process capacity and is not counted as a successful build.
 It also captures the native heap fault at `ntdll + 0x31577`, but does not
 establish that all historical heap/unknown-module crashes share these causes. No fresh Windows
 SDK is accepted from that partial runtime correction; the new predecessor

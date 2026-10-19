@@ -188,6 +188,20 @@ covers raw `_Fork()` too, which does not invoke the `fork()` child hooks.
 The parent-only forwarded cryptbase address otherwise faults in an unmapped
 region in the new process; no public RNG ABI is changed.
 
+Directory search objects returned by FindFirstFile are likewise opaque
+process-owned state, not inheritable file HANDLEs. A private fork epoch
+advances in the low-level memory-copy child, including `_Fork()`. Windows
+DIR streams reopen their saved search pattern on first child read and
+replay the copied logical entry count, giving independently positioned
+parent/child streams for an unchanged directory. Child close discards a
+borrowed search pointer without FindClose; rewind opens a new owned search.
+The underlying CRT directory descriptor remains normally inherited.
+This is not a snapshot guarantee under directory mutation: replay uses the
+saved path/order, costs O(entries already read) once per child stream, and
+fails with EIO if that path cannot be reopened (for example after rename).
+No host heap state is copied, no global DIR registry/lock is introduced,
+and neither the public DIR ABI nor Linux/macOS backend changes.
+
 The Windows PAL owns the descriptor table in
 `libc/src/arch/windows/common/syscall.c`:
 
@@ -276,6 +290,21 @@ narrative; see "Current Open Issues" below for what remains genuinely
 unresolved about the mechanism itself.
 
 ## Current Open Issues
+
+Nested memory-copy forks must not use TEB.StackLimit alone to choose the
+copy's low bound: remote VirtualAllocEx commits in an earlier fork do not
+update that child's native TEB limit. The backend walks the parent stack
+reservation by VirtualQueryEx regions, finds the contiguous committed
+readable extent containing the saved resume SP, and copies through StackBase.
+Querying only the saved SP is insufficient: VirtualQueryEx scans forward
+from the requested page, so that would discard already committed headroom
+used by LdrInitializeThunk before NtContinue. Region iteration preserves
+that headroom without committing an arbitrary larger stack. Child-reservation
+clamping now fails with EAGAIN rather than silently omit a live resume frame.
+The native loader runs normally; its ABI/context is not replaced. This fix
+does not preserve a guard page or promise future automatic stack growth.
+The source proof and bounded nested-fork regression are in
+[the investigation](../bringup/windows_mksh_tranche10_crash.md).
 
 The formal fork/runtime-reset suite and real parallel port builds have now run
 on Windows x86_64 as well as the original aarch64 bring-up environment. The

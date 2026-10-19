@@ -143,6 +143,8 @@ __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
 #define CRT_MEM_COMMIT 0x1000UL
 #define CRT_MEM_RESERVE 0x2000UL
 #define CRT_PAGE_READWRITE 0x04UL
+#define CRT_PAGE_NOACCESS 0x01UL
+#define CRT_PAGE_GUARD 0x100UL
 #define CRT_CONTEXT_ARM64 0x00400000UL
 #define CRT_CONTEXT_ARM64_CONTROL (CRT_CONTEXT_ARM64 | 0x1UL)
 #define CRT_CONTEXT_ARM64_INTEGER (CRT_CONTEXT_ARM64 | 0x2UL)
@@ -309,7 +311,8 @@ static int copy_heap_chunks(HANDLE process) {
  * reports the AllocationBase of its *entire* stack reservation, which is
  * what actually needs to be checked/committed against -- not what the
  * parent's TEB happens to say. */
-static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, void** out_low, void** out_high) {
+static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, DWORD64 resume_sp,
+                              void** out_low, void** out_high) {
   unsigned char* teb = (unsigned char*)read_teb();
   void* stack_base = *(void**)(teb + 0x08);
   void* stack_limit = *(void**)(teb + 0x10);
@@ -317,17 +320,52 @@ static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, void** o
   void* copy_low = stack_limit;
   size_t size;
 
+  /* A prior memory-copy fork commits pages with VirtualAllocEx, which
+   * does not update the new thread's native TEB.StackLimit. In that
+   * child a nested fork can have live frames below the stale limit.
+   * Query the actual committed region containing the saved SP. Copying
+   * just its page omits committed headroom needed by LdrInitializeThunk
+   * before NtContinue restores the fork context. */
+  memset(&mbi, 0, sizeof(mbi));
+  if (VirtualQueryEx((HANDLE)(intptr_t)-1, (void*)(uintptr_t)resume_sp,
+                     &mbi, sizeof(mbi)) != sizeof(mbi) ||
+      mbi.AllocationBase == 0 || mbi.State != CRT_MEM_COMMIT ||
+      (mbi.Protect & (CRT_PAGE_GUARD | CRT_PAGE_NOACCESS)) != 0) return -1;
+  {
+    void* allocation_base = mbi.AllocationBase;
+    uintptr_t cursor = (uintptr_t)allocation_base;
+    uintptr_t committed_low = 0;
+    /* VirtualQueryEx scans forward, not backward from the queried SP.
+     * Walk reservation regions (normally reserve/guard/committed), not
+     * individual pages, to find the full contiguous committed extent. */
+    while (cursor <= (uintptr_t)resume_sp) {
+      uintptr_t next;
+      if (VirtualQueryEx((HANDLE)(intptr_t)-1, (void*)cursor, &mbi, sizeof(mbi)) != sizeof(mbi) ||
+          mbi.AllocationBase != allocation_base) return -1;
+      next = (uintptr_t)mbi.BaseAddress + (uintptr_t)mbi.RegionSize;
+      if (next <= cursor) return -1;
+      if (mbi.State == CRT_MEM_COMMIT &&
+          (mbi.Protect & (CRT_PAGE_GUARD | CRT_PAGE_NOACCESS)) == 0) {
+        if (committed_low == 0) committed_low = cursor;
+      } else {
+        committed_low = 0;
+      }
+      cursor = next;
+    }
+    if (committed_low == 0) return -1;
+    copy_low = (void*)committed_low;
+  }
+
   memset(&mbi, 0, sizeof(mbi));
   if (VirtualQueryEx(process, (void*)(ULONG_PTR)child_initial_sp, &mbi, sizeof(mbi)) == sizeof(mbi) &&
       mbi.AllocationBase != 0 && (uintptr_t)mbi.AllocationBase > (uintptr_t)copy_low) {
-    /* Parent has used more stack than the child's default reservation
-     * covers -- clamp to what is actually available. Known limitation:
-     * anything the parent had below the child's reservation base is not
-     * copied, so a fork() from an unusually deep call stack may resume
-     * with a truncated view of frames below this point. */
+    /* Restrict the copy to the child's reservation. The check below
+     * rejects a clamp that would omit the saved SP/live caller frames. */
     copy_low = mbi.AllocationBase;
   }
 
+  /* Never report success after clamping away a live resume frame. */
+  if ((uintptr_t)copy_low > (uintptr_t)resume_sp) return -1;
   size = (size_t)((uintptr_t)stack_base - (uintptr_t)copy_low);
   *out_low = copy_low;
   *out_high = stack_base;
@@ -428,7 +466,8 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
   {
     int heap_rc = copy_heap_chunks(pi.hProcess);
     int image_rc = heap_rc == 0 ? copy_image_data_sections(pi.hProcess) : heap_rc;
-    int stack_rc = image_rc == 0 ? copy_current_stack(pi.hProcess, ctx.Sp, &stack_low, &stack_high) : image_rc;
+    int stack_rc = image_rc == 0 ? copy_current_stack(pi.hProcess, ctx.Sp, (DWORD64)resume[12],
+                                                     &stack_low, &stack_high) : image_rc;
 
     if (stack_rc != 0) {
       fprintf(stderr, "fork_memcopy: copy failed heap_rc=%d image_rc=%d stack_rc=%d err=%lu\n", heap_rc,

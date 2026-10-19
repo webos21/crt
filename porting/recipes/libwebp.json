@@ -116,11 +116,13 @@
   ],
   "status": {
     "linux": "shared-pass",
-    "macos": "shared-pass"
+    "macos": "shared-pass",
+    "windows": "shared-pass"
   },
   "notes": [
     "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's FindWebP requires libwebp with the demux component (WebCore's WebP image decoder uses WebPDemux).",
-    "Image-format tools (cwebp, dwebp, ...) and the GL/SDL/PNG/JPEG/TIFF/GIF front ends are off: only the libraries are needed. Linux/x86_64 only until the macOS and Windows replays.",
-    "macOS shared tests run with CRT_CXX_RUNTIME_LINKAGE=shared (test-level env): the executable links libc.dylib, the libc every dylib of the port loads, instead of a second static libc.a (Mach-O two-level namespace: two malloc/pthread registries in one process)."
+    "Image-format tools (cwebp, dwebp, ...) and the GL/SDL/PNG/JPEG/TIFF/GIF front ends are off: only the libraries are needed. Native macOS and Windows/x64 replays are now recorded below.",
+    "macOS shared tests run with CRT_CXX_RUNTIME_LINKAGE=shared (test-level env): the executable links libc.dylib, the libc every dylib of the port loads, instead of a second static libc.a (Mach-O two-level namespace: two malloc/pthread registries in one process).",
+    "Windows/x64 2026-10-19: fresh SDK-mode configure/make -j4/install and roundtrip-static/roundtrip-shared pass with CRT mksh/make after the PAL fork HANDLE/RNG/DIR/live-stack corrections. The immutable 05-ui input remains unchanged; full isolated 06-web acceptance is separate (docs/bringup/windows_mksh_tranche10_crash.md). Windows/arm64 native port replay is not claimed."
   ]
 }

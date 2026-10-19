@@ -1,9 +1,13 @@
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/random.h>
 #include <unistd.h>
@@ -147,6 +151,132 @@ static int test_child_wait_handle_ownership(void) {
     return fail("ownership sibling wait");
   return 0;
 }
+
+/* Windows implements the POSIX-permitted independent positioning of
+ * copied directory streams. Test the PAL ownership contract, not native
+ * FindFirstFile allocation addresses or directory ordering assumptions. */
+static int test_child_directory_streams(void) {
+  char directory[] = "fork-dir-XXXXXX";
+  char path[128];
+  int result = 0;
+  int made = 0;
+  int raw;
+  int operation;
+  if (mkdtemp(directory) == 0) return fail("directory mkdtemp");
+  for (int i = 0; i < 3; ++i) {
+    int fd;
+    snprintf(path, sizeof(path), "%s/entry%d", directory, i);
+    fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0600);
+    if (fd < 0) { result = fail("directory fixture create"); goto cleanup; }
+    close(fd);
+    ++made;
+  }
+  for (raw = 0; raw < 2; ++raw) {
+    /* resume, rewind without rebind, close without rebind, copied EOF. */
+    for (operation = 0; operation < 4; ++operation) {
+      DIR* stream;
+      struct dirent* entry;
+      char first[256];
+      char next[256];
+      pid_t child;
+      int status = 0;
+      int fd = -1;
+      if (raw) fd = open(directory, O_RDONLY | O_DIRECTORY);
+      stream = raw ? (fd >= 0 ? fdopendir(fd) : 0) : opendir(directory);
+      if (stream == 0) {
+        if (fd >= 0) close(fd);
+        result = fail("directory open"); goto cleanup;
+      }
+      entry = readdir(stream);
+      if (entry == 0) { closedir(stream); result = fail("directory first"); goto cleanup; }
+      snprintf(first, sizeof(first), "%s", entry->d_name);
+      entry = readdir(stream);
+      if (entry == 0) { closedir(stream); result = fail("directory second"); goto cleanup; }
+      snprintf(next, sizeof(next), "%s", entry->d_name);
+      rewinddir(stream);
+      if (readdir(stream) == 0) { closedir(stream); result = fail("directory reset"); goto cleanup; }
+      if (operation == 3) while (readdir(stream) != 0) {}
+      child = raw ? _Fork() : fork();
+      if (child == 0) {
+        if (dirfd(stream) < 0) _exit(86);
+        if (operation == 1) rewinddir(stream);
+        if (operation != 2) {
+          errno = 0;
+          entry = readdir(stream);
+          if (operation == 3) {
+            if (entry != 0 || errno != 0) _exit(87);
+            /* EOF must remain stable after the lazy reopen. */
+            if (readdir(stream) != 0) _exit(88);
+          } else if (entry == 0 || strcmp(entry->d_name, operation == 1 ? first : next) != 0) {
+            _exit(89);
+          }
+        }
+        _exit(closedir(stream) == 0 ? 0 : 90);
+      }
+      if (child < 0) {
+        closedir(stream); result = fail("directory fork"); goto cleanup;
+      }
+      if (waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "fork_runtime_reset_test: directory raw=%d operation=%d status=%#x\n",
+                raw, operation, (unsigned int)status);
+        closedir(stream); result = fail("child directory stream"); goto cleanup;
+      }
+      entry = readdir(stream);
+      if ((operation == 3 && entry != 0) ||
+          (operation != 3 && (entry == 0 || strcmp(entry->d_name, next) != 0))) {
+        closedir(stream); result = fail("parent directory position changed"); goto cleanup;
+      }
+      if (closedir(stream) != 0) { result = fail("parent directory close"); goto cleanup; }
+    }
+  }
+cleanup:
+  for (int i = 0; i < made; ++i) {
+    snprintf(path, sizeof(path), "%s/entry%d", directory, i);
+    if (unlink(path) != 0) result = fail("directory fixture unlink");
+  }
+  if (rmdir(directory) != 0) result = fail("directory fixture rmdir");
+  return result;
+}
+
+/* The first memory-copy child has committed copied stack pages below
+ * its original native TEB StackLimit. A second fork must copy live
+ * frames there, not just the stale native limit's topmost pages. */
+__attribute__((noinline)) static void commit_nested_stack_headroom(void) {
+  volatile unsigned char headroom[65536];
+  /* Stay within already committed pages in descendants: automatic guard
+   * growth after memory-copy fork is a separately documented limitation. */
+  for (size_t i = 0; i < sizeof(headroom); i += 4096) headroom[i] = 1;
+}
+
+__attribute__((noinline)) static int test_child_nested_stack(void) {
+  volatile unsigned char marker[16384];
+  pid_t child;
+  int status = 0;
+  for (size_t i = 0; i < sizeof(marker); ++i) marker[i] = (unsigned char)(i * 17 + 3);
+  commit_nested_stack_headroom();
+  child = fork();
+  if (child == 0) {
+    pid_t grandchild = fork();
+    if (grandchild == 0) {
+      for (size_t i = 0; i < sizeof(marker); ++i)
+        if (marker[i] != (unsigned char)(i * 17 + 3)) _exit(91);
+      _exit(0);
+    }
+    if (grandchild < 0 || waitpid(grandchild, &status, 0) != grandchild ||
+        !WIFEXITED(status) || WEXITSTATUS(status) != 0) _exit(92);
+    for (size_t i = 0; i < sizeof(marker); ++i)
+      if (marker[i] != (unsigned char)(i * 17 + 3)) _exit(93);
+    _exit(0);
+  }
+  if (child < 0) return fail("nested stack fork");
+  if (waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    fprintf(stderr, "fork_runtime_reset_test: nested stack child status=%#x\n", (unsigned int)status);
+    return fail("nested child stack copy");
+  }
+  for (size_t i = 0; i < sizeof(marker); ++i)
+    if (marker[i] != (unsigned char)(i * 17 + 3)) return fail("parent stack marker");
+  return 0;
+}
 #endif
 
 /* The Windows PAL resolves the native RNG lazily. A copied cache address
@@ -185,6 +315,8 @@ int main(void) {
   }
 #if defined(CRT_TARGET_OS_WINDOWS)
   if (test_child_wait_handle_ownership() != 0) return 1;
+  if (test_child_directory_streams() != 0) return 1;
+  if (test_child_nested_stack() != 0) return 1;
 #endif
   if (test_child_random_source(0) != 0 || test_child_random_source(1) != 0) return 1;
   puts("fork_runtime_reset_test: ok");
