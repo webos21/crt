@@ -9,7 +9,89 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-20
+
+### Windows Web Tranche 10: fresh isolated SDK and product-hidden space-path acceptance
+
+The v11 official continuation finishes recompilation, dependency audit, API
+runtime replay and clean consumer build/install, then stops on Windows CRLF
+notice bytes. All 64 WebKit notices verify against the existing inventory;
+22 require only CRLF-to-LF conversion. The notice writer now ships the exact
+hash-matching bytes without mutating the checkout or accepting other content
+changes. Stage regressions pass 38 cases.
+
+An explicitly unpublished diagnostic first checks all candidate gates without
+publishing an SDK. The new SHA-pinned development asset then passes the strict
+retry proof (190 identical compile inputs and unchanged compile driver) and
+the official installed-predecessor bootstrap. Mandatory recomposition,
+reconfiguration, 1,368 recompilation steps, API replay, clean browser/GPU-worker
+build/install, provenance/security, HTTP/TLS, Host ABI and distribution checks
+complete in 1,799.4 s; only then is the final Windows/x64 SDK published.
+
+Separate ordinary non-debugger replay passes installed, actual space-path and
+external browsers. A stricter second replay hides product work before external
+browser/API configure/build as well as execution. All three process-role
+observations, ten HTTP/TLS cases, both export/Host ABI audits and both
+distribution verifications pass. The 3,603 SDK byte/alias entries and immutable
+3,353-entry predecessor are unchanged; product work is restored and no observed
+browser/debugger processes remain. Stage tests pass 38 cases, host-generator
+tests 2, and both registered tests in the fresh CMake/CTest directory pass 2/2.
+Detailed identities, commands, failed checkpoints and evidence stay in the
+[Windows replay record](docs/acceptance/crtweb_acceptance.md#fresh-windows-full-stage-replay-after-pal-fixes).
+This closes native Windows development acceptance only: the asset is a local
+uncommitted snapshot, not a clean f03626c/public release; cross-target and
+release notice/source/SBOM/security gates remain in Tranche 10.
+The direct API diagnostic's generated root-level data is moved into out for
+recoverable evidence retention, not left as untracked project input.
+
 ## 2026-10-19
+
+### Windows Web Tranche 10: renewed input and host-tool checkpoint
+
+The intermediate checkpoints below are superseded by the accepted 2026-10-20
+development SDK above; their failed identities remain separate evidence.
+
+Verified the PAL-fixed immutable predecessor's complete inventory/runtime
+identity and reviewed media exports, and revalidated the pristine source-only
+WebKit cache. Created a new clean-f03626c source asset and started the official
+installed-SDK bootstrap in a fresh work root. Native build-host gperf and ICU
+generators now build afresh outside the target SDK; their versions, paths,
+host-only Perl module inputs and runtime DLL hashes are recorded. Target ports,
+WebKit, packaged validation and product-hidden space-path replay remain in
+progress, not accepted from this checkpoint. The owning evidence is the
+[fresh Windows replay](docs/acceptance/crtweb_acceptance.md#fresh-windows-full-stage-replay-after-pal-fixes).
+
+The first attempt additionally isolates an external diagnostic-tool false
+stop: fontconfig's CRT xargs PATH probe triggers a native WinRT debugger
+notification. The same probe passes without debugging, fails with the old
+debugger and passes with corrected notification handling. Only the local
+diagnostic tool changes; identical pinned target inputs are resumed through
+the official work-root reuse contract. This is not full-stage acceptance.
+
+The resumed clean-work-root pass completes all selected target ports and
+their recipe-declared runtime probes. Windows OpenSSL/curl remain explicitly
+static-only. WebKit product compilation, publication and installed/relocated
+consumer acceptance are still open; measured evidence stays in the linked
+acceptance section.
+
+Fresh WebKit compilation exposes a separate Windows build-host command limit:
+the serializer batch invocation exceeds 35K characters. The CRT-owned CMake
+hook now dispatches only that generator via UTF-8 JSON argv and in-process
+Python, without changing pinned upstream sources or the target ABI. Oversized
+and special-character arguments, dependencies, unchanged/rebuilt outputs and
+ordinary custom commands pass the regression; the real 309-argument WebKit
+generator emits all 20 expected files in a separate spaced directory. This
+regression joins the existing CTest run. Because build inputs changed, a new
+development source asset and entirely empty work root start the full replay
+again; the former object tree remains failed evidence, never accepted cache.
+
+The new full run completes all 8,300 product compile/link steps, and its
+separate build-tree C API test passes. A subsequent audit false rejection
+of CRT /c drive spelling is repaired without weakening containment: 175
+actual discovery records and 37 stage regressions pass. The existing
+packaging-retry verifier proves all 190 compile inputs and the compile-driver
+AST unchanged before the audit-only source-asset continuation. SDK publication
+and product-hidden relocation remain open, not inferred from compilation.
 
 ### Windows nested fork: copy the actual committed stack, not stale TEB limits
 

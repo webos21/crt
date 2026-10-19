@@ -163,26 +163,12 @@ uses the host replay order stated below and in the acceptance document.
     browser, external consumer and manifests ([evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-build-and-relocation-replay-2026-10-18)).
   * [x] macOS/arm64 isolated development SDK, installed/space-path relocation,
     external consumer, HTTP/TLS and Host ABI ([evidence](docs/acceptance/crtweb_acceptance.md#macosarm64-isolated-build-and-relocation-replay-2026-10-18)).
-  * [ ] Windows isolated `05-ui -> 06-web` SDK/browser, dependency, loader-path
-    and Host ABI implementation/replay.
-    Full predecessor/export and tool-boundary sub-gates are verified. Repeated native
-    mksh access violations during port installation block a final fresh build;
-    bounded Windows PAL/fork/exec triage must precede SDK/space-path consumer acceptance.
-    * [x] Capture native install-sh crash contexts and fix copied wait-HANDLE ownership;
-      deterministic regression, repeated replay and C stage pass ([investigation](docs/bringup/windows_mksh_tranche10_crash.md)).
-    * [x] Reproduce and fix the parent-only RNG DLL address used after fork/_Fork;
-      inherited `/dev/urandom` and new getrandom calls pass 100 regression repetitions.
-    * [x] Fix copied DIR search-handle ownership after fork/_Fork;
-      position/rewind/close/EOF regressions pass 100 repeats and the C stage.
-    * [x] Fix nested-fork live stack omission caused by stale native TEB StackLimit;
-      actual committed-region copy passes the before/after regression and 100 repeats.
-    * [x] Freeze a new runtime-matched predecessor and finish fresh libwebp
-      configure/build/install + static/shared replay; no AV in 26,782 observed processes.
-    * [ ] Run a fresh isolated Windows build and installed/space-path consumer acceptance;
-      capture a full native caller stack if the historical RtlAllocateHeap fault recurs.
+  * [x] Windows/x64 isolated development SDK, installed/space-path replay and external
+    browser/API rebuild with product work hidden; HTTP/TLS, Host ABI and immutable
+    input/output inventories ([evidence](docs/acceptance/crtweb_acceptance.md#fresh-windows-full-stage-replay-after-pal-fixes)).
   * [ ] Prove the build-host/target split with x86_64-host -> Linux/aarch64-target:
     host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
-    Include fontconfig's generator on every host; its Windows host binding is under replay.
+    Keep fontconfig's build-host generator separate from target artifacts.
   * [x] Native Windows replay of the 75-function `libcrtmedia.dll` export boundary;
     DLL-import consumer/API resolution and ownership callback evidence stay in Web acceptance.
   * [ ] Finish inherited-runtime notice/source/SBOM review before publication;

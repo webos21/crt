@@ -232,6 +232,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME crtweb_stage_distribution_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_stage_06_web.py"
   )
+  add_test(NAME crt_webkit_host_generators_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_webkit_host_generators.py"
+  )
   add_test(NAME crtgfx_gpu_backend_boundary_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_gpu_backend_boundary.py"
   )
@@ -242,6 +245,7 @@ if(Python3_Interpreter_FOUND)
     crt_libcxx_fetch_unit_runs
     crt_binary_dependencies_unit_runs
     crtweb_stage_distribution_unit_runs
+    crt_webkit_host_generators_unit_runs
     crtgfx_gpu_backend_boundary_unit_runs
     PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

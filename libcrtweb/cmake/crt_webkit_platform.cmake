@@ -21,3 +21,5 @@ if(WIN32)
   # target's calling convention is the Microsoft x64 one, so offlineasm lowers with --platform=Windows.
   set(CRT_WINDOWS_ABI ON)
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/crt_webkit_host_generators.cmake")

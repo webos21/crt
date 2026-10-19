@@ -4630,9 +4630,243 @@ establish that all historical heap/unknown-module crashes share these causes. No
 SDK is accepted from that partial runtime correction; the new predecessor
 and full fresh/relocated replay remain required.
 
+##### Fresh Windows full-stage replay after PAL fixes
+
+Windows/x64 development-package acceptance closed 2026-10-20. The following
+dated checkpoints retain failed attempts separately from the accepted v12 SDK;
+public-release and cross-target gates remain under Tranche 10.
+
+The new official run starts from the verified immutable
+`out/tranche10-windows/predecessor05-pal-replay-final` (3,353 entries,
+runtime hashes matching the successful fresh port checkpoint). A clean
+`f03626c` source asset is pinned at SHA-256
+`6ae757b69492e8e01c663971917f896f7314b06fd60e21f86e60348a97f5c85e`
+under `out/tranche10-windows/assets-pal-v9`. The installed predecessor's
+`tools/crt-stage-build.py` is the bootstrap, with bytecode writes disabled
+to preserve the input. The build starts from new `C:/crtw/t10w9`; intended
+output is `out/tranche10-windows/sdk06-pal-v9`. No old objects/installed
+dependency prefix or revoked source-stage identity is reused. Only the
+verified pristine WebKit source-only cache is copied.
+
+External LLVM/Windows SDK inputs and the host-only Perl overlay remain
+explicit. Jobs are 4. Owned native debugging retains full exception dumps
+on unhandled failures without global WER/registry changes; successful
+per-DLL trace noise is suppressed. The runtime/relocation acceptance runs
+after packaging are ordinary non-debugger executions. State/command:
+`out/tranche10-windows/run-pal-v9.json`; log:
+`out/web-windows-tranche10-pal-v9.log`. Output publication, installed and
+space-path relocation/consumer checks remain pending; no success or public
+release authorization is claimed by starting this run.
+
+The fresh host phase has completed: native gperf and ICU generators live only
+under `C:/crtw/t10w9/build/06-web/host`. `host-tools.json` records their paths,
+tool versions, the selected POSIX Perl/module inputs and native runtime DLL
+hashes. Target ICU builds with CRT wrappers and the separately supplied
+host ICU generators: configure (69.6 s), make -j4 (304.6 s), install (77.9 s),
+and both static/shared Unicode build-and-run smokes pass. The remaining
+target dependency ports are still in progress.
+
+The first owned-debugger attempt stops after 2,008.5 s in fontconfig's
+`xargs -n` configure probe, not in FreeType or an observed heap access violation.
+The dump identifies `RoOriginateErrorW` (`0x40080201`, HRESULT `0x80070002`)
+inside native CreateProcess while trying a nonexistent PATH candidate. This
+is a Windows debugger error notification, not an established PAL crash
+([Microsoft contract](https://learn.microsoft.com/en-us/windows/win32/api/roerrorapi/nf-roerrorapi-rooriginateerrorw)).
+A bounded identical CRT xargs probe passes normally, fails under the old
+debugger, and passes with the notification correctly consumed; the corrected
+debugger logs the notification explicitly. Report:
+`out/tranche10-windows/winrt-debugger-probe.json`; full stopped-process dump
+and LLDB stack are retained locally. No target runtime/recipe/source asset
+changes. The input inventory is unchanged, no output is published, and no
+owned build process remains. The identical source/predecessor identity is
+resumed through the official `--reuse-work-root` contract with the corrected
+external diagnostic tool; this is continuation of the same clean work-root
+build, not reuse of an earlier accepted or revoked product tree. Original
+failed evidence remains separate from `run-pal-v9-resume1.json` and
+`out/web-windows-tranche10-pal-v9-resume1.log`.
+
+All selected target ports have now completed their build/install and
+recipe-declared execution tests in that same new work tree. ICU static/shared
+Unicode, libpng static/shared round trips, CRT EGL, curl HTTPS/IPv6 static,
+fontconfig shared matching, and the remaining declared image/text/TLS probes
+pass. OpenSSL and its curl variant retain their explicit Windows static-only
+contract; shared TLS probes are recorded skips, not shared acceptance.
+The verified source-only WebKit tree is now copied for the fresh product
+build. No WebKit objects or final Windows SDK are accepted at this checkpoint.
+
+The first resume then reaches composition and stops in the build-host
+Strawberry GNU patch 2.5.9 (`patch.c:354`, assertion `hunk`) on the first
+manifest-pinned COFF patch. The same patch passes GNU patch 2.7.6 dry-run
+against the pristine source. A second identical-input continuation explicitly
+selects Git's hosted patch 2.7.6 while retaining native Strawberry Perl;
+the host patch path/version/hash is recorded in `run-pal-v9-resume2.json`.
+This changes external build-host selection only, not target recipes or the
+pinned source asset. Recomposition still verifies every patch's before/after
+SHA-256. Neither stopped attempt published an SDK; the predecessor remains
+unchanged. The active log is `out/web-windows-tranche10-pal-v9-resume2.log`.
+
+That continuation composes/configures successfully and reaches 7,625/8,300
+Ninja steps, then stops in the native-host serializer generator, not a PAL
+fault. CMake's batch line is 35,176 characters (35,142 excluding the batch
+error suffix), beyond cmd.exe and CreateProcess limits. The CRT-owned
+Windows CMake hook now passes only this generator's argv through UTF-8 JSON
+to a Python in-process adapter; pinned upstream sources remain unchanged.
+It preserves original dependencies, outputs, cwd, following commands and
+unchanged-file timestamps. The adapter is a build-host input, not target ABI.
+
+`python -B tools/test_webkit_host_generators.py -v` passes oversized argv,
+spaces/Unicode, quotes/backslashes/newlines/literal @, adjacent imports,
+no-op rebuild and dependency-triggered rebuild checks. Existing configure
+tests (2) and stage tests (36) also pass; the new regression joins the existing
+CTest workflow without adding a second CI run. The actual 309-argument
+WebKit serializer generates all 20 expected outputs in a separate spaced
+directory (`out/tranche10-windows/real serializer probe/result.json`).
+Since this is a build-input change, the v9 work tree is retained as failed
+evidence and must not supply objects to the next full-stage attempt. A new
+SHA-pinned development-only asset/work root is required; final publication
+and relocation gates remain open.
+
+The new full attempt uses empty `C:/crtw/t10w10`, output
+`out/tranche10-windows/sdk06-pal-v10`, and source SHA-256
+`2ba21d13087c1e1c25ea04a8adc7ec82bc265aa4558950d7d9a14fd750c619f1`
+(`assets-pal-v10`). This is an explicitly `--allow-dirty` **local development
+snapshot**, based on f03626c plus the uncommitted host-generator fix, not a
+claim that f03626c itself contains the fix or a public release asset. Its
+archive hash and individual adapter file hashes are frozen in
+`out/tranche10-windows/run-pal-v10.json`. No previous objects, dependency
+install prefix or host-tool build is reused; only the reverified pristine
+source-only WebKit cache is supplied. The immutable 3,353-entry predecessor
+is unchanged. Host patch 2.7.6/native Perl and the corrected external
+debugger are explicit inputs. Log: `out/web-windows-tranche10-pal-v10.log`.
+Full build, publication and ordinary product-hidden space-path consumer
+acceptance are still pending.
+
+The v10 native host generators have completed afresh;
+`C:/crtw/t10w10/build/06-web/host-tools.json` records their separate host-only
+inputs. The new regression also passes through an actual fresh CMake/CTest
+directory (`out/web10-host-generator-cmake-check`, 1/1). Target ports are now
+rebuilt and all selected recipe execution probes pass in v10 itself; successes
+from v9 are not substituted. New target ICU configure/make/install take
+59.6/293.6/75.8 s, with static/shared Unicode smokes passing. OpenSSL TLS,
+curl HTTPS/IPv6 static, fontconfig shared matching and the declared text/image
+probes also pass; the documented Windows OpenSSL/curl shared skips remain.
+Fresh WebKit composition/compilation is next; SDK publication and relocation
+are not accepted from this dependency checkpoint.
+
+The v10 full WebKit configure completes (165.7 s), producing a 36,006-byte
+serializer argv JSON in the new build tree. The actual fresh Ninja build
+passes the formerly failing serializer step and continues into WebKit shared
+objects (7,686/8,300 observed). This confirms the host-command fix in the
+real product build, not only the synthetic/standalone generator probes;
+final linking, SDK validation and relocation remain pending.
+
+The v10 product subsequently completes all 8,300 compile/link steps, including
+libcrtweb, Host/Web/Network processes and the C API test. The separate API
+diagnostic passes (`out/web10-v10-api-diagnostic.log`, 12 processes, exit 0).
+The official stage nevertheless stops after 4,764.5 s in target-discovery
+audit: `/c/.../dependencies/lib` was incorrectly treated as a native Windows
+root path. No SDK is published; the predecessor's complete inventory is
+unchanged. The owned debugger records 244,314 processes and no access
+violation/unhandled fault; this is not proof of a single cause for every
+historical crash.
+
+The audit now normalizes CRT drive spelling before canonical containment.
+All 175 actual cache records pass, while other drives, sibling prefixes and
+parent-directory escapes remain rejected (37 stage tests pass). This is a
+post-build audit repair only. A new local development asset, SHA-256
+`e753684674b9f624b9457959b354601a670ea056adfaca0666fa345b12179e8a`
+(`assets-pal-v11`), passes the existing packaging-retry verifier against
+the v10 archive: all 190 compile inputs and the compile-driver AST identity
+are unchanged. Proof: `out/tranche10-windows/packaging-retry-pal-v11.json`.
+The official bootstrap resumes with `--reuse-work-root` and that exact
+`--previous-source-asset`; mandatory recomposition/reconfiguration and clean
+consumer rebuilds are retained. The new output is
+`out/tranche10-windows/sdk06-pal-v11`, with active command/state
+`run-pal-v11.json` and log `out/web-windows-tranche10-pal-v11.log`.
+Final packaged and product-hidden relocated acceptance remain pending.
+
+The v11 continuation completes the mandatory 1,368-step recompilation,
+target audit, C API test and clean browser/GPU-worker build/install. It then
+stops before publication at the first WebKit notice hash mismatch. This is
+Windows checkout CRLF conversion: all 64 notices verify against their pinned
+SHA-256, with 22 requiring CRLF-to-LF conversion. Packaging now writes the
+exact hash-matching bytes without modifying the checkout; any content change,
+bare-CR substitution or added whitespace remains rejected. Stage tests pass
+38 cases. The v11 input inventory remains unchanged and no final SDK exists.
+
+On 2026-10-20, the completed work SDK is used for an explicitly unpublished
+packaging diagnostic with the repaired notice writer. Provenance/security,
+browser smoke/role observation, real HTTP/TLS, Host ABI and distribution
+verification all pass (`out/tranche10-windows/candidate-v12-diagnostic.json`,
+`out/web10-candidate-diagnostic.log`). This diagnostic never calls
+`publish_tree` and is not accepted as the official source-stage result.
+The notice-only source-asset retry must still pass input-identity verification
+and the official bootstrap before installed/relocated consumer acceptance.
+
+The v12 development asset is pinned at SHA-256
+`ba5c9c2fdf2cf9047b44f007d3abe9f45a2bbcb0739430bbb1df556a68cb5586`.
+The v11-to-v12 proof again verifies all 190 compile inputs and compile-driver
+identity (`packaging-retry-pal-v12.json`), with no compiler/dependency/target
+source change. The official installed-SDK bootstrap uses the same t10w10
+work root and exact v11 previous archive; command/state is
+`out/tranche10-windows/run-pal-v12.json`, log is
+`out/web-windows-tranche10-pal-v12.log`, intended output is
+`out/tranche10-windows/sdk06-pal-v12`. This remains an uncommitted local
+development snapshot, not a clean-f03626c/public release claim. The temporary
+diagnostic candidate is retained as a checkpoint and rebuilt/revalidated by
+the official path before any output is accepted.
+
+The official v12 continuation finishes successfully on 2026-10-20 (exit 0,
+1,799.4 s). Mandatory recomposition/reconfiguration and all 1,368 recompilation
+steps complete, followed by C API replay, clean browser/GPU-worker consumer
+build/install, provenance/security, installed browser observation, real
+HTTP/TLS, Host ABI and `verify_dist.py`. The bootstrap publishes
+`out/tranche10-windows/sdk06-pal-v12` only after those checks. Its manifest pins
+the v12 source SHA above and predecessor content SHA-256
+`4b72f594e4c046eac09543a17922dda3110835298b155f4563b1cc2bee4eb5ab`;
+the complete 3,353-entry predecessor inventory remains unchanged. The owned
+debugger observes 13,555 processes in this packaging continuation and exits
+normally; this does not establish a common cause for every historical fault.
+The separate non-debugger installed/space-path replay also passes, with log
+`out/web-windows-tranche10-pal-v12-relocation.log` and evidence root
+`out/tranche10-windows/replay-pal-v12`. Its external consumers were built before
+hiding product work, so a second stricter replay builds them while work is
+already hidden rather than inferring build isolation from runtime success.
+
+That strict replay copies the SDK to the actual spaced path
+`out/tranche10-windows/relocated SDK pal-v12-hidden-build` without a short-path
+alias. It renames `C:/crtw/t10w10` to `C:/crtw/t10w10-relocation-hidden` before
+fresh external CMake configure/build of `examples/web-browser` and compilation
+of the public C API network consumer. Both use only the copied SDK toolchain,
+headers and libraries. With product work still hidden, ordinary non-debugger
+execution passes all three painted-browser checkpoints (installed, relocated,
+external rebuilt), each observing HostProcess/WebProcess/NetworkProcess and no
+foreign non-OS/non-SDK modules, runtime-family duplication or owned process
+leftovers. The copied SDK passes all 10 HTTP/TLS cases, including redirect/POST/
+cookie behavior and positive/negative certificate validation. Both SDKs pass
+`verify_dist.py`, public export and native Host ABI audits.
+
+Evidence: `out/tranche10-windows/replay-pal-v12-hidden-build/result.json`,
+its per-browser observations, `network.json`, installed/relocated Host ABI
+reports and `out/web-windows-tranche10-pal-v12-hidden-build.log`. The report
+records `passed`, `product_work_hidden`,
+`external_consumers_built_with_product_work_hidden`, `product_work_restored`,
+`input_unchanged` and `inventory_unchanged` as true. All 3,603 SDK byte/alias
+entries match before/after and across the relocated copy (inventory SHA-256
+`15bc222fbdb9915fcf8e08b608edcb5c51ee91b0ed5dd5858e04a8c14c83777a`);
+the complete 3,353-entry predecessor inventory also remains unchanged. Product
+work is restored and no observed browser/debugger processes remain.
+
+This closes native Windows development SDK acceptance, not a public release or
+cross-target build proof. OpenSSL/curl remain Windows static-only as recorded
+above; no new GPU/hardware-media acceptance is claimed by the CPU browser
+observer. The historical heap fault did not recur in this replay, which is not
+proof that all historical failures shared one cause.
+
 Current local logs use `out/web-windows-tranche10-*`; failed predecessor,
 missing import-path and host-configure diagnostics remain separate from final
-acceptance. `TODO.md` retains the open Windows gates and `STATUS.md` is unchanged.
+acceptance. `TODO.md` retains only the remaining Tranche 10 gates; `STATUS.md`
+is unchanged.
 
 ## Host order
 

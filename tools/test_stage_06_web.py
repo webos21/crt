@@ -4,6 +4,7 @@ import copy
 from datetime import datetime, timezone, timedelta
 import json
 import io
+import os
 import platform
 from pathlib import Path
 import re
@@ -57,6 +58,24 @@ class SecurityTests(unittest.TestCase):
 
 
 class PackagingTests(unittest.TestCase):
+    def test_notices_ship_exact_pinned_bytes_and_reject_content_changes(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "LICENSE"
+            canonical = b"Copyright holder\nPermission text.\n"
+            expected = hashlib.sha256(canonical).hexdigest()
+            for data in (canonical, canonical.replace(b"\n", b"\r\n")):
+                source.write_bytes(data)
+                self.assertEqual(stage.verified_notice_bytes(source, expected), canonical)
+                self.assertEqual(source.read_bytes(), data)  # checkout remains untouched
+            raw = canonical.replace(b"\n", b"\r\n")
+            source.write_bytes(raw)
+            self.assertEqual(stage.verified_notice_bytes(source, hashlib.sha256(raw).hexdigest()), raw)
+            for data in (canonical + b" ", canonical.replace(b"\n", b"\r"), b"modified notice\n"):
+                source.write_bytes(data)
+                with self.assertRaisesRegex(ValueError, "differs"):
+                    stage.verified_notice_bytes(source, expected)
+
     def test_owned_icu_text_bytes_match_evidence_on_windows(self):
         from crt_icu_host_pkgdata import write_owned_text
         with tempfile.TemporaryDirectory() as directory:
@@ -339,6 +358,25 @@ class PackagingTests(unittest.TestCase):
                 self.assertTrue(stage.audit_target_discovery(cache, root / "sdk", root / "ports", root / "source"))
                 cache.write_text(name + "=/usr/host/library\n")
                 with self.assertRaisesRegex(ValueError, "escaped"):
+                    stage.audit_target_discovery(cache, root / "sdk", root / "ports", root / "source")
+
+    @unittest.skipUnless(os.name == "nt", "native Windows drive-path containment")
+    def test_target_discovery_normalizes_crt_drive_paths_without_relaxing_boundary(self):
+        with tempfile.TemporaryDirectory(prefix="web discovery spaces ") as directory:
+            root = Path(directory)
+            cache = root / "CMakeCache.txt"
+            name = "PC_HARFBUZZ_ICU_STATIC_LIBRARY_DIRS:INTERNAL"
+            def crt(path):
+                native = path.as_posix()
+                return "/" + native[0].lower() + native[2:]
+            for parent in (root / "sdk", root / "ports", root / "source"):
+                value = crt(parent / "lib")
+                cache.write_text(name + "=" + value + "\n")
+                self.assertEqual(stage.audit_target_discovery(cache, root / "sdk", root / "ports", root / "source")[name], value)
+            for value in (crt(root / "sdk-sibling/lib"), crt(root / "ports/../host/lib"),
+                          "/z/host/lib", "/usr/host/lib"):
+                cache.write_text(name + "=" + value + "\n")
+                with self.subTest(value=value), self.assertRaisesRegex(ValueError, "escaped"):
                     stage.audit_target_discovery(cache, root / "sdk", root / "ports", root / "source")
     def test_output_cannot_mutate_predecessor_or_work(self):
         with tempfile.TemporaryDirectory() as directory:

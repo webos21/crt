@@ -232,7 +232,14 @@ def audit_target_discovery(cache, sdk, prefix, tree):
             continue
         for entry in value.split(";"):
             if entry.startswith("/") or Path(entry).is_absolute():
-                path = Path(entry).resolve()
+                # CRT/pkg-config paths use /c/... even in a native Windows
+                # CMake cache. Resolve that drive spelling before containment
+                # checks; never accept a different drive or sibling/.. escape.
+                native = entry
+                drive = re.match(r"^/([A-Za-z])(?:/|$)", entry)
+                if os.name == "nt" and drive:
+                    native = drive[1] + ":/" + entry[drive.end():]
+                path = Path(native).resolve()
                 if not any(path.is_relative_to(root.resolve()) for root in (sdk, prefix, tree)):
                     raise ValueError(f"target dependency escaped the SDK/prefix/source: {name}={entry}")
         records[name] = value
@@ -402,6 +409,19 @@ def windows_fontconfig_recipe(recipe, sdk, work, gperf):
     return recipe
 
 
+def verified_notice_bytes(source, expected_sha256):
+    """Ship exact inventory-pinned bytes, accepting only proven CRLF checkout conversion."""
+    if not source.is_file():
+        raise ValueError(f"WebKit notice missing: {source}")
+    data = source.read_bytes()
+    if hashlib.sha256(data).hexdigest() == expected_sha256:
+        return data
+    canonical = data.replace(b"\r\n", b"\n")
+    if hashlib.sha256(canonical).hexdigest() != expected_sha256:
+        raise ValueError(f"WebKit notice differs from inventory: {source}")
+    return canonical
+
+
 def package_provenance(asset, staged, tree, sources, ordered, manifest, report, args, predecessor):
     provenance = staged / "share/crt/dependencies/webkit"
     provenance.mkdir(parents=True, exist_ok=True)
@@ -414,11 +434,10 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
     notices = []
     for record in json.loads((recipe_dir / "license-inventory.json").read_text())["license_files"]:
         source = tree / record["path"]
-        if not source.is_file() or digest(source) != record["sha256"]:
-            raise ValueError(f"WebKit notice differs from inventory: {record['path']}")
+        notice = verified_notice_bytes(source, record["sha256"])
         relative = Path("share/licenses/webkit") / record["path"]
         (staged / relative).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, staged / relative)
+        (staged / relative).write_bytes(notice)
         notices.append(relative.as_posix())
     deps = manifest.setdefault("redistributed_dependencies", [])
     windows = manifest["target"]["os"] == "windows"

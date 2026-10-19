@@ -270,9 +270,24 @@ Binding FindCURL's pkg-config discovery alias to the same already-selected
 static archive is also a permitted link-only repair. The native `make` and
 `openssl` commands are build/verification tools; `openssl` creates fresh
 loopback certificates and is not bundled in the SDK.
-The native Windows development path is under replay (see Web acceptance).
+The native Windows development path has passed installed/space-path and
+product-hidden consumer replay (see [Web acceptance](../acceptance/crtweb_acceptance.md#fresh-windows-full-stage-replay-after-pal-fixes));
+this is not public-release authorization.
 Its build-host tools additionally require Git Bash, native MinGW gcc/g++/make,
-and a POSIX-path Perl for OpenSSL's Unix CRT target; WebKit's own generators
+and a compatible GNU patch (the replay uses Git's 2.7.6, not Strawberry's
+2.5.9, which asserts on a carried patch). Select host patch explicitly via
+PATH while retaining native Windows Perl precedence, for example prepend
+`C:/Strawberry/perl/bin;C:/Program Files/Git/usr/bin;` to the existing host
+PATH. This does not change the target port builder's CRT-only shell PATH.
+The serializer's long input list is dispatched by the CRT-owned Windows
+CMake host-generator adapter through an argument file, without patching the
+upstream generator or shortening the SDK path.
+WebKit notices are shipped with their exact inventory-pinned SHA-256 bytes.
+A Windows CRLF checkout is accepted only when CRLF-to-LF conversion matches
+that pinned hash; other content differences remain fatal and the checkout
+itself is never modified.
+The host tools also require a POSIX-path Perl for OpenSSL's Unix CRT target;
+WebKit's own generators
 still use native Windows Perl. A trimmed Git Perl can use a prepared host-only
 module root through `CRT_WEB_HOST_PERL_LIB`; the entrypoint probes
 `IPC::Cmd`/`ExtUtils::MakeMaker` and records its files' hashes. No global module
@@ -284,8 +299,11 @@ Host/cross-target configurations
 not implemented by these native paths fail explicitly instead of running a
 target generator as a host tool or selecting host libraries.
 
-The public C library is `lib/libcrtweb.so` (Linux) or `lib/libcrtweb.dylib` (macOS). Browser helpers live in
-`libexec/crtweb/{crtweb_host,WebProcess,NetworkProcess,crtweb_gpu_worker}`;
+The public C library is `lib/libcrtweb.so` (Linux), `lib/libcrtweb.dylib`
+(macOS), or `bin/libcrtweb.dll` with `lib/libcrtweb.dll.a` (Windows).
+Browser helpers live in
+`libexec/crtweb/{crtweb_host,WebProcess,NetworkProcess,crtweb_gpu_worker}`
+(with `.exe` suffixes on Windows);
 WebKit and its private dependencies live in `libexec/crtweb/lib/`.
 The CPU browser's media closure (including VA stubs on Linux) is confined there, not placed in the
 SDK's common library directory. Ordinary media applications retain their real
@@ -307,8 +325,8 @@ The public application sample is `examples/web-browser`; it uses a separate
 WebView process and never links WebKit's private Skia. HTTPS needs an explicit
 application PEM trust bundle, and the example has no sandbox. This is not a
 security-hardened browser or an authorization to publish a release. Native
-Windows packaging, cross-target proof, the stable micro-version update
-and support-window confirmation remain the acceptance document's release gates.
+development-package acceptance does not close the cross-target or public-release
+gates recorded in Web acceptance.
 
 The SHA-256 is over the exact release asset bytes, not merely a Git ref. Git
 commit IDs remain provenance metadata, while the digest is the download
