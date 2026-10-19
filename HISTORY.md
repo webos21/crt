@@ -11,6 +11,27 @@ substantive update.
 
 ## 2026-10-20
 
+### macOS CI: host-generator working-directory alias comparison
+
+Reproduced the failure in [Actions job 118328631706](https://github.com/webos21/crt/actions/runs/39330934417/job/118328631706):
+the serializer fixture successfully generated its output, but compared the
+literal temporary build path under `/var/folders/` with `os.getcwd()`'s
+canonical `/private/var/folders/` path. They name the same directory; this was
+a host-test assertion failure, not a CRT/PAL or generator defect.
+
+The regression now compares directory identity with `Path.samefile()`. A
+second fixture explicitly builds through a directory symlink, retaining the
+oversized Unicode/special-character argv, adjacent import, following-command,
+no-op rebuild and changed-dependency checks. Only that extra symlink fixture
+is skipped on Windows, where creating it needs privileges; the original
+generator tests still run. Production code and target ABI are unchanged.
+
+Native macOS validation passes all three host-generator cases and
+`cmake --workflow --preset macos-host-ninja-debug` passes **139/139** tests.
+An initial sandboxed workflow blocked IPv6/Unix socket operations; both pass
+in the full native rerun. This is local verification, not a new hosted CI run;
+Linux/Windows were not replayed on this Mac. `STATUS.md` remains unchanged.
+
 ### Windows Web Tranche 10: fresh isolated SDK and product-hidden space-path acceptance
 
 The v11 official continuation finishes recompilation, dependency audit, API

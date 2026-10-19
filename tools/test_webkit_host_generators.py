@@ -25,8 +25,22 @@ class HostGeneratorTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("cmake") and shutil.which("ninja"), "needs host CMake/Ninja")
     def test_oversized_argv_spaces_dependencies_and_following_commands(self):
+        self.check_generator()
+
+    @unittest.skipIf(sys.platform == "win32", "directory symlinks need Windows privileges")
+    @unittest.skipUnless(shutil.which("cmake") and shutil.which("ninja"), "needs host CMake/Ninja")
+    def test_oversized_argv_through_directory_symlink(self):
+        self.check_generator(symlink=True)
+
+    def check_generator(self, symlink=False):
         with tempfile.TemporaryDirectory(prefix="crt host generator ") as folder:
             root = Path(folder)
+            if symlink:
+                real = root / "real directory"
+                real.mkdir()
+                alias = root / "directory alias"
+                alias.symlink_to(real, target_is_directory=True)
+                root = alias
             source, build = root / "source with spaces", root / "build with spaces"
             source.mkdir()
             generator = source / "generate-serializers.py"
@@ -70,7 +84,8 @@ class HostGeneratorTests(unittest.TestCase):
             run(["cmake", "--build", str(build)])
             result = json.loads((build / "result.json").read_text(encoding="utf-8"))
             self.assertEqual(result["args"], arguments)
-            self.assertEqual(Path(result["cwd"]), build)
+            # getcwd() resolves directory aliases, including macOS /var -> /private/var.
+            self.assertTrue(Path(result["cwd"]).samefile(build), result["cwd"])
             self.assertEqual(result["helper"], 42)
             self.assertTrue((build / "following-command.txt").is_file())
             self.assertTrue((build / "untouched.txt").is_file())
