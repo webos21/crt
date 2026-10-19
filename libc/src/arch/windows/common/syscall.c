@@ -742,8 +742,9 @@ static int winsock_initialized;
  * declares this returning BOOLEAN (a single byte), not BOOL (a 4-byte
  * int) -- same zero-extension ABI reasoning as CreateSymbolicLinkA's
  * own comment above applies here too, so declaring it BOOL is safe. */
-static BOOL(CRT_WINAPI* rtl_gen_random)(void*, unsigned long);
-static int rng_initialized;
+typedef BOOL(CRT_WINAPI* crt_rtl_gen_random_fn)(void*, unsigned long);
+static crt_rtl_gen_random_fn rtl_gen_random;
+static DWORD rng_process_id;
 #if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
 static int ntdll_initialized;
 #endif
@@ -2503,14 +2504,21 @@ void __crt_fd_after_fork_child(void) {
 
   fd_disable_inherit_in_current_process();
   for (i = 0; i < CRT_FD_TABLE_SIZE; ++i) {
-    if (child_process_table[i] != 0 && child_process_table[i] != INVALID_HANDLE_VALUE) {
+    /* CreateProcess's memory-copy fork does not inherit these private,
+     * non-inheritable wait handles. Only their numbers were copied in
+     * .data; a number may now name an unrelated child-owned loader/event
+     * handle. Discard the registry without closing borrowed values.
+     * The legacy NT clone really inherits the handle table instead. */
+    if (windows_unregistered_clone &&
+        child_process_table[i] != 0 && child_process_table[i] != INVALID_HANDLE_VALUE) {
       CloseHandle(child_process_table[i]);
     }
     child_process_table[i] = 0;
     child_pid_table[i] = 0;
     child_notified_table[i] = 0;
   }
-  if (private_wait_process != 0 && private_wait_process != INVALID_HANDLE_VALUE) {
+  if (windows_unregistered_clone &&
+      private_wait_process != 0 && private_wait_process != INVALID_HANDLE_VALUE) {
     CloseHandle(private_wait_process);
   }
   private_wait_process = 0;
@@ -3277,19 +3285,27 @@ static long init_winsock(void) {
  * needed at all. */
 static long init_rng_source(void) {
   HANDLE module;
+  DWORD process_id = GetCurrentProcessId();
+  crt_rtl_gen_random_fn function;
 
-  if (rng_initialized) {
-    return rtl_gen_random != 0 ? 0 : -ENOSYS;
+  /* A memory-copy fork copies this cache, not the parent's loaded DLLs.
+   * Key publication by PID so inherited descriptors and _Fork() also
+   * rebind before calling a parent-only (possibly forwarded) address. */
+  if (__atomic_load_n(&rng_process_id, __ATOMIC_ACQUIRE) == process_id) {
+    return 0;
   }
   module = LoadLibraryA("advapi32.dll");
   if (module == 0) {
-    rng_initialized = 1;
     return -ENOSYS;
   }
-  rtl_gen_random = (BOOL(CRT_WINAPI*)(void*, unsigned long))GetProcAddress(
+  function = (crt_rtl_gen_random_fn)GetProcAddress(
       module, "SystemFunction036");
-  rng_initialized = 1;
-  return rtl_gen_random != 0 ? 0 : -ENOSYS;
+  if (function == 0) {
+    return -ENOSYS;
+  }
+  __atomic_store_n(&rtl_gen_random, function, __ATOMIC_RELAXED);
+  __atomic_store_n(&rng_process_id, process_id, __ATOMIC_RELEASE);
+  return 0;
 }
 
 #if !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__x86_64__) && !defined(_M_X64)
@@ -3638,7 +3654,12 @@ long __crt_sys_read(int fd, void* buf, unsigned long count) {
      * all-or-nothing fill (no short-read concept the way a real device
      * file might have), so a real byte count in, the same count out on
      * success. */
-    if (rtl_gen_random == 0 || !rtl_gen_random(buf, count)) {
+    crt_rtl_gen_random_fn function;
+    if (init_rng_source() != 0) {
+      return -ENOSYS;
+    }
+    function = __atomic_load_n(&rtl_gen_random, __ATOMIC_ACQUIRE);
+    if (!function(buf, count)) {
       return -EIO;
     }
     return (long)count;
@@ -7880,6 +7901,12 @@ long __crt_sys_fork(void) {
   memset(old_inherit_flags, 0, sizeof(old_inherit_flags));
   fd_set_inherit_for_fork(inherit_touched, old_inherit_flags);
   result = __crt_windows_memcopy_fork(&child_pid, &child_process);
+  if (result == 0) {
+    /* _Fork() bypasses the higher-level child hooks. Invalidate here as
+     * well as checking the PID at use, so reuse of an older ancestor's
+     * PID can never make its copied DLL address appear current. */
+    __atomic_store_n(&rng_process_id, 0, __ATOMIC_RELEASE);
+  }
   crt_debug_handle_count("fork_after_memcopy_handles");
   fd_restore_inherit_after_fork(inherit_touched, old_inherit_flags);
 

@@ -4594,6 +4594,17 @@ byte/alias inventory, unchanged v8 source archive hash, absent accepted Windows
 output and revoked diagnostic identities
 (`out/tranche10-windows/closeout.json`, `out/web-windows-tranche10-closeout.log`).
 
+The subsequent [bounded native investigation](../bringup/windows_mksh_tranche10_crash.md)
+fixes a confirmed copied wait-HANDLE ownership defect, with before/after
+regression evidence, C-stage pass and diagnostic libwebp installation replay.
+It additionally reproduces a parent-only RNG DLL address fault in a minimal
+fork consumer and fixes native-cache rebinding for inherited descriptors
+and getrandom, including raw _Fork (100 regression repetitions pass).
+It also captures the native heap fault at `ntdll + 0x31577`, but does not
+establish that all historical heap/unknown-module crashes share these causes. No fresh Windows
+SDK is accepted from that partial runtime correction; the new predecessor
+and full fresh/relocated replay remain required.
+
 Current local logs use `out/web-windows-tranche10-*`; failed predecessor,
 missing import-path and host-configure diagnostics remain separate from final
 acceptance. `TODO.md` retains the open Windows gates and `STATUS.md` is unchanged.

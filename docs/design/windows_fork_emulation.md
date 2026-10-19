@@ -172,6 +172,22 @@ cannot carry sockets across a process boundary at all).
 
 ## fd Table Snapshot / Bootstrap (Shared By Both fork() Backends And `posix_spawn()`)
 
+The memory-copy child's fd-reset hook clears the copied child-process wait
+registry **without closing** its HANDLE values: those private non-inheritable
+handles belong to the parent, and their numbers may already name unrelated
+child-owned loader/signal objects. Only the legacy NT clone inherits and
+closes that registry. The deterministic ownership regression and remaining
+Tranche 10 crash investigation are recorded in
+[`windows_mksh_tranche10_crash.md`](../bringup/windows_mksh_tranche10_crash.md).
+
+Native function-pointer caches also belong to a process, not to the copied
+executable data. The random-device backend keys its atomically published
+SystemFunction036 cache by the current PID and re-resolves it before an
+inherited `/dev/urandom` read as well as a new open/getrandom call. This
+covers raw `_Fork()` too, which does not invoke the `fork()` child hooks.
+The parent-only forwarded cryptbase address otherwise faults in an unmapped
+region in the new process; no public RNG ABI is changed.
+
 The Windows PAL owns the descriptor table in
 `libc/src/arch/windows/common/syscall.c`:
 

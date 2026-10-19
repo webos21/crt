@@ -11,6 +11,62 @@ substantive update.
 
 ## 2026-10-19
 
+### Windows fork: rebind the native RNG cache in the child process
+
+Isolated an additional, deterministic unknown-module access violation:
+after the parent initializes `/dev/urandom`, the copied SystemFunction036
+pointer targets cryptbase.dll, which is absent from the fork child. A full
+dump shows an execute fault in an unmapped region from `__crt_sys_read`.
+The minimal fixture has no unreaped sibling registry, separating this
+defect from the borrowed wait-HANDLE cleanup bug below.
+
+The RNG cache now publishes a PID and function pointer atomically, owns a
+native DLL reference in each process, and rebinds before inherited random
+descriptor reads as well as new opens. Extended `fork_runtime_reset_test`
+covers inherited reads and getrandom after both fork and raw _Fork; all
+100 repetitions pass. The same minimal old-SDK binary faults, whereas a
+recompile against the fixed runtime loads cryptbase in the child and exits
+normally. Windows core remains 156 passed / one expected skip, and both
+the PAL source and regression compile for Windows/arm64. No upstream
+source, public API, CI or Linux/macOS backend is changed. Native arm64
+runtime execution remains for CI/device replay.
+
+This does not prove that the separate historical RtlAllocateHeap read
+fault has the same cause. Its bounded direct native-heap fork probe also
+passes on the old SDK, so that probe is not claimed as a regression for
+the heap incident. Further package replay and limitations belong to
+[the investigation](docs/bringup/windows_mksh_tranche10_crash.md).
+
+### Windows memory-copy fork: preserve child-owned HANDLEs during fd reset
+
+Native mksh debugging exposed a definite ownership defect: copied parent
+process-wait HANDLE numbers were closed in the memory-copy child, although
+CreateProcess never inherited those private handles. Values can already name
+unrelated child loader/signal objects. The child now clears the registry
+without closing borrowed numbers; the legacy NT clone keeps its inherited
+handle cleanup. No public ABI, upstream source or Linux/macOS backend changed.
+
+Added a borrowed-close guard to `fork_runtime_reset_test`:
+the test fails against the original implementation, passes after the fix,
+and passes 100 consecutive repetitions. Test-only CloseHandle IAT
+interposition observes the forbidden operation without depending on Windows
+reusing a particular handle number; other closes delegate to kernel32.
+The earlier event-collision fixture was replaced after a final repeat
+exposed that allocation-policy assumption. Relinked C-stage executables pass
+156 tests with one expected native-COW skip; eight focused shell/fork/process
+cases pass. Windows/arm64 source compilation passes, not a native execution
+claim. Fixed mksh also passes a 1,772-process parallel install-sh diagnostic
+and the retained libwebp make install (1,361 observed processes), without
+observed invalid-handle/access-violation exceptions.
+
+The original SDK additionally reproduced `RtlAllocateHeap + 0x27`
+(`ntdll + 0x31577`) accessing `0x20010`. Its causal connection to the HANDLE defect,
+and the unknown-module/zero-offset event class, remain unproven; the limited
+minidump lacks a decisive native caller stack. Windows Tranche 10 remains
+open pending a new immutable predecessor and fresh isolated/relocation
+replay. Detailed source reasoning, commands and diagnostic limitations are
+in [the investigation](docs/bringup/windows_mksh_tranche10_crash.md).
+
 ### Web Tranche 10: Windows SDK port-tool fixes and runtime blocker evidence
 
 Fixed recipe PATH prepending for Windows CRT mksh (POSIX drive spelling and

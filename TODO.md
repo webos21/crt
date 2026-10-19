@@ -168,6 +168,16 @@ uses the host replay order stated below and in the acceptance document.
     Full predecessor/export and tool-boundary sub-gates are verified. Repeated native
     mksh access violations during port installation block a final fresh build;
     bounded Windows PAL/fork/exec triage must precede SDK/space-path consumer acceptance.
+    * [x] Capture native install-sh crash contexts and fix copied wait-HANDLE ownership;
+      deterministic regression, repeated replay and C stage pass ([investigation](docs/bringup/windows_mksh_tranche10_crash.md)).
+    * [x] Reproduce and fix the parent-only RNG DLL address used after fork/_Fork;
+      inherited `/dev/urandom` and new getrandom calls pass 100 regression repetitions.
+    * [ ] Fix the separately reproduced copied DIR search-handle crash;
+      child readdir faults in FindNextFileA/RtlEnterCriticalSection. Rebinding is under implementation.
+    * [ ] Finish fresh predecessor/port replay and check native-heap fault recurrence;
+      the historical RtlAllocateHeap fault still requires a decisive native stack if it recurs.
+    * [ ] Rebuild a new immutable predecessor SDK after any runtime fix, then run
+      a fresh isolated Windows build and installed/space-path consumer acceptance.
   * [ ] Prove the build-host/target split with x86_64-host -> Linux/aarch64-target:
     host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
     Include fontconfig's generator on every host; its Windows host binding is under replay.
@@ -281,6 +291,13 @@ be replaced.
    same correctness, fork, performance, RSS, distribution, and upper-runtime
    workloads against both implementations. Adoption requires measured benefit
    on the failing baseline without regressing supported hosts.
+
+### Windows virtual random-device descriptor duplication
+
+Separate PAL follow-up: `/dev/urandom` duplication/redirection currently
+returns EBADF in mksh before fork. Freeze Bionic dup/dup2/F_DUPFD behavior
+and add virtual-device descriptor regressions before changing that path
+([diagnostic boundary](docs/bringup/windows_mksh_tranche10_crash.md)).
 
 ### Windows process signals and Toybox `timeout`
 
