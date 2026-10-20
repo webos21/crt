@@ -27,6 +27,7 @@ from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import set_runtime_paths
 from crt_linux_runtime import normalize_cxx_aliases
 import crt_macho
+import crt_source_offer
 from create_dist import DIST_PORTING_TOOLS, write_posix_activation
 from fetch_ports import load_recipes, resolve_recipe_order
 import build_webkit_crt_port as web
@@ -577,6 +578,16 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
     manifest["web_runtime"] = {"sbom": "share/crt/web-sbom.spdx.json", "security": "share/crt/web-security.json",
                                "source_correspondence": "share/crt/web-source-correspondence.json",
                                "development_candidate": True}
+    # The offer inherited from 05-ui covers FFmpeg only; this stage also ships WebKit, so it is rendered again
+    # from the SDK's own recipes (the asset carries the template and the release-time values).
+    version = (staged / "VERSION").read_text(encoding="utf-8").strip()
+    offer = crt_source_offer.install_offer(staged, crt_source_offer.render_offer(
+        asset, crt_source_offer.load_config(asset), "06-web", version,
+        crt_source_offer.components_from_sdk(staged, "06-web"), recipe["product_source"]["commit"]))
+    for dependency in deps:
+        if dependency["name"] in ("webkit", "ffmpeg") and offer not in dependency["notices"]:
+            dependency["notices"].append(offer)
+    manifest["web_runtime"]["source_offer"] = offer
 
 
 def portable_web_macho(staged):

@@ -11,6 +11,34 @@ substantive update.
 
 ## 2026-10-20
 
+### Tranche 10: the LGPL source offer is generated, and the release carries the corresponding source
+
+After the owner's choices (the project's issue tracker as contact, a fixed 3-year period, upstream archives not bundled)
+the source offer stopped being a draft with placeholders. `tools/crt_source_offer.py` renders
+`share/licenses/SOURCE-OFFER.md` from a template, `third_party/crt-runtime/release.json` and the build's own recipes;
+stages that ship FFmpeg get it from `create_dist.py`, `06-web` gets it again with WebKit from `build_stage_06_web.py`,
+`verify_dist.py` rejects a missing or unresolved one, and `prepare_release_assets.py` adds
+`crt-<tag>-corresponding-source.tar.xz` (tracked tree of the release commit plus a manifest naming each upstream archive by
+address and SHA-256). The first isolated build with a changed predecessor refused the packaging-only retry, so `sdk06b`
+is a fresh full `05 -> 06` build: offer, `verify_dist.py`, HTTP/TLS 10/10 and the installed/relocated observer pass.
+The guide `docs/guides/lgpl_source_offer.md` dropped its draft status; the "legal sign-off" gate is now "owner review"
+with external legal review optional. Open: Windows and Linux/aarch64 SDK regeneration, offering `05-ui`/`06-web` in the
+release tool and the `public_release_allowed` switch.
+
+### Tranche 10: header decisions for the inherited libc and an LGPL source-offer draft
+
+The five import-manifest/header findings of the inherited-runtime notices were compared with their upstreams: the
+four header-less imports (`gdtoa_fltrnds.h`, `s_signgam.c`, `s_llrint.c`, `s_llrintf.c`) are byte-identical to Bionic
+main and to OpenBSD/FreeBSD and have no header there either, so each is attributed to its origin (Lucent/gdtoa group,
+BSD-2-Clause `s_lrint.c` group, FreeBSD msun) and recorded in `third_party/bionic/header_decisions.json` bound to the
+file's SHA-256; `gdtoa_support.c` turned out to be a derivative of Bionic's Apache-2.0 `gdtoa_support.cpp`, so it is
+reclassified in the import manifest and carries an Apache-2.0 section 4(b) modification notice. The notice generator
+renders the decisions into `share/licenses/crt-libc/NOTICE` and the provenance (no open finding left; a changed file
+reopens its decision); the macOS SDK stages were regenerated and verified. The LGPL parts of the Web stage (WebKit
+2.54.1, FFmpeg 8.1.2) and what is the corresponding source, the replace/relink path and the offer wording are drafted in
+`docs/guides/lgpl_source_offer.md` with placeholders and seven decisions for the owner and legal review. Not legal
+advice; legal sign-off, hosting/contact for the offer and Windows/aarch64 SDK regeneration remain open.
+
 ### Tranche 10 on Windows/x64: WebKit 2.54.1 isolated replay and inherited-runtime notices
 
 The in-tree Windows SDK was regenerated with the inherited-runtime notices (five stages, each `verify_dist.py` pass,
@@ -21,9 +49,10 @@ C++ runtime per role), HTTP/TLS 10/10, strict PE Host ABI, SPDX with the runtime
 against the newest micro. A copy at a spaced path and an externally rebuilt browser pass the same checks with the
 work root hidden. Nothing in the engine, port or PAL needed a change; the product cache fetch was the pinned 330
 changed Source blobs only, and the port archives were the previous work root's hash-checked cache. Two
-Linux-host-only unit tests that failed on a Windows host were fixed (`tools/test_stage_06_web.py`). Still open for
-the Tranche: Windows/arm64 and Linux/aarch64 SDK regeneration with the notices, the five header decisions, the LGPL
-source offer, legal sign-off, the 2.54 support-window confirmation. Evidence: `docs/acceptance/crtweb_acceptance.md`
+Linux-host-only unit tests that failed on a Windows host were fixed (`tools/test_stage_06_web.py`). This SDK predates the header
+decisions and the generated LGPL source offer that landed the same day: the Windows SDKs are regenerated again with them
+before a release. Still open for the Tranche: Windows/arm64 and Linux/aarch64 SDK regeneration, the 2.54 support-window
+confirmation. Evidence: `docs/acceptance/crtweb_acceptance.md`
 (WebKit 2.54.1 replay on Windows/x64).
 
 ### Tranche 10 on macOS/arm64: WebKit 2.54.1 replay and inherited-runtime notices

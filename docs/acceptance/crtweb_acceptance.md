@@ -5105,9 +5105,39 @@ the pinned revision; `0BSD` for toybox); `crt-libc`, `mksh` and onetrue-awk stay
 other 290 files in the scanned trees have no header and are project-owned under `LICENSE.md`. Cross-checking
 against `third_party/bionic/import_manifest.json` leaves five items that need a human decision and are
 recorded in the component provenance: four imports that carry no in-file header (`gdtoa_fltrnds.h`,
-`s_signgam.c`, `s_llrint.c`, `s_llrintf.c` -- in upstream these are include fragments or one-line
-specializations, not checked against upstream here) and `gdtoa_support.c`, which the manifest calls
-project-owned but which carries an Android Apache-2.0 header. The `libclang_rt.builtins` archive is the
+`s_signgam.c`, `s_llrint.c`, `s_llrintf.c`) and `gdtoa_support.c`, which the manifest called project-owned but
+which carries an Android Apache-2.0 header. **Resolved by engineering review on 2026-10-20** (not legal sign-off),
+by comparing each file with its upstream: the four header-less files are **byte-identical** to Bionic main at the
+pinned `731631f3…` and to OpenBSD `master` / FreeBSD `main` (fetched 2026-10-20), and none has a header upstream
+either. `gdtoa_fltrnds.h` is an 18-line include fragment of netlib gdtoa (the same block, comments included, is inline
+in the headed `dtoa.c` and `strtod.c`) and is included only by `strtof.c`, so it is attributed to the Lucent notice
+(NOTICE group 2); `s_llrint.c` and `s_llrintf.c` are six-line specializations that `#include` the BSD-2-Clause
+`s_lrint.c` (group 4); `s_signgam.c` is three lines (two includes and `int signgam = 0;`) attributed to FreeBSD
+msun, with the question whether such a file needs a license text at all left to legal review.
+`gdtoa_support.c` is a **derivative of Bionic's Apache-2.0 `gdtoa_support.cpp`** (17 lines, two global mutexes; the
+header is verbatim): it is now classified `bionic-main`/`adapted` in the import manifest, and carries a
+modification notice as Apache-2.0 section 4(b) requires. The decisions live in
+`third_party/bionic/header_decisions.json`, each bound to the SHA-256 of the reviewed file (a change reopens it);
+`crt_runtime_notices.py` renders them in the NOTICE ("Imported files without an in-file license header") and records
+them in the provenance (`review_findings` is empty, `review_decisions` lists the four). The LGPL
+source offer for WebKit and FFmpeg is described in `docs/guides/lgpl_source_offer.md`.
+
+*LGPL source offer, generated (2026-10-20).* `share/licenses/SOURCE-OFFER.md` is no longer written by hand:
+`tools/crt_source_offer.py` renders it from `third_party/crt-runtime/SOURCE-OFFER.template.md`, the release-time values
+in `third_party/crt-runtime/release.json` (issue tracker `https://github.com/webos21/crt/issues`, offer period 3 years,
+lower values rejected) and the build's own recipes (FFmpeg 8.1.2 and WPE WebKit 2.54.1: upstream address, SHA-256, size,
+the 23 carried patches). `create_dist.py` installs it in every stage that redistributes FFmpeg, `build_stage_06_web.py`
+renders it again for `06-web` with WebKit, `verify_dist.py` rejects an SDK whose offer is missing, unresolved,
+for another version or stage, or without a component's archive SHA-256, and `prepare_release_assets.py` adds the
+release asset `crt-<tag>-corresponding-source.tar.xz` (the tracked tree of the release commit plus
+`CORRESPONDING-SOURCE.json`; **upstream archives are not copied in**, by decision, so the offer text promises a copy on
+request through the issue tracker for the offer period). Evidence on macOS/arm64: the in-tree `04-gfx-media` and
+`05-ui` SDKs verify with the offer; a **fresh** isolated `05 -> 06` build (the incremental packaging retry was rightly
+refused because the predecessor changed) produced `sdk06b` whose offer names both components, whose manifest lists it as a
+notice of `ffmpeg` and `webkit`, and which passes `verify_dist.py`, HTTP/TLS 10/10 and the installed and relocated
+(work root hidden) process observer. A rehearsal bundle of the current tree is 25 MB (2,143 members, the 23 patches and the recipes included). New tests: `test_crt_source_offer.py` (10), the release-tool cases (25). The
+Windows and Linux/aarch64 SDKs have not been regenerated with the generator, and `prepare_release_assets.py` still
+publishes only `01-c`..`04-gfx-media`. The `libclang_rt.builtins` archive is the
 build toolchain's; its exact version is not pinned by the SDK.
 
 This is an engineering inventory, not a legal review, and it was first exercised on Linux/x86_64. *macOS/arm64

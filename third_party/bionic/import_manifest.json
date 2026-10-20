@@ -1234,13 +1234,13 @@
     {
       "local": "libc/src/gdtoa/gdtoa_support.c",
       "component": "libc",
-      "source_kind": "project-owned",
-      "upstream_ref": "project-owned",
-      "upstream_path": "none",
-      "status": "new",
-      "review_class": "project_owned",
-      "license_family": "project",
-      "reason": "Project C99 equivalent of Bionic gdtoa_support.cpp, with slot-specific locks for the imported MULTIPLE_THREADS gdtoa code.",
+      "source_kind": "bionic-main",
+      "upstream_ref": "main at 731631f300090436d7f5df80d50b6275c8c60a93",
+      "upstream_path": "libc/upstream-openbsd/android/gdtoa_support.cpp",
+      "status": "adapted",
+      "review_class": "main_current",
+      "license_family": "Apache-2.0 via Android Open Source Project",
+      "reason": "Derived from Bionic's gdtoa_support.cpp (Apache-2.0, 17 lines, two global mutexes): ported to C99 with slot-specific locks for the imported MULTIPLE_THREADS gdtoa code, plus a new FPCR/MXCSR rounding-mode reader. The upstream header is kept and a modification notice added (Apache-2.0 section 4(b)); classified as a Bionic-derived file, not project-owned, by the Tranche 10 header review.",
       "next_action": "Revisit when the gdtoa tranche expands to dtoa output conversion or native x87 long double parsing."
     },
     {

@@ -11,6 +11,7 @@ from create_dist import DIST_PORTING_TOOLS, DIST_PORTING_DIRS, DIST_WRAPPER_TOOL
 from crt_binary_dependencies import validate_binary_dependencies
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import is_absolute_runtime_entry, runtime_paths
+import crt_source_offer
 from crt_stage_recipe import recipe_filename_for_stage, validate_recipe
 
 
@@ -184,6 +185,17 @@ def validate_runtime_components(stage: str, dependencies: dict[str, dict]) -> No
                 raise SystemExit(f"stage {stage} does not declare the inherited runtime component {name}")
             if not item.get("notices"):
                 raise SystemExit(f"inherited runtime component {name} carries no notice file")
+
+
+def validate_source_offer(dist: Path, stage: str, dependencies: dict[str, dict]) -> None:
+    """A stage that ships FFmpeg (and 06-web: WebKit) carries the generated, fully resolved LGPL source offer."""
+    if "ffmpeg" not in dependencies:
+        return
+    version = (dist / "VERSION").read_text(encoding="utf-8").strip()
+    problems = crt_source_offer.check_installed_offer(
+        dist, stage, version, crt_source_offer.components_from_sdk(dist, stage))
+    if problems:
+        raise SystemExit("LGPL source offer: " + "; ".join(problems))
 
 
 def validate_redistributed_dependencies(dist: Path, manifest: dict) -> dict[str, dict]:
@@ -450,6 +462,7 @@ def main() -> None:
     validate_external_prerequisites(manifest)
     redistributed = validate_redistributed_dependencies(dist, manifest)
     validate_runtime_components(args.stage, redistributed)
+    validate_source_offer(dist, args.stage, redistributed)
     porting = manifest.get("optional_tools", {}).get("porting", {})
     if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:
         raise SystemExit("manifest does not describe the optional packaged porting tools")

@@ -28,6 +28,10 @@ STAGE_VALIDATION_PROJECT_PATHS = (
     # create_dist.py imports it; the registry is read only for the stage that introduces a component.
     "tools/crt_runtime_notices.py",
     "third_party/crt-runtime/components.json",
+    # The LGPL source offer (stages that ship FFmpeg) and its release-time values.
+    "tools/crt_source_offer.py",
+    "third_party/crt-runtime/release.json",
+    "third_party/crt-runtime/SOURCE-OFFER.template.md",
 )
 
 

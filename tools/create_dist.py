@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import crt_runtime_notices
+import crt_source_offer
 from create_rootfs import TOYBOX_APPLETS
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import remove_absolute_runtime_paths
@@ -699,6 +700,14 @@ def main() -> None:
     # notices and provenance enter the SDK at the stage that first ships them.
     redistributed_dependencies = crt_runtime_notices.add_runtime_dependencies(
         root, destination, args.stage, redistributed_dependencies)
+    # FFmpeg is LGPL: a stage that ships it carries the generated source offer (tools/crt_source_offer.py).
+    if any(item.get("name") == "ffmpeg" for item in redistributed_dependencies):
+        offer = crt_source_offer.install_offer(destination, crt_source_offer.render_offer(
+            root, crt_source_offer.load_config(root), args.stage, args.release_version,
+            crt_source_offer.components_from_root(root, args.stage, True), crt_source_offer.try_commit(root)))
+        for item in redistributed_dependencies:
+            if item.get("name") == "ffmpeg" and offer not in item["notices"]:
+                item["notices"].append(offer)
     copy_porting_sdk(root, destination)
     copy_stage_recipes([recipe.resolve() for recipe in args.stage_recipe], destination)
     install_wrapper_applets(destination, args.target_os)

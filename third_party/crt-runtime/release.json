@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "purpose": "Release-time values that the generated LGPL source offer (share/licenses/SOURCE-OFFER.md) needs and that cannot be derived from a build: where a recipient asks, and for how long. Everything else (tag, commit, upstream archives and hashes, patches) is derived at build or release time by tools/crt_source_offer.py.",
+  "repository_url": "https://github.com/webos21/crt",
+  "issue_tracker_url": "https://github.com/webos21/crt/issues",
+  "offer_years": 3
+}

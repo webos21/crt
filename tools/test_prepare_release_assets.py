@@ -216,6 +216,32 @@ class Prepare(TempCase):
         shutil.unpack_archive(str(out / f"crt-{TAG}-windows-x86_64-01-c.zip"), self.tmp / "x")
         self.assertEqual((self.tmp / "x" / "01-c" / "VERSION").read_text().strip(), TAG)
 
+    def test_media_stage_release_carries_the_corresponding_source_bundle(self):
+        sources = self.tmp / "stage-sources"
+        sdks = {"04-gfx-media": self._stage("04-gfx-media", sources)}
+        built = []
+
+        def fake_bundle(root, config, version, output_dir, components, allow_dirty=False):
+            built.append((version, [c["name"] for c in components], allow_dirty))
+            path = output_dir / release.crt_source_offer.bundle_name(version)
+            path.write_bytes(b"bundle")
+            return path
+
+        with mock.patch.object(release.crt_source_offer, "build_bundle", side_effect=fake_bundle), \
+             mock.patch.object(release, "check_sdk", return_value=(
+                 {"target": {"os": "windows", "arch": "x86_64"}}, [])):
+            result, out = self._run(sdks)
+        self.assertEqual([(TAG, ["FFmpeg"], False)], built)
+        entry = next(a for a in result["assets"] if a["kind"] == "corresponding-source")
+        self.assertEqual(f"crt-{TAG}-corresponding-source.tar.xz", entry["name"])
+        self.assertEqual(hashlib.sha256(b"bundle").hexdigest(), entry["sha256"])
+        self.assertIn(entry["name"], (out / release.checksum_file_name("windows", "x86_64")).read_text())
+
+    def test_lower_stages_carry_no_bundle(self):
+        sources = self.tmp / "stage-sources"
+        result, _ = self._run({"01-c": self._stage("01-c", sources)})
+        self.assertFalse([a for a in result["assets"] if a["kind"] == "corresponding-source"])
+
     def test_stage_source_asset_is_copied_byte_identical(self):
         sources = self.tmp / "stage-sources"
         sdks = {"01-c": self._stage("01-c", sources)}

@@ -17,11 +17,13 @@
       "notices": [
         {"path": "LICENSE.md", "dest": "LICENSE.md"},
         {"path": "third_party/bionic/README.md", "dest": "bionic-provenance/README.md"},
-        {"path": "third_party/bionic/import_manifest.json", "dest": "bionic-provenance/import_manifest.json"}
+        {"path": "third_party/bionic/import_manifest.json", "dest": "bionic-provenance/import_manifest.json"},
+        {"path": "third_party/bionic/header_decisions.json", "dest": "bionic-provenance/header_decisions.json"}
       ],
       "header_scan": {
         "roots": ["libc/src", "libc/include", "include", "libm/src", "libdl", "libstdc++/src"],
-        "extensions": [".c", ".h", ".S", ".s", ".cc", ".cpp", ".inc"]
+        "extensions": [".c", ".h", ".S", ".s", ".cc", ".cpp", ".inc"],
+        "decisions": "third_party/bionic/header_decisions.json"
       }
     },
     {
