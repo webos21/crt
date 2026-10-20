@@ -11,6 +11,17 @@ substantive update.
 
 ## 2026-10-20
 
+### Tranche 10 on macOS/arm64: WebKit 2.54.1 replay and inherited-runtime notices
+
+The in-tree macOS SDK was regenerated with the inherited-runtime notices (five stages, each verified, 139/290 header
+inventory identical to Linux), then a fresh isolated `05 -> 06` build on the 2.54.1 pin ran end to end: 8,302 WebKit
+actions with the 23 patches unchanged, installed browser, HTTP/TLS 10/10, 37 exports, strict Host ABI, observer
+(Host/Web/Network, one CRT C++ image per role), a relocated space-path copy and an external rebuilt consumer with
+the work root hidden, SPDX with the runtime components, security snapshot against the newest micro. Nothing in the
+engine, port or PAL needed a change. Still open for the Tranche: Windows replay of 2.54.1, aarch64 and Windows SDK
+regeneration with the notices, the five header decisions, the LGPL source offer, legal sign-off and the 2.54
+support-window confirmation. Evidence: `docs/acceptance/crtweb_acceptance.md` (WebKit 2.54.1 replay on macOS/arm64).
+
 ### Tranche 10: WebKit 2.54.1 re-pin and inherited-runtime notices
 
 Re-pinned `libcrtweb/third_party/webkit` from 2.54.0 to 2.54.1 (lightweight upstream tag: archive `.asc` and a

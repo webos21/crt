@@ -4993,6 +4993,49 @@ camera capture and network trust. Findings on the way, none caused by 2.54.1:
   flat through iteration 100; 2.54.0 does the same). Its warm-up is now 20 iterations; the leak bound is
   unchanged.
 
+#### WebKit 2.54.1 replay on macOS/arm64 (2026-10-20)
+
+Native replay on macOS 27.0.1/Apple M1 Pro of the pin above, through the official isolated entrypoint: the
+in-tree `05-ui` SDK was regenerated first (all five stage publishers rebuilt with the inherited-runtime
+packaging and each `verify_dist.py` pass), copied to an immutable `predecessor05`, a `06-web` source asset and
+recipe were generated from the clean tree (`tools/create_stage_source.py`, asset SHA-256
+`ae5b4f3b88f5f06ee624bbeabc3f06f942e863d7dcbbbf52d2724b4d57581db9`), and `tools/crt-stage-build.py` built
+`out/tranche10-macos-2541/sdk06` in a fresh work root with the product checkout fetched afresh at commit
+`537776966344c4982751692dd475c94124504271`:
+
+```sh
+python3 tools/crt-stage-build.py --sdk-root out/tranche10-macos-2541/predecessor05 \
+  --recipe out/tranche10-macos-2541/assets/06-web.json \
+  --asset out/tranche10-macos-2541/assets/crt-tranche10-macos-2541-macos-06-web-source.tar.xz \
+  --work-root /private/tmp/crtw10n --output "$PWD/out/tranche10-macos-2541/sdk06" --dependency-jobs 6
+```
+
+A **fresh 8,302-action** WebKit build completed with all 23 carried patches applied unchanged (the macOS chain
+included) and the CRT-owned `HighPriorityThreads.h` adaptation; no new patch, hunk or macOS code was needed. The
+SDK passes the stage's own gates: installed `crtweb_browser --smoke` (load/pixels/script), HTTP/TLS **10/10**, the
+export check (**37** public `crtweb_*` exports, none foreign), strict static Host ABI and `verify_dist.py`; the native
+`ps`/`vmmap` observer finds Host/Web/Network, one CRT C++ image per role, no violation and no owned process left
+(4,631 mapped files, Apple shared-cache images recorded separately). The SDK manifest, `web-sbom.spdx.json` (30
+packages) and `web-source-correspondence.json` name WebKit **2.54.1** and the five inherited-runtime components;
+`web-security.json` records 50 advisories checked, `pin_is_latest_micro: true` and `public_release_allowed: false`.
+
+Relocation: the SDK was copied with symlinks to `relocated SDK/06-web` (a space path) and its installed
+`examples/web-browser` rebuilt in a fresh directory with only that SDK's toolchain; with the **entire** work root
+`/private/tmp/crtw10n` renamed out of reach, the installed browser, the relocated browser and the external rebuild
+each pass the observer (same 4,631 mappings, one C++ runtime per role, nothing left), `verify_dist.py` passes on both
+SDKs, and no loader-path override is used. The work root was restored afterwards. The libc additions of the re-pin
+build and behave on macOS as documented: `getpriority`/`setpriority(0)` succeed, a nonzero priority and
+`SCHED_RESET_ON_FORK` fail with `ENOTSUP`; the new WTF thread-priority code is Linux-only, so nothing in the
+Mach-O build calls it.
+
+Native in-tree C-stage/Web `ctest` **201/201** (the GPU cases skip without their opt-in), the stage tests (45, three
+skipped), runtime-notice, create-dist, licensing, source-closure and host-generator tests, and the patch gate (23
+patches / 63 modified / 24 CRT-owned files) pass. *Not done here:* the in-tree `build_webkit_crt_port.py` gate was not
+re-run against 2.54.1 on macOS (the isolated stage is the replay; the `libcurl.so.4` search-order problem recorded above
+is an ELF RPATH issue and does not exist on this host, where the gate removes the loader path from the framework-linked
+test and the Web stage links WebKit's private OpenSSL curl); Windows is not replayed; upstream's support window for the
+2.54 series is still unconfirmed.
+
 #### Inherited runtime notices (2026-10-20)
 
 Every SDK stage redistributes libc/libm/libdl, the shell and (from `02-cxx`) the imported LLVM C++ runtime,
@@ -5014,9 +5057,13 @@ specializations, not checked against upstream here) and `gdtoa_support.c`, which
 project-owned but which carries an Android Apache-2.0 header. The `libclang_rt.builtins` archive is the
 build toolchain's; its exact version is not pinned by the SDK.
 
-This is an engineering inventory, not a legal review, and it was exercised only on Linux/x86_64: the
-Windows and macOS SDKs run the same packaging code but were not rebuilt, and the aarch64 SDK was not
-regenerated with it. Source-offer text for the LGPL parts of the Web stage and a legal sign-off remain the
+This is an engineering inventory, not a legal review, and it was first exercised on Linux/x86_64. *macOS/arm64
+(2026-10-20):* all five stage publishers were regenerated; every manifest lists `crt-libc`, `mksh`, `toybox` and
+`onetrue-awk` from `01-c` and `llvm-runtimes` from `02-cxx`, `verify_dist.py` requires them and passes, and the
+macOS `crt-libc/NOTICE` is the same inventory (139 files with a header, 290 project-owned) because the scan is
+over the sources, not the host. The isolated `06-web` SDK carries them in its SPDX document with the same
+declared-license policy (`Apache-2.0 WITH LLVM-exception`, `0BSD`, `NOASSERTION` for the rest). The Windows SDKs
+were not rebuilt, and the aarch64 SDK was not regenerated with it. Source-offer text for the LGPL parts of the Web stage and a legal sign-off remain the
 publication gate.
 
 ## Host order
