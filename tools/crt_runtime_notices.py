@@ -113,7 +113,54 @@ def scan_headers(root: Path, scan: dict) -> dict:
     return {"groups": ordered, "headerless": headerless}
 
 
-def render_notice(component: dict, scan: dict) -> str:
+def load_decisions(root: Path, scan_config: dict) -> list:
+    """The reviewed resolutions of header findings (third_party/bionic/header_decisions.json), if configured."""
+    location = scan_config.get("decisions")
+    if not location:
+        return []
+    path = root / location
+    if not path.is_file():
+        raise ValueError(f"header decisions file is missing: {location}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("schema_version") != 1:
+        raise ValueError(f"{location}: unsupported schema_version")
+    return data["entries"]
+
+
+def group_number(scan: dict, file: str) -> int:
+    """1-based number of the license group that lists `file`, or 0."""
+    for index, group in enumerate(scan["groups"], 1):
+        if file in group["files"]:
+            return index
+    return 0
+
+
+def resolve_findings(root: Path, findings: list, scan: dict, decisions: list) -> tuple:
+    """Splits the findings into (resolved decisions, open findings).
+
+    A finding is resolved by a decision for the same file whose SHA-256 equals the file as it is now
+    (a changed file reopens it) and whose `covered_by` reference file really carries a license header
+    in the scan. Everything else stays open."""
+    by_file = {entry["file"]: entry for entry in decisions}
+    resolved, still_open = [], []
+    for finding in findings:
+        entry = by_file.get(finding["file"])
+        if entry is None:
+            still_open.append(finding)
+            continue
+        current = sha256_bytes((root / finding["file"]).read_bytes())
+        if current != entry["sha256"]:
+            still_open.append({**finding, "issue": "changed since its header decision was recorded"})
+            continue
+        number = group_number(scan, entry["covered_by"]) if entry.get("covered_by") else 0
+        if entry["decision"] == "covered-by-group" and not number:
+            still_open.append({**finding, "issue": f"covering file {entry['covered_by']} carries no license header"})
+            continue
+        resolved.append({**entry, "group": number, "finding": finding["issue"]})
+    return resolved, still_open
+
+
+def render_notice(component: dict, scan: dict, resolved: list | None = None) -> str:
     lines = [f"{component['name']} -- third-party license headers found in the redistributed sources",
              "",
              "Project-owned code (every file below without a license header) is under the default license",
@@ -139,6 +186,23 @@ def render_notice(component: dict, scan: dict) -> str:
         lines.append("-" * 78)
         lines.append(group["text"])
         lines.append("")
+    if resolved:
+        lines.append("=" * 78)
+        lines.append("Imported files without an in-file license header")
+        lines.append("")
+        lines.append("These files carry no license text upstream either. Each was compared with its upstream and")
+        lines.append("attributed as below (engineering review; the legal review of this notice is a separate gate).")
+        lines.append("")
+        for entry in resolved:
+            lines.append(entry["file"])
+            lines.append("  License: " + entry["license"])
+            if entry.get("group"):
+                lines.append(f"  Same license as Group {entry['group']} (see {entry['covered_by']}).")
+            for upstream in entry["upstream"]:
+                lines.append(f"  Upstream {upstream['comparison']}: {upstream['repository']} {upstream['path']} @ {upstream['ref']}")
+            for reason in entry["basis"]:
+                lines.append("  - " + reason)
+            lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -192,18 +256,21 @@ def install_component(root: Path, destination: Path, component: dict) -> dict:
     scan_findings = []
     if "header_scan" in component:
         scan = scan_headers(root, component["header_scan"])
-        text = render_notice(component, scan)
+        scan_findings = bionic_header_findings(root, scan)
+        decided, scan_findings = resolve_findings(root, scan_findings, scan, load_decisions(root, component["header_scan"]))
+        text = render_notice(component, scan, decided)
         target = licenses / "NOTICE"
         (destination / target).parent.mkdir(parents=True, exist_ok=True)
         (destination / target).write_text(text, encoding="utf-8", newline="\n")
         notices.append(target.as_posix())
-        scan_findings = bionic_header_findings(root, scan)
         provenance["header_scan"] = {
             "roots": component["header_scan"]["roots"], "groups": len(scan["groups"]),
             "files_with_header": sum(len(g["files"]) for g in scan["groups"]),
             "files_without_header": len(scan["headerless"]),
             "notice_sha256": sha256_bytes(text.encode("utf-8")),
-            "review_findings": scan_findings}
+            "review_findings": scan_findings,
+            "review_decisions": [{"file": item["file"], "decision": item["decision"], "group": item["group"],
+                                  "sha256": item["sha256"]} for item in decided]}
     provenance_path = Path("share/crt/dependencies") / name / "provenance.json"
     (destination / provenance_path).parent.mkdir(parents=True, exist_ok=True)
     (destination / provenance_path).write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8", newline="\n")
@@ -242,10 +309,11 @@ def main() -> int:
     for component in stage_components(registry, args.stage):
         if "header_scan" in component:
             scan = scan_headers(args.root, component["header_scan"])
-            findings = bionic_header_findings(args.root, scan)
+            decided, findings = resolve_findings(args.root, bionic_header_findings(args.root, scan), scan,
+                                                 load_decisions(args.root, component["header_scan"]))
             print(f"{component['name']}: {len(scan['groups'])} license header groups, "
                   f"{sum(len(g['files']) for g in scan['groups'])} headed / {len(scan['headerless'])} project-default files, "
-                  f"{len(findings)} review finding(s)")
+                  f"{len(decided)} finding(s) resolved by a recorded decision, {len(findings)} open")
             for finding in findings:
                 print("  review:", json.dumps(finding))
         else:

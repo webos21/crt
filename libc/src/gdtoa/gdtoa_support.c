@@ -14,6 +14,15 @@
  * limitations under the License.
  */
 
+/*
+ * Modified by the CRT project, 2026 (Apache License 2.0, section 4(b)): this file derives from Bionic's
+ * libc/upstream-openbsd/android/gdtoa_support.cpp (main at 731631f300090436d7f5df80d50b6275c8c60a93), which
+ * only defines the two process-wide mutexes __dtoa_locks[]. It is ported to C99; the two fixed mutexes are
+ * replaced by locks keyed by the imported gdtoa code's lock slot (__crt_gdtoa_mutex_lock/_unlock, used
+ * through thread_private.h); and __crt_gdtoa_flt_rounds(), a read of the AArch64 FPCR / x86-64 MXCSR rounding
+ * mode, is new. The license header above is unchanged.
+ */
+
 #include <pthread.h>
 
 static pthread_mutex_t gdtoa_map_lock = PTHREAD_MUTEX_INITIALIZER;

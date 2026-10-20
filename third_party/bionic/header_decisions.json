@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "purpose": "Engineering resolutions of the import-manifest vs in-file-header findings of tools/crt_runtime_notices.py (Tranche 10). Each entry is bound to the SHA-256 of the file as reviewed: a change to the file reopens the finding. This is an engineering comparison against upstream, not legal advice; legal sign-off of the inherited-runtime notices is a separate publication gate.",
+  "reviewed": "2026-10-20",
+  "reviewer": "engineering",
+  "legal_signoff": "pending",
+  "entries": [
+    {
+      "file": "libc/src/gdtoa/gdtoa_fltrnds.h",
+      "sha256": "370f7621e16c280350e9b350048f53a6425fc8b6d4dc700f8583169f4a881208",
+      "decision": "covered-by-group",
+      "covered_by": "libc/src/gdtoa/strtof.c",
+      "license": "Lucent Technologies permissive notice (David M. Gay, netlib gdtoa), as carried by the gdtoa files that include it",
+      "upstream": [
+        {
+          "repository": "https://android.googlesource.com/platform/bionic",
+          "ref": "731631f300090436d7f5df80d50b6275c8c60a93",
+          "path": "libc/upstream-openbsd/lib/libc/gdtoa/gdtoa_fltrnds.h",
+          "comparison": "byte-identical"
+        },
+        {
+          "repository": "https://github.com/openbsd/src",
+          "ref": "master (fetched 2026-10-20)",
+          "path": "lib/libc/gdtoa/gdtoa_fltrnds.h",
+          "comparison": "byte-identical"
+        }
+      ],
+      "basis": [
+        "Neither upstream copy has a header: it is an 18-line include fragment (the Honor_FLT_ROUNDS block), not a stand-alone work.",
+        "The same block, with the same comment text, appears inline in headed Lucent-licensed gdtoa files of this tree (libc/src/gdtoa/dtoa.c, strtod.c); it is netlib gdtoa code.",
+        "It is included only by libc/src/gdtoa/strtof.c, which carries the Lucent notice."
+      ]
+    },
+    {
+      "file": "libm/src/freebsd/s_signgam.c",
+      "sha256": "23a43a7c3cc1663d79ad2b71c58f97648ca3096b0d87715c28038e4f28e5956e",
+      "decision": "attribute-to-upstream-no-text",
+      "license": "FreeBSD msun, no license text in the file upstream; the FreeBSD files it ships with in this tree carry fdlibm and BSD-2-Clause headers",
+      "upstream": [
+        {
+          "repository": "https://android.googlesource.com/platform/bionic",
+          "ref": "731631f300090436d7f5df80d50b6275c8c60a93",
+          "path": "libm/upstream-freebsd/lib/msun/src/s_signgam.c",
+          "comparison": "byte-identical"
+        },
+        {
+          "repository": "https://github.com/freebsd/freebsd-src",
+          "ref": "main (fetched 2026-10-20)",
+          "path": "lib/msun/src/s_signgam.c",
+          "comparison": "byte-identical"
+        }
+      ],
+      "basis": [
+        "Three lines (two #include directives and the definition `int signgam = 0;`); the upstream file has no header either.",
+        "Redistributed unmodified as part of FreeBSD msun via Bionic; it is attributed to that origin and not claimed as project-owned.",
+        "Whether a three-line definition needs a separate license text at all is left to the legal review."
+      ]
+    },
+    {
+      "file": "libm/src/freebsd/s_llrint.c",
+      "sha256": "dbe6a63d2aa2e36a358a30cfdec071c4e5cd684d11634b6dd423928269ce43c3",
+      "decision": "covered-by-group",
+      "covered_by": "libm/src/freebsd/s_lrint.c",
+      "license": "BSD-2-Clause, Copyright (c) 2005 David Schultz (FreeBSD s_lrint.c, which this file includes)",
+      "upstream": [
+        {
+          "repository": "https://android.googlesource.com/platform/bionic",
+          "ref": "731631f300090436d7f5df80d50b6275c8c60a93",
+          "path": "libm/upstream-freebsd/lib/msun/src/s_llrint.c",
+          "comparison": "byte-identical"
+        },
+        {
+          "repository": "https://github.com/freebsd/freebsd-src",
+          "ref": "main (fetched 2026-10-20)",
+          "path": "lib/msun/src/s_llrint.c",
+          "comparison": "byte-identical"
+        }
+      ],
+      "basis": [
+        "Six lines of #define followed by `#include \"s_lrint.c\"`: a specialization of the headed file, no header upstream."
+      ]
+    },
+    {
+      "file": "libm/src/freebsd/s_llrintf.c",
+      "sha256": "5f2c768299f021604b5e6b21d7ce13d9c758b62f65a24d50b235da13572fd11d",
+      "decision": "covered-by-group",
+      "covered_by": "libm/src/freebsd/s_lrint.c",
+      "license": "BSD-2-Clause, Copyright (c) 2005 David Schultz (FreeBSD s_lrint.c, which this file includes)",
+      "upstream": [
+        {
+          "repository": "https://android.googlesource.com/platform/bionic",
+          "ref": "731631f300090436d7f5df80d50b6275c8c60a93",
+          "path": "libm/upstream-freebsd/lib/msun/src/s_llrintf.c",
+          "comparison": "byte-identical"
+        },
+        {
+          "repository": "https://github.com/freebsd/freebsd-src",
+          "ref": "main (fetched 2026-10-20)",
+          "path": "lib/msun/src/s_llrintf.c",
+          "comparison": "byte-identical"
+        }
+      ],
+      "basis": [
+        "Same pattern as s_llrint.c for the float specialization."
+      ]
+    }
+  ]
+}

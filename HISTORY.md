@@ -11,6 +11,20 @@ substantive update.
 
 ## 2026-10-20
 
+### Tranche 10: header decisions for the inherited libc and an LGPL source-offer draft
+
+The five import-manifest/header findings of the inherited-runtime notices were compared with their upstreams: the
+four header-less imports (`gdtoa_fltrnds.h`, `s_signgam.c`, `s_llrint.c`, `s_llrintf.c`) are byte-identical to Bionic
+main and to OpenBSD/FreeBSD and have no header there either, so each is attributed to its origin (Lucent/gdtoa group,
+BSD-2-Clause `s_lrint.c` group, FreeBSD msun) and recorded in `third_party/bionic/header_decisions.json` bound to the
+file's SHA-256; `gdtoa_support.c` turned out to be a derivative of Bionic's Apache-2.0 `gdtoa_support.cpp`, so it is
+reclassified in the import manifest and carries an Apache-2.0 section 4(b) modification notice. The notice generator
+renders the decisions into `share/licenses/crt-libc/NOTICE` and the provenance (no open finding left; a changed file
+reopens its decision); the macOS SDK stages were regenerated and verified. The LGPL parts of the Web stage (WebKit
+2.54.1, FFmpeg 8.1.2) and what is the corresponding source, the replace/relink path and the offer wording are drafted in
+`docs/guides/lgpl_source_offer_draft.md` with placeholders and seven decisions for the owner and legal review. Not legal
+advice; legal sign-off, hosting/contact for the offer and Windows/aarch64 SDK regeneration remain open.
+
 ### Tranche 10 on macOS/arm64: WebKit 2.54.1 replay and inherited-runtime notices
 
 The in-tree macOS SDK was regenerated with the inherited-runtime notices (five stages, each verified, 139/290 header

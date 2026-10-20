@@ -139,15 +139,53 @@ class RegistryTests(unittest.TestCase):
             self.assertIn("Apache License v2.0 with LLVM Exceptions", text, name)
             self.assertIn("LLVM Exceptions to the Apache 2.0 License", text, name)
 
-    def test_libc_scan_has_no_unexplained_findings_beyond_the_recorded_five(self) -> None:
+    def test_libc_scan_findings_are_all_resolved_by_recorded_decisions(self) -> None:
         registry = notices.load_registry()
         libc = next(c for c in registry["components"] if c["name"] == "crt-libc")
         scan = notices.scan_headers(notices.ROOT, libc["header_scan"])
-        findings = {item["file"] for item in notices.bionic_header_findings(notices.ROOT, scan)}
-        self.assertEqual({
-            "libc/src/gdtoa/gdtoa_fltrnds.h", "libc/src/gdtoa/gdtoa_support.c", "libm/src/freebsd/s_signgam.c",
-            "libm/src/freebsd/s_llrint.c", "libm/src/freebsd/s_llrintf.c"}, findings,
-            "a new import without a license header (or a changed review item) needs a decision")
+        raw = notices.bionic_header_findings(notices.ROOT, scan)
+        self.assertEqual({"libc/src/gdtoa/gdtoa_fltrnds.h", "libm/src/freebsd/s_signgam.c",
+                          "libm/src/freebsd/s_llrint.c", "libm/src/freebsd/s_llrintf.c"},
+                         {item["file"] for item in raw})
+        decided, still_open = notices.resolve_findings(
+            notices.ROOT, raw, scan, notices.load_decisions(notices.ROOT, libc["header_scan"]))
+        self.assertEqual([], still_open, "a new import without a license header needs a recorded decision")
+        self.assertEqual(4, len(decided))
+        for entry in decided:
+            self.assertTrue(entry["upstream"] and entry["basis"], entry["file"])
+        text = notices.render_notice(libc, scan, decided)
+        self.assertIn("Imported files without an in-file license header", text)
+        self.assertIn("libm/src/freebsd/s_signgam.c", text)
+
+    def test_gdtoa_support_is_a_bionic_derived_apache_file_with_a_modification_notice(self) -> None:
+        source = (notices.ROOT / "libc" / "src" / "gdtoa" / "gdtoa_support.c").read_text(encoding="utf-8")
+        self.assertIn("Licensed under the Apache License, Version 2.0", source)
+        self.assertIn("Modified by the CRT project", source)
+        manifest = json.loads((notices.ROOT / "third_party" / "bionic" / "import_manifest.json").read_text(encoding="utf-8"))
+        entry = next(e for e in manifest["entries"] if e["local"] == "libc/src/gdtoa/gdtoa_support.c")
+        self.assertEqual("bionic-main", entry["source_kind"])
+        self.assertTrue(entry["upstream_path"].endswith("gdtoa_support.cpp"))
+
+    def test_a_changed_file_reopens_its_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "ref.c").write_text(BSD + "int r;\n")
+            (root / "src" / "frag.c").write_text("int frag;\n")
+            scan = notices.scan_headers(root, {"roots": ["src"], "extensions": [".c"]})
+            finding = {"file": "src/frag.c", "issue": "import without an in-file license header"}
+            decision = {"file": "src/frag.c", "sha256": notices.sha256_bytes(b"int frag;\n"), "decision": "covered-by-group",
+                        "covered_by": "src/ref.c", "license": "BSD", "upstream": [], "basis": []}
+            decided, still_open = notices.resolve_findings(root, [finding], scan, [decision])
+            self.assertEqual(([1], []), ([item["group"] for item in decided], still_open))
+            (root / "src" / "frag.c").write_text("int frag; /* edited */\n")
+            decided, still_open = notices.resolve_findings(root, [finding], scan, [decision])
+            self.assertEqual([], decided)
+            self.assertIn("changed since", still_open[0]["issue"])
+            decision["covered_by"] = "src/missing.c"
+            (root / "src" / "frag.c").write_text("int frag;\n")
+            decided, still_open = notices.resolve_findings(root, [finding], scan, [decision])
+            self.assertIn("carries no license header", still_open[0]["issue"])
 
 
 class VerifyDistRuntimeTests(unittest.TestCase):
