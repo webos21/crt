@@ -181,7 +181,7 @@ uses the host replay order stated below and in the acceptance document.
     candidate); still open: owner review (external legal review optional).
   * [x] Stable-series pin moved to WebKit 2.54.1 (newest micro; Linux/x86_64 gates green, [evidence](docs/acceptance/crtweb_acceptance.md#webkit-2541-re-pin-and-linuxx86_64-replay-2026-10-20));
     macOS/arm64 and Windows/x64 isolated replays green 2026-10-20; the in-tree driver gate now prefers the port's curl
-    (`CRT_LINK_RPATH_FIRST`, green against the unmodified SDK); open: upstream support-window confirmation.
+    (`CRT_LINK_RPATH_FIRST`, green against the unmodified SDK); open: choose the support policy (upstream publishes no end of life; only the latest stable gets fixes, 2.54 expected to end around 2.56.0, March 2027 -- [facts](docs/acceptance/crtweb_acceptance.md#upstream-support-window-of-the-wpe-webkit-stable-series-checked-2026-10-20)).
 
 `tools/check_webkit_security.py` is the development-package advisory snapshot;
 public-release conditions remain under Tranche 10 above.

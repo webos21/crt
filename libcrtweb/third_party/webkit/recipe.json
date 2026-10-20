@@ -113,7 +113,7 @@
       "2026-10-10 (Tranche 3B): per-file license headers of all 69,573 files under Source/ of the pinned commit were classified (libcrtweb/third_party/webkit/license-scan.json): the classifier recognises standard texts and SPDX tags and reports the rest as unclassified, never guessed."
     ],
     "not_yet_verified": [
-      "Upstream's security support window for a stable series is not documented on the pages consulted."
+      "Upstream publishes no support duration or end-of-life date for a stable series (checked 2026-10-20). It states that only the latest stable branch (even minor number) receives security updates and that fixes are generally not backported; in practice a series' last micro precedes its successor by 1-28 days (2.48, 2.50, 2.52) and none follows. See docs/acceptance/crtweb_acceptance.md, upstream support window."
     ]
   },
   "import": {
@@ -129,6 +129,14 @@
     "advisory_feed": "https://wpewebkit.org/security/",
     "advisory_mailing_list": "webkit-wpe",
     "observed_cadence_2026": "WSA-2026-0001 2026-03-18, 0002 2026-03-28, 0003 2026-06-02, 0004 2026-07-10, 0006 2026-09-29 (0005 date not recorded)",
+    "support_window": {
+      "checked": "2026-10-20",
+      "upstream_rule": "Only the latest stable release branch (even minor number) receives security updates; fixes are generally not backported (docs.webkit.org SecurityUpdates).",
+      "upstream_cadence": "Two feature releases a year, typically March and September (wpewebkit.org/release/schedule).",
+      "published_end_of_life": null,
+      "observed": "The last micro of 2.48, 2.50 and 2.52 was released 1, 6 and 28 days before the next stable series; none after. 2.54.0 was released 2026-09-16; 2.56 is not announced.",
+      "crt_policy": "not set (owner decision)"
+    },
     "rule": "A pinned version is affected by an advisory when it is older than the advisory's fixed version. Re-check the pin against every new advisory; see docs/acceptance/crtweb_acceptance.md Tranche 0."
   },
   "public_api_policy": [
