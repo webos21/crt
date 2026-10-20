@@ -11,6 +11,18 @@ substantive update.
 
 ## 2026-10-20
 
+### Tranche 10: the release tool exports 05-ui and 06-web
+
+- `tools/prepare_release_assets.py` now covers all six stages. `05-ui` is checked for the option-ON build (lvgl/freetype/
+  ffmpeg/skia dependencies, `libcrtui.a`, `ui-basic`); `06-web` must come from the same-version `05-ui` and carry SBOM,
+  security snapshot, source correspondence, source offer and the recorded release decision. The corresponding-source bundle is
+  built whenever a `04`/`05`/`06` stage is exported.
+- The Web public-release decision is owner-controlled (`web_public_release` in `third_party/crt-runtime/release.json`,
+  `tools/crt_web_release.py`): `build_stage_06_web.py` records it, `verify_dist.py` checks it is coherent, and the release tool
+  refuses a development candidate for a final tag while allowing it (flagged in the manifest) for a pre-release tag.
+- Tests: `test_crt_web_release.py` (7), new cases in `test_prepare_release_assets.py` (30 total) and `test_stage_06_web.py`.
+  Guide: [`release_preview.md`](docs/guides/release_preview.md#05-ui-and-06-web).
+
 ### Tranche 10: the LGPL source offer is generated, and the release carries the corresponding source
 
 After the owner's choices (the project's issue tracker as contact, a fixed 3-year period, upstream archives not bundled)

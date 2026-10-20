@@ -14,7 +14,8 @@ works today, see the README and [`STATUS.md`](../../STATUS.md).
 That preview is positioned as the first public developer preview of the CRT
 Graphics/Media SDK stage (`04-gfx-media`).
 The later `05-ui` and `06-web` stages did not exist in that preview
-and were not included in its assets.
+and were not included in its assets. `tools/prepare_release_assets.py` now
+accepts both (see "05-ui and 06-web" below).
 
 ## What a release contains
 
@@ -30,6 +31,9 @@ release is the union of the three sets.
 | `crt-<tag>-<os>-04-gfx-media-source.tar.xz` and the `02-cxx`/`03-gfx-simple` equivalents | Stage-source assets that the packaged stage recipes download (pinned by size and SHA-256) |
 | `SHA256SUMS-<os>-<arch>` | Checksums of every asset that host produced |
 | `release-manifest-<os>-<arch>.json` | Machine-readable list: version, source commit, per-asset size and SHA-256 |
+
+| `crt-<tag>-<os>-<arch>-05-ui`, `-06-web` | `04-gfx-media` plus the CRT UI / the WebKit CRT Port (see below) |
+| `crt-<tag>-corresponding-source.tar.xz` | LGPL corresponding source of the release commit (built when a `04`/`05`/`06` stage is exported; see [`lgpl_source_offer.md`](lgpl_source_offer.md)) |
 
 SDK archives are `.zip` on Windows and `.tar.xz` on Linux and macOS, and each
 extracts to a single `<stage>/` directory. The stages are **cumulative**: the
@@ -381,3 +385,24 @@ Hardware H.264 decode: verified on all three hosts -- macOS (VideoToolbox),
 Windows (D3D11VA), and Linux (VA-API, physical GPU).
 Checksums: SHA256SUMS-<os>-<arch>.
 ```
+
+## 05-ui and 06-web
+
+`prepare_release_assets.py` exports all six stages (`01-c` .. `06-web`) and
+adds these release-grade checks:
+
+- `05-ui` must be built with `CRTUI_ENABLE_LVGL=ON`: the manifest must list the
+  `lvgl`, `freetype`, `ffmpeg`, and `skia` dependencies and the SDK must contain
+  `lib/libcrtui.a`, `include/crtui/api.h`, and `examples/ui-basic/main.c`.
+- `06-web` must be built from the `05-ui` SDK of the same release version
+  (`built_from.predecessor_version == <tag>`) and must carry the SBOM,
+  security snapshot, source-correspondence record, LGPL source offer, and the
+  recorded `web_runtime.release_decision`.
+- The Web public-release decision is the owner's, in
+  `third_party/crt-runtime/release.json` (`web_public_release`). Until the owner
+  approves it and accepts every advisory release blocker, the `06-web` SDK is a
+  **development candidate**. A *final* tag (no `-` in the version) refuses a
+  development candidate; a *pre-release* tag (`vX.Y.Z-preview.N`) may carry one,
+  and the tool prints a warning and records `web_release` in the release
+  manifest. Publish such a release as a GitHub pre-release and say so in the
+  notes.

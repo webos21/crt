@@ -12,6 +12,7 @@ from crt_binary_dependencies import validate_binary_dependencies
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import is_absolute_runtime_entry, runtime_paths
 import crt_source_offer
+import crt_web_release
 from crt_stage_recipe import recipe_filename_for_stage, validate_recipe
 
 
@@ -351,8 +352,6 @@ def validate_web_stage(dist: Path, manifest: dict, redistributed: dict, suffix: 
         if (dist / "include" / directory).exists():
             raise SystemExit(f"private web dependency headers leaked: {directory}")
     runtime = manifest.get("web_runtime", {})
-    if runtime.get("development_candidate") is not True:
-        raise SystemExit("06-web public-release gates are not yet accepted")
     correspondence = json.loads((dist / "share/crt/web-source-correspondence.json").read_text())
     if correspondence.get("predecessor", {}).get("content_sha256") != manifest["built_from"]["predecessor_content_sha256"]:
         raise SystemExit("Web source correspondence names a different predecessor")
@@ -372,6 +371,9 @@ def validate_web_stage(dist: Path, manifest: dict, redistributed: dict, suffix: 
         raise SystemExit("WebKit advisory evidence is missing or affected")
     if security.get("public_release_allowed") is not False:
         raise SystemExit("an advisory snapshot cannot grant public-release approval")
+    decision_problems = crt_web_release.check_recorded(runtime, correspondence, security)
+    if decision_problems:
+        raise SystemExit("06-web release decision: " + "; ".join(decision_problems))
     from check_webkit_security import version
     for advisory in advisories:
         try:

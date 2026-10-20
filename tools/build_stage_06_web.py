@@ -28,6 +28,7 @@ from crt_elf import set_runtime_paths
 from crt_linux_runtime import normalize_cxx_aliases
 import crt_macho
 import crt_source_offer
+import crt_web_release
 from create_dist import DIST_PORTING_TOOLS, write_posix_activation
 from fetch_ports import load_recipes, resolve_recipe_order
 import build_webkit_crt_port as web
@@ -565,6 +566,10 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
         "packages": packages, "relationships": [{"spdxElementId": "SPDXRef-DOCUMENT",
             "relationshipType": "DESCRIBES", "relatedSpdxElement": p["SPDXID"]} for p in packages]})
     write_json(staged / "share/crt/web-security.json", report)
+    # The advisory snapshot never grants approval (it keeps public_release_allowed=false); the owner's record in
+    # release.json plus the snapshot's open blockers decide whether this build is a final-release candidate.
+    decision = crt_web_release.decide(
+        json.loads((asset / "third_party/crt-runtime/release.json").read_text(encoding="utf-8")), report)
     write_json(staged / "share/crt/web-source-correspondence.json", {
         "recipe": "share/crt/dependencies/webkit/recipe.json",
         "patches": "share/crt/dependencies/webkit/patches/manifest.json",
@@ -574,10 +579,11 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
         "source_commit": recipe["product_source"]["commit"],
         "rebuild": "tools/crt-stage-build.py with the exact source recipe and 05-ui predecessor",
         "replacement": "Replace the private WebKit/runtime libraries and matching helper processes together; never link them into the application.",
-        "public_release_allowed": False})
+        "public_release_allowed": decision["public_release_allowed"]})
     manifest["web_runtime"] = {"sbom": "share/crt/web-sbom.spdx.json", "security": "share/crt/web-security.json",
                                "source_correspondence": "share/crt/web-source-correspondence.json",
-                               "development_candidate": True}
+                               "development_candidate": decision["development_candidate"],
+                               "release_decision": decision}
     # The offer inherited from 05-ui covers FFmpeg only; this stage also ships WebKit, so it is rendered again
     # from the SDK's own recipes (the asset carries the template and the release-time values).
     version = (staged / "VERSION").read_text(encoding="utf-8").strip()
@@ -1084,7 +1090,10 @@ def main():
         validate_candidate(staged, work, asset, env)
     output.parent.mkdir(parents=True, exist_ok=True)
     publish_tree(staged, output)
-    print(f"CRT development stage ready: {output}; public release NOT authorized")
+    decision = manifest["web_runtime"]["release_decision"]
+    print(f"CRT {'release-candidate' if decision['public_release_allowed'] else 'development'} stage ready: {output}; "
+          + ("public release authorized by the owner's record" if decision["public_release_allowed"]
+             else "public release NOT authorized (" + "; ".join(decision["reasons"]) + ")"))
 
 
 if __name__ == "__main__":
