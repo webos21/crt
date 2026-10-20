@@ -5082,7 +5082,7 @@ request through the issue tracker for the offer period). Evidence on macOS/arm64
 `05-ui` SDKs verify with the offer; a **fresh** isolated `05 -> 06` build (the incremental packaging retry was rightly
 refused because the predecessor changed) produced `sdk06b` whose offer names both components, whose manifest lists it as a
 notice of `ffmpeg` and `webkit`, and which passes `verify_dist.py`, HTTP/TLS 10/10 and the installed and relocated
-(work root hidden) process observer. New tests: `test_crt_source_offer.py` (10), the release-tool cases (25). The
+(work root hidden) process observer. A rehearsal bundle of the current tree is 25 MB (2,143 members, the 23 patches and the recipes included). New tests: `test_crt_source_offer.py` (10), the release-tool cases (25). The
 Windows and Linux/aarch64 SDKs have not been regenerated with the generator, and `prepare_release_assets.py` still
 publishes only `01-c`..`04-gfx-media`. The `libclang_rt.builtins` archive is the
 build toolchain's; its exact version is not pinned by the SDK.
