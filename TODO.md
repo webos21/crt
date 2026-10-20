@@ -173,9 +173,10 @@ uses the host replay order stated below and in the acceptance document.
   * [ ] Inherited-runtime notices/SBOM: engineering inventory done on Linux/x86_64 (`crt-runtime` components in
     every stage, [evidence](docs/acceptance/crtweb_acceptance.md#inherited-runtime-notices-2026-10-20)); macOS/arm64
     SDK regenerated and verified 2026-10-20; the five header items resolved by engineering
-    review against upstream 2026-10-20 (`third_party/bionic/header_decisions.json`); LGPL source offer drafted
-    ([draft](docs/guides/lgpl_source_offer_draft.md)); still open: Windows/aarch64 SDK regeneration, owner/legal
-    decisions on the draft's placeholders, legal sign-off.
+    review against upstream 2026-10-20 (`third_party/bionic/header_decisions.json`); LGPL source offer generated per SDK and
+    corresponding-source bundle added to the release tool ([guide](docs/guides/lgpl_source_offer.md); issue tracker, 3 years,
+    upstream archives not bundled); still open: Windows/aarch64 SDK regeneration with it, release tool for
+    `05-ui`/`06-web` and the `public_release_allowed` switch, owner review (external legal review optional).
   * [x] Stable-series pin moved to WebKit 2.54.1 (newest micro; Linux/x86_64 gates green, [evidence](docs/acceptance/crtweb_acceptance.md#webkit-2541-re-pin-and-linuxx86_64-replay-2026-10-20));
     macOS/arm64 isolated replay green 2026-10-20; open: Windows replay of 2.54.1, upstream support-window confirmation, and the in-tree driver
     gate vs the SDK's shared `libcurl.so.4` (RPATH order).

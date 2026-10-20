@@ -1,9 +1,10 @@
-# LGPL Source Offer (DRAFT)
+# LGPL Source Offer
 
-**Status: draft for the Tranche 10 publication gate. Not legal advice, not yet adopted.** It was written from the
-SDK inventories and the build recipes (engineering facts, checked against the macOS/arm64 `06-web` development SDK of
-2026-10-20); every `[PLACEHOLDER]` and every item in "Decisions needed" must be settled by the project owner and
-legal review before any binary SDK is published. `public_release_allowed` stays `false` until then.
+**Status: implemented; owner review pending. Not legal advice.** The facts below come from the SDK inventories and
+the build recipes (checked against the macOS/arm64 `06-web` development SDK of 2026-10-20). The offer text itself is
+no longer written by hand: `tools/crt_source_offer.py` generates `share/licenses/SOURCE-OFFER.md` in every SDK that
+ships FFmpeg (and WebKit in `06-web`), and `tools/prepare_release_assets.py` adds the corresponding-source bundle to
+the release. `public_release_allowed` stays `false` until the Tranche 10 release conditions are met.
 
 ## 1. Which parts are LGPL
 
@@ -46,37 +47,45 @@ do).
 * **FFmpeg inside the shared `libcrtmedia`.** Rebuild `libcrtmedia` from the CRT repository with your FFmpeg install
   (`tools/crt-port-build.py` with `porting/recipes/ffmpeg.json`, then the stage build) and substitute it.
 
-## 4. The offer (text for the SDK, to be placed in `share/licenses/SOURCE-OFFER.md` and the release notes)
+## 4. How the offer is produced
 
-> **Written offer for corresponding source.** This SDK contains software licensed under the GNU Lesser General
-> Public License: WPE WebKit 2.54.1 (as modified by the CRT Project) and FFmpeg 8.1.2. You may obtain the complete
-> corresponding source code of these components, the CRT Project's modifications, and the build recipes needed to
-> rebuild and replace them, from **[PLACEHOLDER: permanent URL of the source bundle for this exact release]**, or
-> by writing to **[PLACEHOLDER: postal/e-mail contact]** and asking for it on a physical medium, for which we may
-> charge no more than the cost of physically performing the distribution. This offer is valid for **[PLACEHOLDER:
-> at least three years]** from the date you received this SDK, and for as long as we offer updates or support for
-> the release. The upstream archives and their SHA-256 values, the CRT patches, and the commit and source-asset
-> hashes that built this SDK are listed in `share/crt/web-source-correspondence.json` and
-> `share/crt/dependencies/*/recipe.json`. The full text of the LGPL is in `share/licenses/ffmpeg/COPYING.LGPLv2.1`
-> and under `share/licenses/webkit/Source/`. You may modify these components and replace them in your copy of the
-> SDK as described in `docs/guides/lgpl_source_offer_draft.md` section 3 [PLACEHOLDER: final location of that text].
+| Input | Source | Set by |
+| --- | --- | --- |
+| Version / tag, stage | the SDK's `VERSION` and manifest | the release (`--release-version`) |
+| Release page, bundle name | `repository_url` + `/releases/tag/<tag>`; `crt-<tag>-corresponding-source.tar.xz` | derived |
+| Upstream archive URL, SHA-256, size; number of carried patches; commit | `porting/recipes/ffmpeg.json`, `libcrtweb/third_party/webkit/recipe.json`, `libcrtweb/patches/manifest.json` (read from the installed SDK in `06-web`) | the pins |
+| Where to ask, how long | `third_party/crt-runtime/release.json`: `issue_tracker_url` (the project's GitHub issue tracker), `offer_years` (3, the LGPL minimum; lower values are rejected) | the owner, once |
 
-## 5. Decisions needed (not engineering)
+Where the text lands: `create_dist.py` writes it into stages that redistribute FFmpeg (04-gfx-media, 05-ui);
+`build_stage_06_web.py` renders it again for `06-web` from the SDK's own recipes, adding WebKit; `verify_dist.py`
+fails an SDK whose offer is missing, still has `{{...}}`/placeholder text, names another version or stage, or lacks
+the SHA-256 of a component's archive. A development build points at the repository, not at a release page.
 
-1. **Hosting and contact:** the permanent location of the source bundle per release, who answers physical-medium
-   requests, and the retention period (the draft says at least three years from distribution).
-2. **Bundle versus pointer:** whether the source bundle (the two upstream archives, the patch set, the overlay and the
-   recipes, a few tens of MB) ships inside every binary distribution, which would make a written offer unnecessary, or
-   is hosted.
-3. **FFmpeg inside `libcrtmedia` shared libraries:** whether the combined library is acceptable under LGPL section 6
-   with the rebuild instructions above (the permissive CRT code is combined with LGPL code in one library), or
-   whether the shared `libcrtmedia` must also ship relinkable objects.
-4. **Dual-licensed components:** record the license chosen for mbedTLS (Apache-2.0) and FreeType (FreeType License).
-5. **Source-tree files that are not shipped:** the GPL-with-exception bison skeletons under
-   `Source/ThirdParty/ANGLE/tools`, the MPL files (121) and any other flagged class in `license-scan.json` are in
-   the source archive. This draft assumes none is compiled into a shipped binary; that has been checked for the
-   build inputs only through the SBOM, not object by object.
-6. **Windows and Linux/aarch64 SDKs:** the same offer applies, but their SDKs have not been regenerated with the
-   inherited-runtime notices yet (Tranche 10 TODO), so the lists above were verified on macOS/arm64 only.
-7. **Legal sign-off** of this text and of `share/licenses/crt-libc/NOTICE` (including the four attributed header-less
-   files in `third_party/bionic/header_decisions.json`).
+**The bundle** `crt-<tag>-corresponding-source.tar.xz` is the tracked tree of the release commit (CRT sources, the 23
+carried patches, the PlatformCRT overlay, every recipe and build tool) plus `CORRESPONDING-SOURCE.json` (commit, tag,
+and each upstream archive with address and SHA-256). It is built from a clean tree only. Decision of 2026-10-20: the
+**upstream archives are not copied into the bundle**; the generated "Written offer" section therefore promises a copy
+on request through the issue tracker, for the offer period, if an upstream address stops working. Keep the SHA-256
+values: they are what lets a recipient (or the project) fetch the same bytes later.
+
+## 5. Decisions
+
+Settled 2026-10-20: contact channel = the project's issue tracker; period = 3 years, fixed; upstream archives are not
+included in the bundle.
+
+Still open:
+
+1. **FFmpeg inside the shared `libcrtmedia`:** whether the combined library satisfies LGPL section 6 with the rebuild
+   instructions above (permissive CRT code combined with LGPL code in one library), or the shared library must also ship
+   relinkable objects. Optional external review.
+2. **Dual-licensed components:** record the license chosen for mbedTLS (Apache-2.0) and FreeType (FreeType License).
+3. **Source-tree files that are not shipped:** the GPL-with-exception bison skeletons under
+   `Source/ThirdParty/ANGLE/tools`, the MPL files (121) and any other flagged class in `license-scan.json` are in the
+   upstream archive. This guide assumes none is compiled into a shipped binary; that was checked for the build inputs
+   through the SBOM, not object by object.
+4. **Windows and Linux/aarch64 SDKs:** the same generator applies, but those SDKs have not been regenerated with it, so
+   the lists above were verified on macOS/arm64 only.
+5. **Release gate:** `prepare_release_assets.py` still publishes only `01-c`..`04-gfx-media`; offering `05-ui` and
+   `06-web` and the switch that lets `public_release_allowed` become true are separate Tranche 10 work. The
+   release owner reviews this guide and `share/licenses/crt-libc/NOTICE` (including the four attributed header-less files in
+   `third_party/bionic/header_decisions.json`); an external legal review is optional.

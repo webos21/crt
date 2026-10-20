@@ -11,6 +11,20 @@ substantive update.
 
 ## 2026-10-20
 
+### Tranche 10: the LGPL source offer is generated, and the release carries the corresponding source
+
+After the owner's choices (the project's issue tracker as contact, a fixed 3-year period, upstream archives not bundled)
+the source offer stopped being a draft with placeholders. `tools/crt_source_offer.py` renders
+`share/licenses/SOURCE-OFFER.md` from a template, `third_party/crt-runtime/release.json` and the build's own recipes;
+stages that ship FFmpeg get it from `create_dist.py`, `06-web` gets it again with WebKit from `build_stage_06_web.py`,
+`verify_dist.py` rejects a missing or unresolved one, and `prepare_release_assets.py` adds
+`crt-<tag>-corresponding-source.tar.xz` (tracked tree of the release commit plus a manifest naming each upstream archive by
+address and SHA-256). The first isolated build with a changed predecessor refused the packaging-only retry, so `sdk06b`
+is a fresh full `05 -> 06` build: offer, `verify_dist.py`, HTTP/TLS 10/10 and the installed/relocated observer pass.
+The guide `docs/guides/lgpl_source_offer.md` dropped its draft status; the "legal sign-off" gate is now "owner review"
+with external legal review optional. Open: Windows and Linux/aarch64 SDK regeneration, offering `05-ui`/`06-web` in the
+release tool and the `public_release_allowed` switch.
+
 ### Tranche 10: header decisions for the inherited libc and an LGPL source-offer draft
 
 The five import-manifest/header findings of the inherited-runtime notices were compared with their upstreams: the
@@ -22,7 +36,7 @@ reclassified in the import manifest and carries an Apache-2.0 section 4(b) modif
 renders the decisions into `share/licenses/crt-libc/NOTICE` and the provenance (no open finding left; a changed file
 reopens its decision); the macOS SDK stages were regenerated and verified. The LGPL parts of the Web stage (WebKit
 2.54.1, FFmpeg 8.1.2) and what is the corresponding source, the replace/relink path and the offer wording are drafted in
-`docs/guides/lgpl_source_offer_draft.md` with placeholders and seven decisions for the owner and legal review. Not legal
+`docs/guides/lgpl_source_offer.md` with placeholders and seven decisions for the owner and legal review. Not legal
 advice; legal sign-off, hosting/contact for the offer and Windows/aarch64 SDK regeneration remain open.
 
 ### Tranche 10 on macOS/arm64: WebKit 2.54.1 replay and inherited-runtime notices

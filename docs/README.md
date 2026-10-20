@@ -44,7 +44,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 - [Android-like Shell Environment](guides/android_shell_environment.md)
 - [CRT Build Stages And Distributions](guides/distribution.md)
 - [CRT FAQ](guides/faq.md)
-- [LGPL Source Offer (draft)](guides/lgpl_source_offer_draft.md)
+- [LGPL Source Offer](guides/lgpl_source_offer.md)
 - [Bionic Import Policy](guides/import_bionic.md)
 - [Developer Preview Release](guides/release_preview.md)
 - [Shell Import And Bootstrap Policy](guides/shell_import.md)
