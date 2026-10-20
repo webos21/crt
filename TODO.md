@@ -172,10 +172,10 @@ uses the host replay order stated below and in the acceptance document.
     DLL-import consumer/API resolution and ownership callback evidence stay in Web acceptance.
   * [ ] Inherited-runtime notices/SBOM: engineering inventory done on Linux/x86_64 (`crt-runtime` components in
     every stage, [evidence](docs/acceptance/crtweb_acceptance.md#inherited-runtime-notices-2026-10-20)); macOS/arm64
-    SDK regenerated and verified 2026-10-20; still open: five header items needing a decision, Windows/aarch64 SDK
-    regeneration, LGPL source offer, legal sign-off.
+    and Windows/x64 SDKs regenerated and verified 2026-10-20; still open: five header items needing a decision, Windows/arm64
+    and Linux/aarch64 SDK regeneration, LGPL source offer, legal sign-off.
   * [x] Stable-series pin moved to WebKit 2.54.1 (newest micro; Linux/x86_64 gates green, [evidence](docs/acceptance/crtweb_acceptance.md#webkit-2541-re-pin-and-linuxx86_64-replay-2026-10-20));
-    macOS/arm64 isolated replay green 2026-10-20; open: Windows replay of 2.54.1, upstream support-window confirmation, and the in-tree driver
+    macOS/arm64 and Windows/x64 isolated replays green 2026-10-20; open: upstream support-window confirmation, and the in-tree driver
     gate vs the SDK's shared `libcurl.so.4` (RPATH order).
 
 `tools/check_webkit_security.py` is the development-package advisory snapshot;

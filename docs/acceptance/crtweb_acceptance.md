@@ -5036,6 +5036,59 @@ is an ELF RPATH issue and does not exist on this host, where the gate removes th
 test and the Web stage links WebKit's private OpenSSL curl); Windows is not replayed; upstream's support window for the
 2.54 series is still unconfirmed.
 
+#### WebKit 2.54.1 replay on Windows/x64 (2026-10-20)
+
+Native replay on Windows 11 (10.0.26100) / Intel UHD 630 of the 2.54.1 pin, through the official isolated entrypoint,
+as on macOS. **Inherited-runtime SDK regeneration:** the five in-tree stage publishers were rebuilt and each passes
+`verify_dist.py`; every manifest lists `crt-libc`, `mksh`, `toybox` and `onetrue-awk` (`01-c`: 4), plus `llvm-runtimes`
+from `02-cxx` on (5), the Skia/FFmpeg/FreeType/curl/mbedTLS/zlib set at `04-gfx-media` (11) and `lvgl` at `05-ui`
+(12); `crt-libc/NOTICE` is the same inventory as Linux and macOS (139 files with a header, 290 project-owned).
+
+**Isolated build.** The regenerated `05-ui` was copied to an immutable predecessor (3,378 entries, byte and hash
+inventory identical to its source and unchanged after the build), a `06-web` source asset (SHA-256
+`9b5145296c3f753877edf1bae7b44007080ceed3500e74cc37be3e7073b7f128`) and recipe were generated from the clean tree
+at `21aafb1` (no `--allow-dirty`), and `crt-stage-build.py` from that predecessor built `out/tranche10-windows-2541/sdk06`
+in the empty work root `C:/crtw/t10w2541` (exit 0, 4,210 s; command and state `out/tranche10-windows-2541/run-2541.json`,
+log `out/web-windows-tranche10-2541.log`). Inputs outside the SDK are explicit: LLVM and the Windows SDK import
+libraries, the build-host-only Perl overlay (`CRT_WEB_HOST_PERL_LIB`), native Strawberry Perl for WebKit's generators
+and Git's GNU patch 2.7.6 (Strawberry's 2.5.9 asserts on the COFF patches), exactly as the 2.54.0 runs. Two
+download-related facts: the WebKit product cache was moved from the 2.54.0 to the 2.54.1 commit (one
+`git fetch --depth=1 --filter=blob:none` of the pinned commit and its 330 changed Source blobs from github.com/WebKit/WebKit;
+the commit, tree and 462,083-entry listing are re-verified against the pin before use), and the third-party port archives
+came from the previous accepted work root's cache through a junction created after the stage's empty-root check, not
+from the network (`fetch_ports.py` still hashes them against the recipes; 18 archives, no `.tmp` residue).
+
+A **fresh 8,301-action** WebKit build completed. The Windows patch chain (17 `crt-port` + 1 `windows` = 18 of the
+23 carried patches) applied unchanged, with the CRT-owned `HighPriorityThreads.h` adaptation; no patch, hunk or
+Windows code changed for 2.54.1. The stage's own gates pass: installed `crtweb_browser --smoke`
+(load/pixels/script), the native Toolhelp observer (HostProcess/WebProcess/NetworkProcess, 141 mapped files, one CRT
+C++ runtime per role, no violation, no owned process left), real HTTP/TLS **10/10**, the public export and strict PE
+Host ABI audits and `verify_dist.py`. The SDK manifest and `web-sbom.spdx.json` (30 packages) name WebKit **2.54.1**
+and the five inherited-runtime components; `web-security.json` has `pin_is_latest_micro: true` and
+`public_release_allowed: false`.
+
+**Relocation, product work hidden.** `out/web10_windows_relocation_2541.py` (the 2.54.0 replay script with the 2.54.1
+roots) copies the SDK to the spaced path `out/tranche10-windows-2541/relocated SDK 2541`, renames `C:/crtw/t10w2541` out of
+reach, and then configures/builds `examples/web-browser` and the public-API network consumer from the copy alone. With
+the work root still hidden, the installed, relocated and externally rebuilt browsers each pass the observer (144,
+144 and 141 mapped files, three roles, nothing left running), the relocated SDK passes all 10 HTTP/TLS cases, and both SDKs pass
+`verify_dist.py`, the export audit and the native Host ABI audit. The 3,628-entry SDK inventory (SHA-256
+`c758c589f877abaa2115113587925a8f0ca4693a0b0125e9c419078682e59142`) is identical before and after and across the copy, the
+predecessor inventory is unchanged, and the work root is restored. Evidence: `out/tranche10-windows-2541/replay-2541/result.json`
+and `out/web-windows-tranche10-2541-relocation.log`.
+
+The libc additions of the re-pin (`getpriority`/`setpriority`, `SCHED_RESET_ON_FORK`) behave on Windows as documented:
+the single priority 0 succeeds and a nonzero priority fails with `ENOTSUP`; `sched_test` passes in the in-tree
+`ctest` (**218/218**, 5 opt-in cases skipped), as do the runtime-notice (17), create-dist, licensing, source-closure and
+fetch tests and the patch gate (23 patches / 63 modified files / 24 CRT-owned files). Two Linux-host tests in
+`test_stage_06_web.py` failed on this Windows host (a POSIX wrapper run through `subprocess`, and a path compared in
+POSIX spelling); one is skipped on Windows and the other compares the host's own spelling. *Not done here:* the in-tree
+`build_webkit_crt_port.py` gate was not re-run against 2.54.1 on Windows (the isolated stage is the replay; the
+`libcurl.so.4` search-order problem is an ELF RPATH issue that does not exist on this host); Windows/arm64 and
+Linux/aarch64 SDK regeneration with the notices; the five header decisions; the LGPL source offer and legal sign-off;
+upstream's support window for 2.54 is still unconfirmed. The historical owned-debugger harness was not used: all runs
+are ordinary executions.
+
 #### Inherited runtime notices (2026-10-20)
 
 Every SDK stage redistributes libc/libm/libdl, the shell and (from `02-cxx`) the imported LLVM C++ runtime,
@@ -5062,8 +5115,8 @@ This is an engineering inventory, not a legal review, and it was first exercised
 `onetrue-awk` from `01-c` and `llvm-runtimes` from `02-cxx`, `verify_dist.py` requires them and passes, and the
 macOS `crt-libc/NOTICE` is the same inventory (139 files with a header, 290 project-owned) because the scan is
 over the sources, not the host. The isolated `06-web` SDK carries them in its SPDX document with the same
-declared-license policy (`Apache-2.0 WITH LLVM-exception`, `0BSD`, `NOASSERTION` for the rest). The Windows SDKs
-were not rebuilt, and the aarch64 SDK was not regenerated with it. Source-offer text for the LGPL parts of the Web stage and a legal sign-off remain the
+declared-license policy (`Apache-2.0 WITH LLVM-exception`, `0BSD`, `NOASSERTION` for the rest). The Windows/x64 SDK was regenerated the same day (below); the Windows/arm64 and Linux/aarch64
+SDKs were not regenerated with it. Source-offer text for the LGPL parts of the Web stage and a legal sign-off remain the
 publication gate.
 
 ## Host order

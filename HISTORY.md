@@ -11,6 +11,21 @@ substantive update.
 
 ## 2026-10-20
 
+### Tranche 10 on Windows/x64: WebKit 2.54.1 isolated replay and inherited-runtime notices
+
+The in-tree Windows SDK was regenerated with the inherited-runtime notices (five stages, each `verify_dist.py` pass,
+`crt-libc/NOTICE` 139/290 identical to Linux and macOS), then a fresh isolated `05 -> 06` build of the 2.54.1 pin ran
+end to end from an immutable 3,378-entry predecessor and a clean-tree source asset: 8,301 WebKit actions with the
+Windows patch chain (18 of the 23 patches) unchanged, installed browser smoke, observer (141 mapped files, one CRT
+C++ runtime per role), HTTP/TLS 10/10, strict PE Host ABI, SPDX with the runtime components and the security snapshot
+against the newest micro. A copy at a spaced path and an externally rebuilt browser pass the same checks with the
+work root hidden. Nothing in the engine, port or PAL needed a change; the product cache fetch was the pinned 330
+changed Source blobs only, and the port archives were the previous work root's hash-checked cache. Two
+Linux-host-only unit tests that failed on a Windows host were fixed (`tools/test_stage_06_web.py`). Still open for
+the Tranche: Windows/arm64 and Linux/aarch64 SDK regeneration with the notices, the five header decisions, the LGPL
+source offer, legal sign-off, the 2.54 support-window confirmation. Evidence: `docs/acceptance/crtweb_acceptance.md`
+(WebKit 2.54.1 replay on Windows/x64).
+
 ### Tranche 10 on macOS/arm64: WebKit 2.54.1 replay and inherited-runtime notices
 
 The in-tree macOS SDK was regenerated with the inherited-runtime notices (five stages, each verified, 139/290 header
