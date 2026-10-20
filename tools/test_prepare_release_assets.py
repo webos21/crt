@@ -180,6 +180,71 @@ class Recipes(TempCase):
         self.assertIn("c-source.tar.xz: SHA-256", text)
 
 
+WEB_KEYS = {"sbom": "s", "security": "s", "source_correspondence": "s", "source_offer": "s"}
+
+
+def web_manifest_overrides(version=TAG, candidate=True, predecessor=None):
+    """Extra manifest fields of a fake 06-web SDK."""
+    return {"built_from": {"stage": "05-ui", "predecessor_version": predecessor or version},
+            "web_runtime": {**WEB_KEYS, "development_candidate": candidate,
+                            "release_decision": {"development_candidate": candidate,
+                                                 "public_release_allowed": not candidate,
+                                                 "reasons": ["the owner has not approved a public Web release"] if candidate else [],
+                                                 "approval": None if candidate else {"approved_by": "owner"}}}}
+
+
+class UiAndWebStages(TempCase):
+    def test_option_off_05_is_rejected_and_option_on_is_accepted(self):
+        bare = make_sdk(self.tmp / "a", "05-ui")
+        text = "\n".join(release.release_grade_problems("05-ui", json.loads((bare / "manifest.json").read_text()), bare))
+        self.assertIn("lvgl dependency", text)
+        self.assertIn("examples/ui-basic/main.c", text)
+        full = make_sdk(self.tmp / "b", "05-ui", dependencies=release.UI_DEPENDENCIES, files=release.UI_FILES)
+        self.assertEqual([], release.release_grade_problems("05-ui", json.loads((full / "manifest.json").read_text()), full))
+
+    def _web(self, **kw):
+        self._n = getattr(self, "_n", 0) + 1
+        sdk = make_sdk(self.tmp / f"w{self._n}", "06-web")
+        manifest = json.loads((sdk / "manifest.json").read_text())
+        manifest.update(web_manifest_overrides(**kw))
+        return manifest, sdk
+
+    def test_development_candidate_is_refused_for_a_final_tag_and_allowed_for_a_prerelease(self):
+        manifest, sdk = self._web(version="v1.0.0")
+        text = "\n".join(release.release_grade_problems("06-web", manifest, sdk, "v1.0.0"))
+        self.assertIn("only a development candidate", text)
+        self.assertIn("web_public_release", text)
+        manifest, sdk = self._web(version=TAG)
+        self.assertEqual([], release.release_grade_problems("06-web", manifest, sdk, TAG))
+
+    def test_a_public_decision_allows_a_final_tag(self):
+        manifest, sdk = self._web(version="v1.0.0", candidate=False)
+        self.assertEqual([], release.release_grade_problems("06-web", manifest, sdk, "v1.0.0"))
+
+    def test_web_must_come_from_the_released_05_and_carry_its_evidence(self):
+        manifest, sdk = self._web(predecessor="development")
+        self.assertIn("not the release", "\n".join(release.web_problems(manifest, sdk, TAG)))
+        manifest["built_from"] = {"stage": "03-gfx-simple"}
+        self.assertIn("isolated 05-ui", "\n".join(release.web_problems(manifest, sdk, TAG)))
+        manifest, sdk = self._web()
+        del manifest["web_runtime"]["source_offer"]
+        self.assertIn("web_runtime.source_offer", "\n".join(release.web_problems(manifest, sdk, TAG)))
+
+    def test_release_manifest_records_the_web_candidate(self):
+        sources = self.tmp / "stage-sources"
+        sdk = make_sdk(self.tmp / "sdks", "06-web", recipes=[("06-web", make_asset(sources, f"crt-{TAG}-windows-06-web-source.tar.xz"))])
+        manifest = json.loads((sdk / "manifest.json").read_text())
+        manifest.update(web_manifest_overrides())
+        (sdk / "manifest.json").write_text(json.dumps(manifest))
+        with mock.patch.object(release, "run_verify"), \
+             mock.patch.object(release, "git_state", return_value=("abc123", False)), \
+             mock.patch.object(release.crt_source_offer, "build_bundle",
+                               side_effect=lambda root, config, version, out, comps, allow=False: (out / "b.tar.xz").write_bytes(b"b") and out / "b.tar.xz"):
+            result = release.prepare(self.tmp / "dist", TAG, self.tmp / "out", ("06-web",), {"06-web": sdk}, sources, False, False)
+        self.assertTrue(result["web_release"]["development_candidate"])
+        self.assertIn("owner has not approved", result["web_release"]["reasons"][0])
+
+
 class Prepare(TempCase):
     def _stage(self, stage, sources, **kw):
         recipe = make_asset(sources, f"crt-{TAG}-windows-{stage}-source.tar.xz")
@@ -283,7 +348,7 @@ class Prepare(TempCase):
 
     def test_unpublishable_stage_is_refused(self):
         with self.assertRaisesRegex(release.ReleaseError, "not part of the preview"):
-            release.prepare(self.tmp / "dist", TAG, self.tmp / "out", ("06-web",),
+            release.prepare(self.tmp / "dist", TAG, self.tmp / "out", ("07-x",),
                             {}, self.tmp / "s", True, True)
 
 
