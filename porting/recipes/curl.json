@@ -22,6 +22,8 @@
       "--without-brotli",
       "--without-zstd",
       "--without-libpsl",
+      "--without-nghttp2",
+      "--without-libidn2",
       "--without-libgsasl",
       "--without-ca-bundle",
       "--without-ca-path",
@@ -137,6 +139,7 @@
     "windows": "shared-pass"
   },
   "notes": [
+    "2026-10-20: --without-nghttp2/--without-libidn2 pin the optional host-library probes off. On a Linux/aarch64 host with libnghttp2-dev/libidn2-dev installed, curl's pkg-config probe found the host libraries and libcurl.so gained undeclared NEEDED entries (libnghttp2.so.14, libidn2.so.0), which create_dist.py rejects as unresolved packaged binary dependencies. This port is HTTP/1.1 over mbedTLS with no IDN handling; the host SDK must not decide the binary's dependencies.",
     "Last port in this queue before it closes out (bzip2 -> xz -> pcre2 -> mbedtls -> curl, see TODO.md; openssl stays held back until something actually needs it). Depends on zlib and mbedtls, both already shared-pass on all three OSes.",
     "8.21.0 is curl's current stable release as of this port. --with-mbedtls=@PORT_PREFIX@/--with-zlib=@PORT_PREFIX@ point curl's own configure at this project's shared port-install prefix, where both dependencies are already installed by the time curl's own build runs (tools/crt-port-build.py's dependencies-first ordering). A real bug was found and fixed getting these flags to work at all: tools/crt-port-build.py's @PORT_PREFIX@ substitution was previously only applied to make_args/install_args, never to configure_args -- confirmed by a real build attempt showing the literal, unsubstituted string \"@PORT_PREFIX@\" in configure's own --with-mbedtls argument and resulting CPPFLAGS. Fixed generally (port_prefix_text is now computed once up front in build_configure_port() and applied to configure_args the same way as the other two).",
     "Scoped to HTTP/HTTPS for this first pass, matching this queue's own established caution (pcre2/xz/bzip2 all started narrower than upstream's full default and expanded only once solid): --disable-ftp/-file/-telnet/-tftp/-pop3/-imap/-smb/-smtp/-gopher/-mqtt/-rtsp/-dict/-ipfs and --disable-ldap/-ldaps turn off every protocol handler this first pass doesn't exercise. --without-brotli/-zstd/-libpsl/-libgsasl disable optional third-party compression/PSL/SASL libraries this project hasn't ported. --disable-manual/-docs skip building curl's own bundled documentation (not needed for a library consumer).",

@@ -243,6 +243,17 @@ function(crt_add_crtmedia_targets)
     )
     target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_FFMPEG_LIBRARIES})
     target_link_libraries(crtmedia_shared PRIVATE ${CRTMEDIA_LINUX_VAAPI_LIBS})
+    if(CRT_TARGET_OS STREQUAL "linux")
+      # FFmpeg's static archives are linked into this shared object. On aarch64 its NEON assembly
+      # (libavutil/aarch64/tx_float_neon.S) reaches global tables such as ff_tx_tab_*_float with
+      # adrp+add, which ld refuses for a symbol that "may bind externally" in a shared object (x86_64
+      # builds no FFmpeg assembly, so it never meets this). FFmpeg's own shared build hides these with
+      # a version script, which a static archive never gets; -Bsymbolic binds the references to the
+      # definitions in this same link instead. The isolated 04/05 stages already pass it globally
+      # (distribution/stages/*/CMakeLists.txt); the in-tree build did not, so an option-ON in-tree
+      # SDK could not be built on Linux/aarch64. See porting/recipes/ffmpeg.json (2026-09-11 note).
+      target_link_options(crtmedia_shared PRIVATE "-Wl,-Bsymbolic")
+    endif()
 
     # libcurl-backed HTTP transport (Networking & Streaming Tranche 2,
     # docs/acceptance/crtmedia_networking_acceptance.md) -- additive, only makes sense

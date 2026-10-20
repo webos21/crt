@@ -646,6 +646,8 @@ Make was used in that final run. The recipe declares no standalone tests; this
 install result does not replace libcrtmedia/WebKit runtime or shared-library
 verification. Investigation: [Windows Tranche 8 checkpoint](../bringup/crtweb_windows_tranche8.md).
 
+Linux/aarch64 (2026-10-21): the recipe passes `--disable-linux-perf` there (aarch64-only configure feature that needs host UAPI the CRT sysroot lacks); the port installs and links into `libcrtmedia`.
+
 - Version: `8.1.2`
 - Recipe: `porting/recipes/ffmpeg.json`
 - Build system: `configure`
