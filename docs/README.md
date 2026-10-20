@@ -20,6 +20,9 @@ Current work is in [TODO](../TODO.md); completed work is in
 ## Architecture, ABI boundaries, and policy
 
 - [C++ Runtime](design/cxx_runtime.md)
+- [CRT SDK Development Contract](design/sdk_development_contract.md)
+- [CRT-CLI Development Environment and Source-first Ports](design/crt_cli.md)
+- [CRT Studio Native IDE](design/crt_studio.md)
 - [Dynamic Loading](design/dynamic_loading.md)
 - [Header And Sysroot ABI Policy](design/header_abi.md)
 - [Host ABI Firewall](design/host_abi_firewall.md)

@@ -209,6 +209,15 @@ EME/DRM, and JS-native application bindings.
 The remaining execution order is `06-web`.
 
 
+### CRT developer experience: SDK -> CLI -> Studio
+
+Keep this planned while the active Web distribution closure continues. Follow
+the [SDK contract](docs/design/sdk_development_contract.md) and
+[CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence): inventory/host tools
+and CRT-native bootstrap first, then immutable SDK management, source-first ports
+and project workflow. [Studio](docs/design/crt_studio.md) is a later CLI consumer;
+these contracts are design work, not an implemented or released product.
+
 ### Runtime architecture hardening backlog
 
 These remain independent follow-ups. Promote one at a time when a concrete

@@ -11,6 +11,21 @@ substantive update.
 
 ## 2026-10-20
 
+### SDK, CRT-CLI and Studio: consolidate the developer-environment design
+
+Consolidated the evolving discussion into three English-language design documents:
+`docs/design/sdk_development_contract.md`, `docs/design/crt_cli.md` and
+`docs/design/crt_studio.md`. The adopted direction is separate repositories,
+a CRT-native CLI/bootstrap before the IDE, stage-selectable immutable SDKs,
+source-first port recipes and project locks. Windows host tools/rootfs,
+host-vs-target identity, scoped environments, update/recovery and staged joint
+gates are explicit. Existing JSON recipes, wrappers and SDK paths remain the
+initial implementation basis; superseded host-native/binary-first proposals
+are not treated as current policy. Added the documentation index and a terse
+Planned entry without changing the active Web work, STATUS or the root README.
+This completes design consolidation only, not CLI/Studio implementation,
+repository creation or release acceptance.
+
 ### Tranche 10: the release tool exports 05-ui and 06-web
 
 - `tools/prepare_release_assets.py` now covers all six stages. `05-ui` is checked for the option-ON build (lvgl/freetype/
