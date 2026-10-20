@@ -170,20 +170,21 @@ class RegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "src").mkdir()
-            (root / "src" / "ref.c").write_text(BSD + "int r;\n")
-            (root / "src" / "frag.c").write_text("int frag;\n")
+            # newline="\n": the decision is bound to the file's exact bytes, which a Windows text-mode write would change
+            (root / "src" / "ref.c").write_text(BSD + "int r;\n", newline="\n")
+            (root / "src" / "frag.c").write_text("int frag;\n", newline="\n")
             scan = notices.scan_headers(root, {"roots": ["src"], "extensions": [".c"]})
             finding = {"file": "src/frag.c", "issue": "import without an in-file license header"}
             decision = {"file": "src/frag.c", "sha256": notices.sha256_bytes(b"int frag;\n"), "decision": "covered-by-group",
                         "covered_by": "src/ref.c", "license": "BSD", "upstream": [], "basis": []}
             decided, still_open = notices.resolve_findings(root, [finding], scan, [decision])
             self.assertEqual(([1], []), ([item["group"] for item in decided], still_open))
-            (root / "src" / "frag.c").write_text("int frag; /* edited */\n")
+            (root / "src" / "frag.c").write_text("int frag; /* edited */\n", newline="\n")
             decided, still_open = notices.resolve_findings(root, [finding], scan, [decision])
             self.assertEqual([], decided)
             self.assertIn("changed since", still_open[0]["issue"])
             decision["covered_by"] = "src/missing.c"
-            (root / "src" / "frag.c").write_text("int frag;\n")
+            (root / "src" / "frag.c").write_text("int frag;\n", newline="\n")
             decided, still_open = notices.resolve_findings(root, [finding], scan, [decision])
             self.assertIn("carries no license header", still_open[0]["issue"])
 
