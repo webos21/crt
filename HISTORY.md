@@ -66,6 +66,18 @@ reopens its decision); the macOS SDK stages were regenerated and verified. The L
 `docs/guides/lgpl_source_offer.md` with placeholders and seven decisions for the owner and legal review. Not legal
 advice; legal sign-off, hosting/contact for the offer and Windows/aarch64 SDK regeneration remain open.
 
+### Tranche 10 on Windows/x64: SDKs regenerated with the LGPL source offer
+
+The Windows/x64 SDK stages were regenerated from the merged tree and the isolated `05 -> 06` build repeated from a new
+immutable predecessor: all five stages verify (the FFmpeg-shipping `04-gfx-media` and `05-ui` carry the generated
+offer), a fresh 8,301-action WebKit build finished in 4,267 s, and the 06-web SDK's offer names FFmpeg 8.1.2 and
+WPE WebKit 2.54.1 and passes the stricter `verify_dist.py`. Installed, spaced-path and externally rebuilt browsers pass the
+observer with the work root hidden, HTTP/TLS is 10/10 and the export and PE Host ABI audits are clean; the 3,630-entry
+inventory is unchanged across the copy. `prepare_release_assets.py` correctly refuses these development candidates
+(a release needs a tagged build). Open: Windows/arm64 (needs an arm64 host), a tagged release rehearsal, the 2.54
+support-window confirmation, owner review. Evidence: `docs/acceptance/crtweb_acceptance.md` (Windows/x64 SDK regenerated
+with the LGPL source offer).
+
 ### Tranche 10 on Windows/x64: WebKit 2.54.1 isolated replay and inherited-runtime notices
 
 The in-tree Windows SDK was regenerated with the inherited-runtime notices (five stages, each `verify_dist.py` pass,

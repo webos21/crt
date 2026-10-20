@@ -5093,6 +5093,37 @@ Linux/aarch64 SDK regeneration with the notices; the five header decisions; the 
 upstream's support window for 2.54 is still unconfirmed. The historical owned-debugger harness was not used: all runs
 are ordinary executions.
 
+#### Windows/x64 SDK regenerated with the LGPL source offer (2026-10-20)
+
+The 2.54.1 replay above predates the generated source offer and the header decisions, so the Windows/x64 SDKs were
+regenerated from the merged tree (`d21430d`, clean) and the isolated build repeated. **In-tree:** all five stage
+publishers pass `verify_dist.py`; `04-gfx-media` and `05-ui` carry `share/licenses/SOURCE-OFFER.md` naming FFmpeg 8.1.2
+(the stages without an LGPL component, `01-c` to `03-gfx-simple`, carry none, as designed). **Isolated:** a new
+immutable `05-ui` predecessor (3,380 entries, unchanged after the build), source asset SHA-256
+`fe1081995af6331c6b5fbabb30a34f19604ad2ae55ad2f4ffa4662967cab6434`, empty work root `C:/crtw/t10w2541b`, the same explicit
+build-host inputs as above; a fresh full build (the changed predecessor does not allow a packaging-only retry) finished
+with exit 0 in 4,266.7 s and 8,301 WebKit actions. `out/tranche10-windows-offer/sdk06` passes `verify_dist.py`, which now
+rejects a missing or unresolved offer; its `SOURCE-OFFER.md` names **FFmpeg 8.1.2 and WPE WebKit 2.54.1**, and the
+installed browser smoke, observer (141 mapped files, one CRT C++ runtime per role), HTTP/TLS 10/10, export and
+PE Host ABI checks pass in the stage. The SBOM (30 packages) and `web-security.json` are unchanged in content
+(`public_release_allowed: false`; blockers: upstream support window unconfirmed, native three-host and cross-target
+packaging acceptance required). The manifest reports no public release.
+
+Relocation with the work root `C:/crtw/t10w2541b` renamed out of reach: the installed SDK, a copy at a spaced path and an
+externally rebuilt `examples/web-browser` pass the observer (144, 144, 144 mapped files, three roles, nothing left
+running), the copy passes 10/10 HTTP/TLS, and both SDKs pass `verify_dist.py`, the export audit and the PE Host ABI
+audit. The 3,630-entry inventory (SHA-256 `9bb46ef95124f6b9e1ccd8575db1502798e3ce05960b59891d41e3f781adb7c1`) is identical
+before and after and across the copy, the predecessor is unchanged and the work root is restored. A first attempt of this
+step stopped before touching anything: my copy of the relocation script needed the predecessor's `tree_inventory` record
+that the earlier run had already written; it was created and the step rerun. Evidence: `out/tranche10-windows-offer/run-offer.json`,
+`out/web-windows-tranche10-offer.log`, `out/tranche10-windows-offer/replay-offer/result.json`.
+
+*Not done on Windows:* `prepare_release_assets.py` run against these SDKs. It refuses them, correctly: a release needs a
+tagged build (`-DCRT_RELEASE_TAG`, stage-source recipes pointing at that release), and the Windows SDKs here are development
+candidates; a tagged rehearsal means rebuilding every stage and the 06-web SDK again and is left for the release itself. The
+release tool is host-neutral and covered by its unit tests (25), which pass on this host. Windows/arm64 needs an arm64
+host and was not attempted.
+
 #### Inherited runtime notices (2026-10-20)
 
 Every SDK stage redistributes libc/libm/libdl, the shell and (from `02-cxx`) the imported LLVM C++ runtime,
