@@ -105,8 +105,9 @@ class PackagingTests(unittest.TestCase):
         result = stage.fontconfig_host_generator_recipe(
             recipe, Path("/sdk"), Path("/work"), Path("/host/bin/gperf"), "linux")
         self.assertEqual(result["dependencies"], ["make", "freetype"])
-        self.assertEqual(result["build"]["env"]["GPERF"], "/host/bin/gperf")
-        self.assertEqual(result["build"]["path_prepend"], ["/host/bin"])
+        # The recipe carries the host path in the build host's own spelling (backslashes on Windows).
+        self.assertEqual(result["build"]["env"]["GPERF"], str(Path("/host/bin/gperf")))
+        self.assertEqual(result["build"]["path_prepend"], [str(Path("/host/bin"))])
 
     def test_linux_cross_recipes_name_build_and_target(self):
         autoconf = {"name": "icu", "build": {"system": "configure", "configure_args": []}}
@@ -526,6 +527,7 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "x86_64-host -> Linux/aarch64-target"):
             stage.build_kind({"os": "linux", "arch": "aarch64"}, "Linux", "aarch64")
 
+    @unittest.skipIf(os.name == "nt", "runs the POSIX shell wrappers directly; a Windows build host uses the .cmd wrappers")
     def test_linux_wrappers_select_aarch64_on_an_x86_64_build_host(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
