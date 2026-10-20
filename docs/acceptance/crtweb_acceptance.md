@@ -5093,6 +5093,77 @@ Linux/aarch64 SDK regeneration with the notices; the five header decisions; the 
 upstream's support window for 2.54 is still unconfirmed. The historical owned-debugger harness was not used: all runs
 are ordinary executions.
 
+#### Windows/x64 SDK regenerated with the LGPL source offer (2026-10-20)
+
+The 2.54.1 replay above predates the generated source offer and the header decisions, so the Windows/x64 SDKs were
+regenerated from the merged tree (`d21430d`, clean) and the isolated build repeated. **In-tree:** all five stage
+publishers pass `verify_dist.py`; `04-gfx-media` and `05-ui` carry `share/licenses/SOURCE-OFFER.md` naming FFmpeg 8.1.2
+(the stages without an LGPL component, `01-c` to `03-gfx-simple`, carry none, as designed). **Isolated:** a new
+immutable `05-ui` predecessor (3,380 entries, unchanged after the build), source asset SHA-256
+`fe1081995af6331c6b5fbabb30a34f19604ad2ae55ad2f4ffa4662967cab6434`, empty work root `C:/crtw/t10w2541b`, the same explicit
+build-host inputs as above; a fresh full build (the changed predecessor does not allow a packaging-only retry) finished
+with exit 0 in 4,266.7 s and 8,301 WebKit actions. `out/tranche10-windows-offer/sdk06` passes `verify_dist.py`, which now
+rejects a missing or unresolved offer; its `SOURCE-OFFER.md` names **FFmpeg 8.1.2 and WPE WebKit 2.54.1**, and the
+installed browser smoke, observer (141 mapped files, one CRT C++ runtime per role), HTTP/TLS 10/10, export and
+PE Host ABI checks pass in the stage. The SBOM (30 packages) and `web-security.json` are unchanged in content
+(`public_release_allowed: false`; blockers: upstream support window unconfirmed, native three-host and cross-target
+packaging acceptance required). The manifest reports no public release.
+
+Relocation with the work root `C:/crtw/t10w2541b` renamed out of reach: the installed SDK, a copy at a spaced path and an
+externally rebuilt `examples/web-browser` pass the observer (144, 144, 144 mapped files, three roles, nothing left
+running), the copy passes 10/10 HTTP/TLS, and both SDKs pass `verify_dist.py`, the export audit and the PE Host ABI
+audit. The 3,630-entry inventory (SHA-256 `9bb46ef95124f6b9e1ccd8575db1502798e3ce05960b59891d41e3f781adb7c1`) is identical
+before and after and across the copy, the predecessor is unchanged and the work root is restored. A first attempt of this
+step stopped before touching anything: my copy of the relocation script needed the predecessor's `tree_inventory` record
+that the earlier run had already written; it was created and the step rerun. Evidence: `out/tranche10-windows-offer/run-offer.json`,
+`out/web-windows-tranche10-offer.log`, `out/tranche10-windows-offer/replay-offer/result.json`.
+
+*Not done on Windows:* `prepare_release_assets.py` run against these SDKs. It refuses them, correctly: a release needs a
+tagged build (`-DCRT_RELEASE_TAG`, stage-source recipes pointing at that release), and the Windows SDKs here are development
+candidates; a tagged rehearsal means rebuilding every stage and the 06-web SDK again and is left for the release itself. The
+release tool is host-neutral and covered by its unit tests (25), which pass on this host. Windows/arm64 needs an arm64
+host and was not attempted.
+
+#### Upstream support window of the WPE WebKit stable series (checked 2026-10-20)
+
+The open release blocker "upstream support window unconfirmed" asked for a fact about upstream, so it was looked up
+rather than assumed. Sources, all read on 2026-10-20:
+[Security Updates](https://docs.webkit.org/Ports/WebKitGTK%20and%20WPE%20WebKit/SecurityUpdates.html) in the WebKit
+documentation, the [release schedule](https://wpewebkit.org/release/schedule/), the
+[release list](https://wpewebkit.org/release/) and the [advisory index](https://wpewebkit.org/security/) with
+[WSA-2026-0006](https://wpewebkit.org/security/WSA-2026-0006.html).
+
+**What upstream states.** "Security updates are only available for the latest stable release branch"; stable means an
+even minor number; "developers don't generally backport security fixes for older stable releases"; users are told to use
+the latest stable version. WPE WebKit "follows a 6-month development cycle" with feature releases "typically in March and
+September". WSA-2026-0006 (2026-09-29) names the threshold 2.54.0 and recommends "updating to the latest stable versions".
+
+**What upstream does not state.** No page gives a support duration or an end-of-life date for a stable series, and the
+schedule page gives no date for 2.56. So there is nothing for CRT to *confirm* as a promise; what exists is a rule (one
+supported stable branch) and a cadence.
+
+**Observed practice** (release dates from the release list): the last micro of a series ships shortly before its successor's
+first release and none follows it.
+
+| Series | First release | Last micro | Successor's first release | Last micro before successor |
+| --- | --- | --- | --- | --- |
+| 2.48 | (not read) | 2.48.7, 2025-09-19 | 2.50.0, 2025-09-20 | 1 day |
+| 2.50 | 2.50.0, 2025-09-20 | 2.50.6, 2026-03-12 | 2.52.0, 2026-03-18 | 6 days |
+| 2.52 | 2.52.0, 2026-03-18 | 2.52.6, 2026-08-19 | 2.54.0, 2026-09-16 | 28 days |
+| 2.54 | 2.54.0, 2026-09-16 | 2.54.1, 2026-10-06 (current) | 2.56 expected about March 2027, not announced | -- |
+
+A series therefore receives fixes for roughly five to six months (2.50: 173 days, 2.52: 154 days from first to last
+micro) and no fixes after its successor appears. For the pinned 2.54 series that means: current while 2.54.x is the newest
+stable, expected to stop receiving fixes around the 2.56.0 release (an inference from the March/September pattern, not an
+upstream commitment), with the last 2.54 micro possibly weeks earlier. A release of an SDK built on 2.54.1 made after 2.56.0
+ships would carry an unsupported WebKit.
+
+**What CRT must decide (owner policy, not a fact to look up).** Whether and how fast CRT follows the cadence, for example a
+maximum age of the pinned series at release time, or a re-pin to the next stable within N days of its first release (the
+re-pin tranche item already exists in the Web policy). `tools/check_webkit_security.py` keeps the blocker until that policy is
+chosen; no code or blocker was changed here. Also still true: the information is a snapshot of public pages, not a
+statement from the maintainers; asking them (webkit-gtk/webkit-wpe lists) would turn the pattern into a commitment.
+
 #### Inherited runtime notices (2026-10-20)
 
 Every SDK stage redistributes libc/libm/libdl, the shell and (from `02-cxx`) the imported LLVM C++ runtime,

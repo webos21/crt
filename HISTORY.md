@@ -81,6 +81,28 @@ reopens its decision); the macOS SDK stages were regenerated and verified. The L
 `docs/guides/lgpl_source_offer.md` with placeholders and seven decisions for the owner and legal review. Not legal
 advice; legal sign-off, hosting/contact for the offer and Windows/aarch64 SDK regeneration remain open.
 
+### Tranche 10: what upstream says about the 2.54 support window
+
+Looked up instead of assumed (WebKit documentation, release schedule, release list, advisories, read 2026-10-20): upstream
+gives security fixes only to the latest stable branch, does not generally backport, and publishes no duration or end-of-life
+date. In practice a series' last micro came 1, 6 and 28 days before its successor (2.48, 2.50, 2.52) and none after; with the
+March/September cadence 2.54 should stop receiving fixes around 2.56.0 (about March 2027, unannounced). So the blocker is
+not a fact left to confirm but a policy the owner has to choose (how old a pinned series may be at release, how fast CRT
+re-pins); the recorded facts are in `libcrtweb/third_party/webkit/recipe.json` and `docs/acceptance/crtweb_acceptance.md`
+(Upstream support window of the WPE WebKit stable series). The blocker in `check_webkit_security.py` is unchanged.
+
+### Tranche 10 on Windows/x64: SDKs regenerated with the LGPL source offer
+
+The Windows/x64 SDK stages were regenerated from the merged tree and the isolated `05 -> 06` build repeated from a new
+immutable predecessor: all five stages verify (the FFmpeg-shipping `04-gfx-media` and `05-ui` carry the generated
+offer), a fresh 8,301-action WebKit build finished in 4,267 s, and the 06-web SDK's offer names FFmpeg 8.1.2 and
+WPE WebKit 2.54.1 and passes the stricter `verify_dist.py`. Installed, spaced-path and externally rebuilt browsers pass the
+observer with the work root hidden, HTTP/TLS is 10/10 and the export and PE Host ABI audits are clean; the 3,630-entry
+inventory is unchanged across the copy. `prepare_release_assets.py` correctly refuses these development candidates
+(a release needs a tagged build). Open: Windows/arm64 (needs an arm64 host), a tagged release rehearsal, the 2.54
+support-window confirmation, owner review. Evidence: `docs/acceptance/crtweb_acceptance.md` (Windows/x64 SDK regenerated
+with the LGPL source offer).
+
 ### Tranche 10 on Windows/x64: WebKit 2.54.1 isolated replay and inherited-runtime notices
 
 The in-tree Windows SDK was regenerated with the inherited-runtime notices (five stages, each `verify_dist.py` pass,

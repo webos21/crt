@@ -172,16 +172,16 @@ uses the host replay order stated below and in the acceptance document.
     DLL-import consumer/API resolution and ownership callback evidence stay in Web acceptance.
   * [ ] Inherited-runtime notices/SBOM: engineering inventory done on Linux/x86_64 (`crt-runtime` components in
     every stage, [evidence](docs/acceptance/crtweb_acceptance.md#inherited-runtime-notices-2026-10-20)); macOS/arm64
-    and Windows/x64 SDKs regenerated and verified 2026-10-20 (Windows/x64 before the source offer: regenerate it again);
+    and Windows/x64 SDKs regenerated and verified 2026-10-20, Windows/x64 again with the source offer 2026-10-20 (isolated 06-web, relocation);
     the five header items resolved by engineering
     review against upstream 2026-10-20 (`third_party/bionic/header_decisions.json`); LGPL source offer generated per SDK and
     corresponding-source bundle added to the release tool ([guide](docs/guides/lgpl_source_offer.md); issue tracker, 3 years,
-    upstream archives not bundled); Linux/aarch64 SDKs regenerated and verified 2026-10-21 (four option-ON-only aarch64 defects fixed); still open: Windows/x64 (with the offer) and Windows/arm64 SDK regeneration,
+    upstream archives not bundled); Linux/aarch64 SDKs regenerated and verified 2026-10-21 (four option-ON-only aarch64 defects fixed); still open: Windows/arm64 (needs an arm64 host) SDK regeneration,
     the release tool exports `05-ui`/`06-web` with the owner-controlled `web_public_release` switch (final tags refuse a development
     candidate); still open: owner review (external legal review optional).
   * [x] Stable-series pin moved to WebKit 2.54.1 (newest micro; Linux/x86_64 gates green, [evidence](docs/acceptance/crtweb_acceptance.md#webkit-2541-re-pin-and-linuxx86_64-replay-2026-10-20));
     macOS/arm64 and Windows/x64 isolated replays green 2026-10-20; the in-tree driver gate now prefers the port's curl
-    (`CRT_LINK_RPATH_FIRST`, green against the unmodified SDK); open: upstream support-window confirmation.
+    (`CRT_LINK_RPATH_FIRST`, green against the unmodified SDK); open: choose the support policy (upstream publishes no end of life; only the latest stable gets fixes, 2.54 expected to end around 2.56.0, March 2027 -- [facts](docs/acceptance/crtweb_acceptance.md#upstream-support-window-of-the-wpe-webkit-stable-series-checked-2026-10-20)).
 
 `tools/check_webkit_security.py` is the development-package advisory snapshot;
 public-release conditions remain under Tranche 10 above.
