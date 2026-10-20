@@ -45,6 +45,9 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import crt_source_offer  # noqa: E402  (LGPL corresponding-source bundle)
 
 #: Stages published in a developer preview.  ``05-ui`` (contract and headless
 #: model only so far) and ``06-web`` are deliberately not offered yet.
@@ -288,6 +291,15 @@ def prepare(dist_root: Path, version: str, output_dir: Path,
         for name, source in sorted(stage_sources.items()):
             shutil.copy2(source, output_dir / name)
             assets[name] = {"name": name, "kind": "stage-source"}
+        # FFmpeg (04-gfx-media onwards, WebKit in 06-web) is LGPL: the release carries the bundle that the
+        # generated share/licenses/SOURCE-OFFER.md of those SDKs points to (the upstream archives are named
+        # there by address and SHA-256, not copied in).
+        if any(stage in stages for stage in ("04-gfx-media", "05-ui", "06-web")):
+            bundle_stage = "06-web" if "06-web" in stages else "04-gfx-media"
+            bundle = crt_source_offer.build_bundle(
+                REPO_ROOT, crt_source_offer.load_config(REPO_ROOT), version, output_dir,
+                crt_source_offer.components_from_root(REPO_ROOT, bundle_stage, True), allow_dirty)
+            assets[bundle.name] = {"name": bundle.name, "kind": "corresponding-source"}
         for entry in assets.values():
             path = output_dir / entry["name"]
             entry["size"] = path.stat().st_size
