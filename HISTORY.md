@@ -78,6 +78,13 @@ engine, port or PAL needed a change. Still open for the Tranche: Windows replay 
 regeneration with the notices, the five header decisions, the LGPL source offer, legal sign-off and the 2.54
 support-window confirmation. Evidence: `docs/acceptance/crtweb_acceptance.md` (WebKit 2.54.1 replay on macOS/arm64).
 
+### crt-ui-dist without LVGL fails with its reason
+
+A default configuration (`CRTUI_ENABLE_LVGL=OFF`) built 04-gfx-media and then stopped in `verify_dist.py` on a missing
+`examples/ui-basic/main.c`. `crt-ui-dist` is now a target that fails at once and names `-DCRTUI_ENABLE_LVGL=ON` (and the
+`crtui-lvgl-fetch` target) when LVGL is off (`cmake/fail_with_message.cmake`); the LVGL-on target is unchanged.
+Checked on a clean Linux default configuration; the build with LVGL on still plans `create_dist.py`.
+
 ### Tranche 10: driver gate vs the SDK's shared libcurl
 
 The in-tree SDK's shared mbedTLS `libcurl.so.4` (no FILE protocol) shadowed the Web port's OpenSSL curl through the

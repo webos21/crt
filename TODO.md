@@ -186,10 +186,6 @@ uses the host replay order stated below and in the acceptance document.
 `tools/check_webkit_security.py` is the development-package advisory snapshot;
 public-release conditions remain under Tranche 10 above.
 
-Small UI follow-up (not a gate): make a default-configuration `crt-ui-dist` fail with a clear
-message instead of a missing `ui-basic/main.c` (it needs
-`-DCRTUI_ENABLE_LVGL=ON`).
-
 ## Planned
 
 ### Upper runtime roadmap

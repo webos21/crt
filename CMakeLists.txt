@@ -1782,16 +1782,29 @@ if(Python3_Interpreter_FOUND)
   if(TARGET crtui_contract_shared_test)
     add_dependencies(crt-ui-test crtui_contract_shared_test)
   endif()
-  add_custom_target(crt-ui-dist
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
-      --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
-      --dest "${CRT_DIST_ROOT}/05-ui" --base "${CRT_DIST_ROOT}/04-gfx-media"
-      --component crt-ui --cmake "${CMAKE_COMMAND}" --stage 05-ui
-      --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/06-web.json"
-      --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
-      --dist "${CRT_DIST_ROOT}/05-ui" --stage 05-ui
-    DEPENDS crt-gfx-media-dist crt-ui-build crt-stage-06-source
-    USES_TERMINAL
-  )
+  if(NOT CRTUI_ENABLE_LVGL)
+    # The 05-ui SDK installs the ui-basic sample, which exists only when crtui's private LVGL
+    # renderer is built. Fail up front with the reason instead of building 04-gfx-media and then
+    # stopping in verify_dist.py on a missing examples/ui-basic/main.c.
+    add_custom_target(crt-ui-dist
+      COMMAND "${CMAKE_COMMAND}"
+        "-DCRT_FAIL_MESSAGE=crt-ui-dist needs the crtui LVGL renderer. Configure with -DCRTUI_ENABLE_LVGL=ON (run the crtui-lvgl-fetch target first if LVGL is not extracted). This build has CRTUI_ENABLE_LVGL=OFF, so the 05-ui SDK would have no examples/ui-basic."
+        -P "${CMAKE_SOURCE_DIR}/cmake/fail_with_message.cmake"
+      VERBATIM
+      USES_TERMINAL
+    )
+  else()
+    add_custom_target(crt-ui-dist
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+        --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
+        --dest "${CRT_DIST_ROOT}/05-ui" --base "${CRT_DIST_ROOT}/04-gfx-media"
+        --component crt-ui --cmake "${CMAKE_COMMAND}" --stage 05-ui
+        --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/06-web.json"
+        --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+        --dist "${CRT_DIST_ROOT}/05-ui" --stage 05-ui
+      DEPENDS crt-gfx-media-dist crt-ui-build crt-stage-06-source
+      USES_TERMINAL
+    )
+  endif()
 endif()
