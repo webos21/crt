@@ -19,7 +19,10 @@ if [ -z "${CRT_SYSROOT:-}" ]; then
   exit 1
 fi
 
-target_os="${CRT_TARGET_OS:-}"
+if [ -f "${CRT_SYSROOT}/tools/crt-target.sh" ]; then
+  . "${CRT_SYSROOT}/tools/crt-target.sh"
+fi
+target_os="${CRT_TARGET_OS:-${CRT_SDK_TARGET_OS:-}}"
 if [ -z "$target_os" ]; then
   case "$(uname -s)" in
     Darwin) target_os=macos ;;
@@ -31,7 +34,7 @@ fi
 
 cxx="${CRT_HOST_CXX:-clang++}"
 compiler_rt_builtins=""
-target_arch="${CRT_TARGET_ARCH:-}"
+target_arch="${CRT_TARGET_ARCH:-${CRT_SDK_TARGET_ARCH:-}}"
 if [ -z "$target_arch" ]; then
   case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
     *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
@@ -419,7 +422,10 @@ case "$target_os" in
     if [ "$target_arch" != "$host_arch" ]; then
       # Match crt-cc: target code comes only from the installed SDK while
       # Clang/LLD execute on the build host.
-      common_flags="$common_flags --target=${target_arch}-linux-gnu -fuse-ld=lld"
+      common_flags="$common_flags --target=${target_arch}-linux-gnu"
+      if [ "$compile_only" -eq 0 ]; then
+        common_flags="$common_flags -fuse-ld=lld"
+      fi
     fi
     ;;
   windows)

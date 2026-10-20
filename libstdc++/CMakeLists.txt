@@ -148,6 +148,9 @@ endif()
 list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS
   --host-cc "${CMAKE_C_COMPILER}"
   --host-cxx "${CMAKE_CXX_COMPILER}")
+if(NOT CRT_TARGET_ARCH STREQUAL "host")
+  list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS --target-arch "${CRT_TARGET_ARCH}")
+endif()
 if(Python3_Interpreter_FOUND)
   add_custom_target(crt-libcxx-fetch
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1

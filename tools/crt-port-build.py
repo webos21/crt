@@ -650,7 +650,15 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     if packaged_sdk:
         suffix = ".exe" if target_os == "windows" else ""
         packaged_make = root / "system" / "bin" / f"make{suffix}"
-        if packaged_make.is_file():
+        cross_linux = (target_os == "linux" and
+                       detect_target_arch(env["CRT_TARGET_ARCH"]) != detect_target_arch(platform.machine()))
+        if cross_linux:
+            if use_crt_shell:
+                raise ValueError("a cross-target SDK cannot supply the build-host shell")
+            # The SDK's make is a TARGET executable, just like its mksh.
+            # Configure/make orchestrate target compilation on the BUILD host.
+            env["MAKE"] = find_host_make(target_os) or "make"
+        elif packaged_make.is_file():
             env["MAKE"] = (
                 "/system/bin/make"
                 if use_crt_shell
@@ -897,9 +905,13 @@ def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_b
     # tokens) purely so any future caller that doesn't need path
     # substitution isn't forced to pass them.
     def subst(value):
-        if preset_build_dir is None:
-            return str(value)
-        return substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os)
+        value = (str(value) if preset_build_dir is None else
+                 substitute_recipe_value(value, root, preset_build_dir, work_build_dir, sysroot, port_prefix, target_os))
+        # Command-valued environment entries (e.g. zlib LDSHARED) need the
+        # same selected, space-safe compiler command as configure arguments.
+        for tool in ("CC", "CXX", "AR", "RANLIB"):
+            value = value.replace("@" + tool + "@", env.get(tool, "@" + tool + "@"))
+        return value
 
     for name, value in build.get("env", {}).items():
         env[name] = subst(value)

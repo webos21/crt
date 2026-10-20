@@ -3,6 +3,7 @@
 
 import shutil
 import os
+import platform
 import subprocess
 import sys
 import tempfile
@@ -85,6 +86,24 @@ class ActivationScripts(unittest.TestCase):
         self.assertEqual(entries, [
             "%CRT_SYSROOT%tools", "%CRT_SYSROOT%system\\bin",
             "%CRT_SYSROOT%bin", "%PATH%"])
+
+    def test_linux_cross_sdk_persists_target_for_unactivated_wrappers(self):
+        sdk = self._sdk("linux", "aarch64", "aarch64-linux-gnu")
+        self.assertEqual((sdk / "tools/crt-target.sh").read_text(),
+                         "CRT_SDK_TARGET_OS=linux\nCRT_SDK_TARGET_ARCH=aarch64\n")
+        toolchain = (sdk / "crt-toolchain.cmake").read_text()
+        self.assertIn('set(CMAKE_SYSTEM_PROCESSOR "aarch64")', toolchain)
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux cross activation")
+    def test_cross_activation_does_not_expose_target_shell_make(self):
+        target = "x86_64" if platform.machine().lower() in ("aarch64", "arm64") else "aarch64"
+        sdk = self._sdk("linux", target, target + "-linux-gnu")
+        env = dict(os.environ, PATH="/usr/bin:/bin")
+        result = subprocess.check_output(
+            ["/bin/bash", "-c", '. "$1"; printf "%s" "$PATH"', "activate", str(sdk / "activate.sh")],
+            env=env, text=True)
+        self.assertEqual(result.split(os.pathsep)[0], str(sdk / "tools"))
+        self.assertNotIn(str(sdk / "system/bin"), result.split(os.pathsep))
 
     def test_windows_arm64_activation_also_adds_it(self):
         text = (self._sdk("windows", "aarch64", "aarch64-w64-mingw32")

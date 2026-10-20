@@ -113,6 +113,55 @@ def _read_elf(path: Path) -> bytes | None:
         return magic + stream.read()
 
 
+def machine_id(path: Path) -> int | None:
+    """Read ELF e_machine without loading a large WebKit binary into RAM."""
+    with path.open("rb") as stream:
+        header = stream.read(20)
+    if not header.startswith(b"\x7fELF"):
+        return None
+    if len(header) != 20 or header[5] not in (1, 2):
+        raise ValueError(f"invalid ELF header: {path}")
+    return int.from_bytes(header[18:20], "little" if header[5] == 1 else "big")
+
+
+def archive_machine_ids(path: Path) -> set[int]:
+    """Audit every ELF member, including GNU/BSD long-name archives.
+
+    Read only archive/member headers; static WebKit archives can exceed a GiB.
+    Thin archives and unknown object formats are not self-contained target SDK
+    artifacts and deliberately fail instead of following outside filenames.
+    """
+    machines = set()
+    with path.open("rb") as stream:
+        if stream.read(8) != b"!<arch>\n":
+            raise ValueError(f"not a self-contained archive: {path}")
+        length = path.stat().st_size
+        while stream.tell() < length:
+            header = stream.read(60)
+            if len(header) != 60 or header[58:] != b"`\n":
+                raise ValueError(f"invalid archive member header: {path}")
+            try:
+                size = int(header[48:58])
+                name = header[:16].decode("ascii").rstrip()
+                filename_size = int(name[3:]) if name.startswith("#1/") else 0
+            except (ValueError, UnicodeDecodeError) as error:
+                raise ValueError(f"invalid archive member size/name: {path}") from error
+            start = stream.tell()
+            if size < filename_size or start + size > length:
+                raise ValueError(f"truncated archive member: {path}")
+            if filename_size:
+                name = stream.read(filename_size).rstrip(b"\0").decode("utf-8")
+            if name not in ("/", "//", "/SYM64/") and not name.startswith("__.SYMDEF"):
+                data = stream.read(min(20, size - filename_size))
+                if len(data) != 20 or not data.startswith(b"\x7fELF") or data[5] not in (1, 2):
+                    raise ValueError(f"non-ELF member in target archive: {path}: {name}")
+                machines.add(int.from_bytes(data[18:20], "little" if data[5] == 1 else "big"))
+            stream.seek(start + size + (size & 1))
+    if not machines:
+        raise ValueError(f"target archive has no ELF members: {path}")
+    return machines
+
+
 def runtime_paths(path: Path) -> list[str]:
     """Return DT_RPATH/DT_RUNPATH strings, or an empty list for non-ELF files."""
     data = _read_elf(path)

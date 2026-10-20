@@ -117,6 +117,34 @@ class PackagingTests(unittest.TestCase):
             {"name": "zlib", "build": {"system": "configure", "configure_args": [], "env": {}}})
         self.assertEqual(zlib["build"]["env"]["CHOST"], "aarch64-linux-gnu")
 
+    def test_zlib_linux_probe_keeps_versioning_and_builds_pic_archives(self):
+        recipe = json.loads((ROOT / "porting/recipes/zlib.json").read_text())
+        env = recipe["build"]["target_overrides"]["linux"]["env"]
+        self.assertIn("-fPIC", env["CFLAGS"])
+        self.assertIn("--undefined-version", env["LDSHARED"])
+        self.assertIn("--version-script,zlib.map", env["LDSHARED"])
+        self.assertIn("-soname,libz.so.1", env["LDSHARED"])
+        self.assertNotIn("--allow-shlib-undefined", env["LDSHARED"])
+
+    def test_linux_system_imports_reject_foreign_or_escaping_libraries(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            libraries = root / "target"
+            libraries.mkdir()
+            for name in ("libvulkan.so.1", "libwayland-client.so.0", "libva.so.2", "libva-drm.so.2"):
+                (libraries / name).write_bytes(b"target import")
+            with patch.object(stage, "readelf_machines", return_value=["aarch64"]):
+                self.assertEqual(len(stage.linux_system_imports(libraries)), 4)
+            with patch.object(stage, "readelf_machines", return_value=["x86_64"]):
+                with self.assertRaisesRegex(ValueError, "not AArch64"):
+                    stage.linux_system_imports(libraries)
+            (libraries / "libvulkan.so.1").unlink()
+            (root / "outside").write_bytes(b"foreign")
+            (libraries / "libvulkan.so.1").symlink_to(root / "outside")
+            with self.assertRaisesRegex(ValueError, "escaping"):
+                stage.linux_system_imports(libraries)
+
     def test_native_configure_interpreter_reads_host_not_crt_root_paths(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("crt_port_build_test", ROOT / "tools/crt-port-build.py")
@@ -527,7 +555,35 @@ class PackagingTests(unittest.TestCase):
                                env=env, check=True)
                 actual = arguments.read_text().splitlines()
                 self.assertIn("--target=aarch64-linux-gnu", actual)
-                self.assertIn("-fuse-ld=lld", actual)
+                self.assertNotIn("-fuse-ld=lld", actual)  # link-only option, -Werror safe
+                (sdk / "tools").mkdir(exist_ok=True)
+                (sdk / "tools/crt-target.sh").write_text("CRT_SDK_TARGET_OS=linux\nCRT_SDK_TARGET_ARCH=aarch64\n")
+                env.pop("CRT_TARGET_ARCH")
+                env.pop("CRT_TARGET_OS")
+                subprocess.run([ROOT / "tools" / wrapper, "-c", source, "-o", root / (wrapper + ".o")],
+                               env=env, check=True)
+                self.assertIn("--target=aarch64-linux-gnu", arguments.read_text().splitlines())
+
+    def test_cross_sdk_does_not_execute_its_target_make(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location("port_builder", ROOT / "tools/crt-port-build.py")
+        driver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(driver)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "manifest.json").write_text("{}")
+            (root / "system/bin").mkdir(parents=True)
+            (root / "system/bin/make").touch()
+            with patch.object(driver.platform, "machine", return_value="x86_64"), \
+                    patch.object(driver, "find_host_make", return_value="/native/make"), \
+                    patch.dict(os.environ, {"CRT_TARGET_ARCH": "aarch64", "MAKE": str(root / "system/bin/make")}):
+                env = driver.make_env(root, root, root / "work", root, root / "prefix",
+                                      "linux", "aarch64-w64-mingw32")
+                self.assertEqual(env["MAKE"], "/native/make")
+                recipe = {"build": {"env": {"LDSHARED": "@CC@ -shared -Wl,--undefined-version"}}}
+                driver.apply_recipe_env(env, recipe, "linux", root)
+                self.assertEqual(env["LDSHARED"], env["CC"] + " -shared -Wl,--undefined-version")
 
     def test_host_environment_does_not_inherit_target_flags(self):
         from unittest.mock import patch
@@ -666,10 +722,26 @@ class PackagingTests(unittest.TestCase):
             stage.write_json(root / "share/crt/web-cross-build.json", {
                 "passed": True, "build_host": {"os": "linux", "arch": "x86_64"},
                 "target": {"os": "linux", "arch": "aarch64"},
-                "host_generators": {name: {} for name in ("gperf", "perl", "python", "ruby", "genrb", "icupkg", "pkgdata")},
-                "target_artifacts": {name: {} for name in ("icu", "libc++", "JavaScriptCore", "WebCore", "WebKit")},
+                "host_generators": {name: {"machines": ["x86_64"], "sha256": "a" * 64, "path": "/host/"+name}
+                                    for name in ("gperf", "perl", "python", "ruby", "genrb", "icupkg", "pkgdata")},
+                "target_artifacts": {name: {"machines": ["aarch64"], "sha256": "b" * 64}
+                                     for name in ("icu", "libc++", "JavaScriptCore", "WebCore", "WebKit")},
+                "fontconfig_generator": {"path": "/host/gperf", "makefile_sha256": "c" * 64},
             })
             validate_web_stage(root, cross_manifest, redistributed, "")
+            cross_path = root / "share/crt/web-cross-build.json"
+            cross_proof = json.loads(cross_path.read_text())
+            bad = copy.deepcopy(cross_proof)
+            bad["host_generators"]["gperf"]["machines"] = ["aarch64"]
+            stage.write_json(cross_path, bad)
+            with self.assertRaisesRegex(SystemExit, "architecture/hash"):
+                validate_web_stage(root, cross_manifest, redistributed, "")
+            bad = copy.deepcopy(cross_proof)
+            bad["fontconfig_generator"]["path"] = "/target/gperf"
+            stage.write_json(cross_path, bad)
+            with self.assertRaisesRegex(SystemExit, "fontconfig generator"):
+                validate_web_stage(root, cross_manifest, redistributed, "")
+            stage.write_json(cross_path, cross_proof)
             missing_identity = copy.deepcopy(manifest)
             del missing_identity["built_from"]["predecessor_content_sha256"]
             with self.assertRaisesRegex(SystemExit, "predecessor content"):

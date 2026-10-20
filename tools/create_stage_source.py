@@ -99,6 +99,10 @@ STAGES = {
             ),
             "linux": (
                 "libcrtgfx/src/arch/linux/window_wayland.c",
+                # Optional native-Wayland predecessor bootstrap: the
+                # standalone project enables this only with an explicit
+                # CRT_STAGE_WAYLAND_PREFIX and target OS library.
+                "libcrtgfx/src/arch/linux/window_wayland_native.c",
                 # The legacy backend dispatches through this shared interface
                 # even when the native Vulkan/Wayland implementation itself
                 # is intentionally excluded from the Simple Graphics stage.

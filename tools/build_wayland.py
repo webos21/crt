@@ -41,6 +41,7 @@ what it was checked against.
 
 import argparse
 import os
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -246,6 +247,8 @@ def main():
                               "holding expat/libffi headers+libs")
     parser.add_argument("--target-os", required=True, choices=["linux", "macos", "windows"])
     parser.add_argument("--target-arch", default="host")
+    parser.add_argument("--host-scanner", type=Path,
+                        help="separately built native wayland-scanner 1.26.0 (required for cross builds)")
     parser.add_argument("--configure-only", action="store_true",
                          help="stop after generating headers/building wayland-scanner (no wayland-client build)")
     args = parser.parse_args()
@@ -358,24 +361,32 @@ def main():
     # on the same machine that built it -- no separate "host compiler"
     # is needed the way a real embedded cross-build's own guide would use
     # one). ---
-    expat_include = port_prefix / "include"
-    expat_lib = port_prefix / "lib" / "libexpat.a"
-    if not expat_lib.is_file():
-        raise SystemExit(f"expected expat static library missing: {expat_lib} (build port-build-expat first)")
+    if args.host_scanner:
+        scanner_bin = args.host_scanner.resolve()
+        version = subprocess.run([str(scanner_bin), "--version"], capture_output=True, text=True, check=True)
+        if (version.stdout + version.stderr).strip() != "wayland-scanner 1.26.0":
+            raise SystemExit("--host-scanner must match the pinned Wayland 1.26.0 source")
+    else:
+        if args.target_arch != "host" and args.target_arch != normalize_target_arch(platform.machine()):
+            raise SystemExit("cross-building Wayland requires a separately built --host-scanner")
+        expat_include = port_prefix / "include"
+        expat_lib = port_prefix / "lib" / "libexpat.a"
+        if not expat_lib.is_file():
+            raise SystemExit(f"expected expat static library missing: {expat_lib} (build port-build-expat first)")
 
-    scanner_objs = []
-    for source_file in ("scanner.c", "wayland-util.c"):
-        obj = obj_dir / f"{source_file}.o"
-        compile_object(
-            crt_cc, src / source_file, obj,
-            include_dirs=common_includes + [expat_include],
-            defines=[posix_define],
-            env=env, cwd=root,
-        )
-        scanner_objs.append(obj)
+        scanner_objs = []
+        for source_file in ("scanner.c", "wayland-util.c"):
+            obj = obj_dir / f"{source_file}.o"
+            compile_object(
+                crt_cc, src / source_file, obj,
+                include_dirs=common_includes + [expat_include],
+                defines=[posix_define],
+                env=env, cwd=root,
+            )
+            scanner_objs.append(obj)
 
-    scanner_bin = build_dir / f"wayland-scanner{exe_suffix}"
-    run([str(crt_cc)] + [str(o) for o in scanner_objs] + [str(expat_lib), "-o", str(scanner_bin)], cwd=root, env=env)
+        scanner_bin = build_dir / f"wayland-scanner{exe_suffix}"
+        run([str(crt_cc)] + [str(o) for o in scanner_objs] + [str(expat_lib), "-o", str(scanner_bin)], cwd=root, env=env)
 
     if args.configure_only:
         print(f"wayland-scanner built: {scanner_bin}")

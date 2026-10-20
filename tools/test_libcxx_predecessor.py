@@ -4,6 +4,7 @@
 import importlib.util
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -82,6 +83,16 @@ class PredecessorFingerprintTests(unittest.TestCase):
 
 
 class RuntimeEnvironmentTests(unittest.TestCase):
+    def test_linux_cross_configure_keeps_target_abi_path_and_pthread_policy(self):
+        with mock.patch.object(DRIVER, "compiler_supports_flag", return_value=False):
+            options = DRIVER.common_cmake_args(Path("/repo"), Path("/work with spaces/install"),
+                                               Path("/target-sdk"), None, "linux", None,
+                                               {"CRT_TARGET_ARCH": "aarch64"})
+        self.assertIn("-DCMAKE_SYSTEM_PROCESSOR=aarch64", options)
+        self.assertIn("-DLIBCXXABI_HAS_PTHREAD_LIB=OFF", options)
+        self.assertIn("-DLIBCXX_HAS_PTHREAD_LIB=OFF", options)
+        self.assertIn('-DCMAKE_SHARED_LINKER_FLAGS=-L"/work with spaces/install/lib"', options)
+
     def test_consumer_hints_do_not_enter_runtime_builds(self):
         parent = {"CRT_CXX_RUNTIME_LINKAGE": "shared", "CRT_CXX_HOSTED": "1",
                   "CRT_PORT_RPATH_DIR": "/consumer/lib", "CRT_HOST_CXX": "/llvm/clang++",

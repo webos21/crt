@@ -367,6 +367,22 @@ def validate_web_stage(dist: Path, manifest: dict, redistributed: dict, suffix: 
             raise SystemExit("Linux/aarch64 cross-build evidence is missing a host generator")
         if set(evidence.get("target_artifacts", {})) != {"icu", "libc++", "JavaScriptCore", "WebCore", "WebKit"}:
             raise SystemExit("Linux/aarch64 cross-build evidence is missing a target artifact")
+        for collection, expected in (("host_generators", "x86_64"),
+                                     ("target_artifacts", "aarch64")):
+            for name, record in evidence[collection].items():
+                if record.get("machines") != [expected] or not re.fullmatch(r"[0-9a-f]{64}", record.get("sha256", "")):
+                    raise SystemExit(f"invalid cross-build architecture/hash: {collection}/{name}")
+        fontconfig = evidence.get("fontconfig_generator", {})
+        if (fontconfig.get("path") != evidence["host_generators"]["gperf"].get("path") or
+                not re.fullmatch(r"[0-9a-f]{64}", fontconfig.get("makefile_sha256", ""))):
+            raise SystemExit("fontconfig generator is not bound to the build-host gperf")
+        from crt_elf import archive_machine_ids, machine_id
+        for file in dist.rglob("*"):
+            if file.is_file() and not file.is_symlink():
+                if machine_id(file) not in (None, 183):
+                    raise SystemExit(f"foreign ELF in Linux/aarch64 SDK: {file}")
+                if file.suffix == ".a" and archive_machine_ids(file) != {183}:
+                    raise SystemExit(f"foreign archive member in Linux/aarch64 SDK: {file}")
     if manifest["target"]["os"] == "windows":
         from crt_pe import exported_symbols
         owned = set((dist / "share/crt/crtmedia_public_symbols.txt").read_text().split())

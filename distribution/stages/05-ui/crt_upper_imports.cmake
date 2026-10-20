@@ -27,7 +27,7 @@ if(CRT_STAGE_TARGET_OS STREQUAL "linux")
     list(GET parts 0 name)
     list(GET parts 1 file)
     find_file(crt_host_${name} NAMES "${file}"
-      PATHS "/usr/lib/${crt_host_triplet}" "/lib/${crt_host_triplet}"
+      PATHS "${CRT_LINUX_SYSTEM_LIB_DIR}" "/usr/lib/${crt_host_triplet}" "/lib/${crt_host_triplet}"
       NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
   endforeach()
   set_property(TARGET crtgfx APPEND PROPERTY INTERFACE_LINK_LIBRARIES
@@ -42,6 +42,12 @@ if(CRT_STAGE_TARGET_OS STREQUAL "linux")
     "${CMAKE_SYSROOT}/lib/libz.a" -Wl,--end-group "${crt_host_va}" "${crt_host_va_drm}")
   add_link_options(-Wl,--exclude-libs,ALL -Wl,-Bsymbolic
     "-Wl,-rpath-link,/usr/lib/${crt_host_triplet}")
+  if(CMAKE_CROSSCOMPILING AND CRT_LINUX_SYSTEM_LIB_DIR)
+    # These are explicit target OS graphics imports, not a target libc SDK.
+    # Their transitive host-runtime imports are resolved by the target OS,
+    # never by adding a glibc sysroot to CRT's header/library search.
+    add_link_options(-Wl,--allow-shlib-undefined)
+  endif()
 elseif(CRT_STAGE_TARGET_OS STREQUAL "windows")
   set_property(TARGET crtgfx APPEND PROPERTY INTERFACE_LINK_LIBRARIES -Wl,user32.lib -Wl,gdi32.lib -Wl,d3d11.lib -Wl,dxgi.lib)
   set_property(TARGET crtgfx_gpu APPEND PROPERTY INTERFACE_LINK_LIBRARIES -Wl,d3d12.lib)

@@ -33,6 +33,11 @@
       "-DLIBUNWIND_USE_COMPILER_RT=ON"
     ],
     "target_overrides": {
+      "linux": {
+        "options": [
+          "-DLIBUNWIND_HAS_PTHREAD_LIB=OFF"
+        ]
+      },
       "windows": {
         "options": [
           "-DLIBUNWIND_HAS_PTHREAD_LIB=OFF"

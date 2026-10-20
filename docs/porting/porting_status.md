@@ -209,6 +209,10 @@ zlib builds and installs both static and shared artifacts on all three hosts.
 The recipe tests run real compress/decompress round trips against both build
 shapes.
 
+Linux was replayed on 2026-10-20 after the LLD version-script probe/PIC fix:
+both native static/shared round trips pass. The aarch64 cross build also
+produces both library shapes; it is compile/link proof, not a target run.
+
 Important CRT/PAL work exposed by zlib included shared-library wrapper support,
 Windows symlink support for SONAME-style aliases, Linux/macOS shared rpath
 handling, and correct resolution of this project's own CRT shared libraries

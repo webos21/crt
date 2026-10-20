@@ -4868,6 +4868,87 @@ missing import-path and host-configure diagnostics remain separate from final
 acceptance. `TODO.md` retains only the remaining Tranche 10 gates; `STATUS.md`
 is unchanged.
 
+#### Linux aarch64 cross-build replay (2026-10-20)
+
+This replay starts from `c5fea84` plus the local development changes, on a
+Linux/x86_64 build host with Clang/LLD 21.1.8. It is **compile/package proof**,
+not native aarch64 browser, HTTP/TLS, GPU, audio or camera execution.
+
+**Predecessor preparation.** No aarch64 SDK was present on this host. Built
+target compiler-rt from the same pinned AOSP LLVM revision used by the imported
+C++ runtimes (`37f38d1f3276b62fba09462ab4807dce846c732d`), using CRT C headers
+and Clang intrinsic headers only. The new Linux/aarch64 CMake toolchain builds
+libc/libm/libdl/startup/shell; the imported LLVM driver builds the target
+libunwind/libc++abi/libc++ static/shared pair. Then cross-build the pinned
+FreeType, FFmpeg, curl/mbedTLS/zlib, xkbcommon and Skia inputs. Wayland uses the
+separately built native, pinned 1.26.0 scanner, while client/protocol objects
+are target code. The standalone 03/04/05 compile/install projects provide the
+installed option-ON UI predecessor. They do **not** run their native tests on
+the x86_64 host, and this is not a clean native 01..05 acceptance replay.
+
+`out/tranche10-cross/sdk05` passes `verify_dist.py --stage 05-ui`. Its
+**119 ELF files and all members of 28 static archives are AArch64**, with no
+foreign object. The 3,271-entry predecessor content inventory SHA-256 is
+`6262b4bca5ed1107c1387f08a3ac6f06278ab5aeeefdd7c5881bef73d5cc73fc`.
+Preparation logs are `out/tranche10-cross/{builtins-*,bootstrap-*,libcxx-*,
+skia-build,xkbcommon-build,wayland-*,stage03-v2,stage04-v2,stage05,package05-final,
+verify05}.log`; the preflight inventory is independent of the later Web build.
+
+Only explicit **target OS** graphics imports are used: Vulkan loader
+1.4.341.0-1, Wayland client 1.24.0-2, VA 2.23.0-1ubuntu1 and DRM 2.4.131-1,
+plus target VA development/kernel-UAPI headers (linux-libc-dev 7.0.0-14.14).
+The arm64 `.deb` bytes are checked against the Ubuntu Resolute Packages
+indexes and the signed InRelease (Ubuntu archive keyring `gpgv` passes).
+Their identities are in `out/tranche10-cross/target-system/imports.json`.
+Packages are extracted only under that work directory: none is installed on
+the build host, no glibc sysroot is exposed to CRT, and these OS libraries are
+not redistributed in the SDK. VA/V4L2 headers cross only their existing narrow
+PAL adapter through `CRT_LINUX_SDK_ROOT`.
+
+**Boundary fixes exercised by preparation.** Linux port builds now choose the
+build host's make instead of executing the SDK's aarch64 make. Installed
+wrappers persist the target identity for direct/unactivated calls, and cross
+activation does not put target shell/toybox/make on the host PATH. Imported
+libc++ receives the target architecture and prefers its already-built ABI
+library; pthread-in-libc capability is declared rather than accepting a
+static-try-compile false positive and emitting `pthread` autolink records.
+The same investigation found Clang's default `--print-libgcc-file-name`
+returning GCC 15's `libgcc.a` on Linux. The core query now explicitly requests
+compiler-rt, including the target triple for cross queries; the fresh native
+regression selects `libclang_rt.builtins-x86_64.a`, not a renamed GCC archive.
+
+Fresh Linux/x86_64 C-stage configure/build/CTest passes **139/139**. The shared
+loader positive TLS/thread-local-destructor and unrelated missing-import
+negative tests also pass. Focused packaging/runtime helper regressions pass
+**121 cases, with three expected skips** (118 executed passes), recorded in
+`out/tranche10-cross/{native-configure,native-build,native-ctest,native-loader,
+focused-regressions}.log`. `STATUS.md` is unchanged.
+
+**Isolated `06-web` result.** The official isolated stage consumed the
+`sdk05` predecessor (predecessor inventory SHA-256 prefix `204130e7…`) and the
+pinned 06 source asset (`03abe775…1c46d1`) on the same Linux/x86_64 host and
+completed the full 8,305-step WebKit build, then passed `verify_dist.py --stage
+06-web`. The output SDK (`out/tranche10-cross/sdk06`) has **162 ELF files, all
+AArch64, and none x86-64**, 28 AArch64-only static archives, and
+`lib/libcrtweb.so` is `ELF 64-bit ... ARM aarch64`.
+
+`cross-build-evidence.json` (`passed: true`) records the split: build host
+Linux/x86_64, target Linux/aarch64. Host-executed generators are separate from
+target artifacts: gperf, ICU `genrb`/`icupkg`/`pkgdata` (built in
+`build/06-web/host/`), and the system Perl 5.40.1, Python 3.14.4 and Ruby 3.3.8,
+each recorded with path, SHA-256 and `x86_64` machine type. Target ICU, libc++,
+JavaScriptCore, WebCore and WebKit are recorded with SHA-256 and are AArch64.
+fontconfig's gperf-generated and Python-generated headers are regenerated in a
+separate host directory (`host/fontconfig-proof`) and compared with the target
+build's headers (match; generated-header SHA-256 `299726ec…`). The record states
+`target_execution: not attempted on the build host`.
+
+Limits: this proves the cross compile/link/package split only. No aarch64
+process was run, so browser, HTTP/TLS, Host ABI maps, GPU, audio and camera
+behavior on Linux/aarch64 stay **unverified** until a native aarch64 host
+replays the `06-web` gates. Inherited-runtime notice/SBOM review and public
+release remain open.
+
 ## Host order
 
 Linux first (WPE is the reference), with an early three-host JavaScriptCore

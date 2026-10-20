@@ -69,6 +69,8 @@ def main() -> None:
     parser.add_argument("--asset", type=Path, help="local asset override; still checked against the recipe")
     parser.add_argument("--source-cache", type=Path,
                         help="06-web only: verified upstream WebKit product source cache (no objects)")
+    parser.add_argument("--linux-system-lib-dir", type=Path,
+                        help="06-web cross build: target OS graphics link inputs (not bundled)")
     parser.add_argument("--previous-source-asset", type=Path,
                         help="06-web only: previous pinned asset for a verified packaging-only retry")
     # Forwarded only if given -- not every stage entrypoint understands it
@@ -96,7 +98,7 @@ def main() -> None:
         validate_recipe(recipe)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
-    if (args.source_cache or args.previous_source_asset) and recipe["output_stage"] != "06-web":
+    if (args.source_cache or args.previous_source_asset or args.linux_system_lib_dir) and recipe["output_stage"] != "06-web":
         parser.error("--source-cache is supported only by 06-web")
     if manifest.get("stage") != recipe["input_stage"]:
         raise SystemExit(f"recipe requires {recipe['input_stage']}, SDK is {manifest.get('stage')}")
@@ -139,6 +141,8 @@ def main() -> None:
     ]
     if args.source_cache:
         command += ["--source-cache", str(args.source_cache.resolve())]
+    if args.linux_system_lib_dir:
+        command += ["--linux-system-lib-dir", str(args.linux_system_lib_dir.resolve())]
     if args.previous_source_asset:
         command += ["--previous-source-asset", str(args.previous_source_asset.resolve())]
     if args.reuse_work_root:

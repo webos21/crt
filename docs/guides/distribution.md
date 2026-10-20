@@ -236,7 +236,8 @@ The first supported transitions are `01-c -> 02-cxx`, then
 libc++/libc++abi/libunwind source package and build `02-cxx`; `02-cxx` can
 fetch the Simple Graphics and advanced Graphics/Media packages and build them
 in dependency order. The `04-gfx-media -> 05-ui` transition follows the same model and is
-implemented. `05-ui -> 06-web` has a native Linux/x86_64 and macOS/aarch64 development entrypoint,
+implemented. `05-ui -> 06-web` has native Linux/x86_64, macOS/aarch64 and
+Windows/x64 development paths plus a Linux/x86_64 -> Linux/aarch64 cross path,
 `tools/build_stage_06_web.py`. It requires the option-ON predecessor (including
 the shared-image headers, Skia/media archives and dependency provenance), not a
 default-OFF SDK. The ordinary option-ON `crt-ui-dist` now packages that complete
@@ -298,6 +299,36 @@ this does not substitute a short alias for the SDK path under replay.
 Host/cross-target configurations
 not implemented by these native paths fail explicitly instead of running a
 target generator as a host tool or selecting host libraries.
+
+For the Linux/aarch64 cross path, the predecessor itself must be an installed
+**aarch64** option-ON `05-ui` SDK, not a relabeled x86_64 SDK. Add
+`--linux-system-lib-dir /absolute/path/to/aarch64-os-libraries` to the command
+above when the target's OS graphics imports are not installed in the normal
+target multiarch directory. That directory supplies only the existing PAL
+boundaries `libvulkan.so.1`, `libwayland-client.so.0`, `libva.so.2` and
+`libva-drm.so.2`: their architecture and hashes are checked, they are not
+bundled, and it is not a glibc sysroot. Changing these inputs invalidates work
+reuse. Host shell/make/gperf/interpreters and ICU generators stay outside the
+target SDK. Configure declares both Autoconf build/host triples; WebKit binds
+the host generator paths explicitly. Cross acceptance audits ELF files and
+every static-archive member without running target programs. Native browser,
+HTTP/TLS, GPU and device replays are separate from that compile/package proof.
+
+When preparing that predecessor from source, use
+`cmake/toolchains/linux-aarch64.cmake` with explicit `CRT_TARGET_OS=linux` and
+`CRT_TARGET_ARCH=aarch64`. Supply an AArch64 compiler-rt archive through
+`CRT_COMPILER_RT_BUILTINS_OVERRIDE` if the compiler installation lacks one;
+never rename an x86_64 archive or use a host GCC runtime as compiler-rt.
+`build_wayland.py --host-scanner` separates the pinned native 1.26.0 scanner
+from the target client/protocol objects. The standalone `03-gfx-simple` CMake
+project can opt into that native window backend with `CRT_STAGE_WAYLAND_PREFIX`
+and an explicit target `CRTGFX_LINUX_WAYLAND_CLIENT_LIB`; its ordinary source
+stage remains window-only by default. For narrowly scoped Linux VA/V4L2
+translation units, `CRT_LINUX_SDK_ROOT` selects the target OS headers behind
+the existing `-fcrt-real-linux-sdk` adapter, without exposing them in CRT's
+public sysroot. The normal lower-stage drivers still execute their native
+tests: a cross bootstrap uses their compile/install projects and does not
+claim those native tests passed.
 
 The public C library is `lib/libcrtweb.so` (Linux), `lib/libcrtweb.dylib`
 (macOS), or `bin/libcrtweb.dll` with `lib/libcrtweb.dll.a` (Windows).
@@ -381,6 +412,11 @@ and its freestanding/default-runtime policy. `crt-toolchain.cmake` is provided
 for CMake consumers and selects those wrappers. An embedded vendor toolchain
 that cannot use the Clang-compatible wrappers remains authoritative and must
 consume the packaged headers, startup objects, and libraries directly.
+New SDKs also persist their OS/architecture in `tools/crt-target.sh`, so direct
+unactivated wrapper calls do not silently infer a cross SDK's target from
+`uname`. Explicit `CRT_TARGET_OS`/`CRT_TARGET_ARCH` overrides remain available.
+Cross-Linux activation exposes the compiler scripts, but does not prepend
+the SDK's target shell/make/toybox directory to the build-host PATH.
 On Windows, `activate.cmd` derives `CRT_WINDOWS_SDK_LIBPATH` from
 `WindowsSdkDir` and `WindowsSDKLibVersion` when run from a Developer Command
 Prompt; otherwise set it explicitly.

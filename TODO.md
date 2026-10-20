@@ -166,9 +166,8 @@ uses the host replay order stated below and in the acceptance document.
   * [x] Windows/x64 isolated development SDK, installed/space-path replay and external
     browser/API rebuild with product work hidden; HTTP/TLS, Host ABI and immutable
     input/output inventories ([evidence](docs/acceptance/crtweb_acceptance.md#fresh-windows-full-stage-replay-after-pal-fixes)).
-  * [ ] Prove the build-host/target split with x86_64-host -> Linux/aarch64-target:
-    host gperf/Perl/Python/Ruby/ICU generators, target ICU/libc++/JSC/WebCore/WebKit.
-    Keep fontconfig's build-host generator separate from target artifacts.
+  * [x] Build-host/target split x86_64-host -> Linux/aarch64-target proved (cross compile/package only;
+    native aarch64 execution of the 06-web gates is still unverified, [evidence](docs/acceptance/crtweb_acceptance.md#linux-aarch64-cross-build-replay-2026-10-20)).
   * [x] Native Windows replay of the 75-function `libcrtmedia.dll` export boundary;
     DLL-import consumer/API resolution and ownership callback evidence stay in Web acceptance.
   * [ ] Finish inherited-runtime notice/source/SBOM review before publication;

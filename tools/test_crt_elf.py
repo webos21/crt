@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crt_elf import relocate_absolute_runtime_paths, remove_absolute_runtime_paths, runtime_paths, set_runtime_paths
+from crt_elf import archive_machine_ids, machine_id, relocate_absolute_runtime_paths, remove_absolute_runtime_paths, runtime_paths, set_runtime_paths
 from verify_dist import validate_elf_runtime_paths
 
 
@@ -33,6 +33,43 @@ def write_elf(path: Path, runpath: str) -> None:
 
 
 class ElfRuntimePathTests(unittest.TestCase):
+    def test_archive_checks_all_members_and_long_names(self):
+        def member(name, data):
+            header = (name.ljust(16) + "0".ljust(12) + "0".ljust(6) + "0".ljust(6) +
+                      "100644".ljust(8) + str(len(data)).ljust(10) + "`\n").encode()
+            return header + data + (b"\n" if len(data) & 1 else b"")
+        def elf(machine):
+            return b"\x7fELF" + bytes((2, 1, 1)) + bytes(11) + machine.to_bytes(2, "little")
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / "target.a"
+            symbols = member("/", b"symbol table") + member("//", b"long-name.o/\n")
+            target = b"!<arch>\n" + symbols + member("/0", elf(183))
+            file.write_bytes(target)
+            self.assertEqual(archive_machine_ids(file), {183})
+            # A foreign object hidden behind BSD's long-name prefix is not
+            # forgiven just because the first archive member is AArch64.
+            file.write_bytes(target + member("#1/4", b"host" + elf(62)))
+            self.assertEqual(archive_machine_ids(file), {62, 183})
+            for bad in (b"!<thin>\n", target[:-1], b"!<arch>\n" + member("x.o/", b"not ELF")):
+                file.write_bytes(bad)
+                with self.assertRaises(ValueError):
+                    archive_machine_ids(file)
+
+    def test_machine_id_reads_target_identity_and_rejects_truncated_elf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / "fixture"
+            file.write_bytes(b"plain text")
+            self.assertIsNone(machine_id(file))
+            write_elf(file, "$ORIGIN")
+            self.assertEqual(machine_id(file), 62)
+            data = bytearray(file.read_bytes())
+            data[18:20] = (183).to_bytes(2, "little")
+            file.write_bytes(data)
+            self.assertEqual(machine_id(file), 183)
+            file.write_bytes(b"\x7fELF")
+            with self.assertRaisesRegex(ValueError, "invalid ELF"):
+                machine_id(file)
+
     def test_set_mixed_runtime_path_for_private_package_layout(self):
         with tempfile.TemporaryDirectory() as temporary:
             binary = Path(temporary) / "libcrtweb.so"

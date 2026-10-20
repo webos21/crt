@@ -27,7 +27,7 @@ from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import set_runtime_paths
 from crt_linux_runtime import normalize_cxx_aliases
 import crt_macho
-from create_dist import DIST_PORTING_TOOLS
+from create_dist import DIST_PORTING_TOOLS, write_posix_activation
 from fetch_ports import load_recipes, resolve_recipe_order
 import build_webkit_crt_port as web
 import check_webkit_security as security
@@ -255,7 +255,8 @@ def host_environment():
     env = {key: value for key, value in os.environ.items()
            if not key.startswith("CRT_") and key not in
            ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LD_LIBRARY_PATH",
-            "DYLD_LIBRARY_PATH", "PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "CPATH", "LIBRARY_PATH")}
+            "DYLD_LIBRARY_PATH", "PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR",
+            "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "LIBRARY_PATH", "MAKE", "SDKROOT")}
     env.update(CC=shutil.which("clang") or "cc", CXX=shutil.which("clang++") or "c++")
     return env
 
@@ -699,6 +700,20 @@ def readelf_machines(path):
     return machines
 
 
+def linux_system_imports(directory):
+    """Only the four existing PAL OS boundaries; no host libc/sysroot fallback."""
+    directory = directory.resolve()
+    result = {}
+    for name in ("libvulkan.so.1", "libwayland-client.so.0", "libva.so.2", "libva-drm.so.2"):
+        file = directory / name
+        if not file.is_file() or not file.resolve().is_relative_to(directory):
+            raise ValueError(f"missing/escaping target OS graphics import: {file}")
+        if readelf_machines(file) != ["aarch64"]:
+            raise ValueError(f"target OS graphics import is not AArch64: {file}")
+        result[name] = digest(file)
+    return result
+
+
 def first_artifact(root, patterns):
     for pattern in patterns:
         found = sorted(path for path in root.rglob(pattern) if path.is_file() and not path.is_symlink())
@@ -735,9 +750,32 @@ def prove_linux_cross_split(staged, prefix, build, work, tools):
         if machines != ["aarch64"]:
             raise ValueError(f"target artifact is not AArch64: {name}: {machines}")
         target[name] = {"path": str(path), "sha256": digest(path), "machines": machines}
+    cache = (build / "CMakeCache.txt").read_text()
+    gperf = re.search(r"^GPERF_EXECUTABLE:[^=]+=(.+)$", cache, re.M)
+    if not gperf or Path(gperf[1]).resolve() != Path(tools["gperf"]).resolve():
+        raise ValueError("WebKit did not bind its BUILD-host gperf")
+    fontconfig_make = work / "ports/work/fontconfig/src/Makefile"
+    binding = re.search(r"^GPERF\s*=\s*(.+)$", fontconfig_make.read_text(), re.M)
+    if not binding or Path(binding[1]).resolve() != Path(tools["gperf"]).resolve():
+        raise ValueError("fontconfig did not bind its BUILD-host gperf")
+    python_binding = re.search(r"^PYTHON\s*=\s*(.+)$", fontconfig_make.read_text(), re.M)
+    if not python_binding or Path(python_binding[1]).resolve() != Path(tools["host_executables"]["python"]).resolve():
+        raise ValueError("fontconfig did not bind its BUILD-host Python")
+    # Releases can carry up-to-date generated headers. Reproduce one with
+    # the native interpreter in a HOST-only directory, without touching the
+    # sources/target build, and compare with the header used for compilation.
+    case = fontconfig_make.parent.parent / "fc-case"
+    generated = work / "host/fontconfig-proof/fccase.h"
+    generated.parent.mkdir(parents=True, exist_ok=True)
+    run([python_binding[1], case / "fc-case.py", case / "CaseFolding.txt",
+         "--template", case / "fccase.tmpl.h", "--output", generated], host_environment(), work)
+    if digest(generated) != digest(case / "fccase.h"):
+        raise ValueError("fontconfig host generator differs from the target's generated header")
     evidence = {"passed": True, "build_host": {"os": "linux", "arch": "x86_64"},
                 "target": {"os": "linux", "arch": "aarch64"},
                 "host_generators": host, "target_artifacts": target,
+                "fontconfig_generator": {"path": binding[1], "makefile_sha256": digest(fontconfig_make),
+                    "python": python_binding[1], "generated_header_sha256": digest(generated)},
                 "target_execution": "not attempted on the build host"}
     write_json(work / "cross-build-evidence.json", evidence)
     return evidence
@@ -745,6 +783,26 @@ def prove_linux_cross_split(staged, prefix, build, work, tools):
 
 def validate_cross_candidate(staged, work, asset, env):
     normalize_candidate_paths(staged, "linux")
+    # Every executable/DSO, not only the headline libraries, must be target
+    # code. An accidentally copied host generator must fail the gate.
+    from crt_elf import archive_machine_ids, machine_id
+    binaries = {}
+    archives = {}
+    for file in sorted(staged.rglob("*")):
+        if file.is_file() and not file.is_symlink():
+            machine = machine_id(file)
+            if machine is not None:
+                if machine != 183:
+                    raise ValueError(f"foreign ELF in target SDK: {file}: e_machine={machine}")
+                binaries[file.relative_to(staged).as_posix()] = digest(file)
+            elif file.suffix == ".a":
+                if archive_machine_ids(file) != {183}:
+                    raise ValueError(f"foreign object in target SDK archive: {file}")
+                archives[file.relative_to(staged).as_posix()] = digest(file)
+    if not binaries:
+        raise ValueError("cross-target SDK contains no ELF binaries")
+    write_json(work / "target-elf-inventory.json", binaries)
+    write_json(work / "target-archive-inventory.json", archives)
     run([sys.executable, asset / "tools/verify_dist.py", "--dist", staged, "--stage", "06-web"], env)
 
 
@@ -757,6 +815,8 @@ def main():
     parser.add_argument("--dependency-jobs", type=int, default=4)
     parser.add_argument("--reuse-work-root", action="store_true")
     parser.add_argument("--source-cache", type=Path, help="verified WebKit product cache (sources only, never object files)")
+    parser.add_argument("--linux-system-lib-dir", type=Path,
+                        help="cross build only: AArch64 OS Vulkan/Wayland/VA link inputs; never bundled")
     parser.add_argument("--previous-source-asset", type=Path,
                         help="with reuse: retry notice/packaging-only fixes after proving compile inputs unchanged")
     args = parser.parse_args()
@@ -778,10 +838,15 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     identity = {"source_sha256": args.source_sha256,
                 "predecessor_sha256": inventory_fingerprint(tree_inventory(sdk, normalize_manifest=True))}
+    if args.linux_system_lib_dir:
+        if not cross:
+            raise ValueError("--linux-system-lib-dir is only for the Linux/aarch64 cross build")
+        identity["target_os_imports"] = linux_system_imports(args.linux_system_lib_dir)
     marker = work / "inputs.json"
     if marker.exists():
         previous = json.loads(marker.read_text())
-        if not args.reuse_work_root or previous.get("predecessor_sha256") != identity["predecessor_sha256"]:
+        if (not args.reuse_work_root or previous.get("predecessor_sha256") != identity["predecessor_sha256"] or
+                previous.get("target_os_imports") != identity.get("target_os_imports")):
             raise ValueError("work-root already used: choose a fresh directory or reuse identical inputs")
         if previous["source_sha256"] != identity["source_sha256"]:
             if not args.previous_source_asset:
@@ -885,7 +950,11 @@ def main():
          "-j", args.dependency_jobs]
     if cross:
         web_command[web_command.index("-j"):web_command.index("-j")] = [
-            "--define", "CMAKE_SYSTEM_NAME=Linux", "--define", "CMAKE_SYSTEM_PROCESSOR=aarch64"]
+            "--define", "CMAKE_SYSTEM_NAME=Linux", "--define", "CMAKE_SYSTEM_PROCESSOR=aarch64",
+            "--define", "GPERF_EXECUTABLE=" + tools["gperf"],
+            "--define", "PERL_EXECUTABLE=" + tools["host_executables"]["perl"],
+            "--define", "Python3_EXECUTABLE=" + tools["host_executables"]["python"],
+            "--define", "Ruby_EXECUTABLE=" + tools["host_executables"]["ruby"]]
     run(web_command, env)
     build = web_work / "build"
     write_json(work / "target-discovery.json", audit_target_discovery(build / "CMakeCache.txt", staged, prefix,
@@ -907,6 +976,8 @@ def main():
          "-DCRT_STAGE_TARGET_OS=" + target_os, "-DCRT_STAGE_TARGET_ARCH=" + target["arch"]]
     if cross:
         consumer_configure += ["-DCMAKE_SYSTEM_NAME=Linux", "-DCMAKE_SYSTEM_PROCESSOR=aarch64"]
+        if args.linux_system_lib_dir:
+            consumer_configure += ["-DCRT_LINUX_SYSTEM_LIB_DIR=" + args.linux_system_lib_dir.resolve().as_posix()]
     run(consumer_configure, consumer_env)
     # Two small consumers: also invalidate environment-only wrapper settings,
     # which Ninja cannot see in an otherwise unchanged command line.
@@ -949,6 +1020,8 @@ def main():
     # Metadata/porting helpers describe the output stage, not the old input
     # stage. Keep the predecessor's actual compiler/runtime wrappers intact.
     install_stage_tools(asset, staged)
+    if cross:
+        write_posix_activation(staged, target_os, target["arch"])
     shutil.copytree(asset / "libcrtgfx/assets/fonts", staged / "share/fonts/crtweb", dirs_exist_ok=True)
     write_json(staged / "share/crt/dependencies/crtweb-fonts/recipe.json", {
         "name": "crtweb-fonts", "version": "bundled",

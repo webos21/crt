@@ -11,6 +11,20 @@ substantive update.
 
 ## 2026-10-20
 
+### Tranche 10: Linux x86_64 host -> aarch64 target cross build
+
+Built an aarch64 `05-ui` predecessor SDK on this host and ran the isolated
+`06-web` stage on it; the 8,305-step WebKit build and `verify_dist.py` pass, the
+SDK has 162 AArch64 ELF files and no x86-64 file, and `cross-build-evidence.json`
+separates host generators (gperf, ICU tools, Perl/Python/Ruby, fontconfig
+generators) from target artifacts. Fixes found on the way: SDK `make` (aarch64)
+no longer used as a host tool; libc++ gets the target arch and prefers the built
+ABI library; pthread-in-libc declared instead of a false try-compile positive;
+Wayland scanner built as a native host tool; zlib shared probe/PIC fix (static-only
+fallback broke HarfBuzz); Clang's default `libgcc.a` replaced by an explicit
+compiler-rt query on Linux. Evidence and limits (no aarch64 execution) are in
+docs/acceptance/crtweb_acceptance.md. Uncommitted at this point.
+
 ### macOS CI: host-generator working-directory alias comparison
 
 Reproduced the failure in [Actions job 118328631706](https://github.com/webos21/crt/actions/runs/39330934417/job/118328631706):

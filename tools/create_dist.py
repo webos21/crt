@@ -376,16 +376,7 @@ def remove_absolute_macho_rpaths(path: Path) -> None:
                             check=True)
 
 
-def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: str,
-                    target_triple: str, stage: str, tools: dict[str, str],
-                    redistributed_dependencies: list[dict],
-                    release_version: str = "development") -> None:
-    tools_dest = destination / "tools"
-    tools_dest.mkdir(parents=True, exist_ok=True)
-    for name in DIST_WRAPPER_TOOLS:
-        shutil.copy2(root / "tools" / name, tools_dest / name)
-    shutil.copy2(root / "LICENSE.md", destination / "LICENSE.md")
-
+def write_posix_activation(destination: Path, target_os: str, target_arch: str) -> None:
     (destination / "activate.sh").write_text(
         """#!/bin/sh
 # When sourced by Bash, $0 names the shell rather than this file.  Bash's
@@ -406,11 +397,39 @@ export CC="$_crt_dist_root/tools/crt-cc"
 export CXX="$_crt_dist_root/tools/crt-c++"
 export AR="${CRT_AR:-${AR:-llvm-ar}}"
 export RANLIB="${CRT_RANLIB:-${RANLIB:-llvm-ranlib}}"
-export PATH="$_crt_dist_root/tools:$_crt_dist_root/system/bin:$PATH"
+_crt_activate_host_arch=$CRT_TARGET_ARCH
+if [ "$CRT_TARGET_OS" = linux ]; then
+  _crt_activate_host_arch=$(uname -m)
+  case "$_crt_activate_host_arch" in
+    arm64) _crt_activate_host_arch=aarch64 ;;
+    amd64|AMD64) _crt_activate_host_arch=x86_64 ;;
+  esac
+fi
+if [ "$CRT_TARGET_OS" = linux ] && [ "$_crt_activate_host_arch" != "$CRT_TARGET_ARCH" ]; then
+  # SDK shell/make/toybox are target programs, not build-host tools.
+  export PATH="$_crt_dist_root/tools:$PATH"
+else
+  export PATH="$_crt_dist_root/tools:$_crt_dist_root/system/bin:$PATH"
+fi
+unset _crt_activate_host_arch
 """.replace("__TARGET_OS__", target_os).replace("__TARGET_ARCH__", target_arch),
         encoding="utf-8",
     )
     os.chmod(destination / "activate.sh", 0o755)
+
+
+def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: str,
+                    target_triple: str, stage: str, tools: dict[str, str],
+                    redistributed_dependencies: list[dict],
+                    release_version: str = "development") -> None:
+    tools_dest = destination / "tools"
+    tools_dest.mkdir(parents=True, exist_ok=True)
+    for name in DIST_WRAPPER_TOOLS:
+        shutil.copy2(root / "tools" / name, tools_dest / name)
+    (tools_dest / "crt-target.sh").write_text(
+        f"CRT_SDK_TARGET_OS={target_os}\nCRT_SDK_TARGET_ARCH={target_arch}\n", encoding="utf-8", newline="\n")
+    shutil.copy2(root / "LICENSE.md", destination / "LICENSE.md")
+    write_posix_activation(destination, target_os, target_arch)
     (destination / "activate.cmd").write_text(
         """@echo off
 set "CRT_SYSROOT=%~dp0"
@@ -447,6 +466,10 @@ set "PATH=%CRT_SYSROOT%tools;%CRT_SYSROOT%system\\bin;%CRT_SYSROOT%bin;%PATH%"
     wrapper_suffix = ".cmd" if target_os == "windows" else ""
     toolchain = """# Use with: cmake -S <app> -B <build> -DCMAKE_TOOLCHAIN_FILE=<this-file>
 get_filename_component(CRT_DISTRIBUTION_ROOT "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+if("__TARGET_OS__" STREQUAL "linux" AND NOT CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "__TARGET_ARCH__")
+  set(CMAKE_SYSTEM_NAME Linux)
+  set(CMAKE_SYSTEM_PROCESSOR "__TARGET_ARCH__")
+endif()
 set(CMAKE_SYSROOT "${CRT_DISTRIBUTION_ROOT}")
 set(CMAKE_C_COMPILER "${CRT_DISTRIBUTION_ROOT}/tools/crt-cc__WRAPPER_SUFFIX__" CACHE FILEPATH "CRT C compiler wrapper")
 set(CMAKE_CXX_COMPILER "${CRT_DISTRIBUTION_ROOT}/tools/crt-c++__WRAPPER_SUFFIX__" CACHE FILEPATH "CRT C++ compiler wrapper")
@@ -479,7 +502,7 @@ set(CMAKE_CXX_FLAGS_INIT "-ffreestanding -fno-builtin -nostdinc -nostdinc++")
 # ${CRT_SYSROOT}/lib/... by absolute path throughout.
 set(CMAKE_BUILD_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
 set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
-""".replace("__WRAPPER_SUFFIX__", wrapper_suffix)
+""".replace("__WRAPPER_SUFFIX__", wrapper_suffix).replace("__TARGET_OS__", target_os).replace("__TARGET_ARCH__", target_arch)
     (destination / "crt-toolchain.cmake").write_text(toolchain, encoding="utf-8")
     manifest = {
         "format": 1,

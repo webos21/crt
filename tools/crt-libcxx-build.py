@@ -818,6 +818,21 @@ def common_cmake_args(root, install_prefix, sysroot, rootfs, target_os, windows_
         compiler_arg_options.append("-DCMAKE_C_STANDARD_LIBRARIES=")
         compiler_arg_options.append("-DCMAKE_CXX_STANDARD_LIBRARIES=")
 
+    if target_os == "linux" and env.get("CRT_TARGET_ARCH"):
+        compiler_arg_options += ["-DCMAKE_SYSTEM_NAME=Linux",
+                                 "-DCMAKE_SYSTEM_PROCESSOR=" + env["CRT_TARGET_ARCH"]]
+    if target_os == "linux":
+        # pthread entry points are in CRT libc. Static try_compile probes
+        # cannot prove a separate libpthread exists and otherwise enable
+        # Clang's dependent-library autolink pragma in the generated headers.
+        compiler_arg_options += ["-DLIBCXX_HAS_PTHREAD_LIB=OFF",
+                                 "-DLIBCXXABI_HAS_PTHREAD_LIB=OFF",
+                                 # Upstream's system-libcxxabi target emits
+                                 # -lc++abi; Clang's own install also has a
+                                 # host image with that name. Prefer only the
+                                 # already-built target ABI runtime here.
+                                 f'-DCMAKE_SHARED_LINKER_FLAGS=-L"{install_prefix.as_posix()}/lib"']
+
     return [
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         f"-DCMAKE_C_COMPILER={c_compiler}",
@@ -1009,6 +1024,8 @@ def main():
             found_cxx = shutil.which("clang++-18") or shutil.which("clang++")
             if found_cxx:
                 env["CRT_HOST_CXX"] = found_cxx
+    if args.target_arch:
+        env["CRT_TARGET_ARCH"] = detect_target_arch(args.target_arch)
     if args.target_os == "windows":
         if rootfs is None:
             raise SystemExit("--rootfs is required on Windows")

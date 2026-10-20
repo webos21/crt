@@ -21,7 +21,10 @@ if [ -z "${CRT_SYSROOT:-}" ]; then
   exit 1
 fi
 
-target_os="${CRT_TARGET_OS:-}"
+if [ -f "${CRT_SYSROOT}/tools/crt-target.sh" ]; then
+  . "${CRT_SYSROOT}/tools/crt-target.sh"
+fi
+target_os="${CRT_TARGET_OS:-${CRT_SDK_TARGET_OS:-}}"
 if [ -z "$target_os" ]; then
   case "$(uname -s)" in
     Darwin) target_os=macos ;;
@@ -32,7 +35,7 @@ if [ -z "$target_os" ]; then
 fi
 
 cc="${CRT_HOST_CC:-clang}"
-target_arch="${CRT_TARGET_ARCH:-}"
+target_arch="${CRT_TARGET_ARCH:-${CRT_SDK_TARGET_ARCH:-}}"
 if [ -z "$target_arch" ]; then
   case "$(uname -m 2>/dev/null)$(uname -s 2>/dev/null)" in
     *aarch64*|*arm64*|*ARM64*) target_arch=aarch64 ;;
@@ -225,10 +228,11 @@ fi
 # from libSystem (100 imports), got Apple's pthread_once with Bionic's `int` once control and
 # died with SIGBUS (Web Tranche 3B B2 macOS replay). Bionic merged both libraries into libc,
 # as tools/crt-c++ already assumes for every host.
+# Linux cross builds also have neither separate library in the CRT sysroot.
 # Windows: there is no libpthread or librt to find at all (the CRT libc carries both, and
 # `-lpthread` is a plain "unable to find library" for lld), while upstream build systems name
 # them on every Unix-shaped target.
-if { [ "$target_os" = macos ] || [ "$target_os" = windows ]; } && [ "$compile_only" -eq 0 ]; then
+if [ "$compile_only" -eq 0 ]; then
   mac_lib_argc=$#
   mac_lib_i=0
   while [ "$mac_lib_i" -lt "$mac_lib_argc" ]; do
@@ -458,12 +462,16 @@ fi
 linux_sdk_multiarch_include=""
 linux_sdk_include=""
 if [ "$target_os" = linux ] && [ "$want_real_linux_sdk" -eq 1 ]; then
-  linux_sdk_include="/usr/include"
+  linux_sdk_include="${CRT_LINUX_SDK_ROOT:-}/usr/include"
   if [ ! -d "$linux_sdk_include" ]; then
     echo "crt-cc: -fcrt-real-linux-sdk requested but $linux_sdk_include does not exist" >&2
     exit 1
   fi
-  if command -v dpkg-architecture >/dev/null 2>&1; then
+  if [ -n "${CRT_LINUX_SDK_ROOT:-}" ]; then
+    if [ -d "$CRT_LINUX_SDK_ROOT/usr/include/${target_arch}-linux-gnu" ]; then
+      linux_sdk_multiarch_include="$CRT_LINUX_SDK_ROOT/usr/include/${target_arch}-linux-gnu"
+    fi
+  elif command -v dpkg-architecture >/dev/null 2>&1; then
     multiarch_triplet=$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)
     if [ -n "$multiarch_triplet" ] && [ -d "/usr/include/$multiarch_triplet" ]; then
       linux_sdk_multiarch_include="/usr/include/$multiarch_triplet"
@@ -503,7 +511,10 @@ case "$target_os" in
       # an x86_64 build host from silently producing x86_64 objects for a
       # Linux/aarch64 SDK. LLD is architecture-neutral and does not require a
       # host cross-binutils package.
-      common_flags="$common_flags --target=${target_arch}-linux-gnu -fuse-ld=lld"
+      common_flags="$common_flags --target=${target_arch}-linux-gnu"
+      if [ "$compile_only" -eq 0 ]; then
+        common_flags="$common_flags -fuse-ld=lld"
+      fi
     fi
     ;;
   windows)

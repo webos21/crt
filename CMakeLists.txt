@@ -409,6 +409,12 @@ endif()
 # STL support is needed, this project's own imported libc++ (${CRT_SYSROOT}
 # /include/c++/v1, wired explicitly per-consumer in libcrtgfx/CMakeLists.
 # txt), exactly like Linux/macOS already did -- never a host substitute.
+if(CMAKE_CROSSCOMPILING AND CRT_USE_IMPORTED_LIBCXX AND
+   EXISTS "${CRT_LIBCXX_SYSROOT}/include/c++/v1/__config")
+  # Compiler identification can discover a host STL even for a foreign
+  # target. Upper runtime objects must use the target SDK's ABI headers.
+  set(CRT_CXX_STANDARD_INCLUDE_DIRS "${CRT_LIBCXX_SYSROOT}/include/c++/v1")
+endif()
 set(CRT_CXX_STANDARD_INCLUDE_FLAGS)
 foreach(CRT_CXX_STANDARD_INCLUDE_DIR IN LISTS CRT_CXX_STANDARD_INCLUDE_DIRS)
   list(APPEND CRT_CXX_STANDARD_INCLUDE_FLAGS "-isystem${CRT_CXX_STANDARD_INCLUDE_DIR}")
@@ -628,7 +634,14 @@ endif()
 
 if(CRT_USE_COMPILER_RT)
   set(CRT_COMPILER_RT_BUILTINS "")
-  if(CRT_TARGET_OS STREQUAL "windows")
+  set(CRT_COMPILER_RT_BUILTINS_OVERRIDE "" CACHE FILEPATH
+    "Explicit target compiler-rt builtins archive (for cross toolchains)")
+  if(CRT_COMPILER_RT_BUILTINS_OVERRIDE)
+    if(NOT EXISTS "${CRT_COMPILER_RT_BUILTINS_OVERRIDE}")
+      message(FATAL_ERROR "Target compiler-rt archive is missing: ${CRT_COMPILER_RT_BUILTINS_OVERRIDE}")
+    endif()
+    set(CRT_COMPILER_RT_BUILTINS "${CRT_COMPILER_RT_BUILTINS_OVERRIDE}")
+  elseif(CRT_TARGET_OS STREQUAL "windows")
     # `clang --print-libgcc-file-name` (the general-purpose probe used
     # below for macOS/Linux) is not target-aware here -- execute_process()
     # invokes the raw compiler binary directly, with no knowledge of
@@ -684,8 +697,18 @@ if(CRT_USE_COMPILER_RT)
       endforeach()
     endif()
   else()
+    set(CRT_COMPILER_RT_QUERY_FLAGS)
+    if(CRT_TARGET_OS STREQUAL "linux")
+      # Clang otherwise reports GCC's libgcc.a on distro installations.
+      # That is not compiler-rt and cannot be labeled/redistributed as such.
+      list(APPEND CRT_COMPILER_RT_QUERY_FLAGS "--rtlib=compiler-rt")
+    endif()
+    if(CMAKE_C_COMPILER_TARGET)
+      list(APPEND CRT_COMPILER_RT_QUERY_FLAGS
+        "--target=${CMAKE_C_COMPILER_TARGET}")
+    endif()
     execute_process(
-      COMMAND "${CMAKE_C_COMPILER}" --print-libgcc-file-name
+      COMMAND "${CMAKE_C_COMPILER}" ${CRT_COMPILER_RT_QUERY_FLAGS} --print-libgcc-file-name
       OUTPUT_VARIABLE CRT_COMPILER_RT_BUILTINS
       OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET
