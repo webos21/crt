@@ -86,7 +86,9 @@ def compile_driver_identity(source):
     tree = ast.parse(source)
     selected = []
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name in ("run", "host_environment", "build_host_tools", "build_windows_host_tools", "windows_fontconfig_recipe"):
+        if isinstance(node, ast.FunctionDef) and node.name in (
+                "run", "host_environment", "build_host_tools", "build_windows_host_tools",
+                "fontconfig_host_generator_recipe", "build_kind", "linux_cross_recipe"):
             selected.append(node)
         if isinstance(node, ast.FunctionDef) and node.name == "main":
             active = False
@@ -681,7 +683,17 @@ def readelf_machines(path):
     if not readelf:
         raise ValueError("cross-target proof requires llvm-readelf or readelf")
     result = subprocess.run([readelf, "-h", str(path)], capture_output=True, text=True, check=True)
-    machines = sorted(set(re.findall(r"^\s*Machine:\s*(.+?)\s*$", result.stdout, re.M)))
+    reported = set(re.findall(r"^\s*Machine:\s*(.+?)\s*$", result.stdout, re.M))
+    machines = set()
+    for value in reported:
+        lowered = value.lower()
+        if "aarch64" in lowered:
+            machines.add("aarch64")
+        elif "x86-64" in lowered or "x86_64" in lowered:
+            machines.add("x86_64")
+        else:
+            machines.add(value)
+    machines = sorted(machines)
     if not machines:
         raise ValueError(f"no ELF machine identity found: {path}")
     return machines
@@ -707,20 +719,20 @@ def prove_linux_cross_split(staged, prefix, build, work, tools):
         if any(path.is_relative_to(root.resolve()) for root in (staged, prefix)):
             raise ValueError(f"build-host generator entered the target tree: {name}: {path}")
         machines = readelf_machines(path)
-        if machines != ["Advanced Micro Devices X86-64"]:
+        if machines != ["x86_64"]:
             raise ValueError(f"build-host generator is not x86_64: {name}: {machines}")
         host[name] = {"path": str(path), "sha256": digest(path), "machines": machines}
     artifacts = {
         "icu": first_artifact(prefix / "lib", ("libicuuc.so.*", "libicuuc.so")),
         "libc++": first_artifact(staged / "lib", ("libc++.so.*",)),
-        "JavaScriptCore": first_artifact(build / "lib", ("libJavaScriptCore.so.*", "libJavaScriptCore.so")),
+        "JavaScriptCore": first_artifact(build, ("libJavaScriptCore.a", "libJavaScriptCore.so.*", "libJavaScriptCore.so")),
         "WebCore": first_artifact(build, ("libWebCore.a",)),
         "WebKit": first_artifact(build / "lib", ("libWebKit.so.*", "libWebKit.so")),
     }
     target = {}
     for name, path in artifacts.items():
         machines = readelf_machines(path)
-        if machines != ["AArch64"]:
+        if machines != ["aarch64"]:
             raise ValueError(f"target artifact is not AArch64: {name}: {machines}")
         target[name] = {"path": str(path), "sha256": digest(path), "machines": machines}
     evidence = {"passed": True, "build_host": {"os": "linux", "arch": "x86_64"},

@@ -379,6 +379,12 @@ STAGES = {
             "libstdc++/tests/shared_loader_unresolved.cc",
             # Public SDK link interfaces, not predecessor implementation sources.
             "distribution/stages/05-ui/crt_upper_imports.cmake",
+            # tools/test_stage_06_web.py validates that the installed media DLL
+            # export manifest still matches its public declarations and builds
+            # a fixture through the same export-list generator. Keep the source
+            # asset self-verifying instead of relying on the repository copy.
+            "libcrtmedia/include",
+            "libcrtmedia/cmake/crtmedia_exports.cmake",
             "libcrtmedia/cmake/crtmedia_public_symbols.txt",
             "libcrtgfx/src/gpu_test_control.h",
             "libcrtgfx/src/arch/linux/gpu_vulkan_test.h",
