@@ -31,7 +31,8 @@ import test_crtweb_network  # noqa: E402 (build-host-only TLS fixture)
 DEFAULT_TARGETS = ("PAL", "WebCore")
 
 
-def port_environment(sdk: Path, prefix: Path, gperf: Path | None, target_os: str = "linux") -> dict:
+def port_environment(sdk: Path, prefix: Path, gperf: Path | None, target_os: str = "linux",
+                     work: Path | None = None) -> dict:
     env = jsc.build_environment(sdk, prefix, target_os)
     env.pop("LD_LIBRARY_PATH", None)
     env.pop("DYLD_LIBRARY_PATH", None)
@@ -45,6 +46,14 @@ def port_environment(sdk: Path, prefix: Path, gperf: Path | None, target_os: str
     env["PKG_CONFIG_LIBDIR"] = env["PKG_CONFIG_PATH"]
     if gperf is not None:
         env["PATH"] = str(gperf.parent) + os.pathsep + env.get("PATH", "")
+    if target_os == "linux" and work is not None:
+        # The SDK ships a shared mbedTLS libcurl.so.4 (no FILE protocol) beside this port's OpenSSL
+        # libcurl with the same soname. The wrappers list the SDK's lib directory first in every
+        # RPATH, and an RPATH beats LD_LIBRARY_PATH, so the Web processes would load the SDK's curl
+        # and every file: load would fail with "Unsupported protocol". Name the port's own
+        # directories first (tools/crt-c++, CRT_LINK_RPATH_FIRST).
+        env["CRT_LINK_RPATH_FIRST"] = os.pathsep.join(
+            [str(work / "build" / "lib"), str(prefix / "curl-openssl" / "lib")])
     if target_os == "windows":
         # WebKit's generators are Python and Perl programs that read their input with the process's
         # default encoding (cp949 here), not the UTF-8 the sources are in.
@@ -1278,7 +1287,7 @@ def main() -> int:
         raise SystemExit("gperf not found: WebCore generates its hash tables with it (--gperf)")
     build = work / "build"
     tree = work / "src" / "webkit-crt"
-    env = port_environment(sdk, prefix, gperf.resolve(), target_os)
+    env = port_environment(sdk, prefix, gperf.resolve(), target_os, work)
     if args.reuse_tree and not args.recompose and (tree / "Source").is_dir():
         # Incremental: keep the composed (and patched) tree, and copy only the CRT-owned overlay
         # files whose content changed, so unchanged files keep their timestamps. A change to the

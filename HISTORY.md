@@ -66,6 +66,13 @@ engine, port or PAL needed a change. Still open for the Tranche: Windows replay 
 regeneration with the notices, the five header decisions, the LGPL source offer, legal sign-off and the 2.54
 support-window confirmation. Evidence: `docs/acceptance/crtweb_acceptance.md` (WebKit 2.54.1 replay on macOS/arm64).
 
+### Tranche 10: driver gate vs the SDK's shared libcurl
+
+The in-tree SDK's shared mbedTLS `libcurl.so.4` (no FILE protocol) shadowed the Web port's OpenSSL curl through the
+wrapper-generated RPATH, which hung every `file:` load. `crt-cc`/`crt-c++` now honour `CRT_LINK_RPATH_FIRST`, the
+driver sets it on Linux, and the eleven-entry gate passes against the unmodified SDK (`tools/test_link_rpath_first.py`).
+Linux/x86_64 only.
+
 ### Tranche 10: WebKit 2.54.1 re-pin and inherited-runtime notices
 
 Re-pinned `libcrtweb/third_party/webkit` from 2.54.0 to 2.54.1 (lightweight upstream tag: archive `.asc` and a
