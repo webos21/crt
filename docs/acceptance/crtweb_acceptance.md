@@ -5153,6 +5153,27 @@ declared-license policy (`Apache-2.0 WITH LLVM-exception`, `0BSD`, `NOASSERTION`
 SDKs were not regenerated with it. Source-offer text for the LGPL parts of the Web stage and a legal sign-off remain the
 publication gate.
 
+*Linux/aarch64 (2026-10-21):* the five in-tree stage SDKs (`01-c`..`05-ui`) were regenerated at the current HEAD with every
+option ON (FFmpeg, curl, Skia, GPU backend, LVGL, imported libc++) on the Ubuntu 26.04 aarch64 guest. `01-c` lists `crt-libc`, `mksh`,
+`toybox` and `onetrue-awk`; `02-cxx` adds `llvm-runtimes`; `04-gfx-media` and `05-ui` carry `share/licenses/SOURCE-OFFER.md`;
+`verify_dist.py` passes for all five. Because the C/C++ policy lets CI (default options only) stand for Linux/aarch64, this
+first option-ON build found four defects that only an aarch64 option-ON build can show, all fixed at the root: (1) the FFmpeg
+port enables `linux_perf` on aarch64 only, and the recipe's `-fcrt-real-linux-sdk` configure sentinel exposes the host's
+`asm/unistd.h` while the CRT sysroot has none, so the port failed to compile: `--disable-linux-perf` (a recipe note and
+`tools/test_ffmpeg_recipe_linux.py` guard it); (2) `libcrtmedia.so` linking the static FFmpeg `tx_float_neon.S` (adrp/add
+against default-visibility globals) failed with `ADR_PREL_PG_HI21`: `-Wl,-Bsymbolic` on `crtmedia_shared`, as the isolated
+stages already do; (3) the distro compiler-rt `libclang_rt.builtins-aarch64.a` member `aarch64.c.o` (outline atomics, built with
+the stack protector) references `__stack_chk_fail` after `libc.a` was scanned, so the link fell through to the host `libc.so.6`
+that `libva.so` brings in: the `crt_compiler_rt_builtins` interface target now adds `-Wl,-u,__stack_chk_fail` on Linux/aarch64
+(x86_64 has no such member); (4) the curl port probed the host's `libnghttp2`/`libidn2` and `libcurl.so` gained undeclared NEEDED
+entries that `create_dist.py` rejects: `--without-nghttp2 --without-libidn2`. Verification: 285 tooling tests OK; the full
+build is clean; `ctest` ran 203 tests with these exceptions, all specific to this QEMU guest and not to the CRT changes: the 6
+VAAPI/hardware-decode tests time out because libva `dlopen`s Mesa's `virtio_gpu_drv_video.so`, which loads the host `libLLVM`
+and stalls at init inside the CRT process (with `LIBVA_DRIVER_NAME=x` the four hardware-decode tests that run pass and two
+skip), and `crtmedia_playback_pipeline_test` fails its wall-time floor because the guest has no audio sink to pace playback. Whether
+a host VA driver that pulls in the host libstdc++ is safe inside a CRT process is a separate open question for real hardware.
+Native Linux/aarch64 execution of the `06-web` gates is still not provided: `build_stage_06_web.py` rejects it by design.
+
 ## Host order
 
 Linux first (WPE is the reference), with an early three-host JavaScriptCore

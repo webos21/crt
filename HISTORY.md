@@ -9,6 +9,21 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-21
+
+### Tranche 10 on Linux/aarch64: option-ON SDK regeneration and four aarch64-only defects
+
+The five in-tree stage SDKs (`01-c`..`05-ui`) were regenerated on the Ubuntu 26.04 aarch64 guest with FFmpeg, curl, Skia, GPU and
+LVGL ON; manifests carry the `crt-runtime` components, the FFmpeg stages carry `SOURCE-OFFER.md`, and `verify_dist.py` passes. CI builds only
+default options, so the option-ON aarch64 build exposed four defects, each fixed at its cause: the FFmpeg recipe now passes
+`--disable-linux-perf` (aarch64-only feature vs the `-fcrt-real-linux-sdk` configure sentinel; new `tools/test_ffmpeg_recipe_linux.py`);
+`crtmedia_shared` links with `-Wl,-Bsymbolic` on Linux (`libcrtmedia/cmake/crtmedia_targets.cmake`); `crt_compiler_rt_builtins`
+adds `-Wl,-u,__stack_chk_fail` on Linux/aarch64 (`CMakeLists.txt`) so the distro builtins' outline-atomics member resolves in CRT's libc, not the
+host's `libc.so.6`; the curl recipe disables nghttp2 and libidn2 so host libraries cannot add undeclared dependencies. Verified: 285 tooling
+tests, full build, `ctest` 203 tests. Environmental exceptions on this guest: six VAAPI tests hang in Mesa's virtio video driver (`libLLVM` init)
+unless `LIBVA_DRIVER_NAME=x`, and the playback-pipeline wall-time test fails with no audio sink. Evidence:
+[acceptance](docs/acceptance/crtweb_acceptance.md#inherited-runtime-notices-2026-10-20).
+
 ## 2026-10-20
 
 ### SDK, CRT-CLI and Studio: consolidate the developer-environment design

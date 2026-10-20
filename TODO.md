@@ -176,7 +176,7 @@ uses the host replay order stated below and in the acceptance document.
     the five header items resolved by engineering
     review against upstream 2026-10-20 (`third_party/bionic/header_decisions.json`); LGPL source offer generated per SDK and
     corresponding-source bundle added to the release tool ([guide](docs/guides/lgpl_source_offer.md); issue tracker, 3 years,
-    upstream archives not bundled); still open: Windows/x64 (with the offer), Windows/arm64 and Linux/aarch64 SDK regeneration,
+    upstream archives not bundled); Linux/aarch64 SDKs regenerated and verified 2026-10-21 (four option-ON-only aarch64 defects fixed); still open: Windows/x64 (with the offer) and Windows/arm64 SDK regeneration,
     the release tool exports `05-ui`/`06-web` with the owner-controlled `web_public_release` switch (final tags refuse a development
     candidate); still open: owner review (external legal review optional).
   * [x] Stable-series pin moved to WebKit 2.54.1 (newest micro; Linux/x86_64 gates green, [evidence](docs/acceptance/crtweb_acceptance.md#webkit-2541-re-pin-and-linuxx86_64-replay-2026-10-20));

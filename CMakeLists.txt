@@ -774,6 +774,18 @@ if(CRT_USE_COMPILER_RT)
     endif()
     add_library(crt_compiler_rt_builtins INTERFACE)
     target_link_libraries(crt_compiler_rt_builtins INTERFACE "${CRT_COMPILER_RT_BUILTINS}")
+    if(CRT_TARGET_OS STREQUAL "linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+      # Linux/aarch64 (2026-10-20): the distro compiler-rt archive's
+      # outline-atomics member (aarch64.c.o) is built with the stack
+      # protector and references __stack_chk_fail.  The builtins trail the
+      # link line, after libc.a has been scanned, so nothing in the CRT
+      # satisfies it and ld falls through to the host libc.so.6 (reachable
+      # when libva.so is linked) -- "DSO missing from command line".
+      # Forcing the symbol undefined up front makes libc.a (or c_shared
+      # itself) supply it the first time the archive is scanned.  x86_64 has
+      # no such member, so it never needed this.
+      target_link_options(crt_compiler_rt_builtins INTERFACE "-Wl,-u,__stack_chk_fail")
+    endif()
     install(FILES "${CRT_COMPILER_RT_BUILTINS}" DESTINATION lib RENAME libclang_rt.builtins.a COMPONENT crt-c)
   else()
     message(STATUS "compiler-rt builtins not found by ${CMAKE_C_COMPILER}")
