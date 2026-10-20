@@ -135,7 +135,7 @@
       "upstream_cadence": "Two feature releases a year, typically March and September (wpewebkit.org/release/schedule).",
       "published_end_of_life": null,
       "observed": "The last micro of 2.48, 2.50 and 2.52 was released 1, 6 and 28 days before the next stable series; none after. 2.54.0 was released 2026-09-16; 2.56 is not announced.",
-      "crt_policy": "not set (owner decision)"
+      "crt_policy": "adopted 2026-10-21: public release allowed up to 60 days after the next stable series first ships; re-pin starts within 30 days (docs/design/libcrtweb_api_policy.md)"
     },
     "rule": "A pinned version is affected by an advisory when it is older than the advisory's fixed version. Re-check the pin against every new advisory; see docs/acceptance/crtweb_acceptance.md Tranche 0."
   },

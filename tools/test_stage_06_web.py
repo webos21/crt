@@ -28,6 +28,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SecurityTests(unittest.TestCase):
+    def index(self, rows):
+        return "".join(f'<a href="wpewebkit-{v}.tar.xz">wpewebkit-{v}.tar.xz</a></td><td align="right">{d} 10:09  </td>' for v, d in rows)
+
+    def test_support_window(self):
+        from datetime import date
+        dates = security.release_dates(self.index([("2.54.0", "2026-09-16"), ("2.54.1", "2026-10-06"), ("2.55.1", "2027-01-05"),
+                                                   ("2.56.0", "2027-03-10")]))
+        current = security.support_window(dates, "2.54.1", date(2027, 3, 9))
+        self.assertIsNone(current["series_superseded_age_days"])
+        self.assertTrue(current["series_within_grace"])  # 2.55.x is a development series and does not supersede
+        edge = security.support_window(dates, "2.54.1", date(2027, 5, 9))
+        self.assertEqual(60, edge["series_superseded_age_days"])
+        self.assertTrue(edge["series_within_grace"])
+        late = security.support_window(dates, "2.54.1", date(2027, 5, 10))
+        self.assertEqual(61, late["series_superseded_age_days"])
+        self.assertFalse(late["series_within_grace"])
+        self.assertTrue(security.support_window(dates, "2.56.0", date(2027, 5, 10))["series_within_grace"])
+
     def page(self, declaration):
         return '<p>CVE-2026-1234</p><li>Versions affected: ' + declaration + '.</li><p>Memory corruption.</p>'
 

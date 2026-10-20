@@ -366,3 +366,43 @@ device teardown/recreation from a physical GPU reset. It does not promise that
 arbitrary calls into a hung OS driver can be interrupted. Native queue drains
 remain driver calls. Host replay and actual measurements belong to
 [Web acceptance](../acceptance/crtweb_acceptance.md#9-gpu-integration).
+
+## WebKit support policy (Tranche 10)
+
+Status: adopted 2026-10-21 by the owner with `G = 60` and `S = 30`. The upstream facts it rests on (only the
+latest stable branch gets security fixes, no published end of life, a series' last micro precedes its successor
+by 1-28 days) are recorded in
+[Web acceptance](../acceptance/crtweb_acceptance.md#upstream-support-window-of-the-wpe-webkit-stable-series-checked-2026-10-20).
+
+**Terms.** The *pinned series* is the even-minor series of `libcrtweb/third_party/webkit/recipe.json`.
+It is *superseded* from the day the first release of the next even-minor series (`X.Y+2.0`) is published
+upstream; the number of days since then is its *superseded age*.
+
+**Rules.**
+
+1. A public release must pin the newest micro of the newest stable series (enforced as `pin_is_latest_micro`).
+2. While the pinned series is superseded for no more than `G = 60` days, a public release may still ship it,
+   because upstream series end shortly before or at the successor's first release and a re-pin to a new series
+   is a tranche-sized change (carried patches, three-host replay). Release notes must name the successor and
+   the planned re-pin.
+3. Beyond `G` days a public release on the superseded series is refused. Development candidates are not
+   affected.
+4. Re-pin to a new series starts within `S = 30` days of its first release and ends when the Linux/x86_64
+   gates are green; macOS and Windows replays follow in the usual host order. A micro update inside the
+   pinned series follows the existing advisory gate and needs no policy decision.
+5. An advisory that affects the pin blocks release until fixed, regardless of series age (existing gate).
+6. Already published releases are not patched when their series loses upstream support. The next release
+   states the unsupported state in its notes; withdrawing a release is an owner decision per case.
+
+**Check.** `tools/check_webkit_security.py` derives the successor's first-release date from the upstream release
+index it already reads (a later even-minor series; odd minors are development series) and records
+`series_superseded_since`, `series_superseded_age_days`, `series_grace_days` and `series_within_grace` in
+`share/crt/web-security.json`. Past `G` it adds the release blocker "pinned series superseded N days ago
+(limit 60): re-pin required", and `tools/crt_web_release.py` refuses a public release (and rejects a recorded
+public one) unless `series_within_grace` is true; this reason is not one the owner's `accepted_blockers` can
+waive. Rules 4 and 6 are procedures for the owner and are not machine-checked.
+
+**Still open.** Whether rule 6 should promise a fixed deprecation notice period.
+
+**Current application.** 2.54 is the newest stable (2.54.1, 2026-10-06); 2.56 is unannounced, expected about
+March 2027. A release before then satisfies every rule.

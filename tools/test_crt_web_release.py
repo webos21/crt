@@ -10,9 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import crt_web_release as web
 
-BLOCKERS = ["upstream support window unconfirmed",
-            "native three-host and cross-target packaging acceptance required"]
-SECURITY = {"passed": True, "pin_is_latest_micro": True, "release_blockers": BLOCKERS}
+BLOCKERS = ["native three-host and cross-target packaging acceptance required", "another open blocker"]
+SECURITY = {"passed": True, "pin_is_latest_micro": True, "series_within_grace": True,
+            "release_blockers": BLOCKERS}
 APPROVED = {"web_public_release": {"approved": True, "approved_by": "owner", "approved_utc": "2026-11-01",
                                    "accepted_blockers": BLOCKERS}}
 
@@ -40,6 +40,12 @@ class Decide(unittest.TestCase):
     def test_failed_snapshot_or_stale_pin_blocks_even_an_approved_stage(self) -> None:
         self.assertFalse(web.decide(APPROVED, {**SECURITY, "passed": False})["public_release_allowed"])
         self.assertFalse(web.decide(APPROVED, {**SECURITY, "pin_is_latest_micro": False})["public_release_allowed"])
+
+    def test_a_series_past_the_grace_period_blocks_even_an_approved_stage(self) -> None:
+        stale = {**SECURITY, "series_within_grace": False}
+        decision = web.decide(APPROVED, stale)
+        self.assertFalse(decision["public_release_allowed"])
+        self.assertIn("grace period", " ".join(decision["reasons"]))
 
     def test_inconsistent_approval_records_are_rejected(self) -> None:
         for patch in ({"approved_by": None}, {"approved_utc": "someday"}, {"accepted_blockers": "all"}):
