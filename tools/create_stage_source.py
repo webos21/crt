@@ -25,6 +25,9 @@ STAGE_VALIDATION_PROJECT_PATHS = (
     "tools/crt_pe.py",
     "tools/crt_macho.py",
     "tools/crt_binary_dependencies.py",
+    # create_dist.py imports it; the registry is read only for the stage that introduces a component.
+    "tools/crt_runtime_notices.py",
+    "third_party/crt-runtime/components.json",
 )
 
 
@@ -375,7 +378,7 @@ STAGES = {
         "input_stage": "05-ui",
         "entrypoint": "tools/build_stage_06_web.py",
         "project_paths": (
-            "LICENSE.md", "tools", "libcrtweb",
+            "LICENSE.md", "tools", "libcrtweb", "third_party/crt-runtime",
             "porting/recipes", "porting/tests", "porting/shims",
             "examples/web-browser", "distribution/stages/06-web",
             "libcrtgfx/assets/fonts",

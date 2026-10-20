@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/times.h>
 #include <time.h>
 #include <unistd.h>
@@ -140,4 +141,52 @@ pid_t getsid(pid_t pid) {
 int nice(int inc) {
   (void)inc;
   return 0;
+}
+
+/* Bionic's getpriority()/setpriority() (<sys/resource.h>). The Linux syscall returns 20 - nice so
+ * the result is never negative; libc converts it back and clears errno on success. macOS and
+ * Windows have the single priority 0, as sched_setscheduler() does. */
+static int priority_arguments_valid(int which) {
+  return which == PRIO_PROCESS || which == PRIO_PGRP || which == PRIO_USER;
+}
+
+int getpriority(int which, id_t who) {
+  if (!priority_arguments_valid(which)) {
+    errno = EINVAL;
+    return -1;
+  }
+#if defined(CRT_TARGET_OS_LINUX)
+  long result = syscall(SYS_getpriority, (long)which, (long)who);
+  if (result < 0) {
+    return -1;
+  }
+  errno = 0;
+  return 20 - (int)result;
+#else
+  (void)who;
+  errno = 0;
+  return 0;
+#endif
+}
+
+int setpriority(int which, id_t who, int priority) {
+  if (!priority_arguments_valid(which)) {
+    errno = EINVAL;
+    return -1;
+  }
+#if defined(CRT_TARGET_OS_LINUX)
+  return (int)syscall(SYS_setpriority, (long)which, (long)who, (long)priority);
+#else
+  (void)who;
+  if (priority < PRIO_MIN) {
+    priority = PRIO_MIN;
+  } else if (priority > PRIO_MAX - 1) {
+    priority = PRIO_MAX - 1;
+  }
+  if (priority != 0) {
+    errno = ENOTSUP;
+    return -1;
+  }
+  return 0;
+#endif
 }

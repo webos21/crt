@@ -9,6 +9,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+import crt_runtime_notices
 from create_rootfs import TOYBOX_APPLETS
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import remove_absolute_runtime_paths
@@ -694,6 +695,10 @@ def main() -> None:
     if wayland_xdg_shell and not any(item.get("name") == "wayland-protocols-xdg-shell"
                                      for item in redistributed_dependencies):
         redistributed_dependencies.append(wayland_xdg_shell)
+    # libc/libm/libdl, the shell and the LLVM C++ runtime are redistributed by every stage; their
+    # notices and provenance enter the SDK at the stage that first ships them.
+    redistributed_dependencies = crt_runtime_notices.add_runtime_dependencies(
+        root, destination, args.stage, redistributed_dependencies)
     copy_porting_sdk(root, destination)
     copy_stage_recipes([recipe.resolve() for recipe in args.stage_recipe], destination)
     install_wrapper_applets(destination, args.target_os)

@@ -265,7 +265,7 @@ runtime은 다음 계층으로 나누어 설계한다.
   - `cmake/crtui_sources.cmake`: in-tree 빌드와 isolated stage가 공유하는 source
     목록. 상세는 `libcrtui/README.md`, `docs/acceptance/crtui_acceptance.md`.
 - `libcrtweb/`
-  - `06-web`(WebKit CRT Port)의 자리. `third_party/webkit/`의 WPE WebKit 2.54.0
+  - `06-web`(WebKit CRT Port)의 자리. `third_party/webkit/`의 WPE WebKit 2.54.1
     reference와 full product-source pin/provenance, JSC/WPE reference 검증
     (`tests/jsc`, `tests/wpe-reference`), Tranche 3A의 frame/input 계약과 Linux
     WPEPlatform `crt` prototype(`platform/`, `tests/platform-crt/`)이 있다.

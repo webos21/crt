@@ -33,8 +33,8 @@ class RealPinTests(unittest.TestCase):
     def test_the_committed_pin_is_well_formed(self) -> None:
         recipe = json.loads(RECIPE.read_text(encoding="utf-8"))
         source = fetch_webkit.validate_recipe(recipe)
-        self.assertEqual("2.54.0", recipe["version"])
-        self.assertEqual("wpewebkit-2.54.0.tar.xz", source["archive_name"])
+        self.assertEqual("2.54.1", recipe["version"])
+        self.assertEqual("wpewebkit-2.54.1.tar.xz", source["archive_name"])
         self.assertTrue(source["archive_url"].endswith("/" + source["archive_name"]))
         self.assertEqual(source["tag"], "wpewebkit-" + recipe["version"])
 
@@ -43,8 +43,8 @@ class RealPinTests(unittest.TestCase):
         # tarball equals the whole tagged tree); the recipe must keep saying so.
         recipe = json.loads(RECIPE.read_text(encoding="utf-8"))
         self.assertTrue(recipe["verification"]["not_yet_verified"])
-        self.assertTrue(recipe["source"]["tag_signature"]["verified"])
-        self.assertEqual(40, len(recipe["source"]["tag_signature"]["fingerprint"]))
+        self.assertTrue(recipe["source"]["archive_signature"]["verified"])
+        self.assertEqual(40, len(recipe["source"]["archive_signature"]["fingerprint"]))
 
 
 class RecipeValidationTests(unittest.TestCase):

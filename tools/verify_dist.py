@@ -167,6 +167,25 @@ def dependency_path(dist: Path, name: str, field: str, relative: str) -> Path:
     return candidate
 
 
+# Inherited runtime components a stage's SDK must redistribute (registry:
+# third_party/crt-runtime/components.json; first stage that ships each one).
+RUNTIME_COMPONENTS_BY_STAGE = {
+    "01-c": ("crt-libc", "mksh", "toybox", "onetrue-awk"),
+    "02-cxx": ("llvm-runtimes",),
+}
+
+
+def validate_runtime_components(stage: str, dependencies: dict[str, dict]) -> None:
+    """Every cumulative stage declares the runtime notices of itself and its predecessors."""
+    for earlier in SUPPORTED_STAGES[:SUPPORTED_STAGES.index(stage) + 1]:
+        for name in RUNTIME_COMPONENTS_BY_STAGE.get(earlier, ()):
+            item = dependencies.get(name)
+            if item is None or item.get("kind") != "crt-runtime":
+                raise SystemExit(f"stage {stage} does not declare the inherited runtime component {name}")
+            if not item.get("notices"):
+                raise SystemExit(f"inherited runtime component {name} carries no notice file")
+
+
 def validate_redistributed_dependencies(dist: Path, manifest: dict) -> dict[str, dict]:
     """Validate every declared dependency without hardcoding its file layout."""
     dependencies = manifest.get("redistributed_dependencies", [])
@@ -430,6 +449,7 @@ def main() -> None:
         args.stage)
     validate_external_prerequisites(manifest)
     redistributed = validate_redistributed_dependencies(dist, manifest)
+    validate_runtime_components(args.stage, redistributed)
     porting = manifest.get("optional_tools", {}).get("porting", {})
     if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:
         raise SystemExit("manifest does not describe the optional packaged porting tools")

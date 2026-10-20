@@ -559,13 +559,16 @@ int main(int argc, char** argv)
                 i + 1, samples.back().rssKiB, samples.back().threads, samples.back().descriptors);
     }
 
-    if (samples.size() >= 12) {
-        const Sample& warm = samples[9];
+    // Warm-up is 20 iterations: WTF's memory-pressure monitor opens its /proc and cgroup files lazily
+    // (up to six descriptors on a host whose cgroup exposes memory.*), and does so once after the
+    // first ten iterations; they stay open, so the count is flat afterwards.
+    if (samples.size() >= 22) {
+        const Sample& warm = samples[19];
         const Sample& last = samples.back();
         long rssGrowth = last.rssKiB - warm.rssKiB;
         long threadGrowth = last.threads - warm.threads;
         long descriptorGrowth = static_cast<long>(last.descriptors) - static_cast<long>(warm.descriptors);
-        printf("crtweb_lifecycle_test: %zu iterations, after warm-up (10): rss %+ld KiB, threads %+ld, descriptors %+ld; "
+        printf("crtweb_lifecycle_test: %zu iterations, after warm-up (20): rss %+ld KiB, threads %+ld, descriptors %+ld; "
                "most children at once %u\n", samples.size(), rssGrowth, threadGrowth, descriptorGrowth, maxChildren);
         // Bounded, not zero: allocators keep arenas. A leak of a page or a view would show as linear
         // growth, which over the remaining iterations is far beyond these bounds.

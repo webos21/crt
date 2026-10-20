@@ -11,6 +11,18 @@ substantive update.
 
 ## 2026-10-20
 
+### Tranche 10: WebKit 2.54.1 re-pin and inherited-runtime notices
+
+Re-pinned `libcrtweb/third_party/webkit` from 2.54.0 to 2.54.1 (lightweight upstream tag: archive `.asc` and a
+0-differing tarball/commit correspondence are the authenticity evidence). The 23 carried patches apply to all
+three OS chains; only four manifest hashes changed. New libc surface for WTF thread scheduling
+(`getpriority`/`setpriority`, `PRIO_*`, `id_t`, `SCHED_RESET_ON_FORK`); `HighPriorityThreads.h` rename in
+`PlatformCRT.cmake`; the lifecycle test's warm-up is now 20 iterations. All eleven Linux/x86_64 gate entries pass.
+The replay also exposed that the current in-tree SDK's shared mbedTLS `libcurl.so.4` shadows the port's OpenSSL
+curl (no FILE protocol) -- the replay ran with the SDK's shared curl/zlib removed; the driver fix is open.
+`create_dist.py` now installs notices and provenance for the inherited runtime (libc, shell, LLVM C++ runtime)
+in every stage, `verify_dist.py` requires them, and the Web SBOM lists them. Not run on macOS or Windows.
+
 ### Tranche 10: Linux x86_64 host -> aarch64 target cross build
 
 Built an aarch64 `05-ui` predecessor SDK on this host and ran the isolated

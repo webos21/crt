@@ -94,12 +94,19 @@ def verify_commit(repo: Path, source: dict) -> list:
 
 
 def verify_tag(repo: Path, source: dict) -> None:
-    """The signed tag must still peel to the pinned commit (needs the network)."""
+    """The tag must still resolve to the pinned commit (needs the network).
+
+    An annotated tag peels (`^{}`) to the commit. A lightweight tag (WPE WebKit 2.54.1) is the commit
+    itself; the recipe then records `tag_object` as null and the release archive's detached signature,
+    not a tag signature, is the authenticity evidence.
+    """
     out = git(repo, "ls-remote", source["repository"], f"refs/tags/{source['tag']}*")
-    peeled = {line.split("\t")[1]: line.split("\t")[0] for line in out.splitlines()}
-    want = peeled.get(f"refs/tags/{source['tag']}^{{}}")
+    refs = {line.split("\t")[1]: line.split("\t")[0] for line in out.splitlines()}
+    want = refs.get(f"refs/tags/{source['tag']}^{{}}")
+    if want is None and source.get("tag_object") is None:
+        want = refs.get(f"refs/tags/{source['tag']}")
     if want != source["commit"]:
-        raise SystemExit(f"tag {source['tag']} peels to {want}, not the pinned commit")
+        raise SystemExit(f"tag {source['tag']} resolves to {want}, not the pinned commit")
 
 
 def checkout(source: dict, destination: Path) -> int:

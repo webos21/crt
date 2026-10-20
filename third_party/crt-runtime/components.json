@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "purpose": "Inherited runtime components that every CRT SDK redistributes (libc/libm/libdl, the shell, the imported LLVM C++ runtime). tools/crt_runtime_notices.py turns this registry into the SDK's share/licenses/<name>/ notices, share/crt/dependencies/<name>/provenance.json and manifest redistributed_dependencies entries. Nothing here is a legal review: license_declared stays NOASSERTION unless the whole component is under one verified license text.",
+  "components": [
+    {
+      "name": "crt-libc",
+      "first_stage": "01-c",
+      "kind": "crt-runtime",
+      "description": "CRT libc, libm, libdl, startup objects and the public C headers (project-owned code plus per-file Bionic, OpenBSD gdtoa, FreeBSD msun, Android and kernel UAPI imports).",
+      "license_declared": "NOASSERTION",
+      "license_note": "Mixed per-file licensing: project-owned code under LICENSE.md, imports keep their original license. share/licenses/crt-libc/NOTICE groups every distinct in-file license header.",
+      "source": {
+        "repository": "https://github.com/webos21/crt",
+        "provenance_manifest": "third_party/bionic/import_manifest.json",
+        "upstream": "https://android.googlesource.com/platform/bionic"
+      },
+      "notices": [
+        {"path": "LICENSE.md", "dest": "LICENSE.md"},
+        {"path": "third_party/bionic/README.md", "dest": "bionic-provenance/README.md"},
+        {"path": "third_party/bionic/import_manifest.json", "dest": "bionic-provenance/import_manifest.json"}
+      ],
+      "header_scan": {
+        "roots": ["libc/src", "libc/include", "include", "libm/src", "libdl", "libstdc++/src"],
+        "extensions": [".c", ".h", ".S", ".s", ".cc", ".cpp", ".inc"]
+      }
+    },
+    {
+      "name": "mksh",
+      "first_stage": "01-c",
+      "kind": "crt-runtime",
+      "description": "MirBSD Korn Shell, imported from Android external/mksh (/system/bin/sh).",
+      "license_declared": "NOASSERTION",
+      "license_note": "MirOS licence (and the permissive texts listed in NOTICE); not mapped to an SPDX identifier here.",
+      "source": {"repository": "https://android.googlesource.com/platform/external/mksh", "provenance_manifest": "shell/mksh/import_manifest.json"},
+      "notices": [
+        {"path": "shell/mksh/NOTICE", "dest": "NOTICE"},
+        {"path": "shell/mksh/METADATA", "dest": "METADATA"},
+        {"path": "shell/mksh/import_manifest.json", "dest": "import_manifest.json"}
+      ]
+    },
+    {
+      "name": "toybox",
+      "first_stage": "01-c",
+      "kind": "crt-runtime",
+      "description": "Android external/toybox command applets (/system/bin/toybox).",
+      "license_declared": "0BSD",
+      "license_note": "The imported LICENSE text is the 0BSD permission notice (checked by tools/test_crt_runtime_notices.py).",
+      "source": {"repository": "https://android.googlesource.com/platform/external/toybox", "provenance_manifest": "shell/toybox/import_manifest.json"},
+      "notices": [
+        {"path": "shell/toybox/src/LICENSE", "dest": "LICENSE"},
+        {"path": "shell/toybox/import_manifest.json", "dest": "import_manifest.json"}
+      ]
+    },
+    {
+      "name": "onetrue-awk",
+      "first_stage": "01-c",
+      "kind": "crt-runtime",
+      "description": "onetrue-awk (/system/bin/awk).",
+      "license_declared": "NOASSERTION",
+      "license_note": "Lucent Technologies 1997 permissive license; no SPDX identifier is asserted.",
+      "source": {"repository": "https://github.com/onetrueawk/awk", "provenance_manifest": "shell/awk/import_manifest.json"},
+      "notices": [
+        {"path": "shell/awk/LICENSE", "dest": "LICENSE"},
+        {"path": "shell/awk/import_manifest.json", "dest": "import_manifest.json"}
+      ]
+    },
+    {
+      "name": "llvm-runtimes",
+      "first_stage": "02-cxx",
+      "kind": "crt-runtime",
+      "description": "Imported LLVM libc++, libc++abi and libunwind (pinned AOSP toolchain/llvm-project revision) and the compiler-rt builtins archive.",
+      "license_declared": "Apache-2.0 WITH LLVM-exception",
+      "license_note": "The LLVM Project license texts are vendored byte for byte from the pinned revision (libstdc++/third_party/llvm-license). They also carry the legacy MIT/UIUC dual-license sections for older contributions. The libclang_rt.builtins archive is produced by the toolchain used for the SDK build; its LLVM version is whatever that toolchain provides (SDK manifest records the compiler).",
+      "source": {
+        "repository": "https://android.googlesource.com/toolchain/llvm-project",
+        "ref": "37f38d1f3276b62fba09462ab4807dce846c732d",
+        "provenance_manifest": "libstdc++/third_party/libcxx/recipe.json"
+      },
+      "notices": [
+        {"path": "libstdc++/third_party/llvm-license/llvm-project.LICENSE.TXT", "dest": "llvm-project.LICENSE.TXT"},
+        {"path": "libstdc++/third_party/llvm-license/libcxx.LICENSE.TXT", "dest": "libcxx.LICENSE.TXT"},
+        {"path": "libstdc++/third_party/llvm-license/libcxxabi.LICENSE.TXT", "dest": "libcxxabi.LICENSE.TXT"},
+        {"path": "libstdc++/third_party/llvm-license/libunwind.LICENSE.TXT", "dest": "libunwind.LICENSE.TXT"},
+        {"path": "libstdc++/third_party/llvm-license/compiler-rt.LICENSE.TXT", "dest": "compiler-rt.LICENSE.TXT"},
+        {"path": "libstdc++/third_party/libcxx/recipe.json", "dest": "recipes/libcxx.recipe.json"},
+        {"path": "libstdc++/third_party/libcxxabi/recipe.json", "dest": "recipes/libcxxabi.recipe.json"},
+        {"path": "libstdc++/third_party/libunwind/recipe.json", "dest": "recipes/libunwind.recipe.json"}
+      ]
+    }
+  ]
+}

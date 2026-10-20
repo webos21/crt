@@ -545,8 +545,13 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
         package = {"SPDXID": "SPDXRef-Inherited-" + dependency["name"], "name": dependency["name"],
                    "versionInfo": str(inherited.get("version", inherited.get("revision", "NOASSERTION"))),
                    "downloadLocation": source.get("url", source.get("repository", "NOASSERTION")),
-                   "filesAnalyzed": False, "licenseConcluded": "NOASSERTION", "licenseDeclared": "NOASSERTION",
-                   "copyrightText": "NOASSERTION", "comment": "Inherited unchanged from the installed 05-ui SDK; see its bundled provenance/notice."}
+                   "filesAnalyzed": False, "licenseConcluded": "NOASSERTION",
+                   # Only a license text verified for the whole component is declared (e.g. the LLVM
+                   # runtimes); mixed per-file components stay NOASSERTION, with the note in the comment.
+                   "licenseDeclared": inherited.get("license_declared", "NOASSERTION"),
+                   "copyrightText": "NOASSERTION",
+                   "comment": "Inherited unchanged from the installed 05-ui SDK; see its bundled provenance/notice."
+                              + (" " + inherited["license_note"] if inherited.get("license_note") else "")}
         if source.get("sha256"):
             package["checksums"] = [{"algorithm": "SHA256", "checksumValue": source["sha256"]}]
         packages.append(package)

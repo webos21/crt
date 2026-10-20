@@ -611,3 +611,8 @@ tests and `crtweb_webcore_graph_test`.
   made `file:` loads abort non-deterministically in the Web process (`isIPAddressDisallowed`). The fix was
   already in the source; the SDK `libc.so` simply predated it. A stale SDK is therefore a Web gate
   prerequisite: rebuild `crt-ui-dist` after pulling libc changes.
+- `getpriority`/`setpriority`, `PRIO_*`, `id_t` and `SCHED_RESET_ON_FORK` were missing until WPE WebKit 2.54.1
+  (2026-10-20): its WTF thread-scheduling code (`ThreadingPOSIX.cpp`, `HighPriorityThreads`) uses them. They
+  follow Bionic's `<sys/resource.h>`/`<sched.h>`: Linux uses the real syscalls; macOS and Windows have the
+  single priority 0 (as `sched_setscheduler` does), so `setpriority()` of a nonzero value fails with
+  `ENOTSUP` and WebKit only logs it. Not built or run on macOS or Windows yet.

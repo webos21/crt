@@ -10,6 +10,13 @@ typedef unsigned long rlim_t;
 #define RLIM_SAVED_CUR RLIM_INFINITY
 #define RLIM_SAVED_MAX RLIM_INFINITY
 
+/* Bionic <sys/resource.h> (kernel <linux/resource.h> values). */
+#define PRIO_MIN (-20)
+#define PRIO_MAX 20
+#define PRIO_PROCESS 0
+#define PRIO_PGRP 1
+#define PRIO_USER 2
+
 #define RUSAGE_SELF 0
 #define RUSAGE_CHILDREN -1
 #define RUSAGE_THREAD 1
@@ -56,6 +63,11 @@ extern "C" {
 int getrlimit(int resource, struct rlimit* rlim);
 int setrlimit(int resource, const struct rlimit* rlim);
 int getrusage(int who, struct rusage* usage);
+/* Linux: the real nice value (PRIO_PROCESS with a thread id addresses that thread, as on Linux).
+ * macOS and Windows have the single priority 0, like sched_setscheduler(): setpriority() of any
+ * other value fails with ENOTSUP. */
+int getpriority(int which, id_t who);
+int setpriority(int which, id_t who, int priority);
 
 #ifdef __cplusplus
 }

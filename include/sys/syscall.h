@@ -18,6 +18,8 @@
 #define SYS_sched_getparam 121
 #define SYS_sched_get_priority_max 125
 #define SYS_sched_get_priority_min 126
+#define SYS_setpriority 140
+#define SYS_getpriority 141
 #elif defined(__x86_64__)
 #define SYS_getpid 39
 #define SYS_renameat2 316
@@ -35,6 +37,8 @@
 #define SYS_sched_getscheduler 145
 #define SYS_sched_get_priority_max 146
 #define SYS_sched_get_priority_min 147
+#define SYS_setpriority 141
+#define SYS_getpriority 140
 #else
 #define SYS_getpid 39
 #define SYS_renameat2 316
@@ -51,6 +55,8 @@
 #define SYS_sched_getscheduler 145
 #define SYS_sched_get_priority_max 146
 #define SYS_sched_get_priority_min 147
+#define SYS_setpriority 141
+#define SYS_getpriority 140
 #endif
 
 /* Bionic's <sys/syscall.h> spells each number both __NR_x (<asm/unistd.h>) and
@@ -58,9 +64,11 @@
 #define __NR_fallocate SYS_fallocate
 #define __NR_futex SYS_futex
 #define __NR_getpid SYS_getpid
+#define __NR_getpriority SYS_getpriority
 #define __NR_gettid SYS_gettid
 #define __NR_renameat2 SYS_renameat2
 #define __NR_rt_sigprocmask SYS_rt_sigprocmask
+#define __NR_setpriority SYS_setpriority
 #define __NR_sched_get_priority_max SYS_sched_get_priority_max
 #define __NR_sched_get_priority_min SYS_sched_get_priority_min
 #define __NR_sched_getparam SYS_sched_getparam

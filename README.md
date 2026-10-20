@@ -283,7 +283,7 @@ CRT PAL      crtgfx       crtmedia
 
 WPE WebKit is the Linux reference port during bring-up. The final target is one CRT-facing Web runtime and `WebView` API across Linux, Windows, and macOS.
 
-Tranches 0-2 are closed: the WPE WebKit 2.54.0 provenance is frozen;
+Tranches 0-2 are closed: the WPE WebKit 2.54.1 provenance is frozen;
 JavaScriptCore passes interpreter, Baseline/DFG/FTL JIT, WebAssembly, and
 sampling-profiler acceptance on Linux/x86_64, Linux/aarch64, macOS/arm64, and
 Windows/x64; and pristine native WPE renders the accepted local HTML fixture

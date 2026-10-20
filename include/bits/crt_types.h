@@ -19,6 +19,7 @@ typedef __INT64_TYPE__ __crt_blkcnt_t;
 typedef __INT32_TYPE__ __crt_pid_t;
 typedef __UINT32_TYPE__ __crt_uid_t;
 typedef __UINT32_TYPE__ __crt_gid_t;
+typedef __UINT32_TYPE__ __crt_id_t;
 typedef __UINT32_TYPE__ __crt_socklen_t;
 typedef __INT64_TYPE__ __crt_time_t;
 typedef long __crt_clock_t;

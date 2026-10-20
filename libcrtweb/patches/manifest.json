@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "upstream": "WPE WebKit 2.54.0 (libcrtweb/third_party/webkit/recipe.json)",
+  "upstream": "WPE WebKit 2.54.1 (libcrtweb/third_party/webkit/recipe.json)",
   "policy": "Nothing here is applied silently: tools/build_webkit_jsc.py verifies the SHA-256 of each file before the patch (or accepts the recorded result), applies it, verifies the result, and records it in the configure fingerprint. Add an entry only with a reason and a removal condition (docs/porting/crtweb_porting.md).",
   "patches": [
     {
@@ -360,8 +360,8 @@
         },
         {
           "file": "Source/WebKit/UIProcess/WebProcessProxy.cpp",
-          "sha256_before": "e69bdd90291800f11da2ce89b116e6c3e4b1fc7e28b4bf0001b1c5b0137d00fc",
-          "sha256_after": "368717821aea1c9b0844b54276253e8fe8b61d0dfcb1324785766f184816b0db",
+          "sha256_before": "46b898dd05b244f5ee15cca40882ff63bcf2d4c7a2e073ed49d4267309fd85b8",
+          "sha256_after": "1242b9fffa5bd91538a46b4264ee0d549727f8d2d08a95b0f889c5bed6b06c66",
           "license": "BSD-2-Clause"
         },
         {
@@ -390,8 +390,8 @@
         },
         {
           "file": "Source/WebKit/WebProcess/WebPage/WebPage.cpp",
-          "sha256_before": "1c37140794243c74afb65bc9a091fd1fab0127c25853e845010b6c33fafb0a9a",
-          "sha256_after": "6efc563ba1b4b96d881d00f5b2bd5211120887470abb567deaabfa7165d97dad",
+          "sha256_before": "6e44e911f3469284e098812740d9e2cd689365e16f80258bc25b74e2a67539c9",
+          "sha256_after": "a3e573bd503459b3500684ae0a9250efa22aaeb8290942072eabda459f08eac0",
           "license": "BSD-2-Clause"
         }
       ],
@@ -590,14 +590,14 @@
         },
         {
           "file": "Source/WebKit/WebProcess/WebPage/WebPage.h",
-          "sha256_before": "ae59736934240b795d5329ea8f4ac99a11a55ad55bd8a5a4536e9e4dba3cf280",
-          "sha256_after": "0a7fb39fd3ce6354d72ade3402bef1b3fb24f6431c072575f8e46a1ced989b0f",
+          "sha256_before": "84d588509c87bd41c9df125f534eedbbcf60d26b72959282e1ef9dc730bd8d6a",
+          "sha256_after": "e84db68b26a114a82bb35e1c926effb5e3a60127bd67c9ce8c0751ce36d51697",
           "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WebKit/WebProcess/WebPage/WebPage.cpp",
-          "sha256_before": "6efc563ba1b4b96d881d00f5b2bd5211120887470abb567deaabfa7165d97dad",
-          "sha256_after": "637d105ab0e0507c283cdb7c44e741903453ecf901045c546bb84ef6f7d792c1",
+          "sha256_before": "a3e573bd503459b3500684ae0a9250efa22aaeb8290942072eabda459f08eac0",
+          "sha256_after": "36bdb242eb1fcfa588bacc5f64c3778726bd18b1545509849f17c655815cf150",
           "license": "BSD-2-Clause"
         }
       ],

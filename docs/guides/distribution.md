@@ -230,6 +230,12 @@ layer is part of `04-gfx-media`, redistributed as static libraries plus the
 `curl` tool.)
 Compiler/toolchain inputs remain in the separate external-toolchain fields
 and redistributable third-party ports remain in `redistributed_dependencies`.
+The runtime a stage itself redistributes is declared there too, with `kind` `crt-runtime`:
+`crt-libc`, `mksh`, `toybox` and `onetrue-awk` from `01-c`, and `llvm-runtimes` from `02-cxx`
+(registry `third_party/crt-runtime/components.json`, installer `tools/crt_runtime_notices.py`). Each carries
+its notices under `share/licenses/<name>/` and a `provenance.json`; `verify_dist.py` requires them for the
+stage and every earlier stage. These notices are an inventory, not a legal review
+(`docs/acceptance/crtweb_acceptance.md`, "Inherited runtime notices").
 
 The first supported transitions are `01-c -> 02-cxx`, then
 `02-cxx -> 03-gfx-simple -> 04-gfx-media`. Thus `01-c` can fetch the pinned

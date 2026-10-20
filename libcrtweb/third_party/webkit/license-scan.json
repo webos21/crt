@@ -2,16 +2,16 @@
   "schema": 1,
   "source": {
     "role": "PlatformCRT product source",
-    "commit": "73f39d84ea9d4071994214373efbde3665402b05",
-    "tree": "6d856c316a194c1717414b5b3e9c5ad492bafb5f",
+    "commit": "537776966344c4982751692dd475c94124504271",
+    "tree": "60295deedb6abea300bfae633223baed8c8f6258",
     "scanned_paths": [
       "Source"
     ]
   },
   "method": "tools/scan_webkit_headers.py: first 8 KiB of every file; SPDX tag, else standard license texts; never guessed (unmatched copyright text is 'unclassified-with-copyright')",
-  "files_scanned": 69573,
+  "files_scanned": 69575,
   "by_class": {
-    "BSD-2-Clause": 25041,
+    "BSD-2-Clause": 25043,
     "BSD-3-Clause": 19534,
     "no-license-header": 13036,
     "Apache-2.0": 3533,
@@ -234,7 +234,7 @@
       "LGPL-2": 1
     },
     "WebCore": {
-      "BSD-2-Clause": 12108,
+      "BSD-2-Clause": 12110,
       "LGPL-2+": 2045,
       "BSD-3-Clause": 1092,
       "no-license-header": 336,

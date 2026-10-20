@@ -4946,8 +4946,78 @@ build's headers (match; generated-header SHA-256 `299726ec…`). The record stat
 Limits: this proves the cross compile/link/package split only. No aarch64
 process was run, so browser, HTTP/TLS, Host ABI maps, GPU, audio and camera
 behavior on Linux/aarch64 stay **unverified** until a native aarch64 host
-replays the `06-web` gates. Inherited-runtime notice/SBOM review and public
-release remain open.
+replays the `06-web` gates. Public release remains open.
+
+#### WebKit 2.54.1 re-pin and Linux/x86_64 replay (2026-10-20)
+
+The pin moved from 2.54.0 to the newest stable micro release, **2.54.1** (2026-10-06, commit
+`537776966344c4982751692dd475c94124504271`, tree `60295dee…`, 462,083 entries). Provenance:
+
+- The archive SHA-256 `0de8bdfb…` equals the release page, and its detached `.asc` verifies with the same
+  key as before (Adrian Perez de Castro, `5AA3BC33…123B`; not web-of-trust certified). **The upstream tag
+  `wpewebkit-2.54.1` is lightweight, so unlike 2.54.0 there is no tag signature**; `recipe.json` records
+  `tag_signed: false`, `tag_object: null` and an `archive_signature` instead, and
+  `tools/fetch_webkit_commit.py` accepts a lightweight tag that resolves to the pinned commit.
+- `--correspondence` measured the tarball against the commit: 38,844 files, 34,419 identical, 130 identical
+  after CRLF->LF, **0 differ**; the only archive-only files are the 4,294 generated API docs and `NEWS`.
+- The per-file license scan of the new tree (69,575 files) differs from 2.54.0 by two BSD-2-Clause files;
+  the 64 license/notice files are byte-identical. No new license decision was needed.
+- `check_webkit_security.py`: 2.54.1 is not affected by any of the linked advisories and is the latest micro.
+  Upstream's support window for the 2.54 series is still not documented; that stays a release blocker.
+
+Of the 57 files our 23 patches modify, only `WebProcessProxy.cpp`, `WebPage.cpp` and `WebPage.h` changed
+upstream. All 23 patches apply unchanged to 2.54.1 on all three OS patch chains (no new hunks, no fuzz
+failures); only four `sha256_before`/`sha256_after` pairs in the manifest were re-measured (0010 and 0021).
+CRT-owned code needed one adaptation: upstream renamed `wtf/linux/RealTimeThreads.h` to
+`HighPriorityThreads.h` (`PlatformCRT.cmake`). The new WTF thread-scheduling code calls
+`setpriority()`/`sched_setscheduler(SCHED_RESET_ON_FORK)`, which the CRT libc lacked, so `getpriority`,
+`setpriority`, `PRIO_*`, `id_t` and `SCHED_RESET_ON_FORK` were added with Bionic's signatures (Linux:
+real syscalls; macOS/Windows: the single priority 0, nonzero fails with `ENOTSUP`, like
+`sched_setscheduler`). **macOS and Windows were not built or run for 2.54.1 or for these libc additions.**
+
+Replay (Linux/x86_64, a fresh work root composed from the new pin, `build_webkit_crt_port.py --webkit
+--run-tests`): all eleven gate entries pass -- WebCore graph, process, public API, API lifecycle (100 cycles),
+render/input through the surface protocol, lifecycle and Host ABI, WebView through crtui, media playback,
+camera capture and network trust. Findings on the way, none caused by 2.54.1:
+
+- The in-tree SDK `dist/05-ui` now ships a shared mbedTLS `libcurl.so.4` and `libz.so.1` (since
+  `18eeb3a`). The wrapper-generated RPATH lists the SDK first and beats `LD_LIBRARY_PATH`, so the Web
+  processes loaded the mbedTLS curl, which has no FILE protocol, and every `file:` load hung (the 2.54.0
+  build fails identically against the same SDK). The replay therefore ran with those shared files removed
+  from the in-tree SDK, the pre-`18eeb3a` state; they were restored afterwards. The in-tree driver gate is
+  **not green against an unmodified current in-tree SDK** until the driver controls the curl search order
+  (the isolated SDK packaging puts the private closure first and is unaffected). Linking the port with a
+  later `--enable-new-dtags` was tried and made the wrapper link differently, so it was not adopted.
+- `crtweb_lifecycle_test` counted six extra descriptors between iterations 10 and 20 on this host (cgroup
+  `memory.*`, `/proc/meminfo`, `/proc/zoneinfo`, opened lazily by WTF's memory-pressure monitor and then
+  flat through iteration 100; 2.54.0 does the same). Its warm-up is now 20 iterations; the leak bound is
+  unchanged.
+
+#### Inherited runtime notices (2026-10-20)
+
+Every SDK stage redistributes libc/libm/libdl, the shell and (from `02-cxx`) the imported LLVM C++ runtime,
+but only the ports had notices and SBOM entries. `third_party/crt-runtime/components.json` now declares
+`crt-libc`, `mksh`, `toybox`, `onetrue-awk` (first stage `01-c`) and `llvm-runtimes` (`02-cxx`);
+`tools/crt_runtime_notices.py` installs each component's notices under `share/licenses/<name>/`, writes
+`share/crt/dependencies/<name>/provenance.json` and adds a `crt-runtime` entry to the manifest, and
+`create_dist.py`/`verify_dist.py` apply and require it for every stage. The `06-web` SBOM lists them as
+inherited packages and carries a declared license only where the whole component has one verified text
+(`Apache-2.0 WITH LLVM-exception` for the LLVM runtimes, whose license texts are vendored byte for byte from
+the pinned revision; `0BSD` for toybox); `crt-libc`, `mksh` and onetrue-awk stay `NOASSERTION`.
+
+`crt-libc/NOTICE` is generated from the in-file headers: 36 distinct license texts cover 139 files; the
+other 290 files in the scanned trees have no header and are project-owned under `LICENSE.md`. Cross-checking
+against `third_party/bionic/import_manifest.json` leaves five items that need a human decision and are
+recorded in the component provenance: four imports that carry no in-file header (`gdtoa_fltrnds.h`,
+`s_signgam.c`, `s_llrint.c`, `s_llrintf.c` -- in upstream these are include fragments or one-line
+specializations, not checked against upstream here) and `gdtoa_support.c`, which the manifest calls
+project-owned but which carries an Android Apache-2.0 header. The `libclang_rt.builtins` archive is the
+build toolchain's; its exact version is not pinned by the SDK.
+
+This is an engineering inventory, not a legal review, and it was exercised only on Linux/x86_64: the
+Windows and macOS SDKs run the same packaging code but were not rebuilt, and the aarch64 SDK was not
+regenerated with it. Source-offer text for the LGPL parts of the Web stage and a legal sign-off remain the
+publication gate.
 
 ## Host order
 

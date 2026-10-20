@@ -7,7 +7,7 @@ deliberately differs from upstream and why. Acceptance and tranche order are in
 provenance are in
 [`libcrtweb/third_party/webkit/README.md`](../../libcrtweb/third_party/webkit/README.md).
 
-The reference is **WPE WebKit 2.54.0**. What is below comes from its release
+The reference is **WPE WebKit 2.54.1**. What is below comes from its release
 notes and announcement plus an inventory of the verified archive (file names and
 license files), the Tranche 1 JavaScriptCore builds, and the Tranche 2 native build
 and source reading across WebCore, WebKit, WPEPlatform and the GLib process launcher. A row marked
@@ -22,7 +22,7 @@ named, not a commitment.
 | Platform windowing / input | WPEPlatform views and events | `crtui` external surface plus CRT input | The WebView is a `crtui` external-surface producer (accepted in `05-ui`) |
 | Graphics output | Skia compositor in the web process (deferred display lists, damage-aware); Cairo removed; threaded tile painting mandatory. The built-in headless platform exposes SHM/DMA-BUF buffer types, and the accepted visible snapshot is a BGRA8888 `WebKitImage` | `crtgfx` external surface: shared memory first, then a GPU buffer | Upstream 2.54 notes DMA-BUF buffers selected by `WPE_BUFFER_FORMAT`. Sharing one Skia context with CRT is not an initial goal. **Confirmed:** the archive bundles its own Skia, milestone **154**, and ANGLE under `Source/ThirdParty`; CRT's Skia is m148. They stay separate copies (the web process owns WebKit's); *verify* in Tranche 3/9 that no symbol of either leaks into the other's process |
 | Process launch | `WPEProcessManager`/`WPEProcessLaunchOptions` exist but are compiled **only for Android** (`Source/WebKit/WPEPlatform/CMakeLists.txt`: `if (ANDROID)`); on Linux/WPE WebKit's own `ProcessLauncher`/`AuxiliaryProcess` uses Unix IPC | `ProcessLauncherCRT.cpp` on CRT PAL process, pipe and shared-memory primitives | The same launcher is used on Linux, Windows and macOS. It registers unique launch tokens until `waitpid` reaps each child. Runtime teardown tracks the whole pool and late session-cleanup launches while excluding sibling/shared launches; rules and evidence are owned by the [API policy](../design/libcrtweb_api_policy.md) and [Tranche 5 acceptance](../acceptance/crtweb_acceptance.md). |
-| IPC | WebKit's own IPC between UI, web, network and GPU processes. The pinned 2.54.0 tarball has `Platform/IPC/{unix,glib,darwin,android}` backends only, and **no Windows backend and no `PlatformWin.cmake`** | Reuse WebKit's Unix IPC message/connection implementation over CRT PAL sockets and descriptor transport where that contract is available; add a CRT transport only where a host replay proves it necessary | **B4 result:** Linux/x86_64 reuses `Platform/IPC/unix` unchanged over CRT `socketpair()`/descriptor semantics and passes process IPC. Windows/macOS transport is deliberately undecided until Tranches 6/7 exercise B4; it is not yet valid to claim a separate `Platform/IPC/crt` backend. |
+| IPC | WebKit's own IPC between UI, web, network and GPU processes. The pinned 2.54.1 tarball has `Platform/IPC/{unix,glib,darwin,android}` backends only, and **no Windows backend and no `PlatformWin.cmake`** | Reuse WebKit's Unix IPC message/connection implementation over CRT PAL sockets and descriptor transport where that contract is available; add a CRT transport only where a host replay proves it necessary | **B4 result:** Linux/x86_64 reuses `Platform/IPC/unix` unchanged over CRT `socketpair()`/descriptor semantics and passes process IPC. Windows/macOS transport is deliberately undecided until Tranches 6/7 exercise B4; it is not yet valid to claim a separate `Platform/IPC/crt` backend. |
 | Build | CMake with Ninja only (the Makefile generator is unsupported). The native WPE baseline additionally confirmed GLib/GioUnix, libsoup 3, ICU, fontconfig/FreeType, HarfBuzz, GStreamer, image codecs, EGL/epoxy and libdrm as reference dependencies | CRT sysroot toolchain driven by Ninja | Matches the CRT default generator. Release process binaries use compiled-in install paths, so the reference tool uses a private CMake install prefix rather than relying on `WEBKIT_EXEC_PATH` |
 | Network | libsoup (WPE reference); Curl/OpenSSL (PlayStation-shaped product) | WebKit Curl semantics over CRT-owned curl/OpenSSL and PAL sockets, with CRT explicit trust policy | Product never links libsoup/GLib. Tranche 8A adopts the CRT trust contract; evidence and remaining gates are in the acceptance document. |
 | Media | GStreamer (WPE reference) | `crtmedia` behind a CRT-owned WebCore playback engine and video-capture source | CPU playback uses the installed extractor/codec/frame/audio-sink APIs; camera capture uses application-owned permission decisions. No GStreamer or host-built ALSA/Pulse client library is linked; OS audio APIs stay private to the media PAL. Acceptance and output/device limits belong to the separate 8B/8C gates. |
@@ -52,7 +52,7 @@ the tranche that touches it reads the source. Not yet decided means blank.
 
 | Source | Role |
 | --- | --- |
-| WPE WebKit 2.54.0 release tarball (`recipe.json`) | *Reference*: the WPE baseline, JSCOnly bring-up, the Linux 3A prototype. Has no Windows port |
+| WPE WebKit 2.54.1 release tarball (`recipe.json`) | *Reference*: the WPE baseline, JSCOnly bring-up, the Linux 3A prototype. Has no Windows port |
 | Full WebKit commit `73f39d84...` (the signed tag's target; pinned 2026-10-10 as `product_source`: commit, tree id and listing digest, `tools/fetch_webkit_commit.py`; licensing: `license-scan.json`, `tools/check_webkit_patch_manifest.py`) | *PlatformCRT product source*: the Mac and Win ports as references, and the tree `PlatformCRT` lives in |
 
 ## Rules
@@ -72,7 +72,7 @@ the tranche that touches it reads the source. Not yet decided means blank.
 
 `libcrtweb/patches/manifest.json` is authoritative for target selection, exact source hashes,
 reasons and removal conditions. The current patches describe target ABI/object-format traits
-that WebKit 2.54.0 selects through `OS()` rather than CRT/PAL deficiencies:
+that WebKit 2.54.1 selects through `OS()` rather than CRT/PAL deficiencies:
 
 - `0001` keeps Darwin's real `int64_t` identity while the macOS target uses the Linux-shaped
   source persona.

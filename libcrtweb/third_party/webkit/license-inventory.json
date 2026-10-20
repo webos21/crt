@@ -1,14 +1,14 @@
 {
-  "recipe_version": "2.54.0",
-  "archive": "wpewebkit-2.54.0.tar.xz",
-  "archive_sha256": "efa9bcc3cb891c2d88f50eec710d9ccee71cbdf1040420361eb98c17355eb452",
-  "root": "wpewebkit-2.54.0",
-  "members": 38843,
+  "recipe_version": "2.54.1",
+  "archive": "wpewebkit-2.54.1.tar.xz",
+  "archive_sha256": "0de8bdfba011f9cd63ba9a9171fa6038dd2c08237894f4082abbb821f29d3fe9",
+  "root": "wpewebkit-2.54.1",
+  "members": 38845,
   "top_level_member_counts": {
     "CMakeLists.txt": 1,
     "Documentation": 4294,
     "NEWS": 1,
-    "Source": 33745,
+    "Source": 33747,
     "Tools": 802
   },
   "bundled_third_party_member_counts": {

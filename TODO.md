@@ -170,10 +170,12 @@ uses the host replay order stated below and in the acceptance document.
     native aarch64 execution of the 06-web gates is still unverified, [evidence](docs/acceptance/crtweb_acceptance.md#linux-aarch64-cross-build-replay-2026-10-20)).
   * [x] Native Windows replay of the 75-function `libcrtmedia.dll` export boundary;
     DLL-import consumer/API resolution and ownership callback evidence stay in Web acceptance.
-  * [ ] Finish inherited-runtime notice/source/SBOM review before publication;
-    the Web candidate carries its provenance, notices, SPDX and advisory snapshot.
-  * [ ] Update the stable-series WebKit pin to the newest micro release and confirm
-    upstream support before public release; evidence/decisions stay in Web acceptance.
+  * [ ] Inherited-runtime notices/SBOM: engineering inventory done on Linux/x86_64 (`crt-runtime` components in
+    every stage, [evidence](docs/acceptance/crtweb_acceptance.md#inherited-runtime-notices-2026-10-20)); still
+    open: five header items needing a decision, Windows/macOS/aarch64 SDK regeneration, LGPL source offer, legal sign-off.
+  * [x] Stable-series pin moved to WebKit 2.54.1 (newest micro; Linux/x86_64 gates green, [evidence](docs/acceptance/crtweb_acceptance.md#webkit-2541-re-pin-and-linuxx86_64-replay-2026-10-20));
+    open: macOS/Windows replay of 2.54.1, upstream support-window confirmation, and the in-tree driver
+    gate vs the SDK's shared `libcurl.so.4` (RPATH order).
 
 `tools/check_webkit_security.py` is the development-package advisory snapshot;
 public-release conditions remain under Tranche 10 above.
