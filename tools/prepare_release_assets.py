@@ -49,9 +49,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import crt_source_offer  # noqa: E402  (LGPL corresponding-source bundle)
 
-#: Stages published in a developer preview.  ``05-ui`` (contract and headless
-#: model only so far) and ``06-web`` are deliberately not offered yet.
-RELEASE_STAGES = ("01-c", "02-cxx", "03-gfx-simple", "04-gfx-media")
+#: Stages a release can carry.  ``05-ui`` and ``06-web`` are offered with their own
+#: release-grade checks below; ``06-web`` additionally follows the owner's decision recorded in
+#: ``third_party/crt-runtime/release.json`` (``tools/crt_web_release.py``): a final tag needs a
+#: public decision, a prerelease tag may carry the stage as a flagged development candidate.
+RELEASE_STAGES = ("01-c", "02-cxx", "03-gfx-simple", "04-gfx-media", "05-ui", "06-web")
 
 #: Dependencies a genuine option-ON 04-gfx-media must redistribute.
 OPTION_ON_DEPENDENCIES = ("freetype", "ffmpeg", "skia")
@@ -67,6 +69,14 @@ OPTION_ON_FILES = (
     "lib/libavutil.a",
     "include/crtgfx/skia.h",
 )
+
+#: Dependencies and files a genuine option-ON 05-ui must carry (LVGL ON: the default-OFF
+#: cumulative publisher has neither the dependency nor the ui-basic example).
+UI_DEPENDENCIES = ("lvgl", "freetype", "ffmpeg", "skia")
+UI_FILES = ("lib/libcrtui.a", "include/crtui/api.h", "examples/ui-basic/main.c")
+
+#: Files a 06-web SDK must carry for the release gates (verify_dist.py checks the rest).
+WEB_RUNTIME_KEYS = ("sbom", "security", "source_correspondence", "source_offer", "release_decision")
 
 VERSION_PATTERN = re.compile(r"^v\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.]*)?$")
 
@@ -110,7 +120,7 @@ def find_archive(dist_root: Path, version: str, stage: str) -> Path:
     return matches[0]
 
 
-def release_grade_problems(stage: str, manifest: dict, dist: Path) -> list[str]:
+def release_grade_problems(stage: str, manifest: dict, dist: Path, version: str = "") -> list[str]:
     """Return every reason ``dist`` must not be published as ``stage``."""
     problems: list[str] = []
     if manifest.get("stage") != stage:
@@ -137,6 +147,39 @@ def release_grade_problems(stage: str, manifest: dict, dist: Path) -> list[str]:
         for relative in OPTION_ON_FILES:
             if not (dist / relative).exists():
                 problems.append(f"04-gfx-media is missing {relative}")
+    if stage == "05-ui":
+        declared = {item.get("name") for item in manifest.get("redistributed_dependencies", [])}
+        for name in UI_DEPENDENCIES:
+            if name not in declared:
+                problems.append(f"05-ui does not declare its {name} dependency "
+                                "(build with LVGL ON: -DCRTUI_ENABLE_LVGL=ON)")
+        for relative in UI_FILES:
+            if not (dist / relative).exists():
+                problems.append(f"05-ui is missing {relative}")
+    if stage == "06-web":
+        problems += web_problems(manifest, dist, version)
+    return problems
+
+
+def web_problems(manifest: dict, dist: Path, version: str) -> list[str]:
+    """Release-grade checks of a 06-web SDK beyond verify_dist.py (which validates its internals)."""
+    problems: list[str] = []
+    built_from = manifest.get("built_from") or {}
+    if built_from.get("stage") != "05-ui":
+        problems.append("06-web was not produced by the isolated 05-ui -> 06-web stage build")
+    elif built_from.get("predecessor_version") != version:
+        problems.append(f"06-web was built from a {built_from.get('predecessor_version')!r} 05-ui, "
+                        f"not the release {version!r}")
+    runtime = manifest.get("web_runtime") or {}
+    for key in WEB_RUNTIME_KEYS:
+        if key not in runtime:
+            problems.append(f"web_runtime.{key} is missing")
+    decision = runtime.get("release_decision") or {}
+    if runtime.get("development_candidate") is not False and "-" not in version:
+        problems.append(
+            f"06-web is only a development candidate ({'; '.join(decision.get('reasons', ['no recorded reason']))}) "
+            f"and {version} is a final tag: use a prerelease tag (e.g. {version}-preview.1), or record the "
+            "owner's approval in third_party/crt-runtime/release.json (web_public_release)")
     return problems
 
 
@@ -209,7 +252,7 @@ def check_sdk(sdk: Path, stage: str, version: str,
     if not manifest_path.is_file():
         raise ReleaseError(f"{stage}: {sdk} has no manifest.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    problems = release_grade_problems(stage, manifest, sdk)
+    problems = release_grade_problems(stage, manifest, sdk, version)
     recorded = (sdk / "VERSION").read_text(encoding="utf-8").strip() \
         if (sdk / "VERSION").is_file() else ""
     if recorded != version:
@@ -251,6 +294,7 @@ def prepare(dist_root: Path, version: str, output_dir: Path,
     assets: dict[str, dict] = {}
     hosts: set[tuple[str, str]] = set()
     stage_sources: dict[str, Path] = {}
+    web_release: dict | None = None
     with tempfile.TemporaryDirectory(prefix="crt release ") as scratch:
         for stage in stages:
             if stage in sdk_dirs:
@@ -271,6 +315,14 @@ def prepare(dist_root: Path, version: str, output_dir: Path,
                     raise ReleaseError(f"{archive.name} does not extract to '{stage}/'")
             manifest, sources = check_sdk(sdk, stage, version, stage_source_dir)
             target_os, arch = manifest["target"]["os"], manifest["target"]["arch"]
+            if stage == "06-web":
+                runtime = manifest.get("web_runtime") or {}
+                decision = runtime.get("release_decision") or {}
+                web_release = {"development_candidate": runtime.get("development_candidate") is not False,
+                               "reasons": decision.get("reasons", []), "approval": decision.get("approval")}
+                if web_release["development_candidate"]:
+                    print(f"[release] 06-web is a DEVELOPMENT CANDIDATE ({'; '.join(web_release['reasons'])}): "
+                          "publish this release as a GitHub pre-release and say so in the notes", flush=True)
             hosts.add((target_os, arch))
             for asset in sources:
                 stage_sources[asset.name] = asset
@@ -309,6 +361,8 @@ def prepare(dist_root: Path, version: str, output_dir: Path,
         "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "assets": sorted(assets.values(), key=lambda entry: entry["name"]),
     }
+    if web_release is not None:
+        release["web_release"] = web_release
     if not dry_run:
         host_os, host_arch = next(iter(hosts))
         release["host"] = {"os": host_os, "arch": host_arch}

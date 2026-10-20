@@ -26,6 +26,18 @@ Planned entry without changing the active Web work, STATUS or the root README.
 This completes design consolidation only, not CLI/Studio implementation,
 repository creation or release acceptance.
 
+### Tranche 10: the release tool exports 05-ui and 06-web
+
+- `tools/prepare_release_assets.py` now covers all six stages. `05-ui` is checked for the option-ON build (lvgl/freetype/
+  ffmpeg/skia dependencies, `libcrtui.a`, `ui-basic`); `06-web` must come from the same-version `05-ui` and carry SBOM,
+  security snapshot, source correspondence, source offer and the recorded release decision. The corresponding-source bundle is
+  built whenever a `04`/`05`/`06` stage is exported.
+- The Web public-release decision is owner-controlled (`web_public_release` in `third_party/crt-runtime/release.json`,
+  `tools/crt_web_release.py`): `build_stage_06_web.py` records it, `verify_dist.py` checks it is coherent, and the release tool
+  refuses a development candidate for a final tag while allowing it (flagged in the manifest) for a pre-release tag.
+- Tests: `test_crt_web_release.py` (7), new cases in `test_prepare_release_assets.py` (30 total) and `test_stage_06_web.py`.
+  Guide: [`release_preview.md`](docs/guides/release_preview.md#05-ui-and-06-web).
+
 ### Tranche 10: the LGPL source offer is generated, and the release carries the corresponding source
 
 After the owner's choices (the project's issue tracker as contact, a fixed 3-year period, upstream archives not bundled)
@@ -80,6 +92,13 @@ the work root hidden, SPDX with the runtime components, security snapshot agains
 engine, port or PAL needed a change. Still open for the Tranche: Windows replay of 2.54.1, aarch64 and Windows SDK
 regeneration with the notices, the five header decisions, the LGPL source offer, legal sign-off and the 2.54
 support-window confirmation. Evidence: `docs/acceptance/crtweb_acceptance.md` (WebKit 2.54.1 replay on macOS/arm64).
+
+### Tranche 10: driver gate vs the SDK's shared libcurl
+
+The in-tree SDK's shared mbedTLS `libcurl.so.4` (no FILE protocol) shadowed the Web port's OpenSSL curl through the
+wrapper-generated RPATH, which hung every `file:` load. `crt-cc`/`crt-c++` now honour `CRT_LINK_RPATH_FIRST`, the
+driver sets it on Linux, and the eleven-entry gate passes against the unmodified SDK (`tools/test_link_rpath_first.py`).
+Linux/x86_64 only.
 
 ### Tranche 10: WebKit 2.54.1 re-pin and inherited-runtime notices
 

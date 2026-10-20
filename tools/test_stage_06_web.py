@@ -706,9 +706,12 @@ class PackagingTests(unittest.TestCase):
             now = datetime.now(timezone.utc)
             manifest = {"target": {"os": "linux"}, "created_utc": now.isoformat(),
                         "built_from": {"stage": "05-ui", "predecessor_content_sha256": "a" * 64},
-                        "web_runtime": {"development_candidate": True}}
+                        "web_runtime": {"development_candidate": True, "release_decision": {
+                            "public_release_allowed": False, "development_candidate": True,
+                            "reasons": ["the owner has not approved a public Web release"], "approval": None}}}
             stage.write_json(root / "share/crt/web-source-correspondence.json",
-                             {"predecessor": {"stage": "05-ui", "content_sha256": "a" * 64}})
+                             {"predecessor": {"stage": "05-ui", "content_sha256": "a" * 64},
+                              "public_release_allowed": False})
             redistributed = {"webkit": {"provenance": "recipe.json", "notices": ["notice"]}}
             stage.write_json(root / "recipe.json", {"version": "2.54.0"})
             stage.write_json(root / "share/crt/web-sbom.spdx.json", {"spdxVersion": "SPDX-2.3", "packages": [{}]})
@@ -753,7 +756,8 @@ class PackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "different predecessor"):
                 validate_web_stage(root, manifest, redistributed, "")
             stage.write_json(root / "share/crt/web-source-correspondence.json",
-                             {"predecessor": {"content_sha256": "a" * 64}})
+                             {"predecessor": {"content_sha256": "a" * 64},
+                              "public_release_allowed": False})
             for key, value in (("passed", False), ("version", "2.54.1"), ("advisories", []),
                                ("public_release_allowed", True),
                                ("checked_utc", (now - timedelta(days=8)).isoformat()),

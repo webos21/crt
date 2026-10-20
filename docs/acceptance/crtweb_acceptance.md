@@ -4983,11 +4983,15 @@ camera capture and network trust. Findings on the way, none caused by 2.54.1:
 - The in-tree SDK `dist/05-ui` now ships a shared mbedTLS `libcurl.so.4` and `libz.so.1` (since
   `18eeb3a`). The wrapper-generated RPATH lists the SDK first and beats `LD_LIBRARY_PATH`, so the Web
   processes loaded the mbedTLS curl, which has no FILE protocol, and every `file:` load hung (the 2.54.0
-  build fails identically against the same SDK). The replay therefore ran with those shared files removed
-  from the in-tree SDK, the pre-`18eeb3a` state; they were restored afterwards. The in-tree driver gate is
-  **not green against an unmodified current in-tree SDK** until the driver controls the curl search order
-  (the isolated SDK packaging puts the private closure first and is unaffected). Linking the port with a
-  later `--enable-new-dtags` was tried and made the wrapper link differently, so it was not adopted.
+  build fails identically against the same SDK). The first replay therefore ran with those shared files
+  removed from the in-tree SDK, the pre-`18eeb3a` state. **Resolved the same day:** `tools/crt-cc` and
+  `tools/crt-c++` accept `CRT_LINK_RPATH_FIRST` (colon-separated directories placed before the sysroot in the
+  RPATH of every link, not of compile-only runs), and the driver sets it to the port's `build/lib` and
+  `curl-openssl/lib` on Linux. Re-linked against the **unmodified** in-tree SDK (shared `libcurl.so.4` and
+  `libz.so.1` present), all eleven gate entries pass again, and the Web executables and libraries list the
+  port's directories first. Appending `--enable-new-dtags` last was tried first and made the wrapper link
+  differently, so it was dropped. `tools/test_link_rpath_first.py` covers the hook. macOS and Windows keep the
+  isolated-SDK layout (private closure first) and do not use the hook.
 - `crtweb_lifecycle_test` counted six extra descriptors between iterations 10 and 20 on this host (cgroup
   `memory.*`, `/proc/meminfo`, `/proc/zoneinfo`, opened lazily by WTF's memory-pressure monitor and then
   flat through iteration 100; 2.54.0 does the same). Its warm-up is now 20 iterations; the leak bound is

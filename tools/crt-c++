@@ -509,6 +509,13 @@ esac
 # live below a space-containing SDK prefix; neither may be folded into an
 # unquoted shell flag accumulator.
 run_cxx() {
+  # CRT_LINK_RPATH_FIRST (colon-separated directories): searched before the sysroot's own lib
+  # directory at run time. An RPATH beats LD_LIBRARY_PATH and the sysroot entry below would
+  # otherwise always come first, so a consumer that must prefer a same-named library of its own
+  # (the Web port's OpenSSL libcurl.so.4 over the SDK's mbedTLS one) states it here.
+  if [ -n "${CRT_LINK_RPATH_FIRST:-}" ] && [ "$compile_only" -eq 0 ]; then
+    set -- "-Wl,-rpath,${CRT_LINK_RPATH_FIRST}" "$@"
+  fi
   if [ -n "${CRT_PORT_LIBRARY_DIR:-}" ]; then
     set -- "-L${CRT_PORT_LIBRARY_DIR}" "$@"
   fi

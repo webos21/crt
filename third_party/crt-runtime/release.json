@@ -1,7 +1,14 @@
 {
   "schema_version": 1,
-  "purpose": "Release-time values that the generated LGPL source offer (share/licenses/SOURCE-OFFER.md) needs and that cannot be derived from a build: where a recipient asks, and for how long. Everything else (tag, commit, upstream archives and hashes, patches) is derived at build or release time by tools/crt_source_offer.py.",
+  "purpose": "Release-time values that the generated LGPL source offer (share/licenses/SOURCE-OFFER.md) needs and that cannot be derived from a build: where a recipient asks, and for how long. Also the owner's decision whether the Web stage (06-web) may be published as a final release (web_public_release; default: not approved). Everything else (tag, commit, upstream archives and hashes, patches) is derived at build or release time by tools/crt_source_offer.py.",
   "repository_url": "https://github.com/webos21/crt",
   "issue_tracker_url": "https://github.com/webos21/crt/issues",
-  "offer_years": 3
+  "offer_years": 3,
+  "web_public_release": {
+    "approved": false,
+    "approved_by": null,
+    "approved_utc": null,
+    "accepted_blockers": [],
+    "note": "approved=true needs approved_by and approved_utc. accepted_blockers lists, verbatim, the release_blockers of the WebKit advisory snapshot (share/crt/web-security.json) the owner accepts; a blocker not listed keeps the stage a development candidate. A prerelease tag (v1.0.0-preview.1) may carry a development candidate; a final tag may not."
+  }
 }

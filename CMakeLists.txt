@@ -235,6 +235,12 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME crt_webkit_host_generators_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_webkit_host_generators.py"
   )
+  add_test(NAME crt_link_rpath_first_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_link_rpath_first.py"
+  )
+  add_test(NAME crt_runtime_notices_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crt_runtime_notices.py"
+  )
   add_test(NAME crtgfx_gpu_backend_boundary_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crtgfx_gpu_backend_boundary.py"
   )
@@ -244,6 +250,8 @@ if(Python3_Interpreter_FOUND)
     crt_libcxx_predecessor_unit_runs
     crt_libcxx_fetch_unit_runs
     crt_binary_dependencies_unit_runs
+    crt_link_rpath_first_unit_runs
+    crt_runtime_notices_unit_runs
     crtweb_stage_distribution_unit_runs
     crt_webkit_host_generators_unit_runs
     crtgfx_gpu_backend_boundary_unit_runs
