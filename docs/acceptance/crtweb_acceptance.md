@@ -73,8 +73,10 @@ six sampled source files are byte-identical to that commit; and the 64 license a
 notice files of the archive are inventoried in `libcrtweb/third_party/webkit/license-inventory.json`
 (`tools/scan_webkit_licenses.py`). The upstream mapping is in `crtweb_porting.md`
 and the security policy below was confirmed by the owner. Still unverified, and
-carried as explicit items in the recipe: per-file license headers, tarball-equals-
-commit beyond the sampled files, and upstream's security support window.
+carried as explicit items in the recipe: per-file license headers and tarball-equals-
+commit beyond the sampled files. Upstream's security support window was looked up
+2026-10-20 and the CRT support policy was adopted 2026-10-21
+([policy](../design/libcrtweb_api_policy.md#webkit-support-policy-tranche-10)).
 
 **Frozen scope and version.** Reference: WPE WebKit **2.54.0** (2026-09-16), the
 current stable series. CRT targets the stable WPEPlatform API and does not use the
@@ -108,9 +110,11 @@ that is confirmed or changed with the packaging decisions in Tranche 10.
    `06-web` SDK and declared in its manifest, like the other redistributed
    dependencies; the SBOM format is chosen at Tranche 10.
 5. When the pinned series stops receiving upstream fixes, moving to the next
-   stable series is a planned tranche item, not a silent bump. The length of
-   upstream's support window is not documented on the pages consulted and must
-   be confirmed before the first public `06-web` release.
+   stable series is a planned tranche item, not a silent bump. Upstream publishes
+   no support duration; the adopted CRT policy (a public release may ship a
+   superseded series for at most 60 days, a re-pin starts within 30 days) is in
+   [libcrtweb API policy](../design/libcrtweb_api_policy.md#webkit-support-policy-tranche-10)
+   and is checked by `tools/check_webkit_security.py`.
 
 ### 1. JavaScriptCore / JSCOnly bring-up
 
@@ -5158,10 +5162,11 @@ stable, expected to stop receiving fixes around the 2.56.0 release (an inference
 upstream commitment), with the last 2.54 micro possibly weeks earlier. A release of an SDK built on 2.54.1 made after 2.56.0
 ships would carry an unsupported WebKit.
 
-**What CRT must decide (owner policy, not a fact to look up).** Whether and how fast CRT follows the cadence, for example a
-maximum age of the pinned series at release time, or a re-pin to the next stable within N days of its first release (the
-re-pin tranche item already exists in the Web policy). `tools/check_webkit_security.py` keeps the blocker until that policy is
-chosen; no code or blocker was changed here. Also still true: the information is a snapshot of public pages, not a
+**What CRT had to decide (owner policy, not a fact to look up).** Whether and how fast CRT follows the cadence. Decided
+2026-10-21: a public release may ship a superseded series for at most 60 days and a re-pin starts within 30 days
+([policy](../design/libcrtweb_api_policy.md#webkit-support-policy-tranche-10)); `tools/check_webkit_security.py` now computes
+the superseded age and the fixed blocker "upstream support window unconfirmed" is gone (it was in force when this section
+was written). Also still true: the information is a snapshot of public pages, not a
 statement from the maintainers; asking them (webkit-gtk/webkit-wpe lists) would turn the pattern into a commitment.
 
 #### Inherited runtime notices (2026-10-20)
