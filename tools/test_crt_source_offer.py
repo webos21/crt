@@ -18,6 +18,31 @@ import crt_source_offer as offer
 ROOT = offer.ROOT
 
 
+class StageOfferTests(unittest.TestCase):
+    """The isolated 04-gfx-media and 05-ui stages install their own offer; verify_dist.py rejects an SDK without it."""
+
+    def staged_sdk(self, directory: Path) -> Path:
+        recipe = directory / "share/crt/dependencies/ffmpeg/recipe.json"
+        recipe.parent.mkdir(parents=True)
+        recipe.write_text((ROOT / "porting/recipes/ffmpeg.json").read_text(encoding="utf-8"), encoding="utf-8")
+        (directory / "VERSION").write_text("v9.9.9-test\n", encoding="utf-8")
+        return directory
+
+    def test_each_stage_gets_an_offer_naming_itself(self) -> None:
+        for stage in ("04-gfx-media", "05-ui"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as raw:
+                sdk = self.staged_sdk(Path(raw))
+                dependencies = [{"name": "ffmpeg", "notices": []}, {"name": "zlib", "notices": []}]
+                path = offer.install_for_stage(ROOT, sdk, stage, dependencies)
+                self.assertEqual(path, "share/licenses/SOURCE-OFFER.md")
+                self.assertEqual(dependencies[0]["notices"], [path])
+                self.assertEqual(dependencies[1]["notices"], [])
+                self.assertEqual(offer.check_installed_offer(sdk, stage, "v9.9.9-test", offer.components_from_sdk(sdk, stage)), [])
+                # An offer inherited from another stage must not satisfy this one.
+                other = "06-web" if stage == "05-ui" else "05-ui"
+                self.assertTrue(offer.check_installed_offer(sdk, other, "v9.9.9-test", offer.components_from_sdk(sdk, stage)))
+
+
 class ConfigTests(unittest.TestCase):
     def test_real_config_is_valid(self) -> None:
         config = offer.load_config(ROOT)

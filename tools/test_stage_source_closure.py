@@ -134,6 +134,30 @@ class StageSourceClosure(unittest.TestCase):
                         "its bundled sources include; add them to "
                         "tools/create_stage_source.py")
 
+    def test_every_stage_bundles_the_python_modules_verify_dist_imports(self):
+        # An isolated stage runs its own verify_dist.py at the very end, after hours of building. When
+        # verify_dist.py (or a tool it imports) gained `import crt_web_release` and the asset did not
+        # carry it, the stage failed there with ModuleNotFoundError on every host.
+        tools = ROOT / "tools"
+        # Module-level imports only: function-level ones (06-web-only paths) are loaded lazily.
+        import_line = re.compile(r"^(?:import|from)\s+([A-Za-z_][\w]*)", re.M)
+        closure, pending = set(), ["verify_dist"]
+        while pending:
+            name = pending.pop()
+            if name in closure or not (tools / (name + ".py")).is_file():
+                continue
+            closure.add(name)
+            pending.extend(import_line.findall((tools / (name + ".py")).read_text(encoding="utf-8")))
+        self.assertIn("crt_web_release", closure)
+        for stage in sorted(stage_source.STAGES):
+            spec = stage_source.STAGES[stage]
+            for target_os in ("windows", "linux", "macos"):
+                bundled = {relative(path) for path in expand(
+                    stage_source.required_project_paths(spec, target_os)) if path.suffix == ".py"}
+                missing = sorted(name for name in closure if "tools/" + name + ".py" not in bundled)
+                with self.subTest(stage=stage, os=target_os):
+                    self.assertEqual(missing, [], f"{stage} ({target_os}) asset lacks tool modules verify_dist.py imports")
+
     def test_predecessor_sdk_headers_are_really_installed_by_the_predecessor_stage(self):
         # 05-ui relies on the 04-gfx-media SDK for crtgfx/crtmedia headers. If that
         # stage ever stopped installing them, the isolated 05-ui build would only

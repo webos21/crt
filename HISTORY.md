@@ -21,6 +21,20 @@ The stage itself kept failing because Intel's iHD VA-API driver died in `vaDestr
 test 7/40 failures, packaged zero-copy demo hang); VA-API decode now uses one thread (0/160 failures after).
 `crtmedia_playback_pipeline_test` fails here regardless (likely no sound card), not investigated. Linux/x86_64 only.
 
+### Tranche 10 on Linux/aarch64: relink kit and isolated 04/05 stages
+
+The isolated `03-gfx-simple -> 04-gfx-media -> 05-ui` stage builds ran natively on the aarch64 guest (04: 14 min; 05: 27 s) and the relink kit was
+exercised for the first time on Linux: `share/crt/relink/libcrtmedia` is written and passes `check_kit`; `relink.py` links a `libcrtmedia.so` with the
+same 2,019 exports as the SDK's and no undefined `__aarch64_*` helper, with and without `--ffmpeg-libdir` (a freshly built FFmpeg). The run found
+four defects that were shared by every host and invisible until a stage was built end to end: the stage-source asset did not carry
+`tools/crt_web_release.py`, so the last `verify_dist.py` of any isolated stage failed with `ModuleNotFoundError` (asset list fixed; new closure test
+over `verify_dist.py`'s module-level imports); isolated 04 and 05 never installed `SOURCE-OFFER.md`, which `verify_dist.py` requires of every stage that
+ships FFmpeg and which names its stage (`crt_source_offer.install_stage_offer`, used by both entrypoints; tested); `relink.py` resolved a relative
+`--out` against the kit directory (paths are now made absolute first); and `test_crt_relink_kit`'s Windows parse test failed on POSIX hosts
+(separators folded). The macOS/arm64 run found the same stage defects the same day (`04c9b83`); the merge kept that implementation (`install_for_stage`) and added the offer test and the `verify_dist.py` module-closure test. Local-only deviation, not in the repository: this guest has no VAAPI driver, so the stage's zero-copy media bridge smoke
+(`interop=zero-copy`) was skipped in the extracted work copy to reach the later steps; it needs a host with a VA driver. The SDK also needed
+`crtgfx-wayland-build` run once for `libxdg-shell-protocol.a` (the in-tree dist without it is native-Wayland-less and cannot seed stage 04).
+
 ### Review SDK/CLI/Studio contracts against all three local repositories
 
 Compared the attached cross-repository review with CRT `a23a173`, CRT-CLI
