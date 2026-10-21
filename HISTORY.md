@@ -11,6 +11,16 @@ substantive update.
 
 ## 2026-10-21
 
+### Tranche 10: Linux/x86_64 libcrtmedia relink kit, and the VA-API decode race behind four failed stage runs
+
+The Linux kit was proven from a real isolated `04-gfx-media` stage: relink from a relocated copy (path with a space, relative
+`--out`) gives the same exports/NEEDED/SONAME and identical code and data sections; a modified `libavutil.a` shows up in the
+relinked library; both relinked libraries load and demux the test clip. The first relink exposed that its RUNPATH kept this
+machine's SDK path and `/lib/x86_64-linux-gnu`, so `relink.py` now strips absolute entries (ELF kits ship `crt_elf.py`).
+The stage itself kept failing because Intel's iHD VA-API driver died in `vaDestroyBuffer` under FFmpeg frame threads (lifecycle
+test 7/40 failures, packaged zero-copy demo hang); VA-API decode now uses one thread (0/160 failures after).
+`crtmedia_playback_pipeline_test` fails here regardless (likely no sound card), not investigated. Linux/x86_64 only.
+
 ### Review SDK/CLI/Studio contracts against all three local repositories
 
 Compared the attached cross-repository review with CRT `a23a173`, CRT-CLI

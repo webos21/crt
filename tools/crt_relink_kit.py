@@ -87,7 +87,17 @@ def main():
         print(subprocess.list2cmdline(command))
         return 0
     args.out.mkdir(parents=True, exist_ok=True)
-    return subprocess.run(command, cwd=KIT).returncode
+    status = subprocess.run(command, cwd=KIT).returncode
+    output = args.out / recipe["output"]
+    if status == 0 and output.is_file() and output.read_bytes()[:4] == b"\x7fELF" and (KIT / "crt_elf.py").is_file():
+        # The SDK's own library had its absolute build-time RPATH/RUNPATH entries removed after linking
+        # (only $ORIGIN stays); do the same, so the relinked library is a drop-in replacement and does not
+        # carry this machine's SDK path or a host library directory.
+        sys.path.insert(0, str(KIT))
+        import crt_elf
+        if crt_elf.remove_absolute_runtime_paths(output, require_origin=True):
+            print("relink: removed absolute runtime-path entries from", output)
+    return status
 
 
 if __name__ == "__main__":
@@ -236,6 +246,9 @@ def build_kit(build: Path, output: str, sdk: Path, name: str, ninja: str = "ninj
     recipe = {"format": 1, "name": name, "output": Path(output).name, "compiler": args[0] if "@SDK@" in args[0] else Path(args[0]).name,
               "ffmpeg_archives": list(FFMPEG_ARCHIVES), "args": args[1:]}
     (kit / "relink.json").write_text(json.dumps(recipe, indent=2) + "\n", encoding="utf-8", newline="\n")
+    if Path(output).suffix == ".so":
+        # ELF: relink.py strips absolute RPATH/RUNPATH entries after linking, as the stage did for the SDK's copy.
+        shutil.copy2(Path(__file__).resolve().parent / "crt_elf.py", kit / "crt_elf.py")
     (kit / "relink.py").write_text(RUNNER.format(name=name, ffmpeg=list(FFMPEG_ARCHIVES)), encoding="utf-8", newline="\n")
     (kit / "README.txt").write_text(README.format(name=name, output=Path(output).name), encoding="utf-8", newline="\n")
     return kit
@@ -245,7 +258,10 @@ def check_kit(sdk: Path, name: str, kit_root: Path | None = None) -> list:
     """Problems with an installed kit (empty list = fine). Used by verify_dist."""
     kit = (kit_root or sdk) / KIT_RELATIVE / name
     problems = []
-    for relative in ("relink.json", "relink.py", "README.txt", "objects/MANIFEST.json"):
+    required = ["relink.json", "relink.py", "README.txt", "objects/MANIFEST.json"]
+    if (kit / "relink.json").is_file() and json.loads((kit / "relink.json").read_text(encoding="utf-8")).get("output", "").endswith(".so"):
+        required.append("crt_elf.py")
+    for relative in required:
         if not (kit / relative).is_file():
             problems.append(f"{(KIT_RELATIVE / name / relative).as_posix()} is missing")
     if problems:

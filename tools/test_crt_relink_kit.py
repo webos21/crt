@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -132,6 +133,34 @@ class Installed(unittest.TestCase):
             self.assertTrue(any("libavutil.a" in problem for problem in kit.check_kit(sdk, "libcrtmedia")))
             (folder / "relink.py").unlink()
             self.assertTrue(any("relink.py" in problem for problem in kit.check_kit(sdk, "libcrtmedia")))
+
+    def test_elf_kit_ships_the_runtime_path_cleaner_and_the_runner_uses_it(self) -> None:
+        from test_crt_elf import write_elf
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            sdk, folder = self.write_kit(root)
+            self.assertTrue((folder / "crt_elf.py").is_file())
+            (folder / "crt_elf.py").unlink()
+            self.assertTrue(any("crt_elf.py" in problem for problem in kit.check_kit(sdk, "libcrtmedia")))
+            shutil.copy2(Path(kit.__file__).resolve().parent / "crt_elf.py", folder / "crt_elf.py")
+            self.assertEqual([], kit.check_kit(sdk, "libcrtmedia"))
+            # A stand-in compiler driver that "links" an ELF whose RUNPATH names this machine's SDK, as the real
+            # link does; the runner must leave only $ORIGIN, like the SDK's own library.
+            fixture = root / "fixture.py"
+            fixture.write_text(
+                "import sys\nsys.path.insert(0, %r)\nfrom test_crt_elf import write_elf\nfrom pathlib import Path\n"
+                "out = sys.argv[sys.argv.index('-o') + 1]\n"
+                "write_elf(Path(out), '$ORIGIN:/home/build/sdk/lib:/$ORIGIN:/lib/x86_64-linux-gnu')\n"
+                % str(Path(__file__).resolve().parent))
+            driver = root / "driver.sh"
+            driver.write_text('#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, fixture))
+            driver.chmod(0o755)
+            done = subprocess.run([sys.executable, str(folder / "relink.py"), "--sdk", str(sdk), "--cc", str(driver),
+                                   "--out", str(root / "out")], capture_output=True, text=True)
+            self.assertEqual(0, done.returncode, done.stderr + done.stdout)
+            self.assertIn("removed absolute runtime-path entries", done.stdout)
+            from crt_elf import runtime_paths
+            self.assertEqual(["$ORIGIN"], [e for value in runtime_paths(root / "out" / "libcrtmedia.so") for e in value.split(":") if e])
 
     def test_verify_dist_requires_the_kit_for_isolated_ffmpeg_stages_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

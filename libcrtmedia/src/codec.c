@@ -338,6 +338,13 @@ crtmedia_result crtmedia_codec_create_decoder(const crtmedia_format* format, crt
           break;
         case AV_HWDEVICE_TYPE_VAAPI:
           codec->hw_pix_fmt = AV_PIX_FMT_VAAPI;
+          /* Hardware decode does the work on the device; software frame threads add nothing and
+           * several frame threads issue VA buffer destroys concurrently. Intel's iHD driver (media
+           * driver 26.1.2 here) then intermittently dies with a glibc "double free detected in
+           * tcache" in vaDestroyBuffer (about one run in seven of crtgfx_skia_media_lifecycle_test,
+           * 2026-10-21). One decode thread; the software fallback below keeps its own threading. */
+          codec->codec_ctx->thread_count = 1;
+          codec->codec_ctx->thread_type = 0;
           break;
         default:
           codec->hw_pix_fmt = AV_PIX_FMT_NONE;

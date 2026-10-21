@@ -5169,6 +5169,28 @@ the superseded age and the fixed blocker "upstream support window unconfirmed" i
 was written). Also still true: the information is a snapshot of public pages, not a
 statement from the maintainers; asking them (webkit-gtk/webkit-wpe lists) would turn the pattern into a commitment.
 
+#### Linux/x86_64 libcrtmedia relink kit and a VA-API decode race (2026-10-21)
+
+The isolated `04-gfx-media` stage was built on Linux/x86_64 for the first time since the kit existed (03 SDK + current source
+asset, `crt-stage-build.py`, about 18 minutes cold, 30 seconds with the cached dependency layers). It writes
+`share/crt/relink/libcrtmedia` and `verify_dist.py` accepts it; the relink evidence is in the
+[LGPL guide](../guides/lgpl_source_offer.md#3-how-a-recipient-replaces-or-relinks-the-lgpl-code). The kit gained
+`crt_elf.py` (ELF kits only) so `relink.py` removes absolute RPATH/RUNPATH entries as the stage does.
+
+The stage failed four times before it passed, and none of it was the kit. Cause: hardware H.264 decode through the host
+Intel VA-API driver (`intel-media-va-driver-non-free` 26.1.2, `iHD_drv_video.so`) intermittently aborted in
+`vaDestroyBuffer` with glibc's "double free detected in tcache", called from FFmpeg's frame-thread workers; the same race
+showed up as a 60-second hang of the packaged `crtgfx_skia_media_window_demo`. `crtgfx_skia_media_lifecycle_test` failed
+7 of 40 runs in the in-tree build and 5 of 40 in the stage tree. `libcrtmedia/src/codec.c` enabled two software frame
+threads for every video decode; for VA-API hardware decode it now uses one decode thread (the software fallback keeps its
+threading). After the change the lifecycle test failed 0 of 100 and 0 of 60 runs and the stage passed, including the
+zero-copy demo (0.5 s). This was measured on one Intel UHD 630 host; the macOS and Windows hardware decoders are not
+changed, and a different VA-API driver was not tried.
+
+Not caused by this and left alone: `crtmedia_playback_pipeline_test` fails 12 of 15 runs here with and without the change
+("the real render loop takes a real, non-negligible amount of wall time", under 200 ms) and passed once under parallel
+load; this host has no sound card, so audio pacing is likely absent. Not investigated.
+
 #### Inherited runtime notices (2026-10-20)
 
 Every SDK stage redistributes libc/libm/libdl, the shell and (from `02-cxx`) the imported LLVM C++ runtime,
