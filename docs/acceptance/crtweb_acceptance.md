@@ -5190,7 +5190,8 @@ changed, and a different VA-API driver was not tried.
 
 Not caused by this and left alone: `crtmedia_playback_pipeline_test` fails 12 of 15 runs here with and without the change
 ("the real render loop takes a real, non-negligible amount of wall time", under 200 ms) and passed once under parallel
-load; this host has no sound card, so audio pacing is likely absent. Not investigated.
+load. Cause not found: the host has ALSA playback devices (HDA Intel PCH) and a PipeWire default sink that is a "Dummy Output", so an
+earlier note that the test needs a sound card does not explain it. Not investigated.
 
 #### Linux/x86_64 isolated 04 -> 05 -> 06 chain on WebKit 2.54.1 (2026-10-21)
 
@@ -5215,6 +5216,24 @@ sections equal both copies in the SDK (`lib/` and the private `libexec/crtweb/li
 how RUNPATH is spelled, `$ORIGIN:$ORIGIN` against `$ORIGIN`) and whose RUNPATH is `$ORIGIN`. Placed over both copies, the installed
 `crtweb_browser --smoke` (load, pixels, script) and the packaged browser observation (113 mapped files, no violations) pass, and
 the maps show the relinked files loaded. Not repeated with the relinked library: the packaged HTTP/TLS probe.
+
+#### Tranche 8 device gates against the installed 06-web SDK (2026-10-21)
+
+The media playback and camera capture gates ran only inside the driver's WebKit build tree. `tools/test_stage_06_devices.py` now
+builds their two programs (`crtweb_media_test`, `crtweb_capture_test`, which use only the public C API) with the installed SDK's
+`crt-c++` and runs them with the SDK's `libexec/crtweb` processes, reusing the driver's `run_media_gate`/`run_capture_gate`, so
+pass criteria and the mapped-file audit are the driver's. On the isolated Linux/x86_64 06-web SDK (a relocated copy, path with a
+space): **both pass**. Media: 38 mapped files in the Web process, no file outside the SDK, exactly one C++ runtime
+(`libc++.so.1.0`, `libc++abi.so.1.0`), `libcrtmedia` mapped, only the SDK's VA stub libraries, 12 measured media lifetimes with the
+Web process thread count 17 -> 14. Camera: permission lifecycle and capture from the labelled synthetic source; `physical_camera_opened`
+is false. Six further runs on the pristine SDK passed, and both gates also pass with the relinked `libcrtmedia.so` placed over both
+copies in the SDK.
+
+What this does not show: audio is reported as delivered (nonzero PCM accepted, sink position advanced, `fixture_pcm_complete`), but the
+gate's own wording applies -- it is not a listening test, and this host's PipeWire default sink is a null "Dummy Output" -- and
+`--require-audio-output` was not used. The physical camera, GPU gates and the macOS and Windows installed-SDK versions were not run
+(the tool refuses non-Linux SDKs). The Web process maps no host VA-API library, so VA-API decode through the host driver is not
+exercised here.
 
 #### Inherited runtime notices (2026-10-20)
 

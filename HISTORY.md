@@ -11,6 +11,13 @@ substantive update.
 
 ## 2026-10-21
 
+### Tranche 10: Tranche 8 device gates against the installed Linux/x86_64 06-web SDK
+
+New `tools/test_stage_06_devices.py` builds `crtweb_media_test` and `crtweb_capture_test` (public C API only) with the installed SDK's
+wrapper and runs them with the SDK's own processes, reusing the driver's audit and pass criteria. Both gates pass on the isolated
+06-web SDK, six more runs on the pristine SDK pass, and they pass with the kit's relinked `libcrtmedia.so` in place of both copies.
+Camera: the labelled synthetic camera only; no physical camera was opened. Linux/x86_64 only.
+
 ### Tranche 10: Linux/x86_64 isolated 04 -> 05 -> 06 chain on WebKit 2.54.1, and the missing libcurl in isolated libcrtmedia.so
 
 First fully isolated Linux/x86_64 chain since the 2.54.1 re-pin; all three stages pass `verify_dist.py`. The isolated 04 stage built
@@ -26,7 +33,7 @@ relinked library; both relinked libraries load and demux the test clip. The firs
 machine's SDK path and `/lib/x86_64-linux-gnu`, so `relink.py` now strips absolute entries (ELF kits ship `crt_elf.py`).
 The stage itself kept failing because Intel's iHD VA-API driver died in `vaDestroyBuffer` under FFmpeg frame threads (lifecycle
 test 7/40 failures, packaged zero-copy demo hang); VA-API decode now uses one thread (0/160 failures after).
-`crtmedia_playback_pipeline_test` fails here regardless (likely no sound card), not investigated. Linux/x86_64 only.
+`crtmedia_playback_pipeline_test` fails here regardless of the change, cause not found (the host now has ALSA playback devices; see the device-gate entry). Linux/x86_64 only.
 
 ### Tranche 10 on Linux/aarch64: relink kit and isolated 04/05 stages
 
