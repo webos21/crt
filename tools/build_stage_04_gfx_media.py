@@ -17,6 +17,7 @@ from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
 import crt_relink_kit
+import crt_source_offer
 from crt_elf import needed_libraries, relocate_absolute_runtime_paths, remove_absolute_runtime_paths
 from crt_text_relocate import relocate_text_prefixes
 
@@ -1378,6 +1379,7 @@ def main() -> None:
             for item in manifest["redistributed_dependencies"]:
                 if item["name"] == "ffmpeg":
                     item["relink_kit"] = (crt_relink_kit.KIT_RELATIVE / "libcrtmedia").as_posix()
+            crt_source_offer.install_stage_offer(build_asset, staged, "04-gfx-media", manifest)
             (staged / "manifest.json").write_text(
                 json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 

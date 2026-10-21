@@ -61,6 +61,11 @@ def main():
     parser.add_argument("--cc", help="compiler driver (default: the recorded one, found on PATH)")
     parser.add_argument("--print", action="store_true", help="show the link command and exit")
     args = parser.parse_args()
+    # The link runs with the kit as its working directory, so every path the user typed must be absolute first.
+    args.out = args.out.resolve()
+    args.sdk = args.sdk.resolve()
+    if args.ffmpeg_libdir is not None:
+        args.ffmpeg_libdir = args.ffmpeg_libdir.resolve()
     recipe = json.loads((KIT / "relink.json").read_text(encoding="utf-8"))
     if not args.print and not (args.cc or os.environ.get("CRT_SYSROOT")):
         sys.exit("relink: activate the SDK first (Windows: call <sdk>\\activate.cmd, others: . <sdk>/activate.sh), "
@@ -124,9 +129,13 @@ def link_tokens(commands: str, output: str, windows: bool | None = None) -> list
         else:
             current.append(token)
     segments.append(current)
+    # Compare with both separators folded: a Windows link line spells the output bin\\x.dll, and Path() on a POSIX
+    # host does not split that, so the same parse must not depend on the OS running it.
+    wanted = output.replace("\\", "/")
     candidates = [segment for segment in segments
-                  if segment and segment[0] not in (":", "cd") and any(Path(t).name == Path(output).name or t.endswith(output)
-                                                                         for t in segment)]
+                  if segment and segment[0] not in (":", "cd")
+                  and any(t.replace("\\", "/").rsplit("/", 1)[-1] == wanted.rsplit("/", 1)[-1]
+                          or t.replace("\\", "/").endswith(wanted) for t in segment)]
     if len(candidates) != 1:
         raise SystemExit(f"cannot find the link command for {output} ({len(candidates)} candidates)")
     return candidates[0]

@@ -89,8 +89,10 @@ the `ffmpeg` dependency; `verify_dist.py` rejects an isolated-stage SDK that shi
 (in-tree developer SDKs have none). Evidence on Windows/x64: from a real stage build (`gfx-media-build`), the kit
 relinked `libcrtmedia.dll` (same size as the SDK's, exports identical except one symbol that comes from the newer
 Windows SDK import library on this machine) and also with `--ffmpeg-libdir` pointing at a separate copy of the four
-archives. Not verified: the Linux and macOS kits (same code path, output names `lib/libcrtmedia.so` and `.dylib`; no
-host to run them) and an end-to-end stage rebuild that exercises the new step. Tests: `tools/test_crt_relink_kit.py`.
+archives. Linux/aarch64 (2026-10-21): an isolated `03 -> 04 -> 05` stage build on the aarch64 guest wrote the kit, `check_kit` and `verify_dist.py` passed, and
+`relink.py` produced a `libcrtmedia.so` with the same 2,019 exports as the SDK's, with the packaged archives and with `--ffmpeg-libdir` pointing at a
+separately built FFmpeg (a relative `--out` is resolved before the link changes directory). That guest has no VA driver, so the stage's zero-copy
+smoke was skipped in a local work copy. Not verified: the macOS kit (output `.dylib`; no host to run it). Tests: `tools/test_crt_relink_kit.py`.
 
 Decided 2026-10-21: **dual-licensed components.** FreeType is used under the FreeType License (FTL), not the GPLv2
 alternative; Mbed TLS under Apache-2.0, not GPL-2.0-or-later. Both are permissive, neither makes the combined SDK

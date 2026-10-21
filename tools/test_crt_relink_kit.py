@@ -23,6 +23,27 @@ WINDOWS_LINK = ('C:\\WINDOWS\\system32\\cmd.exe /C "cd . && C:\\sdk\\tools\\crt-
                 '"C:/Program Files (x86)/Windows Kits/10/Lib/x64/Mf.lib" && cd ."')
 
 
+class Runner(unittest.TestCase):
+    def test_relative_paths_are_made_absolute_before_the_link_changes_directory(self) -> None:
+        import json, subprocess, tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            kit_dir = work / "sdk" / "share" / "crt" / "relink" / "libcrtmedia"
+            kit_dir.mkdir(parents=True)
+            (kit_dir / "relink.json").write_text(json.dumps(
+                {"compiler": "cc", "args": ["-o", "@OUT@/libcrtmedia.so", "@SDK@/lib/libavutil.a"]}), encoding="utf-8")
+            (kit_dir / "relink.py").write_text(kit.RUNNER.format(name="libcrtmedia", ffmpeg=["libavutil.a"]), encoding="utf-8")
+            (work / "libs").mkdir()
+            (work / "libs" / "libavutil.a").write_bytes(b"")
+            result = subprocess.run([sys.executable, str(kit_dir / "relink.py"), "--print", "--out", "rel/out",
+                                     "--ffmpeg-libdir", "libs"], cwd=work, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            printed = result.stdout.split()
+            self.assertEqual(printed[printed.index("-o") + 1], str((work / "rel" / "out").resolve() / "libcrtmedia.so"))
+            self.assertEqual(printed[-1], str((work / "libs" / "libavutil.a").resolve()))
+
+
 class Parse(unittest.TestCase):
     def test_posix_link_command_is_found_among_the_ninja_wrapper(self) -> None:
         tokens = kit.link_tokens(POSIX_LINK, "lib/libcrtmedia.so", windows=False)

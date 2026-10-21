@@ -18,6 +18,37 @@ import crt_source_offer as offer
 ROOT = offer.ROOT
 
 
+class StageOfferTests(unittest.TestCase):
+    """The isolated 04-gfx-media and 05-ui stages install their own offer; verify_dist.py rejects an SDK without it."""
+
+    def staged_sdk(self, directory: Path) -> Path:
+        recipe = directory / "share/crt/dependencies/ffmpeg/recipe.json"
+        recipe.parent.mkdir(parents=True)
+        recipe.write_text((ROOT / "porting/recipes/ffmpeg.json").read_text(encoding="utf-8"), encoding="utf-8")
+        (directory / "VERSION").write_text("v9.9.9-test\n", encoding="utf-8")
+        return directory
+
+    def test_each_stage_gets_an_offer_naming_itself(self) -> None:
+        for stage in ("04-gfx-media", "05-ui"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as raw:
+                sdk = self.staged_sdk(Path(raw))
+                manifest = {"redistributed_dependencies": [{"name": "ffmpeg", "notices": []}, {"name": "zlib"}]}
+                path = offer.install_stage_offer(ROOT, sdk, stage, manifest)
+                self.assertEqual(path, "share/licenses/SOURCE-OFFER.md")
+                self.assertEqual(manifest["redistributed_dependencies"][0]["notices"], [path])
+                problems = offer.check_installed_offer(sdk, stage, "v9.9.9-test", offer.components_from_sdk(sdk, stage))
+                self.assertEqual(problems, [])
+                # An offer inherited from another stage must not satisfy this one.
+                self.assertTrue(offer.check_installed_offer(sdk, "06-web" if stage == "05-ui" else "05-ui",
+                                                            "v9.9.9-test", offer.components_from_sdk(sdk, stage)))
+
+    def test_a_stage_without_ffmpeg_gets_no_offer(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            sdk = self.staged_sdk(Path(raw))
+            self.assertIsNone(offer.install_stage_offer(ROOT, sdk, "03-gfx-simple", {"redistributed_dependencies": []}))
+            self.assertFalse((sdk / "share/licenses/SOURCE-OFFER.md").exists())
+
+
 class ConfigTests(unittest.TestCase):
     def test_real_config_is_valid(self) -> None:
         config = offer.load_config(ROOT)

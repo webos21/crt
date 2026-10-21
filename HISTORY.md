@@ -11,6 +11,21 @@ substantive update.
 
 ## 2026-10-21
 
+### Tranche 10 on Linux/aarch64: relink kit and isolated 04/05 stages
+
+The isolated `03-gfx-simple -> 04-gfx-media -> 05-ui` stage builds ran natively on the aarch64 guest (04: 14 min; 05: 27 s) and the relink kit was
+exercised for the first time on Linux: `share/crt/relink/libcrtmedia` is written and passes `check_kit`; `relink.py` links a `libcrtmedia.so` with the
+same 2,019 exports as the SDK's and no undefined `__aarch64_*` helper, with and without `--ffmpeg-libdir` (a freshly built FFmpeg). The run found
+four defects that were shared by every host and invisible until a stage was built end to end: the stage-source asset did not carry
+`tools/crt_web_release.py`, so the last `verify_dist.py` of any isolated stage failed with `ModuleNotFoundError` (asset list fixed; new closure test
+over `verify_dist.py`'s module-level imports); isolated 04 and 05 never installed `SOURCE-OFFER.md`, which `verify_dist.py` requires of every stage that
+ships FFmpeg and which names its stage (`crt_source_offer.install_stage_offer`, used by both entrypoints; tested); `relink.py` resolved a relative
+`--out` against the kit directory (paths are now made absolute first); and `test_crt_relink_kit`'s Windows parse test failed on POSIX hosts
+(separators folded). Local-only deviation, not in the repository: this guest has no VAAPI driver, so the stage's zero-copy media bridge smoke
+(`interop=zero-copy`) was skipped in the extracted work copy to reach the later steps; it needs a host with a VA driver. The SDK also needed
+`crtgfx-wayland-build` run once for `libxdg-shell-protocol.a` (the in-tree dist without it is native-Wayland-less and cannot seed stage 04).
+
+
 ### Tranche 10 on Linux/aarch64: option-ON SDK regeneration and four aarch64-only defects
 
 The five in-tree stage SDKs (`01-c`..`05-ui`) were regenerated on the Ubuntu 26.04 aarch64 guest with FFmpeg, curl, Skia, GPU and
