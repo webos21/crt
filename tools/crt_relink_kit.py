@@ -28,6 +28,9 @@ import sys
 
 OBJECT_SUFFIXES = (".o", ".obj")
 SUPPORT_SUFFIXES = (".def", ".map", ".exp", ".ver", ".lds", ".txt")
+# Options whose next token is a plain value (macOS clang/ld64): kept as written, never taken for a link input.
+VALUE_OPTIONS = ("-arch", "-isysroot", "-install_name", "-framework", "-target", "-current_version",
+                 "-compatibility_version", "-rpath")
 FFMPEG_ARCHIVES = ("libavcodec.a", "libavformat.a", "libavutil.a", "libswresample.a")
 KIT_RELATIVE = Path("share/crt/relink")
 
@@ -61,6 +64,10 @@ def main():
     parser.add_argument("--cc", help="compiler driver (default: the recorded one, found on PATH)")
     parser.add_argument("--print", action="store_true", help="show the link command and exit")
     args = parser.parse_args()
+    # The compiler runs in the kit directory: every path must be absolute.
+    args.sdk, args.out = args.sdk.resolve(), args.out.resolve()
+    if args.ffmpeg_libdir is not None:
+        args.ffmpeg_libdir = args.ffmpeg_libdir.resolve()
     recipe = json.loads((KIT / "relink.json").read_text(encoding="utf-8"))
     if not args.print and not (args.cc or os.environ.get("CRT_SYSROOT")):
         sys.exit("relink: activate the SDK first (Windows: call <sdk>\\activate.cmd, others: . <sdk>/activate.sh), "
@@ -125,7 +132,7 @@ def link_tokens(commands: str, output: str, windows: bool | None = None) -> list
             current.append(token)
     segments.append(current)
     candidates = [segment for segment in segments
-                  if segment and segment[0] not in (":", "cd") and any(Path(t).name == Path(output).name or t.endswith(output)
+                  if segment and segment[0] not in (":", "cd") and any(Path(t.replace(chr(92), "/")).name == Path(output).name or t.endswith(output)
                                                                          for t in segment)]
     if len(candidates) != 1:
         raise SystemExit(f"cannot find the link command for {output} ({len(candidates)} candidates)")
@@ -147,12 +154,20 @@ def under_sdk(token: str, roots: list, windows: bool | None = None) -> str:
 
 def rewrite(tokens: list, build: Path, sdk_roots: list, objects: dict, support: dict) -> list:
     """Placeholders for everything that depends on where the build and the SDK live."""
-    result, skip = [], False
+    result, skip, value_of = [], False, ""
     for index, original in enumerate(tokens):
         if skip:
             skip = False
             continue
         token = under_sdk(original, sdk_roots)
+        if value_of:
+            value_of = ""
+            result.append(token)
+            continue
+        if token in VALUE_OPTIONS:
+            value_of = token
+            result.append(token)
+            continue
         if token == "-o":
             result += ["-o", f"@OUT@/{Path(tokens[index + 1].replace(chr(92), '/')).name}"]
             skip = True
@@ -174,7 +189,7 @@ def rewrite(tokens: list, build: Path, sdk_roots: list, objects: dict, support: 
                 name = f"{resolved.parent.parent.name}__{name}" if resolved.parent.name != resolved.parent.parent.name else f"{len(objects)}__{name}"
             objects[name] = resolved
             result.append(f"@OBJ@/{name}")
-        elif token.lower().endswith(SUPPORT_SUFFIXES) and resolved.is_file() and build in resolved.parents:
+        elif token.lower().endswith(SUPPORT_SUFFIXES) and resolved.is_file():
             support[resolved.name] = resolved
             result.append(f"@SUPPORT@/{resolved.name}")
         elif absolute and build not in resolved.parents:

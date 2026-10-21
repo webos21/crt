@@ -89,8 +89,7 @@ the `ffmpeg` dependency; `verify_dist.py` rejects an isolated-stage SDK that shi
 (in-tree developer SDKs have none). Evidence on Windows/x64: from a real stage build (`gfx-media-build`), the kit
 relinked `libcrtmedia.dll` (same size as the SDK's, exports identical except one symbol that comes from the newer
 Windows SDK import library on this machine) and also with `--ffmpeg-libdir` pointing at a separate copy of the four
-archives. Not verified: the Linux and macOS kits (same code path, output names `lib/libcrtmedia.so` and `.dylib`; no
-host to run them) and an end-to-end stage rebuild that exercises the new step. Tests: `tools/test_crt_relink_kit.py`.
+archives. macOS/arm64 (2026-10-21, isolated `04 -> 05 -> 06` chain): the kit relinked `libcrtmedia.dylib` from a relocated copy of the 04-gfx-media and the 06-web SDK (a path with a space, relative `--out`): the same 103 exports, `libc.dylib` first among the dependencies, no build path inside; swapped into the SDK, `crtgfx_skia_media_window_demo` decoded and presented 25 zero-copy Metal frames. The macOS link line needed value options (`-arch`, `-framework`, `-install_name`, `-isysroot`) and a source-tree export list in the rewrite, and `relink.py` needed absolute paths (it runs the compiler in the kit directory). Not verified: the Linux kit (same code path, `lib/libcrtmedia.so`; no host to run it). Tests: `tools/test_crt_relink_kit.py`.
 
 Decided 2026-10-21: **dual-licensed components.** FreeType is used under the FreeType License (FTL), not the GPLv2
 alternative; Mbed TLS under Apache-2.0, not GPL-2.0-or-later. Both are permissive, neither makes the combined SDK

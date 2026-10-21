@@ -72,6 +72,24 @@ Planned entry without changing the active Web work, STATUS or the root README.
 This completes design consolidation only, not CLI/Studio implementation,
 repository creation or release acceptance.
 
+### Tranche 10 on macOS/arm64: isolated 04 -> 05 -> 06 chain, relink kit, and six macOS-only stage defects
+
+The first isolated macOS `04-gfx-media -> 05-ui -> 06-web` chain since the Tranche 8/9 macOS work (the 2026-10-20 06-web replay had
+used an in-tree `05-ui` predecessor). It passed `verify_dist` at every stage and the 06-web SDK is a development candidate with the
+source offer and the libcrtmedia relink kit. Defects found and fixed (evidence: `out/tranche10-macos-relink`, logs `stage0{4,5,6}.log`):
+
+- `libcrtmedia` CMake named the in-tree `c_shared` target, which an isolated stage does not have: it uses the predecessor's `libc.dylib`.
+- The 04 source asset lacked `crtmedia_exports_macos.txt`; every stage asset lacked `tools/crt_web_release.py` (`verify_dist` imports it).
+- Executables that load CRT dylibs linked the static `libc.a` next to `libc.dylib` (two malloc registries): `crtgfx_skia_raster_smoke`
+  faulted in `unindex_free_block`, then the installed `gfx-skia` example. Both now name `libc.dylib` first (relinking with
+  `CRT_CXX_RUNTIME_LINKAGE=shared` confirmed the cause).
+- The isolated 04 stage never enabled `CRTGFX_ENABLE_GPU_BACKEND` on macOS, so its Skia bridge had no Metal shared-image sources and a
+  06-web built on it failed to link `crtgfx_skia_shared_create/_query` in `crtweb_gpu_worker`.
+- The isolated 04/05 builders did not install the LGPL source offer (`crt_source_offer.install_for_stage`).
+- The relink kit could not rewrite a macOS link line and `relink.py` failed on a relative `--out`; a Windows-path test also failed on macOS.
+
+Relinked `libcrtmedia.dylib` from a relocated SDK keeps the 103 exports and runs the zero-copy media demo (see the LGPL guide).
+
 ### Tranche 10: the release tool exports 05-ui and 06-web
 
 - `tools/prepare_release_assets.py` now covers all six stages. `05-ui` is checked for the option-ON build (lvgl/freetype/

@@ -203,6 +203,20 @@ def check_installed_offer(sdk: Path, stage: str, version: str, components: list)
     return problems
 
 
+def install_for_stage(asset: Path, staged: Path, stage: str, dependencies: list, commit: str | None = None) -> str:
+    """Render and install the offer of an isolated stage build from the SDK's own recipes.
+
+    `asset` is the stage source asset (it carries the template and release.json); the FFmpeg dependency of
+    `dependencies` (the manifest list) gets the offer among its notices."""
+    version = (staged / "VERSION").read_text(encoding="utf-8").strip()
+    offer = install_offer(staged, render_offer(
+        asset, load_config(asset), stage, version, components_from_sdk(staged, stage), commit))
+    for item in dependencies:
+        if item.get("name") == "ffmpeg" and offer not in item["notices"]:
+            item["notices"].append(offer)
+    return offer
+
+
 def git(root: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
 

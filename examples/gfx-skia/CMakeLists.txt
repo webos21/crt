@@ -130,6 +130,13 @@ target_include_directories(crtgfx_skia_example PRIVATE "${CRTGFX_INCLUDE_DIR}")
 target_link_libraries(crtgfx_skia_example PRIVATE
   "${CRTGFX_SKIA_LIBRARY}" "${CRTGFX_GPU_LIBRARY}" "${CRTGFX_WINDOW_LIBRARY}"
   "${CRTGFX_SKIA_STATIC_LIBRARY}" "${CRTGFX_FREETYPE_LIBRARY}")
+if(APPLE)
+  # The shared libcrtgfx_skia/libcrtgfx_gpu/libcrtgfx dylibs load the CRT libc.dylib. An executable that also
+  # links the static libc.a is a second malloc registry in the same process (Mach-O two-level namespace), and
+  # memory crossing the boundary corrupts the heap (segfault in the isolated 04 stage, 2026-10-21). Naming
+  # libc.dylib first resolves every libc symbol there, so libc.a is never pulled.
+  target_link_options(crtgfx_skia_example PRIVATE "${CMAKE_SYSROOT}/lib/libc.dylib")
+endif()
 if(NOT WIN32 AND NOT APPLE)
   # The Linux standalone example deliberately selects only static CRT/Skia
   # archives above. tools/crt-c++ completes that link with libc++.a,

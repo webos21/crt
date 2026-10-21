@@ -66,6 +66,23 @@ class Rewrite(unittest.TestCase):
         self.assertIn("/usr/lib/libm.so.6", result)  # a host library stays as recorded
         self.assertFalse([item for item in result if str(self.build) in item])
 
+    def test_macos_value_options_and_a_source_tree_export_list(self) -> None:
+        source = Path(self.temp.name).resolve() / "source" / "exports.txt"
+        source.parent.mkdir()
+        source.write_text("_crtmedia_open\n")
+        tokens = ["/sdk/tools/crt-cc", "-arch", "arm64", "-isysroot", "/Xcode/MacOSX.sdk", "-dynamiclib",
+                  "/sdk/lib/libc.dylib", "-Xlinker", "-exported_symbols_list", "-Xlinker", str(source),
+                  "-o", "lib/libcrtmedia.dylib", "-install_name", "@rpath/libcrtmedia.dylib",
+                  "libcrtmedia/CMakeFiles/crtmedia_shared.dir/src/a.c.o", "-framework", "AudioToolbox"]
+        support = {}
+        result = kit.rewrite(tokens, self.build, ["/sdk"], {}, support)
+        self.assertEqual(["exports.txt"], list(support))
+        self.assertIn("@SUPPORT@/exports.txt", result)
+        self.assertEqual(["-arch", "arm64"], result[1:3])
+        self.assertEqual(["-framework", "AudioToolbox"], result[-2:])
+        self.assertIn("@rpath/libcrtmedia.dylib", result)
+        self.assertFalse([item for item in result if str(source.parent) in item])
+
     def test_a_build_tree_library_outside_the_sdk_fails_the_kit(self) -> None:
         with self.assertRaises(SystemExit):
             kit.rewrite(["/sdk/tools/crt-cc", "-shared", "port-tests/install/lib/libx.a"], self.build, ["/sdk"], {}, {})
@@ -143,6 +160,10 @@ class Installed(unittest.TestCase):
             self.assertEqual(0, shown.returncode, shown.stderr)
             self.assertIn(str(own / "libavcodec.a"), shown.stdout)
             self.assertNotIn("@SDK@", shown.stdout)
+            relative = subprocess.run([sys.executable, str(folder / "relink.py"), "--print", "--sdk", str(sdk),
+                                       "--out", "relative-out"], capture_output=True, text=True, env=environment, cwd=root)
+            self.assertEqual(0, relative.returncode, relative.stderr)
+            self.assertIn(str(root / "relative-out"), relative.stdout)  # the compiler runs in the kit folder
             bare = {key: value for key, value in environment.items() if key != "CRT_SYSROOT"}
             missing = subprocess.run([sys.executable, str(folder / "relink.py"), "--sdk", str(sdk)],
                                      capture_output=True, text=True, env=bare)

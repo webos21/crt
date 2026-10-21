@@ -426,6 +426,12 @@ target_compile_options(crtgfx_gpu_common_objects PRIVATE ${stage_c_options})
 if(CRT_TARGET_OS STREQUAL "linux")
   target_compile_options(crtgfx_gpu_backend_objects PRIVATE ${stage_c_options})
 endif()
+if(CRT_TARGET_OS STREQUAL "macos")
+  # The in-tree default (libcrtgfx/CMakeLists.txt option). Without it the Skia bridge omits the Metal shared-image
+  # sources (skia_shared_metal.cc, metal_shared_native.cc, metal_share_transport.c) and a 06-web stage built on this
+  # SDK cannot link crtgfx_skia_shared_create/_query (2026-10-21 isolated macOS 04 -> 06 replay).
+  set(CRTGFX_ENABLE_GPU_BACKEND ON)
+endif()
 crt_add_crtgfx_skia_object_target()
 target_compile_options(crtgfx_skia_objects PRIVATE ${stage_cxx_options})
 crt_add_crtgfx_skia_static_target()
@@ -771,6 +777,15 @@ target_compile_definitions(crtgfx_skia_raster_smoke PRIVATE
 target_include_directories(crtgfx_skia_raster_smoke PRIVATE
   "${CRTGFX_ROOT}/include" "${CRTGFX_SKIA_ROOT}")
 target_link_libraries(crtgfx_skia_raster_smoke PRIVATE crtgfx_skia_shared)
+# macOS: an executable that loads the CRT dylibs must use the libc those dylibs load. A static libc.a next to
+# libc.dylib is two malloc registries in one process (Mach-O two-level namespace): memory crossing the boundary
+# corrupted the heap (unindex_free_block fault in crtgfx_skia_raster_smoke, 2026-10-21 isolated replay).
+# Naming libc.dylib first resolves every libc symbol there, so libc.a is never pulled.
+set(CRT_STAGE_SHARED_LIBC_LINK "")
+if(CRT_TARGET_OS STREQUAL "macos")
+  set(CRT_STAGE_SHARED_LIBC_LINK "${CMAKE_SYSROOT}/lib/libc.dylib")
+  target_link_options(crtgfx_skia_raster_smoke PRIVATE "${CRT_STAGE_SHARED_LIBC_LINK}")
+endif()
 crt_stage_register_test(crtgfx_skia_raster_smoke_runs
   crtgfx_skia_raster_smoke "crtgfx_skia_raster_smoke: ok")
 
@@ -805,6 +820,9 @@ target_compile_definitions(crtgfx_skia_gpu_window_demo PRIVATE
 target_include_directories(crtgfx_skia_gpu_window_demo PRIVATE
   "${CRTGFX_ROOT}/tests" "${CRTGFX_SKIA_ROOT}")
 target_link_libraries(crtgfx_skia_gpu_window_demo PRIVATE crtgfx_skia_shared)
+if(CRT_STAGE_SHARED_LIBC_LINK)
+  target_link_options(crtgfx_skia_gpu_window_demo PRIVATE "${CRT_STAGE_SHARED_LIBC_LINK}")
+endif()
 
 # Installed, normalized end-to-end bridge acceptance binary. It links both
 # optional components explicitly, matching the public bridge boundary, and
