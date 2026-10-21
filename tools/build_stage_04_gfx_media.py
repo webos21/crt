@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -596,6 +597,31 @@ def copy_dependency_record(staged: Path, name: str, recipe: Path,
     }
 
 
+FREETYPE_CHOICE = """CRT redistributes FreeType under the FreeType License (FTL), the first of the two mutually exclusive licenses
+FreeType offers (see LICENSE.TXT); the GPLv2 alternative is not used. The FTL text is FTL.TXT in this directory.
+
+Portions of this software are copyright (c) {year} The FreeType Project (https://freetype.org). All rights reserved.
+"""
+MBEDTLS_CHOICE = """CRT redistributes Mbed TLS under the Apache License 2.0, one of the two licenses it is offered under
+(Apache-2.0 OR GPL-2.0-or-later, see LICENSE); the GPL alternative is not used.
+"""
+
+
+def record_license_choices(staged: Path, freetype_source: Path, dependencies: list[dict]) -> None:
+    """Make the dual-license choices visible in the SDK: FreeType's FTL text and credit line, the Mbed TLS choice."""
+    by_name = {item["name"]: item for item in dependencies}
+    year = re.search(r"1996-(\d{4})", (freetype_source / "src" / "base" / "ftobjs.c").read_text(encoding="utf-8", errors="replace"))
+    if year is None:
+        raise SystemExit("cannot read the FreeType copyright year from src/base/ftobjs.c")
+    directory = Path("share") / "licenses" / "freetype"
+    shutil.copy2(freetype_source / "docs" / "FTL.TXT", staged / directory / "FTL.TXT")
+    (staged / directory / "CRT-LICENSE-CHOICE.txt").write_text(FREETYPE_CHOICE.format(year=year.group(1)), encoding="utf-8", newline="\n")
+    by_name["freetype"]["notices"] += [(directory / "FTL.TXT").as_posix(), (directory / "CRT-LICENSE-CHOICE.txt").as_posix()]
+    directory = Path("share") / "licenses" / "mbedtls"
+    (staged / directory / "CRT-LICENSE-CHOICE.txt").write_text(MBEDTLS_CHOICE, encoding="utf-8", newline="\n")
+    by_name["mbedtls"]["notices"].append((directory / "CRT-LICENSE-CHOICE.txt").as_posix())
+
+
 def existing_relative_files(root: Path, patterns: tuple[str, ...]) -> list[str]:
     found: list[str] = []
     for pattern in patterns:
@@ -881,6 +907,7 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
             existing_relative_files(staged, (
                 "lib/libz.so*", "lib/libz*.dylib", "bin/libz*.dll", "lib/libz*.dll.a"))),
     ]
+    record_license_choices(staged, freetype_source, dependencies)
     retained = [item for item in manifest.get("redistributed_dependencies", [])
                 if item.get("name") not in {"freetype", "ffmpeg", "skia",
                                             "curl", "mbedtls", "zlib"}]

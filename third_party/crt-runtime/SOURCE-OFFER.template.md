@@ -11,7 +11,7 @@ built; the values below come from the build, not from hand-edited text.
 
 Everything else in the SDK is under other licenses; see `share/licenses/` and the `share/crt/*.json` inventories.
 
-## Where to get the source
+{{other_licenses}}## Where to get the source
 
 {{where}}
 
