@@ -30,6 +30,12 @@ class HeaderTests(unittest.TestCase):
         self.assertEqual("", notices.header_of("#include <stdio.h>\nint main(void) { return 0; }\n"))
         self.assertEqual("", notices.header_of("/* just a description of foo */\nint x;\n"))
 
+    def test_descriptive_comment_mentioning_permissions_is_not_a_license_header(self) -> None:
+        text = "/* Executable-memory permissions on Apple Silicon: a per-thread toggle. */\nint x;\n"
+        self.assertEqual("", notices.header_of(text))
+        self.assertNotEqual("", notices.header_of("/* Permission to use, copy, modify, and distribute this software. */\n"))
+        self.assertNotEqual("", notices.header_of("/* Permission is hereby granted, free of charge. */\n"))
+
     def test_normalise_ignores_holders_and_years(self) -> None:
         other = BSD.replace("2001 Example Author", "2017 Somebody Else")
         self.assertEqual(notices.normalise(BSD), notices.normalise(other))

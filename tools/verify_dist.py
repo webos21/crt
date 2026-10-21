@@ -11,6 +11,7 @@ from create_dist import DIST_PORTING_TOOLS, DIST_PORTING_DIRS, DIST_WRAPPER_TOOL
 from crt_binary_dependencies import validate_binary_dependencies
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import is_absolute_runtime_entry, runtime_paths
+import crt_relink_kit
 import crt_source_offer
 import crt_web_release
 from crt_stage_recipe import recipe_filename_for_stage, validate_recipe
@@ -197,6 +198,17 @@ def validate_source_offer(dist: Path, stage: str, dependencies: dict[str, dict])
         dist, stage, version, crt_source_offer.components_from_sdk(dist, stage))
     if problems:
         raise SystemExit("LGPL source offer: " + "; ".join(problems))
+
+
+def validate_relink_kit(dist: Path, manifest: dict, dependencies: dict[str, dict]) -> None:
+    """The isolated stage build of an SDK that ships FFmpeg also ships the kit to relink the shared libcrtmedia."""
+    if "ffmpeg" not in dependencies or "built_from" not in manifest:
+        return  # in-tree developer SDKs are not release artifacts and carry no kit
+    if dependencies["ffmpeg"].get("relink_kit") != "share/crt/relink/libcrtmedia":
+        raise SystemExit("the FFmpeg dependency does not declare its libcrtmedia relink kit")
+    problems = crt_relink_kit.check_kit(dist, "libcrtmedia")
+    if problems:
+        raise SystemExit("libcrtmedia relink kit: " + "; ".join(problems))
 
 
 def validate_redistributed_dependencies(dist: Path, manifest: dict) -> dict[str, dict]:
@@ -465,6 +477,7 @@ def main() -> None:
     redistributed = validate_redistributed_dependencies(dist, manifest)
     validate_runtime_components(args.stage, redistributed)
     validate_source_offer(dist, args.stage, redistributed)
+    validate_relink_kit(dist, manifest, redistributed)
     porting = manifest.get("optional_tools", {}).get("porting", {})
     if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:
         raise SystemExit("manifest does not describe the optional packaged porting tools")

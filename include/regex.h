@@ -1,9 +1,5 @@
 /*
- * Copyright (c) 1992 Henry Spencer.
- * Copyright (c) 1992, 1993
- * The Regents of the University of California. All rights reserved.
- *
- * Bionic-compatible public regex surface.
+ * Bionic-compatible public regex interface, written for CRT. The implementation is in libc/src/regex.
  */
 
 #ifndef CRT_REGEX_H

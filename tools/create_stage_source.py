@@ -30,6 +30,8 @@ STAGE_VALIDATION_PROJECT_PATHS = (
     "third_party/crt-runtime/components.json",
     # The LGPL source offer (stages that ship FFmpeg) and its release-time values.
     "tools/crt_source_offer.py",
+    # Relink kit of the shared libcrtmedia (FFmpeg is LGPL); written by the 04-gfx-media stage, checked by verify_dist.
+    "tools/crt_relink_kit.py",
     "third_party/crt-runtime/release.json",
     "third_party/crt-runtime/SOURCE-OFFER.template.md",
 )

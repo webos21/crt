@@ -37,6 +37,8 @@ def decide(config: dict, security: dict) -> dict:
         reasons.append("the WebKit advisory snapshot did not pass")
     if security.get("pin_is_latest_micro") is not True:
         reasons.append("the WebKit pin is not the newest micro release")
+    if security.get("series_within_grace") is not True:
+        reasons.append("the pinned WebKit series is past the support grace period (a re-pin is required; not an acceptable blocker)")
     reasons += [f"open release blocker: {item}" for item in open_blockers]
     allowed = not reasons
     return {"public_release_allowed": allowed, "development_candidate": not allowed, "reasons": reasons,
@@ -63,6 +65,8 @@ def check_recorded(manifest_runtime: dict, correspondence: dict, security: dict)
         missing = [item for item in security.get("release_blockers", []) if item not in approval.get("accepted_blockers", [])]
         if missing:
             problems.append("a public Web release has unaccepted blockers: " + "; ".join(missing))
+        if security.get("series_within_grace") is not True:
+            problems.append("a public Web release needs the pinned series within the support grace period")
         if security.get("passed") is not True or security.get("pin_is_latest_micro") is not True:
             problems.append("a public Web release needs a passing advisory snapshot on the newest micro")
     elif not decision.get("reasons"):

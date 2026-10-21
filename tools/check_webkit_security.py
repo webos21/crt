@@ -2,12 +2,12 @@
 """Fail-closed WPE advisory snapshot for a pinned WebKit development SDK.
 
 This is a version/advisory check, not a vulnerability scanner or proof of a
-sandbox. Public release additionally requires the recorded support-window and
-native/cross-host packaging gates; a successful snapshot alone cannot grant it.
+sandbox. Public release additionally requires the support window (docs/design/libcrtweb_api_policy.md,
+"WebKit support policy") and the native/cross-host packaging gates; a successful snapshot alone cannot grant it.
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import hashlib
 from html.parser import HTMLParser
 import json
@@ -17,6 +17,8 @@ import urllib.request
 
 FEED = "https://wpewebkit.org/security/"
 RELEASES = "https://wpewebkit.org/releases/"
+# Support policy: a pinned series may be released for this many days after the next stable series first shipped.
+SERIES_GRACE_DAYS = 60
 
 
 class Page(HTMLParser):
@@ -79,7 +81,26 @@ def fetch(url):
         return response.read().decode("utf-8")
 
 
-def snapshot(pinned):
+def release_dates(releases_html):
+    """{version: first listed archive date} from the upstream release index."""
+    dates = {}
+    for found, day in re.findall(r'wpewebkit-(\d+\.\d+\.\d+)\.tar\.(?:xz|lz)</a></td><td[^>]*>(\d{4}-\d{2}-\d{2})', releases_html):
+        dates[found] = min(day, dates.get(found, day))
+    return dates
+
+
+def support_window(dates, pinned, today, grace=SERIES_GRACE_DAYS):
+    """Superseded age of the pinned stable series (even minor numbers are stable; odd are development)."""
+    minor = version(pinned)[1]
+    later = [day for found, day in dates.items()
+             if version(found)[1] > minor and version(found)[1] % 2 == 0 and date.fromisoformat(day) <= today]
+    since = min(later) if later else None
+    age = (today - date.fromisoformat(since)).days if since else None
+    return {"series_superseded_since": since, "series_superseded_age_days": age,
+            "series_grace_days": grace, "series_within_grace": age is None or age <= grace}
+
+
+def snapshot(pinned, today=None):
     index = fetch(FEED)
     releases = fetch(RELEASES)
     versions = set(re.findall(r'wpewebkit-(\d+\.\d+\.\d+)\.tar\.xz["<]', releases))
@@ -87,6 +108,7 @@ def snapshot(pinned):
     if not series:
         raise ValueError("release index contains no archive for the pinned stable series")
     latest_micro = max(series, key=version)
+    window = support_window(release_dates(releases), pinned, today or datetime.now(timezone.utc).date())
     # Every advisory linked from the first index page is checked, not merely
     # the newest: an older advisory may have a higher fixed-version bound.
     def check(identifier):
@@ -101,15 +123,17 @@ def snapshot(pinned):
             "checked_utc": datetime.now(timezone.utc).isoformat(),
             "index_sha256": hashlib.sha256(index.encode()).hexdigest(),
             "release_index_sha256": hashlib.sha256(releases.encode()).hexdigest(),
-            "latest_micro": latest_micro, "pin_is_latest_micro": pinned == latest_micro,
+            "latest_micro": latest_micro, **window, "pin_is_latest_micro": pinned == latest_micro,
             "latest_advisory": records[0]["id"], "advisories": records,
             "passed": not any(record["affected"] for record in records),
             "scope": "version bounds on current advisory index; not a security certification",
             "public_release_allowed": False,
             "release_blockers": ([f"stable-series pin update required: {pinned} -> {latest_micro}"]
                                  if pinned != latest_micro else []) +
-                                ["upstream support window unconfirmed",
-                                 "native three-host and cross-target packaging acceptance required"]}
+                                ([] if window["series_within_grace"] else
+                                 [f"pinned series superseded {window['series_superseded_age_days']} days ago "
+                                  f"(limit {window['series_grace_days']}): re-pin required"]) +
+                                ["native three-host and cross-target packaging acceptance required"]}
 
 
 def main():

@@ -505,7 +505,7 @@ def package_provenance(asset, staged, tree, sources, ordered, manifest, report, 
         relative_root = Path("share/licenses/web-deps") / port["name"]
         port_notices = []
         for file in source.rglob("*"):
-            if file.is_file() and re.match(r"^(LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT)(?:[.\-_]|$)", file.name, re.I):
+            if file.is_file() and re.match(r"^(LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT|FTL)(?:[.\-_]|$)", file.name, re.I):
                 destination = relative_root / file.relative_to(source)
                 (staged / destination).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(file, staged / destination)

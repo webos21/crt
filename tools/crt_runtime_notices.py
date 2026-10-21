@@ -27,7 +27,8 @@ REGISTRY = ROOT / "third_party" / "crt-runtime" / "components.json"
 STAGE_ORDER = ["01-c", "02-cxx", "03-gfx-simple", "04-gfx-media", "05-ui", "06-web"]
 
 HEADER_BLOCK = re.compile(r"\s*(/\*.*?\*/|(?://[^\n]*\n)+|(?:#[^\n]*\n)+|(?:;[^\n]*\n)+)", re.S)
-LICENSE_WORDS = re.compile(r"copyright|permission|licen[sc]e|redistribut", re.I)
+# "permission" alone also matches prose such as "executable-memory permissions"; a grant says "permission to/is hereby".
+LICENSE_WORDS = re.compile(r"copyright|permission\s+(?:to|is\s+hereby)|licen[sc]e|redistribut", re.I)
 COPYRIGHT_LINE = re.compile(r"(?im)^[\s*/#;]*(?:copyright|\(c\)).*$")
 DIGITS_YEAR = re.compile(r"\b(?:19|20)\d\d\b")
 SPDX_LINE = re.compile(r"(?im)^[\s*/#;]*SPDX-License-Identifier:\s*(.+?)\s*(?:\*/)?$")

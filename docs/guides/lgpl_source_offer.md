@@ -1,6 +1,6 @@
 # LGPL Source Offer
 
-**Status: implemented; owner review pending. Not legal advice.** The facts below come from the SDK inventories and
+**Status: implemented; owner review in progress (decision 1 recorded 2026-10-21, see section 5). Not legal advice.** The facts below come from the SDK inventories and
 the build recipes (checked against the macOS/arm64 `06-web` development SDK of 2026-10-20). The offer text itself is
 no longer written by hand: `tools/crt_source_offer.py` generates `share/licenses/SOURCE-OFFER.md` in every SDK that
 ships FFmpeg (and WebKit in `06-web`), and `tools/prepare_release_assets.py` adds the corresponding-source bundle to
@@ -44,8 +44,16 @@ do).
 * **FFmpeg, static link.** An application that links `libcrtmedia.a` links `libavcodec.a`, `libavformat.a`,
   `libavutil.a` and `libswresample.a` as separate archives: build a modified FFmpeg with the same recipe and relink
   the application with your archives in place of the SDK's.
-* **FFmpeg inside the shared `libcrtmedia`.** Rebuild `libcrtmedia` from the CRT repository with your FFmpeg install
-  (`tools/crt-port-build.py` with `porting/recipes/ffmpeg.json`, then the stage build) and substitute it.
+* **FFmpeg inside the shared `libcrtmedia`.** The isolated `04-gfx-media` stage (and so `05-ui` and `06-web`, which
+  inherit its tree) installs a relink kit, `share/crt/relink/libcrtmedia/`: the CRT-side objects the shared library was
+  linked from (`objects/`, with SHA-256 in `MANIFEST.json`), the export list the link needs, `relink.json` (the link
+  command the build used, with `@SDK@`, `@OBJ@`, `@OUT@` placeholders) and `relink.py` (standard library only). In a
+  shell where the SDK is activated, `python relink.py --ffmpeg-libdir <your FFmpeg libs> --out <dir>` links a new
+  `libcrtmedia` against your `libavcodec.a`, `libavformat.a`, `libavutil.a` and `libswresample.a`; `--print` shows the
+  command. The host libraries the link names (Windows SDK import libraries; `CRT_WINDOWS_SDK_LIBPATH` must be set) are
+  not part of the kit. In `06-web` the private copy under `libexec/crtweb/lib/` is the same binary and is replaced with
+  the relinked one. Rebuilding from the CRT repository (`tools/crt-port-build.py` with `porting/recipes/ffmpeg.json`,
+  then the stage build) stays available.
 
 ## 4. How the offer is produced
 
@@ -73,19 +81,69 @@ values: they are what lets a recipient (or the project) fetch the same bytes lat
 Settled 2026-10-20: contact channel = the project's issue tracker; period = 3 years, fixed; upstream archives are not
 included in the bundle.
 
+Decided 2026-10-21 and implemented the same day: **FFmpeg inside the shared `libcrtmedia`** is handled by shipping the
+relinkable objects (section 3), not by relying on the rebuild instructions alone. `tools/crt_relink_kit.py` takes the
+link command from the stage build (`ninja -t commands`), rewrites it to placeholders, copies the objects and fails if a
+build-tree path survives; `build_stage_04_gfx_media.py` writes the kit after install and declares it as `relink_kit` on
+the `ffmpeg` dependency; `verify_dist.py` rejects an isolated-stage SDK that ships FFmpeg without a complete kit
+(in-tree developer SDKs have none). Evidence on Windows/x64: from a real stage build (`gfx-media-build`), the kit
+relinked `libcrtmedia.dll` (same size as the SDK's, exports identical except one symbol that comes from the newer
+Windows SDK import library on this machine) and also with `--ffmpeg-libdir` pointing at a separate copy of the four
+archives. Not verified: the Linux and macOS kits (same code path, output names `lib/libcrtmedia.so` and `.dylib`; no
+host to run them) and an end-to-end stage rebuild that exercises the new step. Tests: `tools/test_crt_relink_kit.py`.
+
+Decided 2026-10-21: **dual-licensed components.** FreeType is used under the FreeType License (FTL), not the GPLv2
+alternative; Mbed TLS under Apache-2.0, not GPL-2.0-or-later. Both are permissive, neither makes the combined SDK
+GPL, and the FTL needs only its text and a credit line. The SDK now says so itself: the `04-gfx-media` stage builder
+(`record_license_choices`) installs `share/licenses/freetype/FTL.TXT` (previously not shipped, although FreeType's
+`LICENSE.TXT` points at it), `share/licenses/freetype/CRT-LICENSE-CHOICE.txt` with the credit line the FTL requires
+("Portions of this software are copyright (c) 2026 The FreeType Project (https://freetype.org). All rights
+reserved.", year read from the pinned source) and `share/licenses/mbedtls/CRT-LICENSE-CHOICE.txt`, all listed in the
+manifest notices; the `06-web` stage now also collects `FTL.TXT` from its private FreeType. Tests:
+`tools/test_license_choices.py`. Takes effect in SDKs regenerated from this tree (not yet rebuilt). The SBOM still
+declares `NOASSERTION` for ports; filling their license fields is a separate, optional improvement.
+
+Decided 2026-10-21: **flagged source-tree files** (GPL, GPL-with-exception and MPL classes of `license-scan.json`). Checked
+object by object, not through the SBOM, against the Windows/x64 WebKit 2.54.1 build tree (`build.ninja`, CMake cache,
+unified sources) of the isolated `06-web` build:
+
+* **Not built** (no compile or link input in the build): pdf.js (118 MPL locale and image files; `ENABLE_PDFJS=OFF`), the
+  ANGLE `flex-bison` skeletons and m4 files (host tools, GPL) and the ANGLE bison outputs `glslang_tab_autogen.*`
+  and `preprocessor_tab_autogen.cpp` (`ENABLE_WEBGL=OFF`, no `ANGLE/src/compiler` input), libwebrtc and its yasm files,
+  capstone (`.clang-format` only) and the libsoup `directory.js` resource (CRT uses curl). They stay in the upstream
+  archive the offer names and nowhere in the binaries.
+* **Built, and acceptable:** `Source/WTF/wtf/text/StringBuilderJSON.cpp`, `StringBuilderJSON.h`, `EscapedFormsForJSON.h`
+  (MPL-2.0, file-level copyleft; their source is in the WebKit archive of the offer, and the MPL allows them in a larger
+  work), and `Source/WebCore/xml/XPathGrammar.cpp`/`.h` (Bison output compiled through `UnifiedSource-xml-2.cpp`; the
+  GPL's Bison special exception lets the parser be part of a larger work under other terms). Both are now named in the
+  generated `share/licenses/SOURCE-OFFER.md` of `06-web` ("Two other licenses apply to files compiled into the WebKit
+  binaries"); test: `tools/test_crt_source_offer.py`.
+
+Limits of the check: one host (Windows/x64) and one configuration; the macOS and Linux builds use the same CMake options
+but were not re-inspected. A change of those options (for example WebGL or the PDF viewer) or of the WebKit pin repeats
+this check. No copy of the MPL text is installed: the three file headers carry the Exhibit A notice and the URL, and MPL-2.0
+Section 3.2 asks for a statement of how to get the source of the Executable Form, which the offer now gives. Say so if you
+want the license text installed anyway.
+
+Decided 2026-10-21: **notice and header decisions.** The four attributed header-less files of
+`third_party/bionic/header_decisions.json` are approved as recorded (`gdtoa_fltrnds.h`, `s_llrint.c` and `s_llrintf.c`
+are covered by the headed file they include; `s_signgam.c`, three lines, is attributed to FreeBSD msun without a license
+text). Two further findings of the NOTICE review were fixed: `include/regex.h` is CRT-written and no longer carries the
+Henry Spencer and UCB copyright lines (those apply to the implementation in `libc/src/regex`, whose BSD-3 text is in
+the NOTICE); and `tools/crt_runtime_notices.py` no longer takes a descriptive comment that merely contains the word
+"permissions" (`libc/src/arch/macos/common/jit_permissions.c`) for a license header. The NOTICE now has 34 groups for
+137 headed files (was 36 and 139); test: `tools/test_crt_runtime_notices.py`.
+
+Decided 2026-10-21: **already published binaries.** The release `v0.4.0-preview.1` (2026-09-21) carries `04-gfx-media` SDKs
+with FFmpeg 8.1.2 and predates this offer. The distribution policy has changed completely since, so the owner will
+delete that release from the distribution (done by the owner on GitHub, not by tooling) instead of adding the offer to
+it; no release is offered without the generated `SOURCE-OFFER.md` from now on (`verify_dist.py` and the release tool
+enforce that). The git tag is a source reference and is not an object-code distribution.
+
 Still open:
 
-1. **FFmpeg inside the shared `libcrtmedia`:** whether the combined library satisfies LGPL section 6 with the rebuild
-   instructions above (permissive CRT code combined with LGPL code in one library), or the shared library must also ship
-   relinkable objects. Optional external review.
-2. **Dual-licensed components:** record the license chosen for mbedTLS (Apache-2.0) and FreeType (FreeType License).
-3. **Source-tree files that are not shipped:** the GPL-with-exception bison skeletons under
-   `Source/ThirdParty/ANGLE/tools`, the MPL files (121) and any other flagged class in `license-scan.json` are in the
-   upstream archive. This guide assumes none is compiled into a shipped binary; that was checked for the build inputs
-   through the SBOM, not object by object.
-4. **Windows and Linux/aarch64 SDKs:** the same generator applies, but those SDKs have not been regenerated with it, so
-   the lists above were verified on macOS/arm64 only.
-5. **Release gate:** `prepare_release_assets.py` still publishes only `01-c`..`04-gfx-media`; offering `05-ui` and
-   `06-web` and the switch that lets `public_release_allowed` become true are separate Tranche 10 work. The
-   release owner reviews this guide and `share/licenses/crt-libc/NOTICE` (including the four attributed header-less files in
-   `third_party/bionic/header_decisions.json`); an external legal review is optional.
+1. **SDK coverage of the generator:** macOS/arm64, Windows/x64 and Linux/aarch64 SDKs were regenerated with it
+   (2026-10-20/21); Windows/arm64 has not been (needs an arm64 host).
+2. **Release gate:** `prepare_release_assets.py` exports `05-ui` and `06-web` behind the owner-controlled
+   `web_public_release` switch in `third_party/crt-runtime/release.json` (a final tag refuses a development candidate);
+   the switch stays off until the Tranche 10 conditions are met.

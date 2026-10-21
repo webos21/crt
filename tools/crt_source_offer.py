@@ -67,8 +67,9 @@ def ffmpeg_component(recipe: dict) -> dict:
                     "code built into the shared libcrtmedia"),
         "replace": ("Static link: build a modified FFmpeg with the recipe `porting/recipes/ffmpeg.json` and link "
                     "your application with your `libav*.a`/`libswresample.a` in place of the SDK's (they are "
-                    "separate from `libcrtmedia.a`). Shared `libcrtmedia`: rebuild it from the corresponding "
-                    "source with your FFmpeg install and substitute it."),
+                    "separate from `libcrtmedia.a`). Shared `libcrtmedia`: relink it with the kit in "
+                    "`share/crt/relink/libcrtmedia/` (the CRT-side objects it was linked from and `relink.py`; "
+                    "`--ffmpeg-libdir` takes your FFmpeg libraries), or rebuild it from the corresponding source."),
     }
 
 
@@ -84,6 +85,14 @@ def webkit_component(recipe: dict, patch_manifest: dict) -> dict:
         "recipe": "libcrtweb/third_party/webkit/recipe.json",
         "linkage": ("private shared library `libexec/crtweb/lib/libWebKit.*` with its helper processes "
                     "(`WebProcess`, `NetworkProcess`, `crtweb_host`); applications link only `libcrtweb`"),
+        "other_licenses": ("Two other licenses apply to files compiled into the WebKit binaries; neither changes the LGPL "
+                           "terms above. `Source/WTF/wtf/text/StringBuilderJSON.cpp`, `StringBuilderJSON.h` and "
+                           "`EscapedFormsForJSON.h` are under the Mozilla Public License 2.0 "
+                           "(<https://mozilla.org/MPL/2.0/>): their source form is part of the WebKit archive named "
+                           "below, and the MPL covers only those files. `Source/WebCore/xml/XPathGrammar.cpp` and "
+                           "`XPathGrammar.h` are Bison output under the GNU GPL with Bison's special exception, which "
+                           "allows the parser to be part of a larger work under other terms. Checked against the "
+                           "WebKit build inputs in `docs/guides/lgpl_source_offer.md`."),
         "replace": ("Rebuild the private WebKit closure with `tools/crt-stage-build.py` from the source recipe and "
                     "predecessor SDK named in `share/crt/web-source-correspondence.json`, then replace "
                     "`libexec/crtweb/` (library and matching helper processes together). Applications never link "
@@ -148,10 +157,12 @@ def render_offer(root: Path, config: dict, stage: str, version: str, components:
     upstream = [f"* {item['name']} {item['version']}: <{item['archive']['url']}>, SHA-256 "
                 f"`{item['archive']['sha256']}`" + (f", {item['archive']['size']} bytes" if item['archive'].get("size") else "")
                 for item in components]
+    other = [item["other_licenses"] for item in components if item.get("other_licenses")]
     template = (root / TEMPLATE).read_text(encoding="utf-8")
     values = {
         "version": version, "stage": stage,
         "component_names": " and ".join(f"{item['name']} {item['version']}" for item in components),
+        "other_licenses": (("\n\n").join(other) + "\n\n") if other else "",
         "component_table": "\n".join(rows), "where": where, "source_parts": "\n".join(parts),
         "issue_tracker": config["issue_tracker_url"], "offer_years": str(config["offer_years"]),
         "upstream_list": "\n".join(upstream), "replace": "\n\n".join(f"**{item['name']}.** {item['replace']}" for item in components),

@@ -55,6 +55,14 @@ class RenderTests(unittest.TestCase):
         self.assertEqual([], offer.unresolved_problems(text))
         self.assertIn("the 23 CRT patches", text)
 
+    def test_web_stage_offer_names_the_mpl_and_bison_files_that_are_compiled_in(self) -> None:
+        components = offer.components_from_root(ROOT, "06-web", True)
+        text = offer.render_offer(ROOT, self.config, "06-web", "v1.2.3", components, "abc123")
+        for needle in ("Mozilla Public License 2.0", "StringBuilderJSON.cpp", "XPathGrammar.cpp", "Bison's special exception"):
+            self.assertIn(needle, text)
+        media = offer.render_offer(ROOT, self.config, "05-ui", "v1", offer.components_from_root(ROOT, "05-ui", True))
+        self.assertNotIn("Mozilla", media)
+
     def test_media_stage_offer_is_ffmpeg_only(self) -> None:
         text = offer.render_offer(ROOT, self.config, "05-ui", "v1", offer.components_from_root(ROOT, "05-ui", True))
         self.assertIn("FFmpeg", text)

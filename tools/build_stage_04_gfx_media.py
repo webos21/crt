@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -15,6 +16,7 @@ import time
 from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
+import crt_relink_kit
 from crt_elf import needed_libraries, relocate_absolute_runtime_paths, remove_absolute_runtime_paths
 from crt_text_relocate import relocate_text_prefixes
 
@@ -596,6 +598,31 @@ def copy_dependency_record(staged: Path, name: str, recipe: Path,
     }
 
 
+FREETYPE_CHOICE = """CRT redistributes FreeType under the FreeType License (FTL), the first of the two mutually exclusive licenses
+FreeType offers (see LICENSE.TXT); the GPLv2 alternative is not used. The FTL text is FTL.TXT in this directory.
+
+Portions of this software are copyright (c) {year} The FreeType Project (https://freetype.org). All rights reserved.
+"""
+MBEDTLS_CHOICE = """CRT redistributes Mbed TLS under the Apache License 2.0, one of the two licenses it is offered under
+(Apache-2.0 OR GPL-2.0-or-later, see LICENSE); the GPL alternative is not used.
+"""
+
+
+def record_license_choices(staged: Path, freetype_source: Path, dependencies: list[dict]) -> None:
+    """Make the dual-license choices visible in the SDK: FreeType's FTL text and credit line, the Mbed TLS choice."""
+    by_name = {item["name"]: item for item in dependencies}
+    year = re.search(r"1996-(\d{4})", (freetype_source / "src" / "base" / "ftobjs.c").read_text(encoding="utf-8", errors="replace"))
+    if year is None:
+        raise SystemExit("cannot read the FreeType copyright year from src/base/ftobjs.c")
+    directory = Path("share") / "licenses" / "freetype"
+    shutil.copy2(freetype_source / "docs" / "FTL.TXT", staged / directory / "FTL.TXT")
+    (staged / directory / "CRT-LICENSE-CHOICE.txt").write_text(FREETYPE_CHOICE.format(year=year.group(1)), encoding="utf-8", newline="\n")
+    by_name["freetype"]["notices"] += [(directory / "FTL.TXT").as_posix(), (directory / "CRT-LICENSE-CHOICE.txt").as_posix()]
+    directory = Path("share") / "licenses" / "mbedtls"
+    (staged / directory / "CRT-LICENSE-CHOICE.txt").write_text(MBEDTLS_CHOICE, encoding="utf-8", newline="\n")
+    by_name["mbedtls"]["notices"].append((directory / "CRT-LICENSE-CHOICE.txt").as_posix())
+
+
 def existing_relative_files(root: Path, patterns: tuple[str, ...]) -> list[str]:
     found: list[str] = []
     for pattern in patterns:
@@ -881,6 +908,7 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
             existing_relative_files(staged, (
                 "lib/libz.so*", "lib/libz*.dylib", "bin/libz*.dll", "lib/libz*.dll.a"))),
     ]
+    record_license_choices(staged, freetype_source, dependencies)
     retained = [item for item in manifest.get("redistributed_dependencies", [])
                 if item.get("name") not in {"freetype", "ffmpeg", "skia",
                                             "curl", "mbedtls", "zlib"}]
@@ -1318,6 +1346,14 @@ def main() -> None:
                       ", ".join(str(p.relative_to(staged)) for p in leftover),
                       flush=True)
 
+        # FFmpeg (LGPL) is folded into the shared libcrtmedia: ship what is needed to relink it with a modified FFmpeg.
+        with timings.measure("write libcrtmedia relink kit"):
+            crt_relink_kit.build_kit(
+                build_dir, crt_relink_kit.find_output(build_dir, target_os), staged, "libcrtmedia")
+            problems = crt_relink_kit.check_kit(staged, "libcrtmedia")
+            if problems:
+                raise SystemExit("libcrtmedia relink kit: " + "; ".join(problems))
+
         # The packaged 04 SDK carries the pinned recipe that advances it to
         # 05-ui, the cumulative-chain contract tools/build_stage_02_cxx.py's own
         # successor-recipe comment documents. create_stage_source.py embedded it
@@ -1339,6 +1375,9 @@ def main() -> None:
             }
             add_redistributed_dependencies(
                 build_asset, staged, port_sources, skia_source, manifest)
+            for item in manifest["redistributed_dependencies"]:
+                if item["name"] == "ffmpeg":
+                    item["relink_kit"] = (crt_relink_kit.KIT_RELATIVE / "libcrtmedia").as_posix()
             (staged / "manifest.json").write_text(
                 json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 

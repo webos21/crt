@@ -89,6 +89,15 @@ reopens its decision); the macOS SDK stages were regenerated and verified. The L
 `docs/guides/lgpl_source_offer.md` with placeholders and seven decisions for the owner and legal review. Not legal
 advice; legal sign-off, hosting/contact for the offer and Windows/aarch64 SDK regeneration remain open.
 
+### Tranche 10: WebKit support policy adopted (G = 60, S = 30)
+
+The owner adopted the support policy in `docs/design/libcrtweb_api_policy.md`: a pinned series may be released for 60 days
+after the next stable series first ships, and a re-pin starts within 30 days. `check_webkit_security.py` now computes the
+series' superseded age from the upstream release index (new `series_*` fields in `web-security.json`) and replaces the fixed
+blocker "upstream support window unconfirmed" with a blocker that appears only past 60 days; `crt_web_release.py` refuses a
+public release past the grace period, and the owner cannot waive that through `accepted_blockers`. Live check: 2.54.1 is the
+newest stable, not superseded, within grace. Tests: `test_crt_web_release`, `SecurityTests.test_support_window`.
+
 ### Tranche 10: what upstream says about the 2.54 support window
 
 Looked up instead of assumed (WebKit documentation, release schedule, release list, advisories, read 2026-10-20): upstream
