@@ -4949,8 +4949,9 @@ build's headers (match; generated-header SHA-256 `299726ec…`). The record stat
 
 Limits: this proves the cross compile/link/package split only. No aarch64
 process was run, so browser, HTTP/TLS, Host ABI maps, GPU, audio and camera
-behavior on Linux/aarch64 stay **unverified** until a native aarch64 host
-replays the `06-web` gates. Public release remains open.
+behavior on Linux/aarch64 were **unverified** at this point. The native in-tree run of 2026-10-21
+([below](#inherited-runtime-notices-2026-10-20)) covers the browser, HTTP/TLS and Host ABI gates; audio playback, GPU
+and VA-API stay open for want of a suitable host, and the isolated `06-web` stage build is not provided natively. Public release remains open.
 
 #### WebKit 2.54.1 re-pin and Linux/x86_64 replay (2026-10-20)
 

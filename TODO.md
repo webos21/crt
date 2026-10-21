@@ -167,7 +167,7 @@ uses the host replay order stated below and in the acceptance document.
     browser/API rebuild with product work hidden; HTTP/TLS, Host ABI and immutable
     input/output inventories ([evidence](docs/acceptance/crtweb_acceptance.md#fresh-windows-full-stage-replay-after-pal-fixes)).
   * [x] Build-host/target split x86_64-host -> Linux/aarch64-target proved (cross compile/package only;
-    native aarch64 execution of the 06-web gates is still unverified, [evidence](docs/acceptance/crtweb_acceptance.md#linux-aarch64-cross-build-replay-2026-10-20)).
+    native aarch64 run of the in-tree WebKit gates 2026-10-21: all green except `media_playback` (guest audio) and the GPU gates (no host GPU/VA driver); the isolated 06-web stage build is not provided natively by design, [evidence](docs/acceptance/crtweb_acceptance.md#linux-aarch64-cross-build-replay-2026-10-20)).
   * [x] Native Windows replay of the 75-function `libcrtmedia.dll` export boundary;
     DLL-import consumer/API resolution and ownership callback evidence stay in Web acceptance.
   * [ ] Inherited-runtime notices/SBOM: engineering inventory done on Linux/x86_64 (`crt-runtime` components in
