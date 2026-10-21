@@ -22,9 +22,11 @@ the **SDK wrappers, toolchain, and deployment contract**, not the CLI.
 | `webos21/crt-cli` | SDK installation/selection, development environments, port resolution/local builds, project build/run/package | A separate implementation of CRT ABI/link rules |
 | `webos21/crt-studio` | CRT-native IDE and editing/debugging UX | A duplicate SDK installer or recipe engine |
 
-These repository names describe the target organization, not verified creation
-or implementation status. Initially, develop `crt` and `crt-cli` together;
-Studio follows later.
+The separate CLI and Studio repositories now contain their own design and
+bootstrap documentation, not product implementations. Their local designs own
+subsequent product decisions; CRT's CLI/Studio documents retain the original
+integration baseline. Initially, develop `crt` and `crt-cli` together; Studio
+workflow integration follows available CLI capabilities.
 
 Build dependencies flow from Studio to the public CLI contract/SDK and from
 the CLI to the SDK. Consumer bug reports and requirements may flow back to the
@@ -94,7 +96,7 @@ entry points in the installed SDK**. Declare Python as a host requirement when
 needed. A later fully CRT-native recipe executor must preserve compatibility
 against the same fixtures and results.
 
-## 4. SDK Build Contract v1 Contents
+## 4. Proposed SDK Build Contract v1 Contents
 
 Do not silently change existing `manifest.json` semantics or the stage recipe
 schema. Introduce the development contract through a versioned sidecar
@@ -162,9 +164,11 @@ constraint**. Do not replace real symlinks with MSYS markers, shortcuts, or
 deep copies, and do not let the CLI change this setting automatically.
 Do not promise a new alias mechanism without separate validation.
 
-Independent-bundle acceptance requires mksh/awk/make and applet execution,
-real configure child-process creation, and zlib static/shared build-and-run
-without an SDK or CRT source/build tree. Also test paths containing spaces and
+Independent-bundle acceptance first requires mksh/awk/make and applet execution
+and configure-like child-process creation without a target development SDK or
+CRT source/build tree. The separate zlib static/shared build-and-run gate
+requires a pinned target SDK, but no CRT source/build tree; host tools must
+remain selected independently of that SDK. Also test paths containing spaces and
 Korean characters, colliding DLL/tool names on PATH, and update failure/recovery.
 Do not claim unfinished process-signal or interactive job-control capabilities.
 
@@ -205,6 +209,13 @@ bootstrap review. Windows imported DLLs must resolve during initial loading,
 using validated placement such as app-local deployment. Merely placing them
 under `runtime/` does not guarantee PATH-based resolution.
 
+Bootstrap acceptance must exercise an actual HTTPS metadata fetch and artifact
+download on a clean host without the development SDK, producer build tree, or
+globally installed CRT DLLs. Record the shipped runtime inventory, TLS stack,
+trust inputs, publisher-authentication policy, and negative cases separately
+from later SDK installation/transactions. CLI's D1-07 acceptance owns these
+consumer measurements; writing this requirement is not execution evidence.
+
 ## 7. Change, Validation, and Release Principles
 
 Keep early producer/consumer changes narrow and ordered:
@@ -231,3 +242,33 @@ not authorize public release. Current `05-ui`/`06-web` release tooling and
 remaining publication, notices/source-offer/SBOM, support/security conditions stay in
 [Web acceptance](../acceptance/crtweb_acceptance.md) and [TODO](../../TODO.md).
 This design does not close those gates.
+
+## 8. Cross-repository Contract Review
+
+`crt-cli` owns the shared adoption record at `docs/compatibility.md` in the
+[CLI repository](https://github.com/webos21/crt-cli). It links original evidence;
+it does not replace producer SDK acceptance or Studio's native UX acceptance.
+Keep the original design baseline separate from the exact SDK/tool artifacts,
+CLI command/JSON version, and combinations actually exercised by Studio.
+
+For changes to shared contracts, each repository's review must:
+
+1. Identify the contract owner and the affected producer/consumer paths and
+   immutable baseline commits. Record changed ownership explicitly.
+2. Distinguish existing wire/schema fields from proposed versions and
+   capabilities. Existing SDK manifest `format: 1`, port recipe
+   `schema_version: 1`, and isolated-stage recipe `schema_version: 2` are
+   separate formats, not a common SDK/CLI contract version.
+3. Describe compatibility/errors/lifetimes, migration and fallback/rejection;
+   link proposed commands to their actual implementation/capability status.
+4. Link the owning TODO step, acceptance case/fixtures, and original native
+   evidence (or **Not run**). A documentation baseline or fixture pass does
+   not approve a runnable SDK/CLI/Studio combination.
+5. Review affected repositories and update the adoption record through linked
+   changes. Validate/promote the producer first, then update consumer locks;
+   preserve previous working identities and failed results.
+
+Apply this as a manual review checklist now. Lightweight future automation can
+check pinned references, owner/version links, declared vs implemented commands,
+and TODO-to-acceptance links once concrete metadata exists. Do not enforce
+identical Markdown text across owners or add a second full build for doc edits.

@@ -368,3 +368,13 @@ runtime은 다음 계층으로 나누어 설계한다.
   측정 증거는 acceptance가 소유한다. 완료 체크리스트와 상태를 복제하지 말고
   원문을 링크한다. 검토 초안의 유효한 내용은 소유 문서에 통합하고 폐기된 제안은
   현재 계약처럼 남기지 않는다.
+
+## Cross-repository contract changes
+
+For SDK/host-tool/recipe/CLI/Studio boundary changes, follow the
+[SDK contract review procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review).
+Review affected owners and pinned baseline commits, distinguish proposed from
+implemented versions/commands, and link TODO to acceptance evidence. The CLI
+repository owns `docs/compatibility.md` for contract adoption and exercised
+combinations; do not duplicate its ledger here or label untested combinations
+compatible. Promote producer artifacts before updating consumer locks.

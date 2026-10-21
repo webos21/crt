@@ -11,6 +11,29 @@ substantive update.
 
 ## 2026-10-21
 
+### Review SDK/CLI/Studio contracts against all three local repositories
+
+Compared the attached cross-repository review with CRT `a23a173`, CRT-CLI
+`a76d8ad` and CRT Studio `d3793e3`. Ownership is consistent; both consumer
+repositories still contain documentation only. Added an explicit Planned
+SDK Producer Contract Gate P0 without changing the active Web closure. The
+CLI-owned `docs/compatibility.md` separates design provenance, existing formats,
+proposed contracts and exercised combinations; no runtime combination is
+approved by this review. Existing SDK `format: 1`, port `schema_version: 1`
+and stage `schema_version: 2` are not one common v1 contract.
+
+Clarified feature-level CLI prerequisites and D7's formal approval role in the
+integration baselines; current product designs remain owned by the consumer
+repositories. Added SDK-free HTTPS/bootstrap requirements and a common manual
+contract-review procedure. Corrected independent host-tools acceptance:
+tool execution needs no target SDK, but a zlib build requires its pinned target
+SDK while remaining independent of CRT source/build trees. Consumer histories
+record their own documentation changes. These are documentation/acceptance
+requirements, not implementation, runtime replay, new CI, or release approval.
+Documentation validation covers local links/anchors, English additions, fences,
+conflict markers and whitespace. It also corrected an existing Windows 9B
+acceptance anchor in this history; external URLs were not network-validated.
+
 ### Tranche 10 on Linux/aarch64: option-ON SDK regeneration and four aarch64-only defects
 
 The five in-tree stage SDKs (`01-c`..`05-ui`) were regenerated on the Ubuntu 26.04 aarch64 guest with FFmpeg, curl, Skia, GPU and
@@ -758,7 +781,7 @@ Found by the run: the first identity was all zeros (a 4-byte `wchar_t` translati
 `GrD3DTextureResourceInfo`'s pointer constructor adopts without `AddRef`, so the wrapped shared resource was
 released early (SIGSEGV); `WebView::launch()` used `/tmp` when `TMPDIR` was unset; the Skia object libraries raced
 the `dist/02-cxx` publisher. Details and limits are in
-[Windows 9B acceptance](docs/acceptance/crtweb_acceptance.md#9b-windows-x64-d3d12-shared-resource-implementation-and-replay-2026-10-16).
+[Windows 9B acceptance](docs/acceptance/crtweb_acceptance.md#9b-windowsx64-d3d12-shared-resource-implementation-and-replay-2026-10-16).
 At this checkpoint, macOS Metal and 9C process/device-loss closure remained open;
 Linux and macOS had not re-run the shared descriptor/wire/test edits. The macOS
 availability replay is recorded above; no `06-web` packaging or global Tranche 9 completion is claimed.

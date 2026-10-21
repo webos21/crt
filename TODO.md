@@ -220,6 +220,25 @@ and CRT-native bootstrap first, then immutable SDK management, source-first port
 and project workflow. [Studio](docs/design/crt_studio.md) is a later CLI consumer;
 these contracts are design work, not an implemented or released product.
 
+**SDK Producer Contract Gate P0** (follow-up to active Web closure; feeds CLI
+D0/D1, not an extra Tranche 10 blocker):
+
+- [ ] Supply external-consumer identity/capability fixtures, distinguishing
+  existing manifest/stage/port formats from the proposed development contract.
+- [ ] Publish SDK-owned C/C++ startup/link/runtime-query rules and public imports;
+  consumers must not reconstruct flags or depend on producer build trees.
+- [ ] Define host-tools/rootfs identity and runtime closure separately from the
+  target sysroot; validate actual native tool/alias execution.
+- [ ] Validate the minimum CRT-native CLI HTTP/TLS/runtime closure and trust
+  inputs for bootstrap without an installed development SDK.
+- [ ] Record independent consumer build/run and ABI evidence for each initial
+  native pair before promoting the corresponding artifact/consumer lock.
+
+Contract adoption and review follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review)
+and the `crt-cli`-owned `docs/compatibility.md` record. Lightweight automated
+contract/link checks are planned after machine-readable contracts/fixtures
+exist; they must not duplicate full WebKit builds for documentation changes.
+
 ### Runtime architecture hardening backlog
 
 These remain independent follow-ups. Promote one at a time when a concrete
