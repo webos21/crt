@@ -24,6 +24,14 @@ tests, full build, `ctest` 203 tests. Environmental exceptions on this guest: si
 unless `LIBVA_DRIVER_NAME=x`, and the playback-pipeline wall-time test fails with no audio sink. Evidence:
 [acceptance](docs/acceptance/crtweb_acceptance.md#inherited-runtime-notices-2026-10-20).
 
+### Tranche 10 on Linux/aarch64: the in-tree WebKit gates run natively
+
+`build_webkit_crt_port.py --webkit --run-tests` ran on the aarch64 guest for the first time past B3 and found two more defects: the
+`curl-openssl` recipe linked the host's nghttp2/libidn2 (host glibc inside the NetworkProcess; `file://` loads never finished), and ports built
+through `crt-cc`/`crt-c++` used outline atomics that the CRT libc does not provide (`libcrtmedia.so` had undefined `__aarch64_ld*`). Fixed by
+`--without-nghttp2 --without-libidn2` and `-mno-outline-atomics` for Linux/aarch64 in both wrappers. All gates pass except `media_playback`, which
+fails on this guest's audio stack (second PipeWire-Pulse stream stalls); GPU gates were not run. Details in the acceptance document.
+
 ## 2026-10-20
 
 ### SDK, CRT-CLI and Studio: consolidate the developer-environment design

@@ -42,7 +42,9 @@
       "--disable-ipfs",
       "--disable-manual",
       "--disable-docs",
-      "--without-libpsl"
+      "--without-libpsl",
+      "--without-nghttp2",
+      "--without-libidn2"
     ],
     "env": {
       "CFLAGS": "-O2"
@@ -267,6 +269,7 @@
     "macos": "shared-pass"
   },
   "notes": [
+    "2026-10-21: --without-nghttp2/--without-libidn2 keep the host's optional libraries out of the build. On a Linux/aarch64 host with libnghttp2-dev/libidn2-dev installed, libcurl.so gained NEEDED libnghttp2.so.14/libidn2.so.0, which pulled the host glibc (libc.so.6, libunistring) into the NetworkProcess next to the CRT libc and stalled every file:// load; the public-API gates (crtweb_api_test, crtweb_api_lifecycle_test) then never saw a finished page. See curl.json for the same flags.",
     "Added 2026-10-10 for Web Tranche 3B milestone B2: WebKit's curl network backend (platform/network/curl: CurlContext, CurlSSLHandle, CurlSSLVerifier) installs an OpenSSL verify callback through CURLOPT_SSL_CTX_FUNCTION, so libcurl must be built with its OpenSSL backend; the `curl` port (mbedTLS, used by libcrtmedia networking) cannot provide it.",
     "Second libcurl in the same sysroot, therefore build.install_subdir: it installs to <prefix>/curl-openssl and the mbedTLS curl keeps <prefix>. WebKit's FindCURL gets CURL_ROOT/CMAKE_PREFIX_PATH pointing at the subdirectory. Same version and source as the curl recipe (8.21.0).",
     "LDFLAGS rpath: libcurl.so is found from <prefix>/curl-openssl/lib but needs libssl/libcrypto from <prefix>/lib.",

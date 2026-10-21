@@ -5243,7 +5243,23 @@ VAAPI/hardware-decode tests time out because libva `dlopen`s Mesa's `virtio_gpu_
 and stalls at init inside the CRT process (with `LIBVA_DRIVER_NAME=x` the four hardware-decode tests that run pass and two
 skip), and `crtmedia_playback_pipeline_test` fails its wall-time floor because the guest has no audio sink to pace playback. Whether
 a host VA driver that pulls in the host libstdc++ is safe inside a CRT process is a separate open question for real hardware.
-Native Linux/aarch64 execution of the `06-web` gates is still not provided: `build_stage_06_web.py` rejects it by design.
+Native Linux/aarch64 execution of the isolated `06-web` stage build is still not provided: `build_stage_06_web.py` rejects it by design.
+
+*Native Linux/aarch64 run of the in-tree WebKit gates (2026-10-21).* `tools/build_webkit_crt_port.py --webkit --run-tests -j3` on the
+guest (4 CPU, 7.4 GB; 8,324 build steps in about 70 minutes) is the first execution of B4 and later on aarch64, because earlier
+aarch64 replays stopped at B3. It found two more option-ON defects that only a native aarch64 run can show, both fixed at the root:
+(5) `curl-openssl.json` probed the host's `libnghttp2`/`libidn2`, so `libcurl.so` pulled the host glibc (`libc.so.6`, `libunistring`) into the
+NetworkProcess beside the CRT libc and every `file://` load stalled (`crtweb_api_test` and `crtweb_api_lifecycle_test` never saw a finished
+page; all threads idle in futex waits): `--without-nghttp2 --without-libidn2`; (6) FFmpeg and the other ports compiled through `tools/crt-cc`
+used outline atomics, which the CRT libc does not export, so the static FFmpeg objects left `__aarch64_ldadd4_acq_rel` and friends undefined
+in `libcrtmedia.so` and the WebProcess died at load ("symbol lookup error"): `tools/crt-cc` and `tools/crt-c++` now pass
+`-mno-outline-atomics` for Linux/aarch64, matching `crt_build_flags`. After both fixes the gates pass: `webcore_graph`, `process`, public
+`api` and `api_lifecycle` (100 cycles), `render_through_surface_protocol`, `input_through_surface_protocol`, `lifecycle_and_host_abi`,
+`webview_through_crtui`, `camera_capture` and `crt_network_trust`. **`media_playback` does not pass on this guest**: the audio-only MP3 page
+opens a second PipeWire-Pulse stream while the first page's stream is still alive, the stream-create reply stalls until the 10 s deadline and
+`crtweb_media_test` fails at "audio plays to the end" (the video+audio page before it passes); the guest's QEMU HDA/PipeWire stack is the
+suspect, not CRT, but it is not proven. The GPU gates (`--run-gpu-tests`) were not run (virtio GPU, no VAAPI driver). The VAAPI tests also need
+`LIBVA_DRIVER_NAME=x` here (Mesa's virtio video driver hangs at init).
 
 ## Host order
 

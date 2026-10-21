@@ -415,6 +415,16 @@ case "$target_os" in
     ;;
   linux)
     common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1"
+    # Linux/aarch64 (2026-10-21): the project's own code is built with
+    # -mno-outline-atomics (CMakeLists.txt, crt_build_flags) because the CRT
+    # libc/shared objects export no __aarch64_ld*/swp/cas helpers.  Ports
+    # compiled through this wrapper must match: FFmpeg's static archives
+    # linked into libcrtmedia.so otherwise left undefined
+    # __aarch64_ldadd4_acq_rel & co., and the WebProcess failed at load time
+    # ("symbol lookup error ... libcrtmedia.so").
+    if [ "$target_arch" = aarch64 ]; then
+      common_flags="$common_flags -mno-outline-atomics"
+    fi
     case "$(uname -m 2>/dev/null)" in
       aarch64|arm64) host_arch=aarch64 ;;
       *) host_arch=x86_64 ;;
