@@ -11,6 +11,14 @@ substantive update.
 
 ## 2026-10-21
 
+### crtmedia_playback_pipeline_test: it measured the audio server's start-up latency, not CRT pacing
+
+The wall-time floor failed on back-to-back runs (57-62 ms against a 200 ms floor; 275-295 ms when it passed). The test fed the player the timestamp of
+the audio it had just written, while `player.h` and `media_player_demo.c` use the sink's real playback position; the Pulse sink's initial one-second credit
+then let the 1.04 s clip through at once, and only the server's credit latency set the pace. The test now reports the sink position (loop about 1.1 s;
+0 failures in 20 back-to-back, 15 ctest and 5x3 concurrent runs). No product code changed. Linux/x86_64 only; macOS, Windows and a host without any
+audio sink were not run.
+
 ### Tranche 10: Tranche 8 device gates against the installed Linux/x86_64 06-web SDK
 
 New `tools/test_stage_06_devices.py` builds `crtweb_media_test` and `crtweb_capture_test` (public C API only) with the installed SDK's
@@ -33,7 +41,7 @@ relinked library; both relinked libraries load and demux the test clip. The firs
 machine's SDK path and `/lib/x86_64-linux-gnu`, so `relink.py` now strips absolute entries (ELF kits ship `crt_elf.py`).
 The stage itself kept failing because Intel's iHD VA-API driver died in `vaDestroyBuffer` under FFmpeg frame threads (lifecycle
 test 7/40 failures, packaged zero-copy demo hang); VA-API decode now uses one thread (0/160 failures after).
-`crtmedia_playback_pipeline_test` fails here regardless of the change, cause not found (the host now has ALSA playback devices; see the device-gate entry). Linux/x86_64 only.
+`crtmedia_playback_pipeline_test` also failed here regardless of the change; its cause was found the same day (next entry).
 
 ### Tranche 10 on Linux/aarch64: relink kit and isolated 04/05 stages
 

@@ -376,8 +376,18 @@ int main(void) {
           cursor += (uint32_t)written * block_align;
           frames_left -= (uint32_t)written;
         }
-        if (sink != NULL && buffer.timestamp_us != CRTMEDIA_AUDIO_TIMESTAMP_NONE) {
-          crtmedia_player_update_audio_clock(player, buffer.timestamp_us);
+        if (sink != NULL && buffer.sample_rate != 0) {
+          // crtmedia/player.h: the audio clock is the position the audio hardware has actually reached, as
+          // tools/media_player_demo.c reports it. Reporting the timestamp of the buffer just handed to the
+          // sink instead made the pacing depend on how much the audio server accepts ahead of playback
+          // (the Pulse sink starts with a one-second credit): with a server that grants credit at once the
+          // 1.04 s clip finished in about 60 ms and the wall-time lower bound below failed on back-to-back
+          // runs, while a server that was idle took about 280 ms.
+          uint64_t position_frames = 0;
+          if (crtmedia_audio_sink_get_position_frames(sink, &position_frames) == CRTMEDIA_OK) {
+            crtmedia_player_update_audio_clock(
+                player, (int64_t)(position_frames * 1000000ull / buffer.sample_rate));
+          }
         }
       }
 

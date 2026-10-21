@@ -5188,10 +5188,7 @@ threading). After the change the lifecycle test failed 0 of 100 and 0 of 60 runs
 zero-copy demo (0.5 s). This was measured on one Intel UHD 630 host; the macOS and Windows hardware decoders are not
 changed, and a different VA-API driver was not tried.
 
-Not caused by this and left alone: `crtmedia_playback_pipeline_test` fails 12 of 15 runs here with and without the change
-("the real render loop takes a real, non-negligible amount of wall time", under 200 ms) and passed once under parallel
-load. Cause not found: the host has ALSA playback devices (HDA Intel PCH) and a PipeWire default sink that is a "Dummy Output", so an
-earlier note that the test needs a sound card does not explain it. Not investigated.
+`crtmedia_playback_pipeline_test` also failed here (12 of 15 runs, with and without the change). Cause found and fixed 2026-10-21, below.
 
 #### Linux/x86_64 isolated 04 -> 05 -> 06 chain on WebKit 2.54.1 (2026-10-21)
 
@@ -5234,6 +5231,25 @@ gate's own wording applies -- it is not a listening test, and this host's PipeWi
 `--require-audio-output` was not used. The physical camera, GPU gates and the macOS and Windows installed-SDK versions were not run
 (the tool refuses non-Linux SDKs). The Web process maps no host VA-API library, so VA-API decode through the host driver is not
 exercised here.
+
+#### Why crtmedia_playback_pipeline_test failed intermittently (2026-10-21)
+
+The failing check is `wall_elapsed_us > 200000` ("the real render loop takes a real, non-negligible amount of wall time") for a clip of about
+1.04 s. Measured with temporary instrumentation (reverted): 275-295 ms when it passed, 57-62 ms when it failed, with all 25 video frames
+displayed, none dropped and 46,080 audio samples in both cases, so decoding was correct. The failures followed **back-to-back process starts**
+(gap 0 s: 57, 59, 279 ms; any gap of 0.1 s or more: about 280 ms), not idle time, and not the sound card -- the host has ALSA playback devices
+and the sink used is the native Pulse protocol client to a PipeWire server whose default sink is a null "Dummy Output".
+
+Cause: the test reported to the player the *timestamp of the audio buffer it had just written* as the audio clock. `crtmedia/player.h` asks for the
+position the audio hardware has actually reached, and `tools/media_player_demo.c` reports `crtmedia_audio_sink_get_position_frames()`. The Pulse sink
+starts every stream with a one-second write credit (`audio_sink_linux.c`, a deliberate fix for a deadlock), so a 1.04 s clip is accepted almost at
+once and the only throttle left is how soon the server grants credit for the last ~40 ms -- about 220 ms of stream start-up on an idle server, almost
+nothing when the previous stream's node is still running. The test measured the server's start-up latency, not CRT pacing. The test now reports the
+sink position like the demo does. The loop then takes about 1.1 s (the clip's real duration), and the check passes in 20 of 20 back-to-back runs, 15
+of 15 `ctest` runs and five rounds of three concurrent runs (before: 1 of 4 back-to-back).
+
+No product code changed; the sink's credit policy is unchanged. Not run: macOS and Windows (the test source is shared and the position call is part of
+the public sink API, but their sinks were not exercised), and a host with no audio sink at all (the Linux/aarch64 guest note above).
 
 #### Inherited runtime notices (2026-10-20)
 
