@@ -134,5 +134,28 @@ class Stage04CacheTest(unittest.TestCase):
         self.assertFalse(work.exists())
 
 
+class SharedMediaCurlTest(unittest.TestCase):
+    """The shared libcrtmedia must record libcurl on Linux (06-web consumers fail to link otherwise)."""
+
+    def test_linux_library_without_libcurl_is_rejected(self) -> None:
+        with mock.patch.object(stage04, "needed_libraries", return_value=["libc.so", "libva.so.2"]):
+            with self.assertRaises(SystemExit) as raised:
+                stage04.require_shared_media_curl(Path("lib/libcrtmedia.so"), "linux")
+        self.assertIn("libcurl", str(raised.exception))
+
+    def test_linux_library_with_libcurl_passes(self) -> None:
+        with mock.patch.object(stage04, "needed_libraries", return_value=["libcurl.so.4", "libc.so"]):
+            stage04.require_shared_media_curl(Path("lib/libcrtmedia.so"), "linux")
+
+    def test_other_hosts_are_not_checked(self) -> None:
+        with mock.patch.object(stage04, "needed_libraries", side_effect=AssertionError("must not read")):
+            for target in ("macos", "windows"):
+                stage04.require_shared_media_curl(Path("lib/libcrtmedia.x"), target)
+
+    def test_stage_cmake_declares_the_linux_shared_curl_edge(self) -> None:
+        cmake = (Path(__file__).resolve().parent.parent / "distribution/stages/04-gfx-media/CMakeLists.txt").read_text()
+        self.assertIn("CRTMEDIA_CURL_SHARED_LIBRARIES", cmake)
+        self.assertIn("libcurl.so", cmake)
+
 if __name__ == "__main__":
     unittest.main()

@@ -966,6 +966,19 @@ def build_example(staged: Path, temp_root: Path, name: str,
             f"(expected {missing!r} in its output)")
 
 
+def require_shared_media_curl(library: Path, target_os: str) -> None:
+    """Linux: the shared libcrtmedia.so must record libcurl, or curl_* stay undefined for every consumer.
+
+    The static zlib is not PIC, so the shared object links curl's shared artifact instead
+    (distribution/stages/04-gfx-media/CMakeLists.txt, CRTMEDIA_CURL_SHARED_LIBRARIES). A build that lost that edge
+    still installs and passes the stage's own static examples; the first program that links libcrtmedia.so (the
+    06-web consumer) then fails with undefined curl_* references."""
+    if target_os != "linux":
+        return
+    if not any(name.startswith("libcurl.so") for name in needed_libraries(library)):
+        raise SystemExit(f"{library}: the shared libcrtmedia does not record libcurl; its curl_* symbols are undefined")
+
+
 def validate_example_runtime_dependencies(executable: Path, target_os: str) -> None:
     if target_os != "linux":
         return
@@ -1347,6 +1360,7 @@ def main() -> None:
                       ", ".join(str(p.relative_to(staged)) for p in leftover),
                       flush=True)
 
+        require_shared_media_curl(staged / "lib" / "libcrtmedia.so", target_os)
         # FFmpeg (LGPL) is folded into the shared libcrtmedia: ship what is needed to relink it with a modified FFmpeg.
         with timings.measure("write libcrtmedia relink kit"):
             crt_relink_kit.build_kit(

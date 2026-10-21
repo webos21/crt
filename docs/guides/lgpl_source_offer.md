@@ -51,8 +51,9 @@ do).
   shell where the SDK is activated, `python relink.py --ffmpeg-libdir <your FFmpeg libs> --out <dir>` links a new
   `libcrtmedia` against your `libavcodec.a`, `libavformat.a`, `libavutil.a` and `libswresample.a`; `--print` shows the
   command. The host libraries the link names (Windows SDK import libraries; `CRT_WINDOWS_SDK_LIBPATH` must be set) are
-  not part of the kit. In `06-web` the private copy under `libexec/crtweb/lib/` is the same binary and is replaced with
-  the relinked one. Rebuilding from the CRT repository (`tools/crt-port-build.py` with `porting/recipes/ffmpeg.json`,
+  not part of the kit. In `06-web` the private copy under `libexec/crtweb/lib/` has the same code and data as `lib/libcrtmedia.so` (only the
+  RUNPATH spelling differs) and is replaced with the relinked one; on Linux/x86_64 both were replaced and the installed browser's
+  smoke and observation tests passed (2026-10-21). Rebuilding from the CRT repository (`tools/crt-port-build.py` with `porting/recipes/ffmpeg.json`,
   then the stage build) stays available.
 
 ## 4. How the offer is produced

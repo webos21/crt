@@ -78,6 +78,18 @@ set(CRTMEDIA_CURL_LIBRARIES
   "${CRT_STAGE_CURL_PREFIX}/lib/libz.a"
 )
 
+# Linux: the shared libcrtmedia.so links curl's shared artifact (libcrtmedia/CMakeLists.txt does the same in-tree).
+# The static zlib is intentionally not PIC, so it cannot be folded into the shared object; libcurl.so records its own
+# mbedTLS/zlib dependencies. Without this edge the isolated stage's libcrtmedia.so left curl_* undefined and had no
+# libcurl in NEEDED, so a program linking libcrtweb (06-web) failed to link (2026-10-21 Linux/x86_64 isolated replay).
+set(CRTMEDIA_CURL_SHARED_LIBRARIES "")
+if(CRT_TARGET_OS STREQUAL "linux")
+  if(NOT EXISTS "${CRT_STAGE_CURL_PREFIX}/lib/libcurl.so")
+    message(FATAL_ERROR "required 04-gfx-media dependency is missing: ${CRT_STAGE_CURL_PREFIX}/lib/libcurl.so")
+  endif()
+  set(CRTMEDIA_CURL_SHARED_LIBRARIES "${CRT_STAGE_CURL_PREFIX}/lib/libcurl.so")
+endif()
+
 set(CRTMEDIA_FFMPEG_PORT_PREFIX "${CRT_STAGE_FFMPEG_PREFIX}")
 set(CRTMEDIA_FFMPEG_LIBRARIES
   "${CRT_STAGE_FFMPEG_PREFIX}/lib/libavformat.a"

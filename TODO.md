@@ -160,7 +160,7 @@ uses the host replay order stated below and in the acceptance document.
     native-COW fix/replay evidence is in Web acceptance. Windows memory-copy fork is unchanged.
 * [ ] **10. Distribution and security closure.**
   * [x] Linux/x86_64 isolated `05-ui -> 06-web` development SDK, installed/relocated
-    browser, external consumer and manifests ([evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-build-and-relocation-replay-2026-10-18)).
+    browser, external consumer and manifests ([evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-build-and-relocation-replay-2026-10-18); re-run 2026-10-21 as a full isolated `04 -> 05 -> 06` chain on WebKit 2.54.1, [evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-04---05---06-chain-on-webkit-2541-2026-10-21)).
   * [x] macOS/arm64 isolated development SDK, installed/space-path relocation,
     external consumer, HTTP/TLS and Host ABI ([evidence](docs/acceptance/crtweb_acceptance.md#macosarm64-isolated-build-and-relocation-replay-2026-10-18)).
   * [x] Windows/x64 isolated development SDK, installed/space-path replay and external

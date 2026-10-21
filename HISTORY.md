@@ -11,6 +11,13 @@ substantive update.
 
 ## 2026-10-21
 
+### Tranche 10: Linux/x86_64 isolated 04 -> 05 -> 06 chain on WebKit 2.54.1, and the missing libcurl in isolated libcrtmedia.so
+
+First fully isolated Linux/x86_64 chain since the 2.54.1 re-pin; all three stages pass `verify_dist.py`. The isolated 04 stage built
+`libcrtmedia.so` without linking curl (the stage CMake lacked `CRTMEDIA_CURL_SHARED_LIBRARIES`), which the 06 stage only met in its last
+step as undefined `curl_*` in the external-consumer link; fixed in the stage CMake, with a stage check and tests. The kit's relinked
+library works in place of both `libcrtmedia.so` copies of the 06-web SDK (browser smoke and observation). Linux/x86_64 only.
+
 ### Tranche 10: Linux/x86_64 libcrtmedia relink kit, and the VA-API decode race behind four failed stage runs
 
 The Linux kit was proven from a real isolated `04-gfx-media` stage: relink from a relocated copy (path with a space, relative

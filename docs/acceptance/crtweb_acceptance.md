@@ -5192,6 +5192,30 @@ Not caused by this and left alone: `crtmedia_playback_pipeline_test` fails 12 of
 ("the real render loop takes a real, non-negligible amount of wall time", under 200 ms) and passed once under parallel
 load; this host has no sound card, so audio pacing is likely absent. Not investigated.
 
+#### Linux/x86_64 isolated 04 -> 05 -> 06 chain on WebKit 2.54.1 (2026-10-21)
+
+The first Linux/x86_64 chain built entirely by the isolated stage builders (`crt-stage-build.py`: 03 SDK -> 04 -> 05 -> 06, no
+in-tree publisher in the predecessor) since the WebKit 2.54.1 re-pin. The 2026-10-18 Linux evidence used an in-tree 05-ui
+predecessor and 2.54.0. Result: all three stages pass `verify_dist.py`; the 06-web SDK is a development candidate ("public release
+NOT authorized") with 154 ELF files, all x86-64; SBOM webkit 2.54.1 with the five inherited runtime components and the
+source offer; the security snapshot passes and is the latest micro; the installed browser's Host ABI observation has no
+violations and one C++ runtime per role.
+
+The first 06 attempt failed in its last step, linking the external consumer (`crtweb_network_test` against `-lcrtweb`), with
+undefined `curl_*` references in `lib/libcrtmedia.so`. Cause: the isolated 04 stage's CMake never defined
+`CRTMEDIA_CURL_SHARED_LIBRARIES` (the in-tree `libcrtmedia/CMakeLists.txt` does), so on Linux the shared `libcrtmedia.so` linked no
+curl at all and recorded no `libcurl` in NEEDED; the 2026-10-18 SDK had it only because its 04 came from the in-tree
+publisher. The stage CMake now links curl's shared artifact on Linux (zlib's static archive is not PIC, so it cannot be folded in),
+`build_stage_04_gfx_media.py` fails a Linux stage whose `libcrtmedia.so` lacks `libcurl` in NEEDED, and
+`tools/test_build_stage_04_cache.py` covers both. The rebuilt chain (04 rebuilt, 05 21 s, 06 about 45 minutes with a fresh work root
+-- a work root cannot be reused after the predecessor changes) passed.
+
+Relink in the 06-web SDK: from a relocated copy (path with a space) the kit produced a `libcrtmedia.so` whose code and data
+sections equal both copies in the SDK (`lib/` and the private `libexec/crtweb/lib/`; those two differ from each other only in
+how RUNPATH is spelled, `$ORIGIN:$ORIGIN` against `$ORIGIN`) and whose RUNPATH is `$ORIGIN`. Placed over both copies, the installed
+`crtweb_browser --smoke` (load, pixels, script) and the packaged browser observation (113 mapped files, no violations) pass, and
+the maps show the relinked files loaded. Not repeated with the relinked library: the packaged HTTP/TLS probe.
+
 #### Inherited runtime notices (2026-10-20)
 
 Every SDK stage redistributes libc/libm/libdl, the shell and (from `02-cxx`) the imported LLVM C++ runtime,
