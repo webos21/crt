@@ -6,6 +6,12 @@ not a record of a new CLI implemented in this repository.
 The [SDK Development Contract](sdk_development_contract.md) owns producer
 boundaries; [CRT Studio](crt_studio.md) owns the future GUI design.
 
+This is the original cross-repository integration baseline. Ongoing CLI design
+and the adoption record `docs/compatibility.md` belong to the separate
+[CRT-CLI repository](https://github.com/webos21/crt-cli); do not maintain a
+second product-design mirror here. Shared changes follow the
+[producer review procedure](sdk_development_contract.md#8-cross-repository-contract-review).
+
 ## 1. Adopted Direction and Superseded Proposals
 
 CRT-CLI is an independent development tool built against CRT libc/PAL and its
@@ -375,6 +381,13 @@ completion checklist. Each repository's TODO/acceptance owns actual status.
 D0 snapshots may start with manually installed existing SDKs. Unfinished D1/D2
 work does not block runtime development or recipe-schema fixtures. Conversely,
 D3 acceptance must not substitute Git Bash for an actual CRT host environment.
+
+D7 is formal Studio compatibility stabilization, not a prerequisite for all
+Studio work. SDK-only S0/UI PoCs and labeled protocol fixtures may start early;
+live project build/run needs actual D5 command capabilities, and robust
+job/cancellation/package integration needs the applicable D6 contracts. JSON
+drafts start in D0; D6 stabilizes them rather than introducing them for the
+first time. Stage numbers alone do not prove a capability is available.
 
 Use small increments within each stage: contract, implementation, bounded test,
 native replay, then documentation. Record host failures, unsupported

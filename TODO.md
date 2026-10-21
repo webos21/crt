@@ -179,7 +179,7 @@ uses the host replay order stated below and in the acceptance document.
     upstream archives not bundled); Linux/aarch64 SDKs regenerated and verified 2026-10-21 (four option-ON-only aarch64 defects fixed); still open: Windows/arm64 (needs an arm64 host) SDK regeneration,
     the release tool exports `05-ui`/`06-web` with the owner-controlled `web_public_release` switch (final tags refuse a development
     candidate); owner decision 2026-10-21: ship relinkable objects for FFmpeg inside the shared `libcrtmedia`
-    (implemented 2026-10-21: `share/crt/relink/libcrtmedia` kit, `verify_dist.py` check; Windows relink proven from a stage build; Linux/aarch64 stage build, kit and relink with/without a rebuilt FFmpeg proven 2026-10-21, zero-copy smoke needs a VA-driver host; macOS kit not yet run); dual-license choices recorded in the SDK and flagged-file check done 2026-10-21 (both take effect in regenerated SDKs); still open: the other
+    (implemented 2026-10-21: `share/crt/relink/libcrtmedia` kit, `verify_dist.py` check; Windows, macOS/arm64 and Linux/aarch64 relink proven from stage builds; the Linux stage's zero-copy smoke needs a VA-driver host); dual-license choices recorded in the SDK and flagged-file check done 2026-10-21 (both take effect in regenerated SDKs); still open: the other
     owner-review items ([guide](docs/guides/lgpl_source_offer.md#5-decisions)); `v0.4.0-preview.1` is to be deleted from the distribution by the owner.
   * [x] Stable-series pin moved to WebKit 2.54.1 (newest micro; Linux/x86_64 gates green, [evidence](docs/acceptance/crtweb_acceptance.md#webkit-2541-re-pin-and-linuxx86_64-replay-2026-10-20));
     macOS/arm64 and Windows/x64 isolated replays green 2026-10-20; the in-tree driver gate now prefers the port's curl
@@ -219,6 +219,25 @@ the [SDK contract](docs/design/sdk_development_contract.md) and
 and CRT-native bootstrap first, then immutable SDK management, source-first ports
 and project workflow. [Studio](docs/design/crt_studio.md) is a later CLI consumer;
 these contracts are design work, not an implemented or released product.
+
+**SDK Producer Contract Gate P0** (follow-up to active Web closure; feeds CLI
+D0/D1, not an extra Tranche 10 blocker):
+
+- [ ] Supply external-consumer identity/capability fixtures, distinguishing
+  existing manifest/stage/port formats from the proposed development contract.
+- [ ] Publish SDK-owned C/C++ startup/link/runtime-query rules and public imports;
+  consumers must not reconstruct flags or depend on producer build trees.
+- [ ] Define host-tools/rootfs identity and runtime closure separately from the
+  target sysroot; validate actual native tool/alias execution.
+- [ ] Validate the minimum CRT-native CLI HTTP/TLS/runtime closure and trust
+  inputs for bootstrap without an installed development SDK.
+- [ ] Record independent consumer build/run and ABI evidence for each initial
+  native pair before promoting the corresponding artifact/consumer lock.
+
+Contract adoption and review follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review)
+and the `crt-cli`-owned `docs/compatibility.md` record. Lightweight automated
+contract/link checks are planned after machine-readable contracts/fixtures
+exist; they must not duplicate full WebKit builds for documentation changes.
 
 ### Runtime architecture hardening backlog
 

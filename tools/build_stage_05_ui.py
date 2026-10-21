@@ -20,8 +20,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from crt_dist_prerequisites import external_prerequisites_for
 import crt_source_offer
+from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import relocate_absolute_runtime_paths, remove_absolute_runtime_paths
 
 
@@ -455,7 +455,8 @@ def main() -> None:
                 "source_sha256": args.source_sha256,
             }
             add_lvgl_dependency(staged, lvgl_root, lvgl_recipe, manifest)
-            crt_source_offer.install_stage_offer(asset, staged, "05-ui", manifest)
+            # The offer inherited from 04-gfx-media names that stage: render it again for this one.
+            crt_source_offer.install_for_stage(asset, staged, "05-ui", manifest["redistributed_dependencies"])
             successor = asset / "stages/recipes/06-web.json"
             if successor.is_file():
                 destination = staged / "stages/recipes/06-web.json"

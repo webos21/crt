@@ -21,10 +21,32 @@ four defects that were shared by every host and invisible until a stage was buil
 over `verify_dist.py`'s module-level imports); isolated 04 and 05 never installed `SOURCE-OFFER.md`, which `verify_dist.py` requires of every stage that
 ships FFmpeg and which names its stage (`crt_source_offer.install_stage_offer`, used by both entrypoints; tested); `relink.py` resolved a relative
 `--out` against the kit directory (paths are now made absolute first); and `test_crt_relink_kit`'s Windows parse test failed on POSIX hosts
-(separators folded). Local-only deviation, not in the repository: this guest has no VAAPI driver, so the stage's zero-copy media bridge smoke
+(separators folded). The macOS/arm64 run found the same stage defects the same day (`04c9b83`); the merge kept that implementation (`install_for_stage`) and added the offer test and the `verify_dist.py` module-closure test. Local-only deviation, not in the repository: this guest has no VAAPI driver, so the stage's zero-copy media bridge smoke
 (`interop=zero-copy`) was skipped in the extracted work copy to reach the later steps; it needs a host with a VA driver. The SDK also needed
 `crtgfx-wayland-build` run once for `libxdg-shell-protocol.a` (the in-tree dist without it is native-Wayland-less and cannot seed stage 04).
 
+### Review SDK/CLI/Studio contracts against all three local repositories
+
+Compared the attached cross-repository review with CRT `a23a173`, CRT-CLI
+`a76d8ad` and CRT Studio `d3793e3`. Ownership is consistent; both consumer
+repositories still contain documentation only. Added an explicit Planned
+SDK Producer Contract Gate P0 without changing the active Web closure. The
+CLI-owned `docs/compatibility.md` separates design provenance, existing formats,
+proposed contracts and exercised combinations; no runtime combination is
+approved by this review. Existing SDK `format: 1`, port `schema_version: 1`
+and stage `schema_version: 2` are not one common v1 contract.
+
+Clarified feature-level CLI prerequisites and D7's formal approval role in the
+integration baselines; current product designs remain owned by the consumer
+repositories. Added SDK-free HTTPS/bootstrap requirements and a common manual
+contract-review procedure. Corrected independent host-tools acceptance:
+tool execution needs no target SDK, but a zlib build requires its pinned target
+SDK while remaining independent of CRT source/build trees. Consumer histories
+record their own documentation changes. These are documentation/acceptance
+requirements, not implementation, runtime replay, new CI, or release approval.
+Documentation validation covers local links/anchors, English additions, fences,
+conflict markers and whitespace. It also corrected an existing Windows 9B
+acceptance anchor in this history; external URLs were not network-validated.
 
 ### Tranche 10 on Linux/aarch64: option-ON SDK regeneration and four aarch64-only defects
 
@@ -63,6 +85,24 @@ are not treated as current policy. Added the documentation index and a terse
 Planned entry without changing the active Web work, STATUS or the root README.
 This completes design consolidation only, not CLI/Studio implementation,
 repository creation or release acceptance.
+
+### Tranche 10 on macOS/arm64: isolated 04 -> 05 -> 06 chain, relink kit, and six macOS-only stage defects
+
+The first isolated macOS `04-gfx-media -> 05-ui -> 06-web` chain since the Tranche 8/9 macOS work (the 2026-10-20 06-web replay had
+used an in-tree `05-ui` predecessor). It passed `verify_dist` at every stage and the 06-web SDK is a development candidate with the
+source offer and the libcrtmedia relink kit. Defects found and fixed (evidence: `out/tranche10-macos-relink`, logs `stage0{4,5,6}.log`):
+
+- `libcrtmedia` CMake named the in-tree `c_shared` target, which an isolated stage does not have: it uses the predecessor's `libc.dylib`.
+- The 04 source asset lacked `crtmedia_exports_macos.txt`; every stage asset lacked `tools/crt_web_release.py` (`verify_dist` imports it).
+- Executables that load CRT dylibs linked the static `libc.a` next to `libc.dylib` (two malloc registries): `crtgfx_skia_raster_smoke`
+  faulted in `unindex_free_block`, then the installed `gfx-skia` example. Both now name `libc.dylib` first (relinking with
+  `CRT_CXX_RUNTIME_LINKAGE=shared` confirmed the cause).
+- The isolated 04 stage never enabled `CRTGFX_ENABLE_GPU_BACKEND` on macOS, so its Skia bridge had no Metal shared-image sources and a
+  06-web built on it failed to link `crtgfx_skia_shared_create/_query` in `crtweb_gpu_worker`.
+- The isolated 04/05 builders did not install the LGPL source offer (`crt_source_offer.install_for_stage`).
+- The relink kit could not rewrite a macOS link line and `relink.py` failed on a relative `--out`; a Windows-path test also failed on macOS.
+
+Relinked `libcrtmedia.dylib` from a relocated SDK keeps the 103 exports and runs the zero-copy media demo (see the LGPL guide).
 
 ### Tranche 10: the release tool exports 05-ui and 06-web
 
@@ -773,7 +813,7 @@ Found by the run: the first identity was all zeros (a 4-byte `wchar_t` translati
 `GrD3DTextureResourceInfo`'s pointer constructor adopts without `AddRef`, so the wrapped shared resource was
 released early (SIGSEGV); `WebView::launch()` used `/tmp` when `TMPDIR` was unset; the Skia object libraries raced
 the `dist/02-cxx` publisher. Details and limits are in
-[Windows 9B acceptance](docs/acceptance/crtweb_acceptance.md#9b-windows-x64-d3d12-shared-resource-implementation-and-replay-2026-10-16).
+[Windows 9B acceptance](docs/acceptance/crtweb_acceptance.md#9b-windowsx64-d3d12-shared-resource-implementation-and-replay-2026-10-16).
 At this checkpoint, macOS Metal and 9C process/device-loss closure remained open;
 Linux and macOS had not re-run the shared descriptor/wire/test edits. The macOS
 availability replay is recorded above; no `06-web` packaging or global Tranche 9 completion is claimed.

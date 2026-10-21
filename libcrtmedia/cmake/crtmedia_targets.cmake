@@ -334,7 +334,12 @@ function(crt_add_crtmedia_targets)
     # re-export libSystem, so FFmpeg's pthread_once/pthread_mutex_* bound to libsystem_pthread: a Darwin
     # function writing into a Bionic-layout pthread_once_t (bus error in avcodec_find_decoder_by_name).
     # The CRT libc goes first, so every libc symbol of libcrtmedia is the CRT's.
-    target_link_options(crtmedia_shared BEFORE PRIVATE "$<TARGET_FILE:c_shared>")
+    # An isolated stage has no c_shared target: the predecessor SDK's installed libc.dylib is the same file.
+    if(TARGET c_shared)
+      target_link_options(crtmedia_shared BEFORE PRIVATE "$<TARGET_FILE:c_shared>")
+    else()
+      target_link_options(crtmedia_shared BEFORE PRIVATE "${CMAKE_SYSROOT}/lib/libc.dylib")
+    endif()
     set(_crtmedia_exports "${CRTMEDIA_ROOT}/cmake/crtmedia_exports_macos.txt")
     target_link_options(crtmedia_shared PRIVATE "LINKER:-exported_symbols_list,${_crtmedia_exports}")
     set_property(TARGET crtmedia_shared APPEND PROPERTY LINK_DEPENDS "${_crtmedia_exports}")

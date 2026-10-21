@@ -32,7 +32,6 @@ STAGE_VALIDATION_PROJECT_PATHS = (
     "tools/crt_source_offer.py",
     # Relink kit of the shared libcrtmedia (FFmpeg is LGPL); written by the 04-gfx-media stage, checked by verify_dist.
     "tools/crt_relink_kit.py",
-    # verify_dist.py imports it (the 06-web release decision); an isolated stage has no checkout to find it in.
     "tools/crt_web_release.py",
     "third_party/crt-runtime/release.json",
     "third_party/crt-runtime/SOURCE-OFFER.template.md",
@@ -175,6 +174,7 @@ STAGES = {
             "libcrtmedia/cmake/crtmedia_targets.cmake",
             "libcrtmedia/cmake/crtmedia_exports.cmake",
             "libcrtmedia/cmake/crtmedia_public_symbols.txt",
+            "libcrtmedia/cmake/crtmedia_exports_macos.txt",
             "libcrtmedia/include",
             "libcrtmedia/src/runtime.c",
             "libcrtmedia/src/frame.c",

@@ -7,6 +7,12 @@ Desktop UI contracts are ready. The
 boundaries; [CRT-CLI](crt_cli.md) owns prerequisite development/package
 management and the joint development sequence.
 
+This is the original integration baseline. Ongoing Studio design and
+feature-level CLI prerequisites belong to the separate
+[CRT Studio repository](https://github.com/webos21/crt-studio), not an
+independently edited mirror here. Shared changes follow the
+[producer review procedure](sdk_development_contract.md#8-cross-repository-contract-review).
+
 ## 1. Product Purpose and Development Order
 
 Studio's primary purpose is not to provide another editor. It lets developers
@@ -125,13 +131,16 @@ UI-only configurations against `05-ui`.
 
 ## 5. Staged Goals
 
-Use stable consumer contracts from CLI stages D0-D6 as prerequisites.
-High-risk UI/IME/editor PoCs may proceed in parallel, but must not bypass
-SDK/CLI boundaries through private includes.
+Gate each feature on the CLI capabilities it actually consumes, not completion
+of all D0-D6 or D7. SDK-only S0/UI PoCs and labeled protocol fixtures can start
+before a live CLI exists. S3 build/run requires actual D5 workflow commands;
+job/cancellation/package integration uses applicable D6 contracts. D7 records
+formal compatible combinations, not permission to start S0. High-risk
+UI/IME/editor PoCs must still respect public SDK/CLI boundaries.
 
 | Studio stage | Scope | Acceptance goal |
 | --- | --- | --- |
-| S0 External consumer | Pinned SDK/CLI, minimal native window, input, shutdown | External build without CRT source/build trees; three OSes; no private APIs |
+| S0 External consumer | Pinned SDK; CLI if available, otherwise labeled fixtures; minimal native window/input/shutdown | External build without CRT source/build trees; three OSes; no private APIs; unavailable live CLI left unaccepted |
 | S1 Workbench | Explorer/editor/build placeholders, menus/settings/layout | UI model/toolkit lifecycle, focus/resize/High-DPI, IME PoC |
 | S2 Editor | Documents/editing/undo/save/recovery, syntax, LSP | Real files and Korean composition; crash recovery; editor surface |
 | S3 Build/run | CLI SDK/port/project UI, diagnostics, cancellation | Same locks/plans/results as CLI; no unnecessary SDK rebuilds |

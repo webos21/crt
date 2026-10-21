@@ -188,21 +188,6 @@ def install_offer(destination: Path, text: str) -> str:
     return OFFER_RELATIVE.as_posix()
 
 
-def install_stage_offer(asset: Path, staged: Path, stage: str, manifest: dict) -> str | None:
-    """Render and install the offer for an isolated stage that redistributes FFmpeg (the in-tree SDK gets it from
-    create_dist.py). Each stage names itself in the text, so 05-ui cannot reuse the one inherited from 04-gfx-media."""
-    dependencies = [item for item in manifest.get("redistributed_dependencies", []) if item.get("name") == "ffmpeg"]
-    if not dependencies:
-        return None
-    version = (staged / "VERSION").read_text(encoding="utf-8").strip()
-    offer = install_offer(staged, render_offer(
-        asset, load_config(asset), stage, version, components_from_sdk(staged, stage), try_commit(asset)))
-    for item in dependencies:
-        if offer not in item.setdefault("notices", []):
-            item["notices"].append(offer)
-    return offer
-
-
 def check_installed_offer(sdk: Path, stage: str, version: str, components: list) -> list:
     """Problems with the offer inside an installed SDK (empty list = fine). Used by verify_dist and the release tool."""
     path = sdk / OFFER_RELATIVE
@@ -216,6 +201,20 @@ def check_installed_offer(sdk: Path, stage: str, version: str, components: list)
         if item["archive"]["sha256"] not in text:
             problems.append(f"it does not carry the SHA-256 of the {item['name']} archive")
     return problems
+
+
+def install_for_stage(asset: Path, staged: Path, stage: str, dependencies: list, commit: str | None = None) -> str:
+    """Render and install the offer of an isolated stage build from the SDK's own recipes.
+
+    `asset` is the stage source asset (it carries the template and release.json); the FFmpeg dependency of
+    `dependencies` (the manifest list) gets the offer among its notices."""
+    version = (staged / "VERSION").read_text(encoding="utf-8").strip()
+    offer = install_offer(staged, render_offer(
+        asset, load_config(asset), stage, version, components_from_sdk(staged, stage), commit))
+    for item in dependencies:
+        if item.get("name") == "ffmpeg" and offer not in item["notices"]:
+            item["notices"].append(offer)
+    return offer
 
 
 def git(root: Path, *args: str) -> str:

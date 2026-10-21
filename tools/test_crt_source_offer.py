@@ -32,21 +32,15 @@ class StageOfferTests(unittest.TestCase):
         for stage in ("04-gfx-media", "05-ui"):
             with self.subTest(stage=stage), tempfile.TemporaryDirectory() as raw:
                 sdk = self.staged_sdk(Path(raw))
-                manifest = {"redistributed_dependencies": [{"name": "ffmpeg", "notices": []}, {"name": "zlib"}]}
-                path = offer.install_stage_offer(ROOT, sdk, stage, manifest)
+                dependencies = [{"name": "ffmpeg", "notices": []}, {"name": "zlib", "notices": []}]
+                path = offer.install_for_stage(ROOT, sdk, stage, dependencies)
                 self.assertEqual(path, "share/licenses/SOURCE-OFFER.md")
-                self.assertEqual(manifest["redistributed_dependencies"][0]["notices"], [path])
-                problems = offer.check_installed_offer(sdk, stage, "v9.9.9-test", offer.components_from_sdk(sdk, stage))
-                self.assertEqual(problems, [])
+                self.assertEqual(dependencies[0]["notices"], [path])
+                self.assertEqual(dependencies[1]["notices"], [])
+                self.assertEqual(offer.check_installed_offer(sdk, stage, "v9.9.9-test", offer.components_from_sdk(sdk, stage)), [])
                 # An offer inherited from another stage must not satisfy this one.
-                self.assertTrue(offer.check_installed_offer(sdk, "06-web" if stage == "05-ui" else "05-ui",
-                                                            "v9.9.9-test", offer.components_from_sdk(sdk, stage)))
-
-    def test_a_stage_without_ffmpeg_gets_no_offer(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            sdk = self.staged_sdk(Path(raw))
-            self.assertIsNone(offer.install_stage_offer(ROOT, sdk, "03-gfx-simple", {"redistributed_dependencies": []}))
-            self.assertFalse((sdk / "share/licenses/SOURCE-OFFER.md").exists())
+                other = "06-web" if stage == "05-ui" else "05-ui"
+                self.assertTrue(offer.check_installed_offer(sdk, other, "v9.9.9-test", offer.components_from_sdk(sdk, stage)))
 
 
 class ConfigTests(unittest.TestCase):

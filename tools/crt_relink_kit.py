@@ -28,6 +28,9 @@ import sys
 
 OBJECT_SUFFIXES = (".o", ".obj")
 SUPPORT_SUFFIXES = (".def", ".map", ".exp", ".ver", ".lds", ".txt")
+# Options whose next token is a plain value (macOS clang/ld64): kept as written, never taken for a link input.
+VALUE_OPTIONS = ("-arch", "-isysroot", "-install_name", "-framework", "-target", "-current_version",
+                 "-compatibility_version", "-rpath")
 FFMPEG_ARCHIVES = ("libavcodec.a", "libavformat.a", "libavutil.a", "libswresample.a")
 KIT_RELATIVE = Path("share/crt/relink")
 
@@ -61,9 +64,8 @@ def main():
     parser.add_argument("--cc", help="compiler driver (default: the recorded one, found on PATH)")
     parser.add_argument("--print", action="store_true", help="show the link command and exit")
     args = parser.parse_args()
-    # The link runs with the kit as its working directory, so every path the user typed must be absolute first.
-    args.out = args.out.resolve()
-    args.sdk = args.sdk.resolve()
+    # The compiler runs in the kit directory: every path must be absolute.
+    args.sdk, args.out = args.sdk.resolve(), args.out.resolve()
     if args.ffmpeg_libdir is not None:
         args.ffmpeg_libdir = args.ffmpeg_libdir.resolve()
     recipe = json.loads((KIT / "relink.json").read_text(encoding="utf-8"))
@@ -129,13 +131,9 @@ def link_tokens(commands: str, output: str, windows: bool | None = None) -> list
         else:
             current.append(token)
     segments.append(current)
-    # Compare with both separators folded: a Windows link line spells the output bin\\x.dll, and Path() on a POSIX
-    # host does not split that, so the same parse must not depend on the OS running it.
-    wanted = output.replace("\\", "/")
     candidates = [segment for segment in segments
-                  if segment and segment[0] not in (":", "cd")
-                  and any(t.replace("\\", "/").rsplit("/", 1)[-1] == wanted.rsplit("/", 1)[-1]
-                          or t.replace("\\", "/").endswith(wanted) for t in segment)]
+                  if segment and segment[0] not in (":", "cd") and any(Path(t.replace(chr(92), "/")).name == Path(output).name or t.endswith(output)
+                                                                         for t in segment)]
     if len(candidates) != 1:
         raise SystemExit(f"cannot find the link command for {output} ({len(candidates)} candidates)")
     return candidates[0]
@@ -156,12 +154,20 @@ def under_sdk(token: str, roots: list, windows: bool | None = None) -> str:
 
 def rewrite(tokens: list, build: Path, sdk_roots: list, objects: dict, support: dict) -> list:
     """Placeholders for everything that depends on where the build and the SDK live."""
-    result, skip = [], False
+    result, skip, value_of = [], False, ""
     for index, original in enumerate(tokens):
         if skip:
             skip = False
             continue
         token = under_sdk(original, sdk_roots)
+        if value_of:
+            value_of = ""
+            result.append(token)
+            continue
+        if token in VALUE_OPTIONS:
+            value_of = token
+            result.append(token)
+            continue
         if token == "-o":
             result += ["-o", f"@OUT@/{Path(tokens[index + 1].replace(chr(92), '/')).name}"]
             skip = True
@@ -183,7 +189,7 @@ def rewrite(tokens: list, build: Path, sdk_roots: list, objects: dict, support: 
                 name = f"{resolved.parent.parent.name}__{name}" if resolved.parent.name != resolved.parent.parent.name else f"{len(objects)}__{name}"
             objects[name] = resolved
             result.append(f"@OBJ@/{name}")
-        elif token.lower().endswith(SUPPORT_SUFFIXES) and resolved.is_file() and build in resolved.parents:
+        elif token.lower().endswith(SUPPORT_SUFFIXES) and resolved.is_file():
             support[resolved.name] = resolved
             result.append(f"@SUPPORT@/{resolved.name}")
         elif absolute and build not in resolved.parents:
