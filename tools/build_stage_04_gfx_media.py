@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
+import crt_relink_kit
 from crt_elf import needed_libraries, relocate_absolute_runtime_paths, remove_absolute_runtime_paths
 from crt_text_relocate import relocate_text_prefixes
 
@@ -1345,6 +1346,14 @@ def main() -> None:
                       ", ".join(str(p.relative_to(staged)) for p in leftover),
                       flush=True)
 
+        # FFmpeg (LGPL) is folded into the shared libcrtmedia: ship what is needed to relink it with a modified FFmpeg.
+        with timings.measure("write libcrtmedia relink kit"):
+            crt_relink_kit.build_kit(
+                build_dir, crt_relink_kit.find_output(build_dir, target_os), staged, "libcrtmedia")
+            problems = crt_relink_kit.check_kit(staged, "libcrtmedia")
+            if problems:
+                raise SystemExit("libcrtmedia relink kit: " + "; ".join(problems))
+
         # The packaged 04 SDK carries the pinned recipe that advances it to
         # 05-ui, the cumulative-chain contract tools/build_stage_02_cxx.py's own
         # successor-recipe comment documents. create_stage_source.py embedded it
@@ -1366,6 +1375,9 @@ def main() -> None:
             }
             add_redistributed_dependencies(
                 build_asset, staged, port_sources, skia_source, manifest)
+            for item in manifest["redistributed_dependencies"]:
+                if item["name"] == "ffmpeg":
+                    item["relink_kit"] = (crt_relink_kit.KIT_RELATIVE / "libcrtmedia").as_posix()
             (staged / "manifest.json").write_text(
                 json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 

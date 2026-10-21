@@ -44,11 +44,16 @@ do).
 * **FFmpeg, static link.** An application that links `libcrtmedia.a` links `libavcodec.a`, `libavformat.a`,
   `libavutil.a` and `libswresample.a` as separate archives: build a modified FFmpeg with the same recipe and relink
   the application with your archives in place of the SDK's.
-* **FFmpeg inside the shared `libcrtmedia`.** Decision of 2026-10-21: the SDK ships what is needed to relink the shared
-  library, not only the rebuild-from-source route. A recipient can relink `libcrtmedia.so` from the SDK's
-  `libcrtmedia.a` (the CRT-side objects) and the four FFmpeg archives with their own build of FFmpeg, using the link
-  command documented with the SDK; rebuilding from the CRT repository (`tools/crt-port-build.py` with
-  `porting/recipes/ffmpeg.json`, then the stage build) stays available. Implementation status: section 5.
+* **FFmpeg inside the shared `libcrtmedia`.** The isolated `04-gfx-media` stage (and so `05-ui` and `06-web`, which
+  inherit its tree) installs a relink kit, `share/crt/relink/libcrtmedia/`: the CRT-side objects the shared library was
+  linked from (`objects/`, with SHA-256 in `MANIFEST.json`), the export list the link needs, `relink.json` (the link
+  command the build used, with `@SDK@`, `@OBJ@`, `@OUT@` placeholders) and `relink.py` (standard library only). In a
+  shell where the SDK is activated, `python relink.py --ffmpeg-libdir <your FFmpeg libs> --out <dir>` links a new
+  `libcrtmedia` against your `libavcodec.a`, `libavformat.a`, `libavutil.a` and `libswresample.a`; `--print` shows the
+  command. The host libraries the link names (Windows SDK import libraries; `CRT_WINDOWS_SDK_LIBPATH` must be set) are
+  not part of the kit. In `06-web` the private copy under `libexec/crtweb/lib/` is the same binary and is replaced with
+  the relinked one. Rebuilding from the CRT repository (`tools/crt-port-build.py` with `porting/recipes/ffmpeg.json`,
+  then the stage build) stays available.
 
 ## 4. How the offer is produced
 
@@ -76,10 +81,16 @@ values: they are what lets a recipient (or the project) fetch the same bytes lat
 Settled 2026-10-20: contact channel = the project's issue tracker; period = 3 years, fixed; upstream archives are not
 included in the bundle.
 
-Decided 2026-10-21: **FFmpeg inside the shared `libcrtmedia`** is handled by shipping the relinkable objects (section 3),
-not by relying on the rebuild instructions alone. Not yet implemented: the SDKs must carry the archives and a documented
-link command for the shared library on each host, and `verify_dist.py` must fail a stage that ships FFmpeg without them
-(tracked in `TODO.md`). An external legal review is no longer needed for this point.
+Decided 2026-10-21 and implemented the same day: **FFmpeg inside the shared `libcrtmedia`** is handled by shipping the
+relinkable objects (section 3), not by relying on the rebuild instructions alone. `tools/crt_relink_kit.py` takes the
+link command from the stage build (`ninja -t commands`), rewrites it to placeholders, copies the objects and fails if a
+build-tree path survives; `build_stage_04_gfx_media.py` writes the kit after install and declares it as `relink_kit` on
+the `ffmpeg` dependency; `verify_dist.py` rejects an isolated-stage SDK that ships FFmpeg without a complete kit
+(in-tree developer SDKs have none). Evidence on Windows/x64: from a real stage build (`gfx-media-build`), the kit
+relinked `libcrtmedia.dll` (same size as the SDK's, exports identical except one symbol that comes from the newer
+Windows SDK import library on this machine) and also with `--ffmpeg-libdir` pointing at a separate copy of the four
+archives. Not verified: the Linux and macOS kits (same code path, output names `lib/libcrtmedia.so` and `.dylib`; no
+host to run them) and an end-to-end stage rebuild that exercises the new step. Tests: `tools/test_crt_relink_kit.py`.
 
 Decided 2026-10-21: **dual-licensed components.** FreeType is used under the FreeType License (FTL), not the GPLv2
 alternative; Mbed TLS under Apache-2.0, not GPL-2.0-or-later. Both are permissive, neither makes the combined SDK

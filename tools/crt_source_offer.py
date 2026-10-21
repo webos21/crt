@@ -67,8 +67,9 @@ def ffmpeg_component(recipe: dict) -> dict:
                     "code built into the shared libcrtmedia"),
         "replace": ("Static link: build a modified FFmpeg with the recipe `porting/recipes/ffmpeg.json` and link "
                     "your application with your `libav*.a`/`libswresample.a` in place of the SDK's (they are "
-                    "separate from `libcrtmedia.a`). Shared `libcrtmedia`: rebuild it from the corresponding "
-                    "source with your FFmpeg install and substitute it."),
+                    "separate from `libcrtmedia.a`). Shared `libcrtmedia`: relink it with the kit in "
+                    "`share/crt/relink/libcrtmedia/` (the CRT-side objects it was linked from and `relink.py`; "
+                    "`--ffmpeg-libdir` takes your FFmpeg libraries), or rebuild it from the corresponding source."),
     }
 
 
