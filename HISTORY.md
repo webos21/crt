@@ -11,6 +11,33 @@ substantive update.
 
 ## 2026-10-22
 
+### Select residual PAL defects with bounded Windows reproducers
+
+Moved random-device duplication, Windows iostream and macOS dylib binding from
+Planned into one ordered In Progress increment ahead of SDK Producer Contract
+Gate P0, removing the duplicate planned entries. Completed the Windows triage
+and prepared the native macOS handoff; outstanding fixes/native evidence stay
+unchecked rather than claiming the three reports are resolved.
+
+The identified packaged 02-cxx SDK reproduces random-device dup/dup2 (including
+self) and both F_DUPFD variants failing with EBADF while the original fd still
+reads/closes; packaged CRT mksh redirection fails before fork. Iostream include-
+only and cstdio controls pass static/shared, but actual cout use fails in both
+with exit 139 after a main-entry marker. This narrows the old startup report;
+cerr is not reached and no root cause or fix is claimed. In-tree libc and
+imported libc++ archive/DLL hashes match the tested SDK copies, not an
+independent fresh-build comparison.
+
+Exact identity/hashes, bounded commands, observed failures, reproduction cases
+and the per-dylib macOS handoff are in the
+[diagnostic record](docs/bringup/crt_pal_residual_triage.md). Initial sandboxed
+launcher execution stalled; a five-second exit-only control isolated the
+environment restriction, and the functional run completed outside the sandbox
+without retry loops or visible consoles. No production runtime, upstream source,
+SDK content, CI or STATUS was changed; no native macOS pass is claimed.
+Documentation validation passes for four changed Markdown files and 121 local
+links/anchors, plus English/fence/conflict checks and `git diff --check`.
+
 ### Prefer JavaScriptCore reuse over a deferred QuickJS runtime
 
 Replaced TODO's conditional QuickJS entry and the roadmap's deferred-engine

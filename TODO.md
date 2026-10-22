@@ -60,15 +60,28 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-No implementation tranche is active. The next planned increment is the SDK
-Producer Contract Gate P0 below; this closure does not start CLI/Studio work.
+### CRT/PAL residual defects: bounded triage and fixes
+
+Windows triage is recorded in the [diagnostic record](docs/bringup/crt_pal_residual_triage.md).
+Only reproduced defects enter fixes; macOS still needs native evidence. This
+does not reopen accepted SDK stages or start SDK/CLI/Studio implementation.
+
+- [ ] Tranche 1 -- Fix the reproduced Windows random-device dup/dup2/F_DUPFD
+  gap after Bionic contract review; prove flags/lifetime/replacement and
+  packaged-shell redirection with before/after regressions.
+- [ ] Tranche 2 -- Trace and fix the reproduced Windows first-cout-use fault;
+  retain include-only/cstdio controls and static/shared stream-use regressions.
+  Compare rebuilt and packaged runtimes without retry-based acceptance.
+- [ ] Tranche 3 -- Execute the prepared per-dylib binding/shared-consumer audit
+  on native macOS. Preserve crtui/crtmedia fixes; select any common link-order
+  change only from actual Mach-O/runtime evidence. Native replay remains open.
 
 ## Planned
 
-SDK Producer Contract Gate P0 is next. The remaining sections are independent
-follow-ups, not a prerequisite chain for CLI/Studio or a reopening of accepted
-SDK stages. Promote one bounded item into In Progress with its reproducer and
-acceptance scope; long-term extensions stay conditional on a real consumer.
+SDK Producer Contract Gate P0 follows the bounded residual-defect triage above.
+The remaining sections are independent follow-ups, not a prerequisite chain for
+CLI/Studio or a reopening of accepted SDK stages; long-term extensions stay
+conditional on a real consumer.
 
 ### CRT developer experience: SDK -> CLI -> Studio
 
@@ -95,29 +108,11 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 Add lightweight automated contract/link checks once fixtures exist, without
 duplicating full WebKit builds for documentation changes.
 
-### Windows virtual random-device descriptor duplication
-
-- [ ] Reproduce `/dev/urandom` dup/redirection EBADF before fork, freeze Bionic
-  dup/dup2/F_DUPFD semantics, and add virtual-device regressions covering flags,
-  ownership and close behavior before fixing the PAL path. Keep this separate
-  from the resolved [mksh/fork crash](docs/bringup/windows_mksh_tranche10_crash.md).
-
 ### Focused CRT/PAL follow-ups: revalidate before fixing
 
 These older reports need bounded checks against identified current artifacts;
 neither later large-consumer passes nor a stale build tree settles them.
 
-- [ ] Recheck the packaged Windows `02-cxx` `<iostream>` startup crash against
-  packaged and in-tree builds; if reproducible, compare constructors and
-  `std::ios_base::Init`, then add a startup regression without retries.
-  `<cstdio>` passing is not equivalent coverage
-  ([C++ runtime policy](docs/design/cxx_runtime.md)).
-- [ ] Audit macOS libc symbol binding in the remaining CRT dylibs and the
-  shared-runtime CMake helper. Preserve the accepted crtui/crtmedia fixes;
-  use native Mach-O binding evidence and per-library shared-consumer tests
-  before changing common link order
-  ([UI acceptance](docs/acceptance/crtui_acceptance.md),
-  [host ABI firewall](docs/design/host_abi_firewall.md)).
 - [ ] Revalidate meaningful partial-option combinations of ordinary Linux
   `crt-gfx-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
   dependency publication already exists; close only reproduced gaps in shared
