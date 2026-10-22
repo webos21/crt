@@ -2506,6 +2506,13 @@ int dup2(int oldfd, int newfd) {
   if (newfd < 0) {
     return (int)__set_errno(EBADF);
   }
+#if defined(CRT_TARGET_OS_LINUX)
+  /* Bionic dup.cpp: dup2(fd, fd) keeps a valid fd open and returns it, an invalid one fails with EBADF. The
+   * Linux/aarch64 __crt_sys_dup2 is dup3(), which rejects oldfd == newfd with EINVAL. */
+  if (oldfd == newfd) {
+    return fcntl(oldfd, F_GETFD) == -1 ? -1 : oldfd;
+  }
+#endif
   {
     int result = (int)normalize_syscall_result(__crt_sys_dup2(oldfd, newfd));
 
