@@ -33,7 +33,9 @@ in the tool is not evidence of an uploaded release. The former `05-js` skeleton 
 and its `crt-js-*` targets were deleted on 2026-09-29; the QuickJS plan behind
 it is retired ([`runtime_roadmap.md`](../design/runtime_roadmap.md)). `05-ui` was created
 fresh by `crtui` Tranche 0 (2026-09-30) with `crt-ui-build/test/dist` targets.
-`crt-ui-dist` needs `-DCRTUI_ENABLE_LVGL=ON` after `crtui-lvgl-fetch`.
+The presets enable LVGL (and Skia, FFmpeg, curl and the imported libc++), and `crt-ui-build`/`crt-ui-dist` fetch what
+they need first, so no separate fetch step or configure option is required
+([build targets](build_targets.json), [README](../../README.md#build)).
 
 Each binary stage is cumulative and independently consumable. The repository
 build currently creates each later directory by copying the preceding

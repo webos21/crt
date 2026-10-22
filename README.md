@@ -478,9 +478,11 @@ See [docs/guides/distribution.md](docs/guides/distribution.md).
 
 ## Build
 
-CRT uses CMake presets.
+CRT uses CMake presets. The presets enable the features each stage needs (the
+imported libc++, Skia, FFmpeg, curl and LVGL), so a stage target works on a clean
+tree: it fetches and builds what it depends on first.
 
-The default workflow builds/tests the C stage:
+The default workflow builds and tests the C stage:
 
 ```sh
 cmake --workflow --preset linux-host-ninja-debug
@@ -488,7 +490,8 @@ cmake --workflow --preset macos-host-ninja-debug
 cmake --workflow --preset windows-host-ninja-debug
 ```
 
-Focused stage targets use the corresponding build preset:
+Each stage has `build`, `test` and `dist` targets. They are cumulative: a stage
+target builds the stages before it.
 
 ```sh
 cmake --build --preset <preset> --target crt-c-build
@@ -518,13 +521,31 @@ Outputs are cumulative SDK trees and archives under:
 out/<preset>/dist/
 ```
 
-The `crt-ui-*` targets need the LVGL renderer: run the `crtui-lvgl-fetch` target
-once and configure with `-DCRTUI_ENABLE_LVGL=ON`. Without it `crt-ui-dist` fails
-at `verify_dist.py`, because the installed `ui-basic` sample it must package is
-only built then. The Skia/`MediaView` companions and their tests also need a
-Skia/FFmpeg-enabled tree. The in-tree `crt-gfx-media-dist` keeps Skia and FFmpeg
-OFF; the release-grade `04-gfx-media` and `05-ui` SDKs come from the isolated
-stage builds (`tools/crt-stage-build.py`, see
+### Rebuilding only what changed
+
+`test` and `dist` steps (and the libc++ build and the stage source assets) keep an
+input hash. A step is skipped when the sources of its stage and of every earlier
+stage, the configuration, and its command line are unchanged since its last
+success, so editing `libcrtui` reruns only the `ui` steps while editing `libc`
+reruns everything after it. Compilation is incremental through Ninja as usual.
+
+```sh
+CRT_STAGE_CACHE=off cmake --build --preset <preset> --target crt-ui-dist   # never skip
+cmake --build --preset <preset> --target crt-stage-cache-reset              # forget the recorded state
+```
+
+The first build on a clean tree downloads and builds Skia, FFmpeg, curl and the
+other ports, which takes a while; later builds only redo what depends on a change.
+On Linux the FFmpeg targets need `libva-dev`; configure still succeeds without it
+and the targets that need it fail with that message.
+
+The list of targets documented here is owned by
+[docs/guides/build_targets.json](docs/guides/build_targets.json); every other
+target in the build tree is internal. `python tools/list_cmake_targets.py out/<preset>`
+prints both groups for a configured tree.
+
+The release-grade `04-gfx-media` and `05-ui` SDKs come from the isolated stage
+builds (`tools/crt-stage-build.py`, see
 [docs/guides/release_preview.md](docs/guides/release_preview.md)).
 
 ---

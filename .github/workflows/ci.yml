@@ -247,6 +247,17 @@ jobs:
       - name: Configure, build, and test
         run: cmake --workflow --preset ${{ matrix.preset }}
 
+      # The user-facing target list (docs/guides/build_targets.json) must exist on every host, and each host's
+      # target list is kept so the operating-system-specific targets can be compared across the matrix.
+      - name: Check the documented build targets exist
+        run: python tools/list_cmake_targets.py out/${{ matrix.preset }} --check --json cmake-targets-${{ matrix.name }}.json
+
+      - name: Keep the target list
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-targets-${{ matrix.name }}
+          path: cmake-targets-${{ matrix.name }}.json
+
       # Tranche 6 acceptance is deliberately representative-host rather than
       # architecture-cartesian: Linux/aarch64, Windows/x64, and macOS/arm64
       # cover all three PALs while keeping the per-PR lane bounded. The target

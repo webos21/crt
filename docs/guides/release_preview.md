@@ -141,7 +141,8 @@ names, and the download URLs inside the packaged stage recipes all agree.
    ```
 
 3. Build the release-grade `04-gfx-media`. The ordinary `crt-gfx-media-dist`
-   target keeps Skia and FFmpeg OFF and is **not** releasable. Use the isolated
+   target is an in-tree developer SDK (the presets now enable Skia and FFmpeg, but it is built from the
+   repository build tree) and is **not** releasable. Use the isolated
    option-ON stage build from the packaged `03-gfx-simple` SDK, with the local
    `--asset` override because the release is not published yet (the asset is
    still checked against the recipe). It needs network access and took about

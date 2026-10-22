@@ -1,0 +1,107 @@
+{
+  "comment": "Owner of the list of user-facing CMake targets. README.md's Build section mirrors it; tools/list_cmake_targets.py --check fails when a listed target is missing from a configured tree. Targets not listed here are internal. Planned entries are recorded in 'planned' until they exist.",
+  "groups": {
+    "stage 01-c": [
+      {
+        "target": "crt-c-build",
+        "what": "compile libc, libm, libdl, PAL, startup, shell, make"
+      },
+      {
+        "target": "crt-c-test",
+        "what": "run the 01-c tests (skipped when the stage inputs are unchanged)"
+      },
+      {
+        "target": "crt-c-dist",
+        "what": "package, archive and verify out/<preset>/dist/01-c (skipped when unchanged)"
+      }
+    ],
+    "stage 02-cxx": [
+      {
+        "target": "crt-libcxx-build",
+        "what": "compile imported libc++, libc++abi, libunwind"
+      },
+      {
+        "target": "crt-libcxx-test",
+        "what": "run the 02-cxx tests (skipped when the stage inputs are unchanged)"
+      },
+      {
+        "target": "crt-libcxx-dist",
+        "what": "package, archive and verify out/<preset>/dist/02-cxx (skipped when unchanged)"
+      }
+    ],
+    "stage 03-gfx-simple": [
+      {
+        "target": "crt-gfx-simple-build",
+        "what": "compile window, input, software framebuffer"
+      },
+      {
+        "target": "crt-gfx-simple-test",
+        "what": "run the 03-gfx-simple tests (skipped when the stage inputs are unchanged)"
+      },
+      {
+        "target": "crt-gfx-simple-dist",
+        "what": "package, archive and verify out/<preset>/dist/03-gfx-simple (skipped when unchanged)"
+      }
+    ],
+    "stage 04-gfx-media": [
+      {
+        "target": "crt-gfx-media-build",
+        "what": "compile Skia, GPU, FFmpeg, media, networking"
+      },
+      {
+        "target": "crt-gfx-media-test",
+        "what": "run the 04-gfx-media tests (skipped when the stage inputs are unchanged)"
+      },
+      {
+        "target": "crt-gfx-media-dist",
+        "what": "package, archive and verify out/<preset>/dist/04-gfx-media (skipped when unchanged)"
+      }
+    ],
+    "stage 05-ui": [
+      {
+        "target": "crt-ui-build",
+        "what": "compile crtui, LVGL-backed widgets"
+      },
+      {
+        "target": "crt-ui-test",
+        "what": "run the 05-ui tests (skipped when the stage inputs are unchanged)"
+      },
+      {
+        "target": "crt-ui-dist",
+        "what": "package, archive and verify out/<preset>/dist/05-ui (skipped when unchanged)"
+      }
+    ],
+    "ports": [
+      {
+        "target": "port-test-recipes",
+        "what": "build and test every porting recipe"
+      }
+    ],
+    "maintenance": [
+      {
+        "target": "crt-stage-cache-reset",
+        "what": "forget the recorded stage-cache state so the next build reruns every step"
+      }
+    ]
+  },
+  "os_specific": {},
+  "planned": [
+    "crt-c-config",
+    "crt-libcxx-config",
+    "crt-gfx-simple-config",
+    "crt-gfx-media-config",
+    "crt-ui-config",
+    "crt-web-config",
+    "crt-web-build",
+    "crt-web-test",
+    "crt-web-dist",
+    "crt-dev-release",
+    "crt-full-release"
+  ],
+  "internal_stage_parts": {
+    "crt-gfx-build": "graphics half of crt-gfx-media-build",
+    "crt-gfx-test": "graphics half of crt-gfx-media-test",
+    "crt-media-build": "media half of crt-gfx-media-build",
+    "crt-media-test": "media half of crt-gfx-media-test"
+  }
+}
