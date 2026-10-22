@@ -60,12 +60,48 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-None. The CRT/PAL residual-defect triage finished 2026-10-22 ([record](docs/bringup/crt_pal_residual_triage.md),
-[HISTORY.md](HISTORY.md)); its latent risks stay listed in that record, not as scheduled work.
+### CRT SDK split: Full SDK and Development SDK
+
+CRT produces two kinds of SDK per native pair from the same sources, stage outputs and port
+recipes (no second build system, ABI or recipe set); the contract is
+[Full SDK and Development SDK](docs/design/sdk_development_contract.md#full-sdk-and-development-sdk-adopted-direction-2026-10-22).
+The **Full SDK** is the existing cumulative `01-c` .. `06-web` archives, unchanged. The **Development
+SDK** is `02-cxx` plus zlib, Mbed TLS and libcurl (static and shared), with no graphics, media, UI or
+Web content; it exists so `crt-cli` can be built without CRT's source or build tree, and its
+shared runtime files are byte-identical to the Full SDK of the same release. The CLI runtime bundle
+is assembled by `crt-cli` from its own link result. The `crt-cli` repository is laid out as
+`crt new` generates it and must build and run with its own `crt build`/`crt run`
+([layout and self-test](docs/design/crt_cli.md#9-joint-development-sequence)); its adoption evidence
+stays in the CLI repository. Residual-defect triage finished 2026-10-22
+([record](docs/bringup/crt_pal_residual_triage.md)).
+
+- [ ] S0 Freeze the split in the design docs: Development SDK content rule, archive and release asset
+  names, how the `dev` profile is expressed (manifest stays `02-cxx`; identity in the development-contract
+  sidecar), notice/SBOM scope (no FFmpeg, so no LGPL source offer), and who supplies the CLI's TLS trust
+  material (the curl port bakes in no CA bundle).
+- [ ] S1 Add a CLI-shaped reference consumer to this repository's tests (C++17: HTTPS GET with
+  certificate verification plus zlib inflate) linked only through the Development SDK wrappers; its
+  ELF/Mach-O/PE imports, via `crt_binary_dependencies.py`, define the runtime closure instead of a guessed list.
+- [ ] S2 Producer: build zlib, Mbed TLS and libcurl through one shared implementation with the
+  `04-gfx-media` stage builder (today they are built only there), then assemble the Development SDK on top of
+  `02-cxx` for Linux x86_64/aarch64, macOS arm64 and Windows x64/arm64.
+- [ ] S3 Verification: `verify_dist.py` profile checks (no `03+` content, ports present static and shared,
+  declared dependencies and notices, relocation, the macOS binding audit with a shared consumer, Windows
+  imports resolving at load); an external build and run from the Development SDK alone, with CRT's source
+  and build tree hidden.
+- [ ] S4 Release tool: `prepare_release_assets.py` publishes both kinds (checksums, release manifest, recipes
+  pointing at the release, `VERSION` equal to the tag) and checks that the two share the source commit and the
+  runtime-file digests.
+- [ ] S5 Native replay on Linux x86_64, macOS arm64 and Windows x64 (aarch64 targets compile-only unless
+  run natively), including negative cases (missing port, mismatched digest, stale Full SDK). Hand the
+  identity to `crt-cli`, whose lock owns adoption.
+
+CI cost stays bounded: one host smoke in CI, the full matrix at release time. Not goals here: signing and
+publisher authentication, a static CLI, and any change to the Full SDK stages.
 
 ## Planned
 
-SDK Producer Contract Gate P0 is the next step now that the bounded residual-defect triage is closed.
+SDK Producer Contract Gate P0 below continues after, and partly through, the SDK split in progress above.
 The remaining sections are independent follow-ups, not a prerequisite chain for
 CLI/Studio or a reopening of accepted SDK stages; long-term extensions stay
 conditional on a real consumer.
@@ -77,27 +113,17 @@ Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [Studio](docs/design/crt_studio.md) is a later CLI consumer; the development
 contracts remain design work, not an implemented or released product.
 
-**Adopted direction (2026-10-22):** CRT produces a **Bootstrap SDK** (`02-cxx` plus the
-libcurl/TLS/zlib ports the CLI links) from the existing stage and port outputs, a **CLI
-runtime bundle** for end users, and the unchanged Full SDK; `crt-cli` consumes only the pinned
-Bootstrap SDK ([artifacts](docs/design/sdk_development_contract.md#bootstrap-sdk-profile-and-artifacts-adopted-direction-2026-10-22)).
-The `crt-cli` repository is laid out as `crt new` generates it and must build and run with its
-own `crt build`/`crt run` ([layout and self-test](docs/design/crt_cli.md#9-joint-development-sequence)).
-
 **SDK Producer Contract Gate P0** (feeds CLI D0/D1; not started):
 
 - [ ] Supply external-consumer identity/capability fixtures, distinguishing
   existing manifest/stage/port formats from the proposed development contract.
-- [ ] Define the Bootstrap SDK profile: contents fixed by the real CLI link result, identity and
-  digests, produced from the same recipes with no second build system; publish the SDK-owned
-  startup/link/runtime-query rules and public imports it exposes.
-- [ ] Publish the runtime-bundle contract: closure computed from the CLI's ELF/Mach-O/PE imports,
-  app-local placement, Windows import resolution at load.
+- [ ] Publish the SDK-owned startup/link/runtime-query rules and public imports for both the Full
+  and Development SDK, and the runtime-bundle contract: closure computed from the CLI's
+  ELF/Mach-O/PE imports, app-local placement, Windows import resolution at load.
 - [ ] Define host-tools/rootfs identity and runtime closure separately from the
   target sysroot; validate actual native tool/alias execution.
-- [ ] Validate the minimum CRT-native CLI HTTP/TLS stack (libcurl with a CRT-built TLS backend)
-  and trust inputs for bootstrap without an installed development SDK, including fail-closed
-  negative cases.
+- [ ] Validate the minimum CRT-native CLI HTTP/TLS stack and trust inputs for bootstrap without an
+  installed development SDK, including fail-closed negative cases (the producer side is S1 above).
 - [ ] Record independent consumer build/run and ABI evidence for each initial
   native pair before promoting the corresponding artifact/consumer lock.
 

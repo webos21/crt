@@ -192,26 +192,32 @@ pinned crt-cli source + pinned SDK -> CLI bootstrap archive
                                  installation/management without an SDK
 ```
 
-### Bootstrap SDK profile and artifacts (adopted direction, 2026-10-22)
+### Full SDK and Development SDK (adopted direction, 2026-10-22)
 
-Building the CLI needs a development SDK; running it must not. CRT therefore
-produces three artifacts from the same sources, stage outputs and port recipes:
+Building the CLI needs a development SDK; running it must not. For each native
+pair CRT therefore produces two kinds of SDK, plus a runtime closure, from the
+same sources, stage outputs and port recipes:
 
 | Artifact | For | Content |
 | --- | --- | --- |
-| **Bootstrap SDK** | `crt-cli` developers and CI | The `02-cxx` stage plus the ports the CLI links: libcurl, its TLS backend, zlib, and any other library the real link result requires (headers, link libraries, startup, toolchain files, notices) |
-| **CLI runtime bundle** | End users | The CLI executable and only the runtime files its import closure needs, placed app-local |
-| **Full SDK** | CRT application developers | Unchanged, up to `06-web` |
+| **Full SDK** | End users and CRT application developers (installed by the CLI) | The existing validated cumulative stage archives `01-c` .. `06-web`; unchanged. "Full" is `06-web` |
+| **Development SDK** | `crt-cli` developers and CI | The `02-cxx` stage plus the ports the CLI links: zlib, Mbed TLS, libcurl (headers, static and shared libraries, startup, toolchain files, notices), extended only when the real link result requires another library. No graphics, media, UI or Web content |
+| **CLI runtime bundle** | End users, no SDK installed | The CLI executable and only the runtime files its import closure needs, placed app-local. Assembled by `crt-cli`; CRT supplies the libraries and the closure contract |
 
-The Bootstrap SDK is a reduced packaging of verified `01-c`/`02-cxx` and port
-outputs, not a second build system, ABI or recipe set. Do not start it with a
-separate compile path: extract it after the external CLI build against the
-existing outputs succeeds. The ports are produced and validated by CRT;
-`crt-cli` neither ports them nor vendors CRT headers or libraries, and consumes
-only the pinned Bootstrap SDK identity. The runtime closure is computed from the
-CLI's actual ELF/Mach-O/PE imports, never from a guessed list. Whether a static
-CLI is viable is a separate technical check; the default is a minimal dynamic
-bundle.
+The Development SDK is a reduced packaging of verified `01-c`/`02-cxx` and port
+outputs, not a second build system, ABI or recipe set, and it is not a cumulative
+prefix of `03-gfx-simple`. Its manifest keeps `stage: 02-cxx` with the ports as
+declared redistributed dependencies; the `dev` profile identity belongs to the
+development-contract sidecar, not to a new stage ID. Its shared runtime files
+(libc, libm, libdl, libc++, libc++abi, libunwind and their startup objects) must
+be byte-identical to those of the Full SDK from the same release. The ports are
+produced and validated by CRT; `crt-cli` neither ports them nor vendors CRT
+headers or libraries, and consumes only the pinned Development SDK identity.
+The runtime closure is computed from the CLI's actual ELF/Mach-O/PE imports,
+never from a guessed list. Whether a static CLI is viable is a separate technical
+check; the default is a minimal dynamic bundle. No CA bundle is baked into the
+curl port; who supplies the CLI's trust material is a decision for the first
+implementation, not an assumption.
 
 Do not introduce a cycle in which CRT runtime/SDK builds require the CLI.
 If CRT product assembly includes the CLI, explicitly supply the external source

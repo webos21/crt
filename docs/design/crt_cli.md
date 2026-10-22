@@ -383,11 +383,11 @@ completion checklist. Each repository's TODO/acceptance owns actual status.
 (`crt.toml`, `crt.lock`, sources, tests, and a CMake entry that delegates to the
 SDK's `crt-toolchain.cmake`); it has no private layout. The template is owned by
 this repository and is what `crt new --template cxx` emits. The first binary is
-built by an ordinary external CMake build against the pinned Bootstrap SDK
-([bootstrap artifacts](sdk_development_contract.md#6-bootstrapping-a-crt-built-cli)).
+built by an ordinary external CMake build against the pinned Development SDK
+([Development SDK](sdk_development_contract.md#full-sdk-and-development-sdk-adopted-direction-2026-10-22)).
 From the first stage that has `new`/`build`/`run`, the acceptance test is that
 `crt build` and `crt run` work on the CLI's own tree (and `crt test` once it
-exists) using the installed Bootstrap SDK profile, and that a fresh `crt new`
+exists) using the installed Development SDK, and that a fresh `crt new`
 project builds and runs the same way. A layout the CLI cannot build with its own
 commands is a defect of the template, not an exception.
 
