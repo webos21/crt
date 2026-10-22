@@ -556,6 +556,14 @@ function(crt_add_crtgfx_skia_shared_target)
         "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.dll.a"
         "${CRT_LIBCXX_SYSROOT}/lib/libunwind.dll.a"
       )
+      # This link names the shared libc++ import libraries itself, so tell the crt-c++
+      # wrapper not to add the static libc++.a/libc++abi.a/libunwind.a it appends to a
+      # DLL link by default: the DLL would then define libc++ symbols (ios.instantiations
+      # and others) that libc++.dll.a also provides, and lld stops with "duplicate
+      # symbol". Found by the Windows/arm64 isolated 04 stage; harmless when the
+      # in-tree build links with clang directly (the variable is only read by crt-c++).
+      set_property(TARGET crtgfx_skia_shared PROPERTY CXX_LINKER_LAUNCHER
+        "${CMAKE_COMMAND};-E;env;CRT_CXX_STL_LINKAGE=shared")
     else()
       set(CRTGFX_SHARED_SKIA_LINUX_GROUPED OFF)
       if(CRT_TARGET_OS STREQUAL "linux" AND CRTGFX_SKIA_LIBRARIES)
