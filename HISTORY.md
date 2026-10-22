@@ -9,6 +9,43 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-22
+
+### Tranche 10 on Windows/arm64: option-ON SDKs 01-c..05-ui, isolated 04 -> 05 chain, relink kit, and three defects
+
+Run on a 4-vCPU Windows 11 arm64 VM (no GPU). The in-tree `01-c..05-ui` SDKs were regenerated with FFmpeg, curl, Skia, GPU and LVGL ON
+and all five pass `verify_dist.py`; `04-gfx-media` and `05-ui` carry the generated `SOURCE-OFFER.md` (FFmpeg 8.1.2). `ctest` is 220/220
+(5 skipped: MF capture, the three `crtweb_*gpu*` tests and `fork_heap_snapshot`; no GPU on a VM). The isolated `03 -> 04 -> 05` chain ran
+from an immutable copy of the in-tree `03-gfx-simple` with a clean-tree source asset (`f0217d7`): `04-gfx-media` and `05-ui` publish and
+verify, installed `gfx-gpu`, `gfx-skia`, `media-player`, `media-stream` and `ui-basic` pass, and the libcrtmedia relink kit works from a
+relocated SDK at a spaced path with a relative `--out` (same 75 exports and section sizes as the SDK's DLL; a program with only the
+relinked DLL beside it plays 30 frames). 06-web is not provided on Windows/arm64 by design (`tools/build_stage_06_web.py` accepts native
+Linux/x86_64, macOS/aarch64, Windows/x86_64 and the x86_64 -> Linux/aarch64 cross build).
+
+Defects found and fixed, each in CRT code and none in an upstream source:
+
+- `libcrtgfx/src/arch/windows/gpu_win32.c` included `<string.h>` although its unit has no libc header on its include path. Windows/x64
+  passed only because a host MinGW header was found by accident (likely; not verified on that host); this machine has none (`0116844`:
+  compiler builtins).
+- `crtgfx_skia_shared` names `libc++.dll.a` itself while `crt-c++` also appended the static `libc++.a` to the DLL link, so lld stopped with
+  duplicate `std::__1` symbols in the isolated 04 stage. The target now links that DLL with `CRT_CXX_STL_LINKAGE=shared`, which leaves the
+  predecessor SDK unchanged (`8ffd984`). Why the Windows/x64 stage did not hit it was not investigated.
+- `crtmedia_http_lifecycle_test` failed "upload cancel" (handle count +5) in about 3 of 10 runs on this VM: the audit sampled while cancelled
+  transfers were still closing. It now resamples for up to 2 s, so a leak still fails (`f0217d7`; 20/20 afterwards, in-tree).
+
+Pitfalls on this host, recorded because each cost a run: (1) cmake must run from a native arm64 shell. A bash from Git for Windows is an x64
+process, reports `PROCESSOR_ARCHITECTURE=AMD64`, and configures the x86_64 sources; (2) Strawberry Perl's `c\bin` ships an x64 cmake 3.29
+that shadows the installed one, so only `perl\bin` goes on PATH; (3) `make.exe` is linked statically against `libc.a`, so a libc change needs
+`port-rebuild-make` (the freetype build died silently with exit 253 on the August binary); (4) Skia's pinned GN has no Windows/arm64 package
+(the fetch URL returns 404), so the Windows/x64 `gn.exe` of the same pinned revision runs under emulation as a build-host tool (SHA-256 of
+`gn.exe`: `cf28c1ea5c5c6c2ec1c2e4e12b360f276595ceea8de6a35368dfd1f9b39b527d`; not shipped in any SDK) and is found through PATH; (5) isolated stages
+need `CRT_WINDOWS_SDK_LIBPATH` (8.3 form, newest installed SDK 10.0.28000) and `CRT_CC/CXX/AR/RANLIB`.
+
+Local-only deviations, not in the repository: the packaged zero-copy media bridge smoke (`crtgfx_skia_media_window_demo`) fails here because
+the VM's D3D12 adapters cannot import a hardware-decoded frame (`crtgfx_skia_import_media_frame failed`), so it was skipped in the extracted
+work copy of the 04 stage; `CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1` made the media-player step expect `hardware_decode=no`. Both need a host with
+a GPU. Evidence: [acceptance](docs/acceptance/crtweb_acceptance.md#windowsarm64-option-on-sdks-and-isolated-04---05-chain-2026-10-22).
+
 ## 2026-10-21
 
 ### crtmedia_playback_pipeline_test: it measured the audio server's start-up latency, not CRT pacing

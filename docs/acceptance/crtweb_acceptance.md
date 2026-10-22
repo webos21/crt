@@ -5127,7 +5127,44 @@ that the earlier run had already written; it was created and the step rerun. Evi
 tagged build (`-DCRT_RELEASE_TAG`, stage-source recipes pointing at that release), and the Windows SDKs here are development
 candidates; a tagged rehearsal means rebuilding every stage and the 06-web SDK again and is left for the release itself. The
 release tool is host-neutral and covered by its unit tests (25), which pass on this host. Windows/arm64 needs an arm64
-host and was not attempted.
+host and was not attempted there; it is the next section.
+
+#### Windows/arm64 option-ON SDKs and isolated 04 -> 05 chain (2026-10-22)
+
+Host: Windows 11 arm64 VM (QEMU, 4 vCPUs, no GPU), Clang 22.1.8, CMake 4.4.4, Ninja, Python 3.11 (arm64), Strawberry Perl 5.42 (x64
+build under emulation), Windows SDK 10.0.28000 (newest installed, chosen automatically; 10.0.26100 also present). Tree: `f0217d7`, clean. Scope:
+`01-c..05-ui`. **06-web is out of scope**: `tools/build_stage_06_web.py` rejects Windows/arm64 by design, and this host has no MinGW
+gcc/g++/make for the WebKit build-host tools.
+
+**In-tree.** Configure with `CRTMEDIA_ENABLE_FFMPEG=ON CRTMEDIA_ENABLE_CURL=ON CRTGFX_ENABLE_SKIA=ON CRTGFX_ENABLE_GPU_BACKEND=ON
+CRTUI_ENABLE_LVGL=ON CRT_USE_IMPORTED_LIBCXX=ON` after fetching Skia, LVGL, libc++ and the port sources and building the Skia, FFmpeg and curl
+ports (order: `crtgfx-*-fetch`, `crtui-lvgl-fetch`, `crt-libcxx-fetch`, `port-fetch`, `crtgfx-skia-build`, `port-build-ffmpeg`,
+`port-build-curl`, reconfigure, `crt-c-build crt-ui-dist`). All five SDKs pass `verify_dist.py`; `04-gfx-media` and `05-ui` ship
+`share/licenses/SOURCE-OFFER.md` (FFmpeg 8.1.2) and the Skia, FreeType, curl, mbedTLS and zlib notices. `ctest`: 220 tests, 220 passed,
+5 skipped (`crtmedia_capture_mf_test_runs`, `crtweb_webview_gpu_test_runs`, `crtweb_gpu_resource_test_runs`,
+`crtweb_gpu_lifecycle_test_runs`, `fork_heap_snapshot_test_runs`; the first four need a camera or GPU the VM does not have).
+
+**Isolated chain.** Predecessors are copies of the in-tree SDKs; source assets were generated from the clean tree
+(`source_commit` `f0217d7`). `04-gfx-media` (FreeType, FFmpeg, Skia, curl, mbedTLS, zlib built by the stage; curl and its dependencies about
+21 minutes at `-j4`) passes its 17 stage tests, `verify_dist.py` and the installed `gfx-gpu`, `gfx-skia`, `media-player` and `media-stream`
+examples; `05-ui` (LVGL, 204 s build) passes its tests, the installed `ui-basic` example (`presented=30 pixel_check=pass input_check=pass`),
+the packaged `crtui_window_demo` and `verify_dist.py`. Both published SDKs verify again when checked on their own.
+
+**Relink kit.** A copy of the published `04-gfx-media` at a path containing a space, activated with its `activate.cmd`, ran
+`python relink.py --out relinked-out`: the new `libcrtmedia.dll` has the same 75 exports as the SDK's (identical sorted export lists) and the
+same `.text/.rdata/.data` sizes; the files differ in bytes (PE header fields). `crtmedia_player_example.exe` placed next to only the relinked
+DLL presented 30 frames and exited 0. A relink against a different FFmpeg build (`--ffmpeg-libdir`) was not run here.
+
+**Not run on this host, needs a GPU.** (1) The packaged zero-copy media bridge smoke: `crtgfx_skia_media_window_demo` reports
+`backend=d3d12 device_count=2` and then `crtgfx_skia_import_media_frame failed`; it was skipped in the extracted work copy of the stage (not in the
+repository) to reach the later steps. (2) The media-player step requires `hardware_decode=yes`; with no hardware decode available
+`CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1` was set so the step expects `hardware_decode=no`. (3) The GPU CTest cases above. This is the same class of
+limit as the Linux/aarch64 guest without a VA driver.
+
+**Defects found** (details in `HISTORY.md`, 2026-10-22): `gpu_win32.c` depended on a host `<string.h>` (`0116844`); `crtgfx_skia_shared`
+linked libc++ both statically and as a DLL in isolated stages (`8ffd984`); `crtmedia_http_lifecycle_test` audited handles before cancelled
+transfers settled (`f0217d7`, about 30% flaky on this VM). Build-host inputs not in the repository: the Windows/x64 `gn.exe` of Skia's pinned GN
+revision (the arm64 package is not published), `CRT_WINDOWS_SDK_LIBPATH` in 8.3 form and `CRT_CC/CXX/AR/RANLIB`.
 
 #### Upstream support window of the WPE WebKit stable series (checked 2026-10-20)
 

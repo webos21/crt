@@ -146,8 +146,8 @@ enforce that). The git tag is a source reference and is not an object-code distr
 
 Still open:
 
-1. **SDK coverage of the generator:** macOS/arm64, Windows/x64 and Linux/aarch64 SDKs were regenerated with it
-   (2026-10-20/21); Windows/arm64 has not been (needs an arm64 host).
+1. **SDK coverage of the generator:** macOS/arm64, Windows/x64, Linux/aarch64 and Windows/arm64 (`01-c`..`05-ui`; there is no
+   06-web there) SDKs were regenerated with it (2026-10-20..22).
 2. **Release gate:** `prepare_release_assets.py` exports `05-ui` and `06-web` behind the owner-controlled
    `web_public_release` switch in `third_party/crt-runtime/release.json` (a final tag refuses a development candidate);
    the switch stays off until the Tranche 10 conditions are met.
