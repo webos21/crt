@@ -71,6 +71,12 @@ set_tests_properties(fd_errno_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fd_errno_test: ok"
 )
 
+add_crt_test(virtual_device_dup_test virtual_device_dup_test.c)
+set_tests_properties(virtual_device_dup_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "virtual_device_dup_test: ok"
+  TIMEOUT 15
+)
+
 add_crt_test(malloc_test malloc_test.c)
 # The coalescing fixture needs an untouched heap, not the process heap used by
 # startup/environment import. Reuse the independently renamed production

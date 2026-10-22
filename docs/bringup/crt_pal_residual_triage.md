@@ -8,13 +8,14 @@ The active work queue is [TODO](../../TODO.md#in-progress).
 
 | Report | Observed result | Next boundary |
 | --- | --- | --- |
-| Windows virtual random-device dup | Reproduced: open/read succeeds; dup, dup2 (including self), F_DUPFD and F_DUPFD_CLOEXEC fail with EBADF; mksh redirection also fails before fork | Fix virtual descriptor duplication with Bionic-compatible flags/lifetime tests |
+| Windows virtual random-device dup | Initial failure reproduced; fixed and replayed on Windows/x64 below | Windows fix closed; other native host/architecture replays are not claimed |
 | Windows packaged iostream crash | Reproduced on first cout use, static and shared, after a main-entry marker; include-only and cstdio controls pass | Trace the first stream-use fault and initialization/import boundary, not an assumed unconditional pre-main failure |
 | macOS CRT dylib libc binding | Native evidence pending; source risk and existing local fixes identified | Audit actual Mach-O bindings and shared consumers on macOS before a common link-order change |
 
-These are diagnostic observations, not passing regression tests or completed
-fixes. In particular, the random-device probe exits zero after reporting failed
-operations; its exit code alone is not a pass criterion.
+The original triage observations are not passing regressions; the later
+random-device fix has its own evidence below. In particular, the original
+random-device probe exits zero after reporting failed operations; its exit
+code alone is not a pass criterion.
 
 ## Windows inputs and execution boundary
 
@@ -78,20 +79,89 @@ flags cannot yet be exercised because no duplication succeeds. The shell case
 is `read -N 1 value < /dev/urandom`; it exits 1 with `can't finish (dup)
 redirection` and `Bad file descriptor`.
 
-Source inspection agrees with this narrower finding:
+At the original triage checkpoint, source inspection agreed with this finding:
 [Windows PAL](../../libc/src/arch/windows/common/syscall.c) creates URANDOM as
-a synthetic descriptor with no native HANDLE, but dup/dup2 first demand a
+a synthetic descriptor with no native HANDLE, but dup/dup2 first demanded a
 valid native HANDLE, even before the dup2 self case. Public F_DUPFD variants
-in [fd.c](../../libc/src/fd.c) delegate to dup, so they inherit the failure.
+in [fd.c](../../libc/src/fd.c) delegate to dup, so they inherited the failure.
 The earlier [RNG fork crash](windows_mksh_tranche10_crash.md) is a separate,
 already-fixed parent-address ownership issue.
 
-Before implementation, check Bionic's duplication/descriptor-flag contracts;
-then add failure-before/fix-after regressions for self-dup, replacement, minimum
-fd, CLOEXEC handling, closing either descriptor, repeated read and fd reuse.
-Preserve ordinary file/pipe/socket semantics; check sibling virtual devices
-without broadening this into a general fd-table rewrite. Accept through the
-packaged CRT shell as well as direct tests.
+The selected fix gate was Bionic contract review, before/after regressions for
+self-dup, replacement, minimum fd, CLOEXEC handling, closing either descriptor,
+repeated read and fd reuse, plus packaged CRT shell acceptance. The following
+checkpoint records that bounded fix rather than a general fd-table rewrite.
+
+## Windows random-device dup fix (2026-10-22)
+
+Contract references: Bionic's
+[dup implementation](https://android.googlesource.com/platform/bionic/+/f7c40da307be6a9cbe2287306d9b7c25f16bb09b/libc/bionic/dup.cpp),
+[dup2_same regression](https://android.googlesource.com/platform/bionic/+/master/tests/unistd_test.cpp)
+and [fcntl dispatcher](https://android.googlesource.com/platform/bionic/+/refs/heads/main/libc/bionic/fcntl.cpp).
+Valid dup2 self-dup preserves the fd; an invalid self-dup fails with EBADF.
+Distinct duplicates clear FD_CLOEXEC, except F_DUPFD_CLOEXEC; F_DUPFD honors
+the minimum requested fd through the existing public wrapper.
+
+The Windows PAL now duplicates URANDOM/ZERO descriptor state without treating
+its placeholder as a HANDLE. Dup2 validates the source before replacing the
+destination, preserves the self case, and uses the existing kind-aware close
+path for occupied destinations in both virtual and ordinary-file branches.
+No public header/symbol or snapshot format changes. Socket-source duplication,
+cross-process virtual-fd snapshot transport and shared open-file-description
+status-flag storage are not added by this fix.
+
+[virtual_device_dup_test.c](../../libc/tests/virtual_device_dup_test.c) is a
+routine, 15-second-bounded CTest on all hosts. It checks random reads without
+assuming byte values, zero-fill semantics, descriptor flags, self/invalid dup,
+both F_DUPFD forms, minimum fd, independent close lifetime, repeated reuse,
+virtual-over-virtual and real/virtual replacement. A replaced pipe writer must
+produce EOF at its reader, exposing leaked native handles instead of merely
+checking return values. Windows also exercises `/dev/random`; `/etc/random`
+is not a supported alias and is not added as part of this fix.
+
+Evidence, source baseline `196fddd` plus this fix, native Windows/x64:
+
+- Fresh configure/build in `out/windows-random-dup`, Debug, imported libc++ OFF,
+  Clang 22.1.8, Windows SDK 10.0.28000.0 imports. The new test fails before
+  the PAL fix at `dup2(fd, fd)` with errno 9, then passes with the fix.
+- `cmake --build out/windows-random-dup --target crt-c-test -j 8`: 160
+  executed passes, zero failures and the existing `fork_heap_snapshot_test`
+  native-COW skip (161 selected). Full CTest time: 41.58 seconds. This includes
+  file/pipe/socket, descriptor snapshots, fork/reset, process-stress and shell
+  coverage. Logs: `out/windows-random-dup/Testing/Temporary/LastTest.log`.
+- Changed PAL and test sources compile with the strict Windows/aarch64
+  freestanding/emulated-TLS/fixed-x18 flags. This is compilation only.
+- A new local `01-c` SDK, `out/windows-random-dup/packaged-01-c`, installs the
+  fresh runtime/shell with `tools/create_dist.py --component crt-c` and passes
+  `tools/verify_dist.py --stage 01-c`. The unchanged Make port and pinned
+  02-cxx successor recipe were reused from the existing native build; this is
+  not a fresh port build, full isolated-chain replay or published release.
+- Rebuild the tracked regression externally with that SDK's `tools/crt-cc`:
+  static execution prints its success marker. For DLL coverage compile the C
+  object with `crt-cc`, then link it with the packaged `crt-c++` shared-core
+  lane (`CRT_CXX_RUNTIME_LINKAGE=shared`, `CRT_CXX_BUILDING_RUNTIME=1` to omit
+  C++ libraries). The marker and exit status pass, and PE imports confirm
+  `libc.dll`. Merely setting the linkage variable on the Windows C executable
+  wrapper does not select shared libc; ad-hoc mixed static/DLL links are not
+  accepted as shared-runtime proof.
+- Packaged mksh now passes `read -N 1 value < /dev/urandom`, plus explicit
+  fd 8 -> fd 9 duplication/read after closing fd 8. Zero-device fd duplication
+  and closing also pass (without a NUL-discarding shell read loop).
+
+The bounded local package driver and raw commands/results are
+`out/windows-random-dup/run_packaged_probe.py` and `packaged-probe.json`.
+All native execution was outside the sandbox, hidden-window, timeout-bounded.
+The packaged libc archive/DLL and mksh hashes match the fresh build artifacts:
+
+```text
+lib/libc.a           2f922adcad18ba629cfa97c957d186b8c4d2607b7b786407673e57aeaf1dc300
+bin/libc.dll         da212614f9ba6cfbd256179ecf0611388e0ee80e1e9acf295559baaa3daeba79
+system/bin/mksh.exe  a94f881de8f99d5aff8c2d2dde138565be72493b5bfaa64b19de9cc79cd06a00
+```
+
+No Linux/macOS or native Windows/arm64 runtime replay is claimed. The portable
+test is wired into existing CTest/CI selection, not a second CI workflow.
+Iostream and macOS binding remain open and unchanged.
 
 ## Iostream: include-only is not stream-use coverage
 

@@ -66,9 +66,6 @@ Windows triage is recorded in the [diagnostic record](docs/bringup/crt_pal_resid
 Only reproduced defects enter fixes; macOS still needs native evidence. This
 does not reopen accepted SDK stages or start SDK/CLI/Studio implementation.
 
-- [ ] Tranche 1 -- Fix the reproduced Windows random-device dup/dup2/F_DUPFD
-  gap after Bionic contract review; prove flags/lifetime/replacement and
-  packaged-shell redirection with before/after regressions.
 - [ ] Tranche 2 -- Trace and fix the reproduced Windows first-cout-use fault;
   retain include-only/cstdio controls and static/shared stream-use regressions.
   Compare rebuilt and packaged runtimes without retry-based acceptance.

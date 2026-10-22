@@ -188,7 +188,7 @@ struct crt_memory_status_ex {
 #define CRT_FD_KIND_NONE 0
 #define CRT_FD_KIND_FILE 1
 #define CRT_FD_KIND_SOCKET 2
-/* A synthetic fd kind for /dev/urandom/etc/random (see path_is_dev_
+/* A synthetic fd kind for /dev/urandom and /dev/random (see path_is_dev_
  * urandom()'s own comment): serviced entirely in-process by
  * __crt_sys_read() calling RtlGenRandom() directly, with no real
  * Windows HANDLE/SOCKET backing it at all -- fd_table[] holds an
@@ -4713,11 +4713,38 @@ long __crt_sys_getcwd(char* buf, unsigned long size) {
   return (long)result;
 }
 
+/* Random/zero devices own no native HANDLE. Copy the descriptor state, never
+ * DuplicateHandle/CloseHandle the nonzero slot placeholder. These devices have
+ * no offset or per-open backing resource whose lifetime needs a new owner. */
+static int fd_is_virtual_device(int fd) {
+  return fd >= 0 && fd < CRT_FD_TABLE_SIZE &&
+         (fd_kind[fd] == CRT_FD_KIND_URANDOM || fd_kind[fd] == CRT_FD_KIND_ZERO);
+}
+
+static void copy_virtual_device_fd(int oldfd, int newfd) {
+  fd_table[newfd] = (HANDLE)(uintptr_t)1;
+  fd_kind[newfd] = fd_kind[oldfd];
+  fd_flags[newfd] = fd_flags[oldfd] & ~FD_CLOEXEC;
+  fd_nonblock[newfd] = fd_nonblock[oldfd];
+  fd_socket_seqpacket[newfd] = 0;
+  fd_seq_peer_pid[newfd] = 0;
+  fd_pipe_write_only[newfd] = 0;
+  fd_termios_shadow_valid[newfd] = 0;
+}
+
 long __crt_sys_dup(int oldfd) {
   HANDLE handle = get_fd_handle(oldfd);
   HANDLE duplicate = 0;
   int fd;
 
+  if (fd_is_virtual_device(oldfd)) {
+    fd = alloc_fd((HANDLE)(uintptr_t)1);
+    if (fd < 0) {
+      return -EMFILE;
+    }
+    copy_virtual_device_fd(oldfd, fd);
+    return fd;
+  }
   if (handle == INVALID_HANDLE_VALUE) {
     return -EBADF;
   }
@@ -4742,7 +4769,7 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   HANDLE duplicate = 0;
 
   init_fd_table();
-  if (handle == INVALID_HANDLE_VALUE) {
+  if (handle == INVALID_HANDLE_VALUE && !fd_is_virtual_device(oldfd)) {
     return -EBADF;
   }
   if (newfd < 0 || newfd >= CRT_FD_TABLE_SIZE) {
@@ -4751,16 +4778,18 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   if (oldfd == newfd) {
     return newfd;
   }
+  if (fd_is_virtual_device(oldfd)) {
+    if (fd_kind[newfd] != CRT_FD_KIND_NONE) {
+      (void)close_fd_slot(newfd);
+    }
+    copy_virtual_device_fd(oldfd, newfd);
+    return newfd;
+  }
   if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &duplicate, 0, 0, DUPLICATE_SAME_ACCESS)) {
     return fail_last_error();
   }
-  if (fd_table[newfd] != 0 && fd_table[newfd] != INVALID_HANDLE_VALUE) {
-    if (fd_kind[newfd] == CRT_FD_KIND_SOCKET) {
-      crt_seq_forget(newfd);
-      winsock.closesocket((SOCKET)(uintptr_t)fd_table[newfd]);
-    } else {
-      CloseHandle(fd_table[newfd]);
-    }
+  if (fd_kind[newfd] != CRT_FD_KIND_NONE) {
+    (void)close_fd_slot(newfd);
   }
   fd_table[newfd] = duplicate;
   fd_kind[newfd] = CRT_FD_KIND_FILE;

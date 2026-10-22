@@ -11,6 +11,37 @@ substantive update.
 
 ## 2026-10-22
 
+### Fix Windows virtual random/zero descriptor duplication
+
+The Windows PAL now clones HANDLE-less random/zero descriptor state for dup
+and dup2 instead of rejecting its placeholder as an invalid native HANDLE.
+Valid self-dup preserves descriptor flags, distinct duplicates clear CLOEXEC,
+and existing F_DUPFD/F_DUPFD_CLOEXEC wrappers work without public ABI changes.
+Occupied dup2 destinations use the existing kind-aware close path, including
+when an ordinary file replaces a virtual slot; no placeholder CloseHandle or
+leaked replaced pipe writer is needed. Bionic contract references and exact
+scope are in the [diagnostic checkpoint](docs/bringup/crt_pal_residual_triage.md#windows-random-device-dup-fix-2026-10-22).
+
+Added portable `virtual_device_dup_test` to routine CTest with a 15-second
+bound. A fresh Windows/x64 Debug build fails before the fix at dup2 self with
+EBADF, then passes; checks include flags, invalid inputs, minimum fd, close
+lifetime, reuse and bidirectional virtual/native replacement. Full C-stage
+replay selects 161 cases: 160 executed passes, zero failures and the existing
+native-COW skip. Both changed C sources also compile with strict Windows/arm64
+flags; no native arm64, Linux or macOS execution is claimed.
+
+Created/verified a separate local 01-c SDK from the fresh runtime/shell (reusing
+unchanged Make and successor-recipe inputs), then externally rebuilt/executed
+the regression against static libc and the shared-core link lane. DLL imports
+and the success marker are checked, not inferred from an environment setting.
+Packaged CRT mksh random redirection and duplicate/read/close now pass; zero
+dup/close also passes. No frozen SDK was overwritten or release published.
+Removed the completed Tranche 1 from TODO; iostream Tranche 2 and macOS binding
+Tranche 3 remain open. No upstream patch, new public symbol, CI workflow change
+or STATUS update; virtual-fd cross-process transport remains outside this fix.
+Markdown validation passes for three edited documents and 100 local links/
+anchors, plus English/fence/conflict checks and `git diff --check`.
+
 ### Select residual PAL defects with bounded Windows reproducers
 
 Moved random-device duplication, Windows iostream and macOS dylib binding from
