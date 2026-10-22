@@ -1005,6 +1005,46 @@ function(add_crt_cxx_test test_name source_file)
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS ${test_name}_runs)
 endfunction()
 
+if(Python3_Interpreter_FOUND)
+  # Input-hash cache of the stage steps (tools/crt_stage_cache.py, inputs in tools/stage_cache.json): a step is skipped
+  # when the sources it depends on (its stage and every stage before it), the configuration keys below and its command
+  # line are unchanged since its last successful run. CRT_STAGE_CACHE=off disables skipping; the
+  # crt-stage-cache-reset target clears the recorded state.
+  set(CRT_STAGE_CACHE_DIR "${CMAKE_BINARY_DIR}/stage-cache")
+  set(CRT_STAGE_CACHE_KEYS
+    --key "compiler=${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION}"
+    --key "target=${CRT_TARGET_OS}-${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
+    --key "build_type=${CMAKE_BUILD_TYPE}"
+    --key "release_tag=${CRT_RELEASE_TAG}"
+    --key "imported_libcxx=${CRT_USE_IMPORTED_LIBCXX}"
+    --key "skia=${CRTGFX_ENABLE_SKIA}"
+    --key "ffmpeg=${CRTMEDIA_ENABLE_FFMPEG}"
+    --key "curl=${CRTMEDIA_ENABLE_CURL}"
+    --key "lvgl=${CRTUI_ENABLE_LVGL}"
+    --key "debug_malloc=${CRT_ENABLE_DEBUG_MALLOC}")
+  # crt_add_cached_stage_target(<target> NAME <step> STAGE <stage> [OUTPUTS <paths>] [DEPENDS <targets>]
+  #                             COMMAND <cmd> [++ <cmd> ...])     ("++" runs the commands in sequence)
+  function(crt_add_cached_stage_target target)
+    cmake_parse_arguments(ARG "" "NAME;STAGE" "OUTPUTS;DEPENDS;COMMAND" ${ARGN})
+    set(crt_cache_outputs)
+    foreach(crt_cache_output IN LISTS ARG_OUTPUTS)
+      list(APPEND crt_cache_outputs --output "${crt_cache_output}")
+    endforeach()
+    add_custom_target(${target}
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt_stage_cache.py" run
+        --root "${CMAKE_SOURCE_DIR}" --state-dir "${CRT_STAGE_CACHE_DIR}"
+        --name "${ARG_NAME}" --stage "${ARG_STAGE}" ${CRT_STAGE_CACHE_KEYS} ${crt_cache_outputs}
+        -- ${ARG_COMMAND}
+      DEPENDS ${ARG_DEPENDS}
+      VERBATIM
+      USES_TERMINAL)
+  endfunction()
+  add_custom_target(crt-stage-cache-reset
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${CRT_STAGE_CACHE_DIR}"
+    COMMENT "Clearing the stage cache (${CRT_STAGE_CACHE_DIR})"
+    VERBATIM)
+endif()
+
 add_subdirectory(libc)
 add_subdirectory(libm)
 add_subdirectory(libdl)
@@ -1460,13 +1500,11 @@ if(Python3_Interpreter_FOUND)
     endif()
   endforeach()
   add_dependencies(crt-c-build ${CRT_C_TEST_TARGETS})
-  add_custom_target(crt-c-test
-    COMMAND "${CMAKE_COMMAND}" -DCRT_BINARY_DIR="${CMAKE_BINARY_DIR}"
-      -DCRT_CTEST="${CMAKE_CTEST_COMMAND}"
-      -P "${CMAKE_SOURCE_DIR}/cmake/run_core_tests.cmake"
+  crt_add_cached_stage_target(crt-c-test NAME c-test STAGE c
     DEPENDS ${CRT_C_TEST_TARGETS} crt_shell_artifacts
-    USES_TERMINAL
-  )
+    COMMAND "${CMAKE_COMMAND}" -DCRT_BINARY_DIR=${CMAKE_BINARY_DIR}
+      -DCRT_CTEST=${CMAKE_CTEST_COMMAND}
+      -P "${CMAKE_SOURCE_DIR}/cmake/run_core_tests.cmake")
   # A packaged 01-c SDK must carry the pinned recipe that advances it to
   # 02-cxx. Generate the release-shaped source asset and recipe after fetching
   # the pinned runtime sources; only the recipe is copied into 01-c. The
@@ -1486,71 +1524,64 @@ if(Python3_Interpreter_FOUND)
   # step ("distribution is missing: .../stages/recipes/03-gfx-simple.json").
   # DEPENDS crt-stage-03-source (defined just below) for this exact reason
   # -- its own recipe.json must already exist on disk before this runs.
-  add_custom_target(crt-stage-02-source
+  crt_add_cached_stage_target(crt-stage-02-source NAME stage-02-source STAGE cxx
+    OUTPUTS "${CRT_STAGE_SOURCE_ROOT}/02-cxx.json"
+    DEPENDS crt-libcxx-fetch crt-stage-03-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
       --root "${CMAKE_SOURCE_DIR}" --stage 02-cxx
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CRT_LIBCXX_FETCH_ROOT}"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
       --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/03-gfx-simple.json"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
-    DEPENDS crt-libcxx-fetch crt-stage-03-source
-    COMMENT "Creating the pinned 01-c -> 02-cxx source asset and recipe"
-    USES_TERMINAL
-  )
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
   set(CRT_STAGE_03_SOURCE_DEPENDS)
   if(CRT_TARGET_OS STREQUAL "linux")
     list(APPEND CRT_STAGE_03_SOURCE_DEPENDS crtgfx-xkbcommon-build)
   endif()
-  add_custom_target(crt-stage-03-source
+  crt_add_cached_stage_target(crt-stage-03-source NAME stage-03-source STAGE gfx-simple
+    OUTPUTS "${CRT_STAGE_SOURCE_ROOT}/03-gfx-simple.json"
+    DEPENDS ${CRT_STAGE_03_SOURCE_DEPENDS}
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
       --root "${CMAKE_SOURCE_DIR}" --stage 03-gfx-simple
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
-    DEPENDS ${CRT_STAGE_03_SOURCE_DEPENDS}
-    COMMENT "Creating the pinned 02-cxx -> 03-gfx-simple source asset and recipe"
-    USES_TERMINAL
-  )
-  add_custom_target(crt-stage-04-source
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
+  crt_add_cached_stage_target(crt-stage-04-source NAME stage-04-source STAGE gfx-media
+    OUTPUTS "${CRT_STAGE_SOURCE_ROOT}/04-gfx-media.json"
+    DEPENDS crt-stage-05-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
       --root "${CMAKE_SOURCE_DIR}" --stage 04-gfx-media
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
       --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
-    # Embeds 05-ui.json so the isolated 04 SDK can bootstrap 05-ui with nothing
-    # but a downloaded asset (the same contract 02-cxx -> 03-gfx-simple has).
-    DEPENDS crt-stage-05-source
-    COMMENT "Creating the pinned 03-gfx-simple -> 04-gfx-media source asset and recipe"
-    USES_TERMINAL
-  )
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
+  # (crt-stage-04-source embeds 05-ui.json so the isolated 04 SDK can bootstrap 05-ui with nothing
+  # but a downloaded asset, the same contract 02-cxx -> 03-gfx-simple has.)
   # 04-gfx-media -> 05-ui (Tranche 7): crtui, its Skia/MediaView companions and
   # tests build from this asset against the isolated 04 SDK alone; only LVGL is
   # fetched live. No source_root content is bundled (the asset carries project
   # paths only), so the shared external/ root is just a placeholder.
-  add_custom_target(crt-stage-05-source
+  crt_add_cached_stage_target(crt-stage-05-source NAME stage-05-source STAGE ui
+    OUTPUTS "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
+    DEPENDS crt-stage-06-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
       --root "${CMAKE_SOURCE_DIR}" --stage 05-ui
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
       --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
-      --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/06-web.json"
-    DEPENDS crt-stage-06-source
-    COMMENT "Creating the pinned 04-gfx-media -> 05-ui source asset and recipe"
-    USES_TERMINAL
-  )
-  add_custom_target(crt-stage-06-source
+      --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/06-web.json")
+  crt_add_cached_stage_target(crt-stage-06-source NAME stage-06-source STAGE web
+    OUTPUTS "${CRT_STAGE_SOURCE_ROOT}/06-web.json"
+    DEPENDS crt-c-build crt-stage-02-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
       --root "${CMAKE_SOURCE_DIR}" --stage 06-web --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external" --output-dir "${CRT_STAGE_SOURCE_ROOT}"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
-    COMMENT "Creating the pinned 05-ui -> 06-web source asset and recipe"
-    USES_TERMINAL)
-  add_custom_target(crt-c-dist
+      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
+  crt_add_cached_stage_target(crt-c-dist NAME c-dist STAGE c OUTPUTS "${CRT_DIST_ROOT}/01-c"
+    DEPENDS crt-c-build crt-stage-02-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/01-c" --component crt-c
@@ -1558,11 +1589,8 @@ if(Python3_Interpreter_FOUND)
       --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/02-cxx.json"
       --cmake "${CMAKE_COMMAND}" --stage 01-c
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
-      --dist "${CRT_DIST_ROOT}/01-c" --stage 01-c
-    DEPENDS crt-c-build crt-stage-02-source
-    USES_TERMINAL
-  )
+    ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+      --dist "${CRT_DIST_ROOT}/01-c" --stage 01-c)
 
   if(TARGET crt-libcxx-build)
     # Both publishers write 01-c. Do not fingerprint/read it while crt-c-dist
@@ -1585,7 +1613,8 @@ if(Python3_Interpreter_FOUND)
     if(NOT CRT_USE_IMPORTED_LIBCXX)
       list(APPEND CRT_LIBCXX_DIST_DEPENDS cxx cxx_shared)
     endif()
-    add_custom_target(crt-libcxx-dist
+    crt_add_cached_stage_target(crt-libcxx-dist NAME cxx-dist STAGE cxx OUTPUTS "${CRT_DIST_ROOT}/02-cxx"
+      DEPENDS ${CRT_LIBCXX_DIST_DEPENDS} crt-stage-03-source
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
         --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
         --dest "${CRT_DIST_ROOT}/02-cxx" --base "${CRT_DIST_ROOT}/01-c"
@@ -1593,11 +1622,8 @@ if(Python3_Interpreter_FOUND)
         --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/03-gfx-simple.json"
         --cmake "${CMAKE_COMMAND}" --stage 02-cxx
         --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
-      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
-        --dist "${CRT_DIST_ROOT}/02-cxx" --stage 02-cxx
-      DEPENDS ${CRT_LIBCXX_DIST_DEPENDS} crt-stage-03-source
-      USES_TERMINAL
-    )
+      ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+        --dist "${CRT_DIST_ROOT}/02-cxx" --stage 02-cxx)
     # Both targets publish the cumulative C++ SDK at CRT_LIBCXX_SYSROOT.
     # Serialize the writers: otherwise a distribution build can remove and
     # replace dist/02-cxx while a concurrent sysroot refresh (or one of its
@@ -1662,12 +1688,10 @@ if(Python3_Interpreter_FOUND)
   # Graphics stage's own dist actually window-only: no GPU/Skia object
   # code ever gets pulled into this DEPENDS list at all.
   add_custom_target(crt-gfx-simple-build DEPENDS crtgfx_window crtgfx_window_shared crtgfx_window_smoke crtgfx_synthetic_event crtgfx_window_demo)
-  add_custom_target(crt-gfx-simple-test
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_window_smoke_runs"
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_synthetic_event_runs"
+  crt_add_cached_stage_target(crt-gfx-simple-test NAME gfx-simple-test STAGE gfx-simple
     DEPENDS crt-gfx-simple-build
-    USES_TERMINAL
-  )
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_window_smoke_runs"
+    ++ "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_synthetic_event_runs")
   set(CRT_GFX_SIMPLE_DIST_ARGS)
   if(CRT_TARGET_OS STREQUAL "linux")
     list(APPEND CRT_GFX_SIMPLE_DIST_ARGS
@@ -1693,7 +1717,9 @@ if(Python3_Interpreter_FOUND)
       )
     endif()
   endif()
-  add_custom_target(crt-gfx-simple-dist
+  crt_add_cached_stage_target(crt-gfx-simple-dist NAME gfx-simple-dist STAGE gfx-simple
+    OUTPUTS "${CRT_DIST_ROOT}/03-gfx-simple"
+    DEPENDS crt-libcxx-dist crt-gfx-simple-build crt-stage-04-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/03-gfx-simple" --base "${CRT_DIST_ROOT}/02-cxx"
@@ -1701,11 +1727,8 @@ if(Python3_Interpreter_FOUND)
       --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/04-gfx-media.json"
       ${CRT_GFX_SIMPLE_DIST_ARGS}
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
-      --dist "${CRT_DIST_ROOT}/03-gfx-simple" --stage 03-gfx-simple
-    DEPENDS crt-libcxx-dist crt-gfx-simple-build crt-stage-04-source
-    USES_TERMINAL
-  )
+    ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+      --dist "${CRT_DIST_ROOT}/03-gfx-simple" --stage 03-gfx-simple)
 
   # crtgfx_gpu/crtgfx_gpu_shared PUBLIC-link crtgfx_window/crtgfx_window_
   # shared transitively, but both are listed explicitly here so `ninja`
@@ -1723,11 +1746,9 @@ if(Python3_Interpreter_FOUND)
   # in crt-gfx-build's own (pre-this-fix) DEPENDS ever built them, so
   # ctest correctly reported them "Not Run" rather than a false pass.
   add_custom_target(crt-gfx-build DEPENDS crt-gfx-simple-build crtgfx_window crtgfx_window_shared crtgfx_gpu crtgfx_gpu_shared crtgfx_gpu_test crtgfx_gpu_window_demo)
-  add_custom_target(crt-gfx-test
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_.*_runs"
+  crt_add_cached_stage_target(crt-gfx-test NAME gfx-test STAGE gfx-simple
     DEPENDS crt-gfx-build
-    USES_TERMINAL
-  )
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_.*_runs")
   # crt-media-test's filter below selects all five always-registered media
   # tests, so its build aggregate must produce their executables as well as
   # the two libraries. A real clean-tree Windows run (2026-09-09) exposed
@@ -1748,11 +1769,9 @@ if(Python3_Interpreter_FOUND)
     # cumulative SDK build must produce it before create_dist invokes install.
     add_dependencies(crt-media-build crtmedia_player_demo)
   endif()
-  add_custom_target(crt-media-test
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtmedia_.*_runs"
+  crt_add_cached_stage_target(crt-media-test NAME media-test STAGE gfx-media
     DEPENDS crt-media-build
-    USES_TERMINAL
-  )
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtmedia_.*_runs")
   # The media stage's packaged Skia demo consumes CRT_LIBCXX_SYSROOT
   # (dist/02-cxx). Keep the cumulative predecessor ahead of that direct
   # consumer, and do not let either stage-04 aggregate complete before it:
@@ -1791,7 +1810,9 @@ if(Python3_Interpreter_FOUND)
       --media-source-root "${CMAKE_BINARY_DIR}/port-tests/src"
       --skia-source "${CRTGFX_SKIA_ROOT}" --skia-library "${CRT_STAGE_SKIA_LIBRARY}")
   endif()
-  add_custom_target(crt-gfx-media-dist
+  crt_add_cached_stage_target(crt-gfx-media-dist NAME gfx-media-dist STAGE gfx-media
+    OUTPUTS "${CRT_DIST_ROOT}/04-gfx-media"
+    DEPENDS crt-gfx-simple-dist crt-gfx-media-build crt-stage-05-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/04-gfx-media" --base "${CRT_DIST_ROOT}/03-gfx-simple"
@@ -1799,11 +1820,8 @@ if(Python3_Interpreter_FOUND)
       ${CRT_FULL_MEDIA_DIST_ARGS}
       --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
       --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
-      --dist "${CRT_DIST_ROOT}/04-gfx-media" --stage 04-gfx-media
-    DEPENDS crt-gfx-simple-dist crt-gfx-media-build crt-stage-05-source
-    USES_TERMINAL
-  )
+    ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+      --dist "${CRT_DIST_ROOT}/04-gfx-media" --stage 04-gfx-media)
 
   # 05-ui: crtui (Tranche 0 ships the frozen contract and its headless model).
   add_custom_target(crt-ui-build DEPENDS crtui crtui_shared)
@@ -1818,10 +1836,9 @@ if(Python3_Interpreter_FOUND)
   if(TARGET crtui_skia_media)
     add_dependencies(crt-ui-build crtui_skia_media)
   endif()
-  add_custom_target(crt-ui-test DEPENDS crt-ui-build crtui_contract_test
-    crtui_layout_test crtui_surface_test crtui_input_test
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtui_.*_runs"
-  )
+  crt_add_cached_stage_target(crt-ui-test NAME ui-test STAGE ui
+    DEPENDS crt-ui-build crtui_contract_test crtui_layout_test crtui_surface_test crtui_input_test
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtui_.*_runs")
   if(TARGET crtui_render_test)
     add_dependencies(crt-ui-test crtui_render_test)
   endif()
@@ -1846,17 +1863,15 @@ if(Python3_Interpreter_FOUND)
       USES_TERMINAL
     )
   else()
-    add_custom_target(crt-ui-dist
+    crt_add_cached_stage_target(crt-ui-dist NAME ui-dist STAGE ui OUTPUTS "${CRT_DIST_ROOT}/05-ui"
+      DEPENDS crt-gfx-media-dist crt-ui-build crt-stage-06-source
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
         --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
         --dest "${CRT_DIST_ROOT}/05-ui" --base "${CRT_DIST_ROOT}/04-gfx-media"
         --component crt-ui --cmake "${CMAKE_COMMAND}" --stage 05-ui
         --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/06-web.json"
         --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
-      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
-        --dist "${CRT_DIST_ROOT}/05-ui" --stage 05-ui
-      DEPENDS crt-gfx-media-dist crt-ui-build crt-stage-06-source
-      USES_TERMINAL
-    )
+      ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+        --dist "${CRT_DIST_ROOT}/05-ui" --stage 05-ui)
   endif()
 endif()

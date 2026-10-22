@@ -152,7 +152,8 @@ if(NOT CRT_TARGET_ARCH STREQUAL "host")
   list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS --target-arch "${CRT_TARGET_ARCH}")
 endif()
 if(Python3_Interpreter_FOUND)
-  add_custom_target(crt-libcxx-fetch
+  crt_add_cached_stage_target(crt-libcxx-fetch NAME cxx-fetch STAGE cxx
+    OUTPUTS "${CRT_LIBCXX_FETCH_ROOT}"
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
       --root "${CMAKE_SOURCE_DIR}"
@@ -162,26 +163,10 @@ if(Python3_Interpreter_FOUND)
       --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
       --sysroot "${CRT_SYSROOT}"
       --target-os "${CRT_TARGET_OS}"
-      --phase fetch
-    COMMENT "Fetching libcxx/libcxxabi/libunwind recipe sources"
-  )
-  add_custom_target(crt-libcxx-configure
-    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
-      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
-      --root "${CMAKE_SOURCE_DIR}"
-      --recipe-root "${CRT_LIBCXX_RECIPE_ROOT}"
-      --source-root "${CRT_LIBCXX_FETCH_ROOT}"
-      --build-root "${CRT_LIBCXX_BUILD_ROOT}"
-      --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
-      --sysroot "${CRT_SYSROOT}"
-      --target-os "${CRT_TARGET_OS}"
-      ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
-      --phase configure
+      --phase fetch)
+  crt_add_cached_stage_target(crt-libcxx-configure NAME cxx-configure STAGE cxx
+    OUTPUTS "${CRT_LIBCXX_BUILD_ROOT}"
     DEPENDS crt-libcxx-fetch
-    COMMENT "Configuring libcxx/libcxxabi/libunwind recipes through the CRT toolchain"
-    USES_TERMINAL
-  )
-  add_custom_target(crt-libcxx-build
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
       --root "${CMAKE_SOURCE_DIR}"
@@ -192,11 +177,21 @@ if(Python3_Interpreter_FOUND)
       --sysroot "${CRT_SYSROOT}"
       --target-os "${CRT_TARGET_OS}"
       ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
-      --phase build
+      --phase configure)
+  crt_add_cached_stage_target(crt-libcxx-build NAME cxx-build STAGE cxx
+    OUTPUTS "${CRT_LIBCXX_INSTALL_PREFIX}"
     DEPENDS crt-libcxx-configure
-    COMMENT "Building libcxx/libcxxabi/libunwind recipes through the CRT toolchain"
-    USES_TERMINAL
-  )
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
+      --root "${CMAKE_SOURCE_DIR}"
+      --recipe-root "${CRT_LIBCXX_RECIPE_ROOT}"
+      --source-root "${CRT_LIBCXX_FETCH_ROOT}"
+      --build-root "${CRT_LIBCXX_BUILD_ROOT}"
+      --install-prefix "${CRT_LIBCXX_INSTALL_PREFIX}"
+      --sysroot "${CRT_SYSROOT}"
+      --target-os "${CRT_TARGET_OS}"
+      ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
+      --phase build)
   # Declared outputs: libcrtgfx and the other imported-libc++ consumers link these sysroot files, which do not exist
   # at configure time on a clean tree (restat keeps consumers from relinking when nothing changed).
   set(CRT_LIBCXX_SYSROOT_OUTPUTS)
