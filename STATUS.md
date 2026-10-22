@@ -5,7 +5,10 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-10-12**.
+Last synchronized with the source tree and git history: **2026-10-22**.
+Reviewed commits through `2d2853d` together with the owner-approved Tranche 10
+closure changes in the working tree. This is a documentation synchronization,
+not a new runtime replay or a claim that those edits are already committed.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -20,8 +23,8 @@ documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 - The default workflow builds and tests only the C stage. Explicit cumulative
   distributions then add C++, Simple Graphics, advanced Graphics/Media, and
   `05-ui` (`crtui`, accepted on all three hosts) under `out/<preset>/dist/`.
-  `06-web` is in bring-up with Tranches 0-2 closed and Tranche 3 active through
-  `PlatformCRT` milestone B4, but has no product SDK yet
+  `06-web` now has the public `crtweb` API/WebView and predecessor-only SDK
+  packaging within the accepted host/device scope described below
   (the superseded `05-js`/`libcrtjs` skeleton was removed on 2026-09-29).
 - No distribution bundles LLVM/Clang/LLD. Desktop and embedded consumers
   provide the host or vendor toolchain; CRT supplies the staged sysroot,
@@ -263,111 +266,60 @@ and Windows/x64 (Tranches 0-7, `docs/acceptance/crtui_acceptance.md`):
   path, now rejected by `verify_dist.py` and verified on all three hosts (on
   Windows the path is baked in the `/c/...` spelling).
 
-### Removed: libcrtjs / 05-js
+### libcrtweb
 
-The `libcrtjs` skeleton (static/shared skeleton libraries only, no engine) and
-the `05-js` stage that packaged it were deleted on 2026-09-29, together with
-the `crt-js-*` targets, the `crtjs_` test-filter entries, and the `05-js`
-stage in `tools/verify_dist.py`/`tools/crt_dist_prerequisites.py`. The QuickJS
-plan is retired in favor of the `05-ui` and `06-web` stages (WebKit brings
-JavaScriptCore). There is no standalone CRT JavaScript API or binding;
-JavaScriptCore now exists only as an accepted `06-web` bring-up component.
+The WebKit CRT Port (`PlatformCRT`) is accepted through Tranches 0-10 within
+the recorded scope. The owner approved public releases on 2026-10-22; this is
+not evidence that a new release has been published. Original gates, artifact
+identities and limitations belong to
+[Web acceptance](docs/acceptance/crtweb_acceptance.md#tranche-10-closure-and-owner-release-approval-2026-10-22).
 
-### libcrtweb / 06-web
+- The product pin is WPE WebKit 2.54.1 with source/patch correspondence,
+  notices, SPDX composition and a version-bound advisory snapshot. The original
+  native Linux WPE reference remains a separate baseline, not the CRT product.
+- JavaScriptCore has interpreter, Baseline/DFG/FTL, WebAssembly, profiler and
+  lifecycle/Host ABI evidence. This does not turn every later Web/device gate
+  into a four-architecture pass.
+- Public `crtweb` runtime/view APIs and the `crtui` WebView provide painting,
+  input, navigation, website data/cookies, downloads, dialogs/popups and
+  composition/commit/cancel through the CRT-owned boundary. WebKit types stay
+  private; multiple runtimes and bounded child recovery/teardown are exercised.
+- Network trust, CRT media playback and permission-gated capture, final GPU
+  composition and the owned GPU-resource worker are integrated. GPU backends
+  use Vulkan, D3D12 or Metal with explicit lifetime/synchronization contracts;
+  CPU, synthetic, physical-device and fallback evidence remain distinct.
+- Isolated SDK builds use an installed option-ON predecessor, not producer
+  runtime objects. Installed/relocated browser and external consumers,
+  dependency/runtime audits and `verify_dist.py` are part of acceptance.
 
-The WebKit CRT Port is in progress. Tranches 0-2 are closed and Tranche 3 is
-active; detailed evidence and non-gating hardening follow-ups are in
-`docs/acceptance/crtweb_acceptance.md`:
+### Distribution and Host Scope
 
-- WPE WebKit 2.54.0 is pinned with archive hash, signed-tag/commit provenance,
-  license inventory, patch manifest, and a source-security policy.
-- JavaScriptCore is accepted on Linux/x86_64, Linux/aarch64, macOS/arm64, and
-  Windows/x64 through the interpreter, Baseline/DFG/FTL tiers, WebAssembly,
-  multi-thread/context lifecycle, watchdog/trap handling, Host ABI audits, and
-  the sampling profiler. W^X tightening, broader SIMD, and Wasm threads remain
-  documented non-gating follow-ups.
-- The verified, pristine WPE 2.54.0 source builds with the native Linux toolchain
-  on Ubuntu 26.04.1/x86_64 and renders the repository's local HTML/CSS/DOM/
-  JavaScript/canvas fixture through WPEPlatform's built-in headless backend.
-  The accepted run returned the exact DOM proof and a visible 640x480 BGRA8888
-  snapshot. This is deliberately a native reference build, not CRT integration.
-- Tranche 3A froze the shared-memory frame and input wire contract. Its native
-  WPEPlatform `crt` reference module passed end-to-end on Linux/x86_64, and the
-  consumer/layout/transport contracts have been replayed on macOS/arm64,
-  Windows/x64 and Linux/aarch64 where applicable.
-- The real `PlatformCRT` product port exists as a pinned full-source overlay.
-  B0-B3 are accepted across Linux/x86_64, macOS/arm64, Windows/x64 and
-  Linux/aarch64: source/license gates, `PORT=CRT` JSC, target dependencies, and
-  the WTF/PAL/WebCore/Skia graph. B4 is accepted on Linux/x86_64: UI, Web and
-  Network processes launch, round-trip IPC and report forced child termination.
-- B5 first render is next. The public `crtweb` API, `crtui` WebView, complete
-  lifecycle/cross-host process replay and `06-web` distribution do not exist yet.
+This is the packaging/consumer snapshot, not a general support or all-devices
+matrix. A completed historical replay does not certify every new build.
 
-### Upper Runtime Direction
+| Host/architecture | Lower stages and relink | `06-web` evidence and limits |
+| --- | --- | --- |
+| Linux/x86_64 | Regenerated SDKs; isolated stage/relink evidence | Native isolated SDK, installed/relocated consumers; later `04 -> 05 -> 06` chain and scoped installed-device gates |
+| macOS/arm64 | Regenerated SDKs; isolated stage/relink evidence | Native isolated `04 -> 05 -> 06`, relocation, consumer and runtime checks |
+| Windows/x64 | Regenerated SDKs; isolated stage/relink evidence | Native isolated SDK, fresh predecessor/space-path replay, external consumers and PE Host ABI checks |
+| Linux/aarch64 | Regenerated `01-c..05-ui`, native isolated `03 -> 04 -> 05`, relink evidence | x86_64-host cross compile/package; additional native in-tree WebKit run, with guest audio/GPU/VA limits |
+| Windows/arm64 | Regenerated `01-c..05-ui`, isolated `03 -> 04 -> 05`, relink with packaged FFmpeg | `06-web` unsupported; lower-stage VM skips are not hardware acceptance |
 
-- The runtime is packaged through the cumulative C, C++, Simple Graphics, and
-  Graphics/Media stages and `05-ui`; `06-web` is the active, not-yet-packaged
-  next stage.
-- Each cumulative stage can also be bootstrapped and verified in isolation,
-  purely from its own predecessor's already-packaged SDK rather than the
-  in-repo build tree. The complete predecessor-only chain through
-  `03-gfx-simple -> 04-gfx-media`, with Skia and FFmpeg genuinely enabled
-  (not the in-repo cumulative pass's default-OFF state), is complete on
-  Windows, macOS, and native Linux/aarch64. Linux's fresh cumulative run also
-  passes both installed-source Vulkan examples, `verify_dist.py`, and atomic
-  publication. The `04-gfx-media -> 05-ui` transition is accepted the same way
-  on Windows, macOS, and Linux/x86_64 (the 05-ui stage built with the 04 SDK's own
-  tool and embedded recipe).
-- Distribution hardening is complete for the current 01-through-05 contract:
-  predecessor relinking, external-prerequisite manifests, ELF/PE/Mach-O
-  dependency inventory, ELF RUNPATH and Mach-O install-name/RPATH portability,
-  installed external CMake consumers, configure/make port consumers, and
-  space-containing paths are covered. The former Linux/aarch64 Skia blocker is
-  resolved without an exception to those gates.
-- Allocator baseline validation and a documented Host ABI firewall are the
-  accepted foundation for FFmpeg hardware decode. The validation tranche is
-  closed with the current allocator retained. Real upper-runtime workloads
-  continue to compare against that baseline; Scudo remains conditional on a
-  preserved, repeatable blocker.
-- The `libcrtgfx` GPU backend-object boundary hardening and the live GPU
-  presentation pixel-exact/resize evidence tranches are both closed
-  (2026-09-17..18) on every required host. Hardware video decode built on
-  that foundation and is closed on all three hosts ([`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md),
-  2026-09-22): macOS/arm64 (VideoToolbox, 2026-09-18), Windows/x64 (D3D11VA,
-  2026-09-19), and Linux/x86_64 (VA-API, physical Intel GPU, 2026-09-22) all
-  report a real hardware frame observed and downloaded, the normalized
-  cross-host acceptance matrix is recorded in
-  `docs/acceptance/crtmedia_hardware_decode_acceptance.md`, and the package-acceptance
-  re-audit (fresh isolated `04-gfx-media` rebuild, binary/import dependency
-  audit) passed on all three hosts. A real, separate gap this closure found:
-  the packaged `crtmedia_player_demo` never actually requested hardware
-  decode, so it always decoded in software regardless of host; fixed the
-  same day (`HISTORY.md`) -- it now requests hardware by default, with a
-  documented software-only escape hatch, verified on Windows so far.
-  The first public developer preview of the completed `04-gfx-media` stage
-  is published: `v0.4.0-preview.1` on GitHub
-  (`https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1`) with
-  Windows/x64, macOS/arm64, and Linux/x86_64 asset sets, checksums, and
-  manifests. Its packaged `crtmedia_player_demo` predates the hardware-decode
-  default above and still only decodes in software on every host; the
-  release notes document that. A dedicated clean-machine run was explicitly
-  removed from the project queue in favor of acting on real downloader
-  reports ([`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md), 2026-09-23). Replaying the later hardware-decode-
-  default demo on macOS/Linux belongs to a future release build, not the
-  completed preview or the active runtime tranche.
-- Zero-copy decoded-texture interop, Encode and capture, and Networking and
-  streaming are closed on all three hosts.
-- The roadmap is `04-gfx-media -> 05-ui -> 06-web`. `05-ui` (`crtui`, LVGL as a
-  private implementation, with external surfaces so video -- and later a WebView
-  -- is composed by `crtgfx` rather than copied through an LVGL framebuffer) is
-  accepted; `06-web` is in progress as a WebKit CRT Port (`PlatformCRT`) with
-  `libcrtweb` and a WebView, using WPE WebKit as the reference. Tranches 0-2
-  are closed, Tranche 3 is active through B4, and B5 first render is next. WebRTC,
-  QuickJS, WebGPU, EME/DRM, V8, and Chromium/Ozone are deferred, not gates.
+The inherited C/C++/shell notices, generated LGPL source offer, corresponding
+source tooling and shared-libcrtmedia relink kits are implemented. SDK
+regeneration and owner review are complete for the supported scope; the
+[LGPL guide](docs/guides/lgpl_source_offer.md#5-decisions) owns those decisions.
+Exact native results remain in the original acceptance records, not copied
+as new test results here.
 
-The sequencing and ownership boundaries are recorded in
-[`docs/design/runtime_roadmap.md`](docs/design/runtime_roadmap.md); the isolated-acceptance
-trail is in `HISTORY.md`, open work in `TODO.md`.
+**Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
+its source tag remains. The owner's `web_public_release.approved: true`
+record accepts only the completed native/cross-packaging reminder. Failed
+advisory checks, a stale micro pin, expired support grace or unrelated blockers
+still prevent publication. Existing development SDKs keep their recorded
+candidate decisions; new artifacts must embed the approval and pass current
+release checks. No replacement release or new archive was published by this
+documentation work. See the [release guide](docs/guides/release_preview.md#05-ui-and-06-web).
 
 ## Verification Model
 
@@ -457,9 +409,12 @@ statuses, and exceptions are maintained in:
 - Windows static archives containing constructor sections can still require a
   recipe-specific retention policy because PE/COFF archive extraction does
   not behave like a GNU ELF linker script.
-- `getrusage()` currently preserves the public API shape but returns
-  zero-filled usage counters. Allocator baseline tooling therefore measures
-  RSS with a host-side runner rather than treating `ru_maxrss` as real data.
+- `getrusage()` coverage is host/selector-specific (`libc/src/resource.c`):
+  Windows reports process CPU time, peak working set in KiB and page faults
+  for `RUSAGE_SELF`; macOS reports native self/children usage with Bionic-unit
+  normalization. Windows children/threads, macOS threads and the current
+  Linux implementation still return zero-filled counters. Do not assume
+  every selector supplies measured RSS; baseline tooling uses host-side data.
 - Linux `libdl` remains a documented boundary rather than a CRT-owned general
   ELF loader: its `dlopen`/`dlsym`/`dlclose` honestly report "not supported"
   rather than delegating to a real loader, since this project links every
@@ -517,11 +472,26 @@ statuses, and exceptions are maintained in:
 
 ### libcrtweb
 
-- `libcrtjs` is gone and QuickJS is no longer planned as a stage. The accepted
-  JavaScriptCore and native WPE builds are `06-web` bring-up/reference evidence,
-  not a standalone JavaScript product API or packaged Web runtime. W^X
-  tightening, broader SIMD, Wasm threads, and native WPE dependency breadth are
-  recorded limitations rather than claims that `PlatformCRT` already exists.
+- The embedding runtime is for local/trusted content. Separate processes and
+  Host ABI audits are not a sandbox or security certification; general-purpose
+  untrusted browsing is not accepted. HTTPS needs the caller's explicit trust
+  configuration.
+- The base WebView transports CPU-painted frames. Final GPU composition and
+  the owned GPU-worker/resource channel do not make WebCore a GPU renderer or
+  make CPU-frame transport zero-copy.
+- Windows/arm64 `06-web` and a native Linux/aarch64 isolated-stage builder are
+  unsupported. Linux/aarch64 cross-package proof is not runtime execution of
+  that package; the additional native in-tree replay retains its guest audio
+  failure and unexecuted GPU/VA-driver cases.
+- Windows/arm64's lower-stage VM replay skipped the zero-copy smoke and used
+  software decode; its relink used the packaged FFmpeg archives, not a different
+  FFmpeg build. The installed Linux/x86_64 device replay used a labelled
+  synthetic camera and a null audio sink, not physical-camera/listening proof.
+  Existing native device evidence belongs to its original host/case records.
+- WebView IME composition/commit/cancel contract tests do not prove complete
+  native candidate-window geometry or an IDE editor. W^X tightening, broader
+  SIMD and Wasm threads retain their recorded non-gating scope. Deferred Web
+  extensions remain in the [roadmap](docs/design/runtime_roadmap.md#deferred-scope).
 
 ### libcrtui
 
@@ -533,8 +503,8 @@ statuses, and exceptions are maintained in:
   edges; the tests use sources whose pixels survive it.
 - Input evidence is scripted through the real event queue; interactive keyboard,
   mouse and trackpad behavior on real devices is not automated on any host.
-- The `05-ui` SDK is not yet a release asset: `tools/prepare_release_assets.py`
-  has no `05-ui` entry. The in-tree package ships `crtui/skia*.h` even when
+- The release tool supports `05-ui` and `06-web`; that does not imply an uploaded
+  binary release. The in-tree package ships `crtui/skia*.h` even when
   Skia/FFmpeg are off but builds the companion libraries only when they are on.
 - `crt-ui-dist` needs `-DCRTUI_ENABLE_LVGL=ON` (after `crtui-lvgl-fetch`); with
   the default configuration it fails at `verify_dist.py` because the required
@@ -542,24 +512,23 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-1. Continue `TODO.md`'s active Web Runtime (`06-web`) work, a WebKit CRT Port.
-   Application UI (`05-ui`, Tranches 0-7) is closed on all three hosts, so its
-   External Surface contract is the accepted prerequisite. The order is
-   `docs/acceptance/crtweb_acceptance.md`: Tranches 0-2 are closed; Tranche 3A
-   and PlatformCRT B0-B3 are complete on all acceptance pairs, B4 is complete
-   on Linux/x86_64, and B5 first render is next. See
-   `docs/porting/crtweb_porting.md`.
-2. Small follow-ups left by the UI work, not gates: teach
-   `tools/prepare_release_assets.py` the `05-ui` SDK, and make a default-
-   configuration `crt-ui-dist` fail with a clear message instead of a missing
-   `ui-basic/main.c`.
+No implementation tranche is active after Web Tranche 10 closure. The next
+planned producer increment is the **SDK Producer Contract Gate P0** in
+[TODO](TODO.md#crt-developer-experience-sdk---cli---studio); CLI/Studio
+implementation and consumer compatibility acceptance have not started here.
 
-Also ongoing, opportunistically rather than sequenced: closing the focused
-CRT/PAL limitations above when an upstream consumer exposes a concrete
-requirement, following the Bionic-first porting discipline in `AGENTS.md`
-(`TODO.md`'s "Focused CRT/PAL follow-ups"), including non-blocking
-Windows/aarch64 allocator validation and comparison of real upper-runtime
-workloads against `docs/acceptance/allocator_baseline.md`.
+- Keep SDK identity/capability/startup/link/runtime contracts with CRT and use
+  immutable public artifacts for external consumers. The separate CLI/Studio
+  repositories remain documentation/bootstrap plans, not implemented products.
+- A new public release still needs an explicitly scoped assembly/publication
+  action and current artifact checks; approval alone does not perform it.
+- Two existing Windows relink-kit fixture portability failures (path separators
+  and a directly executed POSIX fake compiler) are tracked separately in
+  [TODO](TODO.md#relink-kit-test-portability-on-windows). They reproduce from the
+  unchanged committed tests and are not new actual-DLL relink failures.
+- Broader CRT/PAL hardening, allocator replacement and deferred upper-runtime
+  extensions remain consumer-driven follow-ups, not reopened Web gates.
 
-Detailed actionable work belongs in [`TODO.md`](TODO.md); completed changes
-belong in [`HISTORY.md`](HISTORY.md).
+Detailed work stays in [TODO](TODO.md), completed decisions in
+[HISTORY](HISTORY.md), and reproducible evidence in the owning acceptance
+document. This snapshot does not replace those sources.

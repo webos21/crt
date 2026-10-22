@@ -1,15 +1,17 @@
 # Developer Preview Release
 
 This document defines what a CRT developer-preview release contains, how it is
-verified, and how a maintainer produces it. The first preview,
-[`v0.4.0-preview.1`](https://github.com/webos21/crt/releases/tag/v0.4.0-preview.1), was published
-on 2026-09-21 as a GitHub pre-release, and now carries **Windows/x64,
-macOS/arm64, and Linux/x86_64 assets** (all three built and checksummed
-2026-09-21/22, uploaded since; re-confirmed 2026-09-22 via the release API --
-27 files, release body byte-identical to
-[`release_notes_v0.4.0-preview.1.md`](../releases/release_notes_v0.4.0-preview.1.md)) --
-see "What has been verified so far" below for each host's own build. For what
-works today, see the README and [`STATUS.md`](../../STATUS.md).
+verified, and how a maintainer produces it. **The first preview,
+`v0.4.0-preview.1`, was withdrawn by the owner; checked 2026-10-22.** Its source
+tag remains, but its GitHub binary release is no longer offered. The owner has
+approved future Web releases; no replacement release was published by the
+[Tranche 10 closure](../acceptance/crtweb_acceptance.md#tranche-10-closure-and-owner-release-approval-2026-10-22).
+
+The build/measurement records below describe the historical 2026-09-21/22
+preview (Windows/x64, macOS/arm64 and Linux/x86_64, 27 uploaded files). The
+[original release notes](../releases/release_notes_v0.4.0-preview.1.md) are
+retained as history, not a current download. For present build/use contracts,
+see the [distribution guide](distribution.md) and [Web acceptance](../acceptance/crtweb_acceptance.md).
 
 That preview is positioned as the first public developer preview of the CRT
 Graphics/Media SDK stage (`04-gfx-media`).
@@ -31,7 +33,6 @@ release is the union of the three sets.
 | `crt-<tag>-<os>-04-gfx-media-source.tar.xz` and the `02-cxx`/`03-gfx-simple` equivalents | Stage-source assets that the packaged stage recipes download (pinned by size and SHA-256) |
 | `SHA256SUMS-<os>-<arch>` | Checksums of every asset that host produced |
 | `release-manifest-<os>-<arch>.json` | Machine-readable list: version, source commit, per-asset size and SHA-256 |
-
 | `crt-<tag>-<os>-<arch>-05-ui`, `-06-web` | `04-gfx-media` plus the CRT UI / the WebKit CRT Port (see below) |
 | `crt-<tag>-corresponding-source.tar.xz` | LGPL corresponding source of the release commit (built when a `04`/`05`/`06` stage is exported; see [`lgpl_source_offer.md`](lgpl_source_offer.md)) |
 
@@ -350,7 +351,7 @@ files) sets were uploaded to the release, and the updated, three-platform
 2026-09-22 re-confirmed both via the release API (27 assets across all three
 hosts; the live body is byte-identical to the file in this repo).
 
-Not yet done:
+Historical unperformed follow-ups for the withdrawn preview:
 
 - A fresh-clone rebuild of the Windows set. It is not needed for consistency:
   the tag `v0.4.0-preview.1` points at `fd01d7c`, the commit the assets record.
@@ -399,10 +400,19 @@ adds these release-grade checks:
   security snapshot, source-correspondence record, LGPL source offer, and the
   recorded `web_runtime.release_decision`.
 - The Web public-release decision is the owner's, in
-  `third_party/crt-runtime/release.json` (`web_public_release`). Until the owner
-  approves it and accepts every advisory release blocker, the `06-web` SDK is a
-  **development candidate**. A *final* tag (no `-` in the version) refuses a
+  `third_party/crt-runtime/release.json` (`web_public_release`). Approval was
+  recorded on 2026-10-22 for the documented host/cross-target acceptance. Every
+  new artifact still needs a passing current advisory check, latest micro,
+  support grace and no unaccepted blockers. Otherwise it is a **development
+  candidate**. A *final* tag (no `-` in the version) refuses a
   development candidate; a *pre-release* tag (`vX.Y.Z-preview.N`) may carry one,
   and the tool prints a warning and records `web_release` in the release
   manifest. Publish such a release as a GitHub pre-release and say so in the
   notes.
+
+Do not edit old development SDKs to claim the new approval. Generate source
+assets from the intended clean release revision, build/package with its exact
+version and predecessor, and let the stage/release tools record and validate
+the decision. Include corresponding source/notices and recheck security at
+release time. Approval is not an upload instruction or evidence that a new
+GitHub release exists.

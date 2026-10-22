@@ -1,9 +1,11 @@
 # crtweb Acceptance (Stage `06-web`)
 
-**Status: in progress. Tranches 0-9 are closed, including the public `crtweb`
-API and `crtui` WebView plus public-API/process lifecycle acceptance on
-Linux/x86_64, macOS/arm64 and Windows/x64. GPU integration is accepted (Tranche 9); a packaged
-`06-web` SDK follows in Tranche 10.** Detailed contract and tranche order for the
+**Status: Tranches 0-10 closed 2026-10-22 within the recorded host/device scope;
+public-release approval is recorded, but no new release was published by this
+closure.** The public `crtweb` API, `crtui` WebView, process/GPU lifecycle and
+isolated SDK evidence are recorded below. The final decision and limits are in
+[Tranche 10 closure](#tranche-10-closure-and-owner-release-approval-2026-10-22).
+Detailed contract and tranche order for the
 WebKit-based web runtime. It depends on `05-ui`'s External Surface contract
 ([`crtui_acceptance.md`](crtui_acceptance.md)), which is accepted on all three
 hosts (2026-10-03). Upstream mapping lives in [`crtweb_porting.md`](../porting/crtweb_porting.md). Evidence is recorded
@@ -51,9 +53,10 @@ within the device/resource scope recorded below.
 Deferred: WebRTC, WebGPU, WebXR, EME/DRM, microphone/display capture, printing,
 extensions, full accessibility, downloads.
 
-**Version and licensing.** Frozen reference: WPE WebKit 2.54.0 (the stable
-series, where WPEPlatform is the stable embedding API), pinned in Tranche 0 with
-its revision, source provenance, LGPL/BSD notices, and source correspondence. WebKit ports own their release and security cadence, so a
+**Version and licensing.** Initial frozen reference: WPE WebKit 2.54.0 in
+Tranche 0; the product was re-pinned to **2.54.1** in Tranche 10. The pinned
+revision, source provenance, LGPL/BSD notices and source correspondence remain
+part of each SDK. WebKit ports own their release and security cadence, so a
 security-update policy is a deliverable, not an afterthought.
 
 ## Tranches and gates
@@ -4049,6 +4052,110 @@ build-host/target split: gperf, Perl, Python, Ruby and ICU data generators execu
 for the build host and never enter the SDK or target ABI audit; ICU, libc++, JSC,
 WebCore and WebKit are built for the target. Acceptance includes an
 x86_64-host -> Linux/aarch64-target isolated build.
+
+#### Tranche 10 closure and owner release approval (2026-10-22)
+
+The owner explicitly approves public Web releases and closes Tranche 10 on
+2026-10-22, following the three-host isolated SDK, host/target split,
+notices/source-offer and relink evidence recorded in this section. This is
+acceptance of the documented scope, not a claim of new tests on this date.
+Earlier dated checkpoints below retain their original open/candidate status
+as history; this closure supersedes them for the current tranche state.
+
+The accepted evidence covers:
+
+- Native Linux/x86_64, macOS/arm64 and Windows/x64 isolated `05-ui -> 06-web`
+  SDK production, installed/relocated consumers, HTTP/TLS and Host ABI checks.
+  The later Linux and macOS records also cover full isolated `04 -> 05 -> 06`
+  chains; Windows/x64's fresh predecessor replay is recorded separately below.
+- The x86_64-host -> Linux/aarch64-target isolated `06-web` compile/package
+  split. Native Linux/aarch64 in-tree WebKit evidence is additional, not an
+  execution test of the cross-built package.
+- Regenerated inherited notices/source offers on all five supported lower-stage
+  host/architecture pairs, source correspondence/SBOM, recorded license/header
+  decisions, the release-source bundle tooling, and stage-produced libcrtmedia
+  relink kits. Windows/arm64 adds the `01-c..05-ui` and isolated `03 -> 04 -> 05`
+  evidence recorded below; it is not a `06-web` target.
+- The 2.54.1 re-pin, advisory snapshot mechanism and adopted support policy;
+  every newly assembled release still needs current security/pin/support checks.
+  Source-offer decisions and regeneration completion are owned by the
+  [LGPL guide](../guides/lgpl_source_offer.md#5-decisions).
+
+**Preview withdrawal checked, not performed here.** The owner reports deleting
+the old `v0.4.0-preview.1` release. Read-only checks on 2026-10-22 confirm the
+[repository API](https://api.github.com/repos/webos21/crt) returns HTTP 200,
+the [release-by-tag API](https://api.github.com/repos/webos21/crt/releases/tags/v0.4.0-preview.1)
+returns HTTP 404, and the [public releases list](https://api.github.com/repos/webos21/crt/releases?per_page=100)
+returns HTTP 200 with no entries. The
+[tag API](https://api.github.com/repos/webos21/crt/git/ref/tags/v0.4.0-preview.1)
+returns HTTP 200: annotated tag object
+`88f19a659075546b1d566712488ccf7cfc510cb8`. `git ls-remote --tags origin`
+confirms the tag remains and peels to source commit
+`fd01d7c85f3dc6b96aa5019b0edff2121598c070`. A retained source tag does not
+mean that its withdrawn binary assets are still offered.
+
+**Approval record and immutable artifacts.**
+`third_party/crt-runtime/release.json` records the owner's explicit approval,
+identity and UTC timestamp and accepts exactly the advisory tool's fixed
+"native three-host and cross-target packaging acceptance required" reminder.
+It does not waive an affected/failed advisory snapshot, a non-latest micro,
+an expired support grace period or an unrelated blocker. Missing approval
+continues to deny release by default. The new approval takes effect in source
+assets and SDKs generated from this tree: already accepted development SDKs
+keep their original manifests, security snapshots and candidate decisions.
+No archive was rebuilt, overwritten, uploaded or published during this closure;
+release assembly must use the intended clean revision/version and current
+checks before upload.
+
+**Limits retained, not passes.** Windows/arm64 relink used the packaged FFmpeg
+archives, not a different FFmpeg build. Its VM skipped the packaged zero-copy
+smoke, used software decode and could not run GPU/device gates. Linux/aarch64's
+guest lacks a VA driver and retains the audio playback failure described below;
+its native isolated `06-web` builder is unsupported. The installed-SDK device
+replay on Linux/x86_64 used the labelled synthetic camera and a null audio sink,
+not a physical camera or listening test. Do not convert those limits into
+hardware pass claims or promise a sandbox/general-purpose untrusted browser.
+
+**Closure-change verification on Windows/x64.** The six suites
+`python -m unittest tools.test_crt_web_release tools.test_crt_source_offer
+tools.test_license_choices tools.test_crt_runtime_notices
+tools.test_prepare_release_assets tools.test_stage_06_web` report 119 tests:
+118 executed passes and one expected POSIX-only skip. The approval regression
+uses the actual release record and verifies both acceptance of the completed
+packaging reminder and rejection of unrelated/security/pin/support blockers.
+
+Before the fixture follow-up below, the expanded run including
+`tools.test_crt_relink_kit` reported 131 tests:
+128 passes, two failures and one skip. Both failures reproduce when loading
+`git show 2d2853d:tools/test_crt_relink_kit.py` without modifying that committed
+test or its helper: `Runner.test_relative_paths_are_made_absolute_before_the_link_changes_directory`
+compares mixed `/` vs Windows `\` path spellings, and
+`Installed.test_elf_kit_ships_the_runtime_path_cleaner_and_the_runner_uses_it`
+tries to execute its POSIX `driver.sh` directly with Windows CreateProcess
+(WinError 193). These were test-fixture portability follow-ups, not
+new real-library relink failures or a claim that the full suite is green.
+The first sandboxed attempt also hit Git/compiler/symlink restrictions; those
+errors disappear outside that sandbox without changing Developer Mode or
+machine security settings. No full SDK/runtime rebuild was run for this edit.
+
+**Relink-kit fixture follow-up resolved (2026-10-22, Windows/x64).**
+`tools/test_crt_relink_kit.py` now preserves quoted arguments from the runner's
+`list2cmdline` output and compares absolute resolved `Path` values instead of
+separator spellings; the fixture's working directory includes spaces. Its
+fake compiler is the current Python executable with a script prepended to the
+test recipe's arguments, rather than a POSIX shell script passed to
+CreateProcess. The script and output paths contain spaces and both subprocesses
+are bounded by 30-second timeouts. The real generated runner still invokes the
+fake compiler and strips absolute ELF RUNPATH entries; the assertion still
+requires exactly `$ORIGIN`, with no shell fallback or skip added.
+
+Verification: `python -m unittest -v tools.test_crt_relink_kit` passes all
+12 tests. Repeating the seven-suite command above with the relink-kit suite
+included runs 131 tests: **130 executed passes, one expected POSIX-wrapper
+skip on Windows, no failures/errors**. This supersedes the earlier two fixture
+failures, not the original real-SDK/device scope. No production relink runner,
+SDK binary, CI workflow or native DLL acceptance requirement was changed;
+Linux/macOS runtime replay was not performed by this Windows-only follow-up.
 
 #### Linux-first development packaging contract (2026-10-18)
 

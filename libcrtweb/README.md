@@ -12,17 +12,18 @@ The product also registers CRT-owned playback and permission-gated video-camera
 sources over the installed `crtmedia` APIs. Host acceptance, lifecycle/resource
 measurements and media limits live in the acceptance document linked above;
 active work lives in [`TODO.md`](../TODO.md), not a second checklist here.
-The development source-stage entrypoint is `tools/build_stage_06_web.py`;
+The source-stage entrypoint is `tools/build_stage_06_web.py`;
 [SDK layout/build instructions](../docs/guides/distribution.md) and
 [distribution/security gates](../docs/acceptance/crtweb_acceptance.md#10-distribution-and-security-closure)
-define its packaging boundary. A development candidate is not a public release.
+define its packaging boundary. The owner-approved closure does not rewrite
+existing development candidates or imply that a new release was uploaded.
 
 `crtweb/skia.h` is the optional GPU final-composition companion for a WebView:
 it uses the application's SDK Ganesh context, composes into an offscreen or
 acquired `crtgfx` GPU surface and waits for completion before source retirement.
 The existing v1 transport is still CPU shared memory; this path uploads pixels
-and does not claim zero-copy or GPU WebCore rendering. Contract and remaining
-resource/host gates: [GPU integration](../docs/acceptance/crtweb_acceptance.md#9-gpu-integration).
+and does not claim zero-copy or GPU WebCore rendering. Contract and recorded
+resource/host scope: [GPU integration](../docs/acceptance/crtweb_acceptance.md#9-gpu-integration).
 
 `crtweb/gpu_surface.h` is the separate GPU-resource consumer. A CRT-owned
 `crtweb_gpu_worker` owns an ordinary CPU WebView and uploads its frames into

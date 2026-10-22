@@ -237,11 +237,13 @@ host/target identities, and results without duplicating the original evidence.
 Follow the [CLI joint sequence](crt_cli.md#9-joint-development-sequence)
 for the detailed development order.
 
-SDK/CLI/Studio versions are independent. Development-snapshot acceptance does
-not authorize public release. Current `05-ui`/`06-web` release tooling and
-remaining publication, notices/source-offer/SBOM, support/security conditions stay in
-[Web acceptance](../acceptance/crtweb_acceptance.md) and [TODO](../../TODO.md).
-This design does not close those gates.
+SDK/CLI/Studio versions are independent. A consumer design or development
+snapshot alone does not authorize publication. The `05-ui`/`06-web` release
+tooling, source/notices/SBOM obligations and continuing security checks belong
+to [Web acceptance](../acceptance/crtweb_acceptance.md) and the
+[release guide](../guides/release_preview.md). Tranche 10's owner approval is
+recorded there; this SDK/CLI design does not independently approve a consumer
+product or publish artifacts. [TODO](../../TODO.md) owns the next producer work.
 
 ## 8. Cross-repository Contract Review
 

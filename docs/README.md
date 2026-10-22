@@ -64,9 +64,9 @@ Current work is in [TODO](../TODO.md); completed work is in
 
 - [Libm Dependency Map](reference/libm_dependency_map.md)
 
-## Published release notes
+## Release notes and withdrawal records
 
-- [CRT v0.4.0-preview.1](releases/release_notes_v0.4.0-preview.1.md)
+- [CRT v0.4.0-preview.1](releases/release_notes_v0.4.0-preview.1.md) (binary release withdrawn; original notes retained).
 
 ## Historical material
 

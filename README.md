@@ -4,14 +4,19 @@
 
 CRT is a native cross-platform application runtime for **Linux, Windows, and macOS**.
 
-It provides a common C/C++ runtime and platform layer, then builds upward into native windows, GPU graphics, media, networking, application UI, and eventually a WebKit-based Web runtime.
+It provides a common C/C++ runtime and platform layer, then builds upward into
+native windows, GPU graphics, media, networking, application UI and an optional
+WebKit-based embedding runtime.
 
 **Same source model. Native executables. Native GPUs. No VM, container, or translation layer.**
 
 The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-Pi-class consoles, industrial HMIs, smart displays, and automotive IVI systems. Windows and macOS are first-class native development and execution hosts, not emulation environments.
 
-> CRT is pre-1.0 developer software under active development.  
-> The accepted product runtime now reaches **`05-ui`**: `crtui` application widgets, layout, input, external-surface composition, and a GPU-composed `MediaView`, verified on all three hosts. The current upper-runtime work is **`06-web`**, a WebKit CRT Port with JavaScriptCore, WebCore, WebKit, `PlatformCRT`, and `WebView`. JavaScriptCore and the native WPE reference are accepted; the new `PlatformCRT` port now builds WebCore and launches its UI/Web/Network process model on Linux. First rendered output through the CRT surface contract is the next gate.
+> CRT is pre-1.0 developer software under active development.
+> The SDK stack includes native application UI and optional `06-web` embedding
+> through CRT-owned APIs. See [STATUS](STATUS.md) for accepted host/device scope
+> and limitations. Public-release approval is not a claim of an available new
+> binary download or a sandboxed general-purpose browser.
 
 [Documentation](docs/README.md) ·
 [Roadmap](docs/design/runtime_roadmap.md) ·
@@ -64,7 +69,7 @@ That foundation now supports a broader goal:
                   Linux     Windows    macOS
 ```
 
-Today, the lower and middle layers are already working across all three hosts:
+The stack provides these layers, within their recorded host/device scope:
 
 - Bionic-shaped libc/libm/libdl and imported libc++ runtime
 - native windows and input
@@ -77,10 +82,13 @@ Today, the lower and middle layers are already working across all three hosts:
 - `crtui` application widgets with CRT-owned layout, styling, input and focus
 - external-surface composition, including GPU video (`MediaView`) composed in the final present
 
-The `crtweb` product runtime remains in progress and is not claimed as a usable
-browser SDK. Its `PlatformCRT` source, WebCore graph and initial multi-process
-foundation now exist, but first rendering, the public API/WebView, cross-host
-lifecycle replay and the packaged `06-web` SDK remain open.
+The `crtweb` runtime provides the WebKit `PlatformCRT` port, public API/WebView,
+multi-process lifecycle and a predecessor-built `06-web` SDK within the
+[accepted host/device scope](docs/acceptance/crtweb_acceptance.md). It is an
+embedding runtime for local/trusted content, not a sandboxed general-purpose
+browser. Public-release approval is recorded, but the old preview binary
+release was withdrawn and no replacement is claimed here; see the
+[release guide](docs/guides/release_preview.md).
 
 ---
 
@@ -156,7 +164,8 @@ Examples include:
 
 `crtui` extends that base into a real application-facing widget layer.
 
-The active `06-web` stage will add an embedded Web runtime rather than making Web technology a prerequisite for the native stack.
+The optional `06-web` stage adds an embedded Web runtime without making Web
+technology a prerequisite for the native stack.
 
 ---
 
@@ -175,12 +184,12 @@ The active `06-web` stage will add an embedded Web runtime rather than making We
 04-gfx-media
   Skia / GPU / media / networking
       |
-05-ui                         accepted on all three hosts
+05-ui
   crtui / LVGL / widgets
   external-surface composition
   MediaView
       |
-06-web                        <-- current upper-runtime work (B5 first render next)
+06-web
   JavaScriptCore
   WebCore
   WebKit
@@ -204,7 +213,8 @@ Application UI
 Web Runtime          <-- current
 ```
 
-WebRTC, WebGPU, EME/DRM, and other large Web capabilities are intentionally consumer-driven follow-ups rather than prerequisites for the WebKit bring-up.
+WebRTC, WebGPU, EME/DRM and other large Web capabilities are consumer-driven
+follow-ups, not prerequisites of the accepted Web embedding baseline.
 
 See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
 
@@ -256,16 +266,16 @@ Accepted on Linux, Windows, and macOS:
   `ui-basic` consumer
 
 Interactive real-device input is not automated; the input evidence is scripted.
-`tools/prepare_release_assets.py` does not yet know `05-ui`, so it is not a
-release asset.
+`tools/prepare_release_assets.py` supports packaging `05-ui`; a supported
+export path is not a claim that a binary release is currently offered.
 
 See [docs/acceptance/crtui_acceptance.md](docs/acceptance/crtui_acceptance.md).
 
-### `06-web`: current work
+### `06-web`: WebKit embedding
 
 The Web stage is built around a **WebKit CRT Port**, not around porting WPE unchanged to every OS.
 
-The intended architecture is:
+The architecture is:
 
 ```text
 JavaScriptCore
@@ -281,17 +291,15 @@ CRT PAL      crtgfx       crtmedia
  +--------- CRT Network -----+
 ```
 
-WPE WebKit is the Linux reference port during bring-up. The final target is one CRT-facing Web runtime and `WebView` API across Linux, Windows, and macOS.
+WPE WebKit serves as the Linux reference port. Applications use the CRT-owned
+runtime and `WebView` API rather than choosing a host-specific WebKit port.
 
-Tranches 0-2 are closed: the WPE WebKit 2.54.1 provenance is frozen;
-JavaScriptCore passes interpreter, Baseline/DFG/FTL JIT, WebAssembly, and
-sampling-profiler acceptance on Linux/x86_64, Linux/aarch64, macOS/arm64, and
-Windows/x64; and pristine native WPE renders the accepted local HTML fixture
-through its built-in headless backend on Linux/x86_64. Tranche 3A then froze and
-proved the frame/input contract. The product `PlatformCRT` overlay has completed
-B0-B3 on all four acceptance pairs and B4 on Linux/x86_64: WTF/PAL/WebCore/Skia
-build, and UI/Web/Network processes launch and exchange IPC. B5 first render is
-next. The public `crtweb` API, WebView and `06-web` distribution do not exist yet.
+Applications use the CRT-owned runtime/view API and `crtui` WebView, with
+private WebKit processes behind that boundary. The cumulative SDK can be built
+from its installed predecessor. JavaScriptCore, rendering/input, lifecycle,
+network/media/capture and GPU-resource acceptance have distinct host/device
+records; consult those records rather than inferring every capability from
+an architecture name or a successful compile.
 
 See:
 
@@ -329,34 +337,12 @@ That is the point where CRT's application-runtime direction becomes visible in a
 
 ## Capability Snapshot
 
-Each cell describes evidence on that host, not a future promise.
-
-- **Verified** — implementation plus automated or recorded acceptance passed.
-- **Partial** — implemented and exercised, with a documented limitation.
-- **In progress** — current work, not yet fully accepted.
-- **Planned** — not implemented.
-
-| Capability | Linux | Windows | macOS | Notes |
-| --- | --- | --- | --- | --- |
-| libc / libm | Verified | Verified | Verified | Bionic-shaped public surface; full runtime tests. |
-| libdl | Partial | Verified | Verified | Linux real-library loading through a CRT-owned loader remains deferred. |
-| libc++ / libc++abi / libunwind | Verified | Verified | Verified | Static/shared smoke, RTTI, exceptions. |
-| pthread | Verified | Verified | Verified | Mutex, condvar, barrier, attributes, TLS, process-shared coverage. |
-| Sockets / DNS | Verified | Verified | Verified | Real HTTP/HTTPS through CRT sockets + libcurl/mbedTLS. Resolver remains IPv4/UDP A-record only. |
-| mmap / TLS | Verified | Verified | Verified | Runtime memory mapping and thread-local storage tests. |
-| Native window / input | Verified | Verified | Verified | Wayland, Win32, Cocoa; keyboard, pointer, resize, DPI. |
-| Skia CPU raster / text | Verified | Verified | Verified | Skia m148 + FreeType. |
-| Skia GPU presentation | Verified | Verified | Verified | Vulkan / D3D12 / Metal with pixel and resize checks. |
-| FFmpeg software media | Verified | Verified | Verified | Narrow LGPL configuration. |
-| Native audio output | Partial | Verified | Verified | ALSA/PulseAudio, WASAPI, CoreAudio; Linux real-device behavior is environment-dependent. |
-| Hardware H.264 decode | Verified | Verified | Verified | VA-API, D3D11VA, VideoToolbox. |
-| Decoded GPU texture interop | Verified | Verified | Verified | Direct zero-copy on Linux/macOS; measured no-CPU-readback GPU-copy fallback on Windows. |
-| Video encode / capture | Verified | Verified | Verified | V4L2/VA-API, Media Foundation, AVFoundation/VideoToolbox. |
-| Network streaming | Verified | Verified | Verified | Bounded HTTP/HTTPS input/output, reconnect, lifecycle and package acceptance. |
-| Application UI (`crtui`) | Verified | Verified | Verified | Contract, input, private-LVGL wrapper, widgets, external surfaces, MediaView and the isolated `05-ui` package (Tranches 0-7) accepted on all hosts. |
-| Web runtime (`crtweb`) | In progress | In progress | In progress | WebKit CRT Port (`06-web`). Tranches 0-2 are closed; PlatformCRT B0-B3 pass on all four acceptance pairs and B4 multi-process foundation passes on Linux/x86_64. B5 rendering, public API/WebView and packaging remain. |
-
-The authoritative detailed evidence lives in [STATUS.md](STATUS.md), [HISTORY.md](HISTORY.md), and the subsystem acceptance documents.
+[STATUS.md](STATUS.md) owns the current evidence-based host/architecture
+snapshot and known limitations. Native SDK acceptance, cross compile/package
+proof, VM/software fallback and real hardware execution are different results;
+the five-pair core CI matrix is not an all-devices upper-runtime support claim.
+The linked subsystem acceptance documents own original measurements and exact
+cases. This introduction does not maintain another completion matrix.
 
 ---
 
@@ -468,7 +454,7 @@ CRT is built as cumulative SDK stages.
 | `03-gfx-simple` | `02-cxx` + native window/input/software framebuffer |
 | `04-gfx-media` | `03-gfx-simple` + Skia CPU/GPU, Vulkan/D3D12/Metal, FFmpeg, media/networking |
 | `05-ui` | `04-gfx-media` + `crtui`, LVGL-backed widgets, application composition |
-| `06-web` | in progress (Tranches 0-2 closed; Tranche 3 active through B4, B5 next): `05-ui` + JavaScriptCore/WebCore/WebKit, `PlatformCRT`, `crtweb`/WebView |
+| `06-web` | `05-ui` + JavaScriptCore/WebCore/WebKit, `PlatformCRT`, `crtweb`/WebView; scope and host limits in [Web acceptance](docs/acceptance/crtweb_acceptance.md) |
 
 A later stage is expected to contain everything from the preceding stage.
 
@@ -720,14 +706,16 @@ The v1 widget set is intentionally small and application-oriented:
 - list/scroll view
 - text input
 
-The external surface is the architecture boundary that keeps GPU-backed content out of the LVGL CPU framebuffer. It is accepted for video (`MediaView`); a Web view is the next producer:
+The external surface is the architecture boundary that lets application
+widgets, `MediaView` and `WebView` share final composition without exposing
+their private implementation types:
 
 ```text
                  crtui scene
                      |
         +------------+------------+
         |            |            |
-      Widgets     MediaView    future WebView
+      Widgets     MediaView      WebView
         |            |            |
       LVGL        crtmedia      WebKit
         |            |            |
@@ -736,7 +724,10 @@ The external surface is the architecture boundary that keeps GPU-backed content 
                    crtgfx
 ```
 
-Video stays GPU-backed instead of being copied into an LVGL CPU framebuffer, and the same contract is meant to carry Web content.
+Video can remain GPU-backed rather than passing through an LVGL CPU
+framebuffer. The base WebView supplies CPU-painted frames; optional GPU final
+composition and the owned GPU worker's upload path do not make WebCore a GPU
+renderer or turn the base transport into zero-copy.
 
 See [docs/acceptance/crtui_acceptance.md](docs/acceptance/crtui_acceptance.md).
 
@@ -744,11 +735,11 @@ See [docs/acceptance/crtui_acceptance.md](docs/acceptance/crtui_acceptance.md).
 
 ## Web Runtime
 
-The in-progress Web layer is a **WebKit CRT Port**.
+The Web layer is a **WebKit CRT Port**.
 
 The goal is not to expose WPE or WebKit types directly to applications.
 
-Applications will eventually use a CRT-owned surface such as:
+Applications use CRT-owned surfaces:
 
 ```text
 crtweb runtime
@@ -758,19 +749,10 @@ crtui WebView
 
 while WebKit is integrated through `PlatformCRT`.
 
-The WebKit work is sequenced as follows. The first three items are closed;
-item 4 is active through the multi-process foundation, with first render next:
-
-1. pinned WebKit/JSC provenance and license policy
-2. JavaScriptCore/JSCOnly bring-up
-3. Linux WPE reference baseline
-4. `PlatformCRT` graphics/input integration
-5. `libcrtweb` and WebView
-6. WebKit multi-process lifecycle
-7. Windows/x64
-8. macOS/arm64
-9. gradual replacement of reference network/media backends with CRT subsystems
-10. packaging, security, lifecycle, and license closure
+The acceptance document owns the completed bring-up sequence and exact native,
+cross-build and device limits. Application code does not link private WebKit
+types or assume that process separation provides a security sandbox. Release
+assembly remains separate from implementation acceptance and owner approval.
 
 QuickJS is no longer a runtime stage prerequisite.
 
@@ -805,7 +787,10 @@ libcrtmedia/tests/ media/codec/audio/capture/network tests
 docs/             design, policy, roadmap and acceptance records
 ```
 
-`libcrtweb/` holds the pinned WPE/full WebKit sources and provenance, JavaScriptCore/WPE reference evidence, the `PlatformCRT` overlay, surface contracts and WebCore/WebKit process tests. The public `crtweb` API, WebView and `06-web` source stage are still planned.
+`libcrtweb/` holds WebKit pins/provenance (sources are fetched, not vendored),
+JavaScriptCore/WPE reference tests, the `PlatformCRT` overlay, surface contracts,
+public `crtweb` API/WebView and process tests. The isolated `06-web` builder
+lives under `tools/`.
 
 ---
 
@@ -844,48 +829,11 @@ Build/distribution:
 
 ## Project Status
 
-CRT is a developer-preview project.
-
-The important distinction is between what works today and where the architecture is heading.
-
-### Verified today
-
-```text
-C/C++ runtime
-native windows/input
-Skia CPU/GPU
-Vulkan / D3D12 / Metal
-software + hardware media
-zero-copy/GPU interop
-capture + encode
-network streaming
-crtui widgets, layout, input and MediaView
-isolated 05-ui source-stage build
-```
-
-### In progress
-
-```text
-WebKit CRT Port (06-web):
-Tranches 0-2 closed; Tranche 3 active through B4;
-JavaScriptCore accepted through interpreter, Baseline/DFG/FTL,
-WebAssembly, and sampling profiler on all four required host pairs;
-pristine native WPE headless reference accepted on Linux/x86_64;
-PlatformCRT WebCore graph accepted cross-host and initial Linux
-UI/Web/Network process launch plus IPC accepted
-```
-
-### Planned
-
-```text
-PlatformCRT B5 first render and B6 input
-crtweb / WebView
-multi-process cross-host replay and 06-web packaging
-```
-
-Claims in this README are intentionally evidence-based.
-
-If this file and the detailed status records disagree, [STATUS.md](STATUS.md) and the corresponding acceptance document are authoritative.
+CRT is a developer-preview project, not a promise of universal platform or
+device support. The owning [acceptance documents](docs/README.md#acceptance-contracts-and-measured-evidence)
+record measured scope and limitations; [TODO](TODO.md) owns active/planned work
+and [HISTORY](HISTORY.md) owns completed changes. [STATUS](STATUS.md) is a dated
+snapshot and is updated separately, not automatically by this README.
 
 ---
 
@@ -897,10 +845,10 @@ Each component retains its applicable license and provenance requirements.
 
 Bionic/OpenBSD-derived imports are tracked under `third_party/`. External runtime, graphics, media, UI, shell, and porting dependencies have project-owned recipe/import metadata alongside their integration.
 
-The active WebKit stage keeps WebKit/JSC/WebCore provenance and license obligations explicit and separate from CRT-owned platform adapter code.
+The WebKit stage keeps WebKit/JSC/WebCore provenance and license obligations explicit and separate from CRT-owned platform adapter code.
 
 ---
 
 ## In One Sentence
 
-> **CRT is a native application runtime for embedded Linux products that lets the same C/C++ application stack run directly on Linux, Windows, and macOS — from the runtime and GPU up through media, networking, UI, and, next, the Web.**
+> **CRT is a native application runtime for embedded Linux products that lets the same C/C++ application stack run directly on Linux, Windows, and macOS — from the runtime and GPU up through media, networking, UI and optional Web embedding.**

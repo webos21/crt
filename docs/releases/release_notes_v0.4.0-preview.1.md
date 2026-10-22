@@ -1,5 +1,10 @@
 # CRT v0.4.0-preview.1
 
+**Withdrawn binary release (checked 2026-10-22).** The owner removed this GitHub
+release; only the source tag remains. The text below is the original dated
+release note, not a current download or support claim. See the
+[withdrawal and approval record](../acceptance/crtweb_acceptance.md#tranche-10-closure-and-owner-release-approval-2026-10-22).
+
 **First public developer preview of the CRT Graphics/Media SDK stage
 (`04-gfx-media`).** Pre-1.0: interfaces may change, and this is not a
 production-ready release.

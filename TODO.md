@@ -50,6 +50,9 @@ policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Done
 
+<!-- Preserve the old link from dated snapshots; completed details live in HISTORY. -->
+<a id="relink-kit-test-portability-on-windows"></a>
+
 See [`HISTORY.md`](HISTORY.md) for the full, dated, reverse-chronological
 record of completed work. This section stays empty in `TODO.md` itself. Finished
 top-level work moves to `HISTORY.md`; terse checked prerequisite gates may remain
@@ -57,171 +60,31 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-### Web Runtime (`06-web`: WebKit CRT Port)
-
-Promoted 2026-10-03 after Application UI (`05-ui`, Tranches 0-7) closed on
-Windows/x64, macOS/arm64 and Linux/x86_64; its External Surface contract is the
-accepted prerequisite (`HISTORY.md`, `docs/acceptance/crtui_acceptance.md`). The contract,
-gates and host order live in
-[`docs/acceptance/crtweb_acceptance.md`](docs/acceptance/crtweb_acceptance.md); the upstream mapping in
-[`docs/porting/crtweb_porting.md`](docs/porting/crtweb_porting.md). Keep completed evidence in
-`HISTORY.md`; this list tracks only tranche state and execution order. Linux is
-the first implementation host because WPE is the reference; each tranche then
-uses the host replay order stated below and in the acceptance document.
-
-* [x] **0. Scope, version and license freeze.** Closed 2026-10-03.
-  * [x] Pin and verify WPE WebKit 2.54.0, signed tag/commit and archive hash.
-  * [x] Inventory licenses and freeze the security, source-correspondence and SBOM policy.
-* [x] **1. JavaScriptCore / JSCOnly bring-up.** Closed 2026-10-09 on all four
-  acceptance host/architecture pairs.
-  * [x] **1A:** build-host tool inventory and CRT-built ICU/gperf dependency ports.
-  * [x] **1B:** C-loop interpreter, lifecycle/thread/RSS checks and Host ABI audit.
-  * [x] **1C:** assembly interpreter plus Baseline JIT compile proof and watchdog.
-  * [x] **1D-A:** concurrent DFG compiler threads.
-  * [x] **1D-B:** FTL/B3.
-  * [x] **1D-C:** WebAssembly interpreter, BBQ/OMG and fast-memory fault path.
-  * [x] **1D-D:** separate sampling-profiler build and main/worker VM sampling.
-* [x] **2. Linux WPE reference baseline.** Closed 2026-10-10 on Linux/x86_64.
-  * [x] Build the pristine upstream WPE reference with the native toolchain.
-  * [x] Render the local HTML/CSS/DOM/JavaScript/canvas fixture and retain the
-    accepted 640x480 frame/proof string for later comparison.
-* [x] **3. `PlatformCRT` graphics and input prototype.** Closed 2026-10-13: 3A, 3B-B0..B7 on
-  Linux/x86_64, B4-B7 replayed on macOS/arm64 and Windows/x64. Detailed
-  contracts, commands and evidence are in
-  [`docs/acceptance/crtweb_acceptance.md`](docs/acceptance/crtweb_acceptance.md).
-  * [x] **3A:** freeze the v1 frame/input wire contract; prove shared-memory
-    rendering and input through the Linux WPEPlatform `crt` reference module.
-  * [x] **3A consumer replay:** validate the wire/layout/consumer contracts on
-    macOS/arm64, Windows/x64 and Linux/aarch64; the WPE module itself remains
-    Linux/x86_64 reference-only by design.
-  * [x] **3B-B0:** pin the full product-source commit; close source correspondence,
-    per-file licensing and patch-manifest gates.
-  * [x] **3B-B1:** compose `PORT=CRT` and pass JSC acceptance on Linux/x86_64,
-    macOS/arm64, Windows/x64 and Linux/aarch64.
-  * [x] **3B-B2:** build and test the Web dependency ports and make WebKit's
-    `find_package()` resolve them on all four acceptance pairs (Windows OpenSSL
-    and libcurl remain static-only as documented).
-  * [x] **3B-B3:** build/link WTF, PAL and WebCore with bundled Skia and pass the
-    graph/paint/text test on all four acceptance pairs.
-  * [x] **3B-B4:** on Linux/x86_64 launch UI/Web/Network processes, round-trip IPC
-    and detect forced child termination. Replayed on macOS/arm64 and
-    Windows/x64 (2026-10-12).
-  * [x] **3B-B5:** on Linux/x86_64 `reference.html` renders through `DrawingAreaCRT`,
-    the proof matches the WPE reference and the 640x480 frame reaches the CRT
-    consumer through the 3A contract; 8.3 % of pixels differ (text: font set).
-    Windows/x64 and macOS/arm64 replayed (2026-10-13); Linux/aarch64 only on assembly changes.
-  * [x] **3B-B6:** on Linux/x86_64 the 3A input contract (pointer, key, wheel, text,
-    resize, stalled consumer) passes through `PlatformCRT` against `surface_probe`.
-    Windows/x64 and macOS/arm64 replayed (2026-10-13); Linux/aarch64 only on assembly changes.
-  * [x] **3B-B7:** Linux/x86_64 prototype closed: 100x create/destroy flat, Host ABI audit
-    (static and `/proc/maps`) clean, license scan and patch manifest rechecked (patch 0018).
-    Windows/x64 and macOS/arm64 replayed (2026-10-13); Linux/aarch64 only on assembly changes (patch 0019 on macOS).
-* [x] **4. `libcrtweb` and the WebView.** C0-C8 done on Linux/x86_64 2026-10-13 and replayed on
-  macOS/arm64 and Windows/x64 (`HISTORY.md`); closed.
-  * [x] **C0-C2:** the CRT-owned runtime/view API and callbacks (`crtweb.h`, `libcrtweb.so`) and
-    the `crtui` WebView (`crtweb::WebView` over the out-of-process `crtweb_host`).
-  * [x] **C4:** multiple runtimes per process, each with its own website data store.
-  * [x] **C5:** cookies and website data: persistent or ephemeral data directory, cookie policy, clearing.
-  * [x] **C6:** downloads (request, destination decision, progress, result).
-  * [x] **C7:** popups (`window.open`, `window.close`) and dialogs (alert, confirm, prompt).
-  * [x] **C8:** IME: composition, commit of arbitrary UTF-8 (Hangul), cancel.
-  * [x] **C3:** replay `crtweb_api_test` and `crtweb_webview_test` (and C4-C8) on macOS/arm64
-    and Windows/x64: macOS/arm64 and Windows/x64 replayed (2026-10-13).
-* [x] **5. Multi-process lifecycle.** Closed on Linux/x86_64 2026-10-13:
-  public API recovery, bounded teardown and 100x runtime/view cycles; evidence
-  in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`. The owned GPU worker joins in Tranche 9.
-* [x] **6. Windows/x64 replay.** Closed 2026-10-14: the combined eight-entry
-  public API/WebView lifecycle, B5-B7 and static/runtime PE Host ABI gate is green;
-  evidence and fixes are in `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
-* [x] **7. macOS/arm64 replay.** Done 2026-10-13: B3-B7, Tranche 4 and the Tranche 5
-  public API/WebView lifecycle gates pass with the same `PlatformCRT` port (`HISTORY.md`).
-* [x] **8. CRT subsystem substitution.** Closed on Linux/x86_64, macOS/arm64 and
-  Windows/x64: network, playback, capture and shared allocator replay evidence in
-  `HISTORY.md` and `docs/acceptance/crtweb_acceptance.md`.
-* [x] **9. GPU integration.** Three-host native acceptance is closed; evidence stays in Web acceptance.
-  * [x] **9A GPU final composition:** CPU-shared-memory WebView upload into the CRT
-    GPU compositor; evidence stays in Web acceptance.
-    * [x] Linux/x86_64 Vulkan baseline.
-    * [x] Windows/x64 D3D12 replay, CPU WebView/wire/lifecycle regressions and native Host ABI audit.
-    * [x] macOS/arm64 Metal replay, CPU WebView/B7 regressions and native browser Host ABI evidence.
-  * [x] **9B GPU resources:** separately negotiated shared/zero-copy GPU-buffer import,
-    actual GPU synchronization and owned worker/consumer lifetimes; no private Skia ABI across IPC.
-    * [x] Linux Vulkan resource channel, CRT GPU worker, native ready/release synchronization and strict replay.
-    * [x] Windows D3D12 shared texture + shared-fence backend, NT handles as CRT descriptors, strict replay (offscreen 3/3, window 3/3).
-    * [x] macOS Metal IOSurface/shared-event backend, capability/lease transport and
-      strict native replay; static/shared PAL and evidence are in Web acceptance.
-  * [x] **9C closure:** device/process loss, bounded resource reuse and three-host replay.
-    CRT GPU worker is the owned GPU-process boundary; sharing one Skia context is not an initial gate.
-    Evidence stays in Web acceptance.
-    * [x] Linux owned-worker/context-loss recovery, unread-transfer draining and complete-lifetime replay.
-    * [x] macOS/arm64 Metal native 9C replay with rebuilt browser, CPU/9A/9B and Host ABI regressions.
-    * [x] Windows/x64 native 9C replay with CPU/9A/9B/Host ABI regressions.
-  * [x] **Native fork regression replay:** Linux heap-snapshot repeat and C-stage pass;
-    native-COW fix/replay evidence is in Web acceptance. Windows memory-copy fork is unchanged.
-* [ ] **10. Distribution and security closure.**
-  * [x] Linux/x86_64 isolated `05-ui -> 06-web` development SDK, installed/relocated
-    browser, external consumer and manifests ([evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-build-and-relocation-replay-2026-10-18); re-run 2026-10-21 as a full isolated `04 -> 05 -> 06` chain on WebKit 2.54.1, [evidence](docs/acceptance/crtweb_acceptance.md#linuxx86_64-isolated-04---05---06-chain-on-webkit-2541-2026-10-21)).
-  * [x] macOS/arm64 isolated development SDK, installed/space-path relocation,
-    external consumer, HTTP/TLS and Host ABI ([evidence](docs/acceptance/crtweb_acceptance.md#macosarm64-isolated-build-and-relocation-replay-2026-10-18)).
-  * [x] Windows/x64 isolated development SDK, installed/space-path replay and external
-    browser/API rebuild with product work hidden; HTTP/TLS, Host ABI and immutable
-    input/output inventories ([evidence](docs/acceptance/crtweb_acceptance.md#fresh-windows-full-stage-replay-after-pal-fixes)).
-  * [x] Build-host/target split x86_64-host -> Linux/aarch64-target proved (cross compile/package only;
-    native aarch64 run of the in-tree WebKit gates 2026-10-21: all green except `media_playback` (guest audio) and the GPU gates (no host GPU/VA driver); the isolated 06-web stage build is not provided natively by design, [evidence](docs/acceptance/crtweb_acceptance.md#linux-aarch64-cross-build-replay-2026-10-20)).
-  * [x] Native Windows replay of the 75-function `libcrtmedia.dll` export boundary;
-    DLL-import consumer/API resolution and ownership callback evidence stay in Web acceptance.
-  * [ ] Inherited-runtime notices/SBOM: engineering inventory done on Linux/x86_64 (`crt-runtime` components in
-    every stage, [evidence](docs/acceptance/crtweb_acceptance.md#inherited-runtime-notices-2026-10-20)); macOS/arm64
-    and Windows/x64 SDKs regenerated and verified 2026-10-20, Windows/x64 again with the source offer 2026-10-20 (isolated 06-web, relocation);
-    the five header items resolved by engineering
-    review against upstream 2026-10-20 (`third_party/bionic/header_decisions.json`); LGPL source offer generated per SDK and
-    corresponding-source bundle added to the release tool ([guide](docs/guides/lgpl_source_offer.md); issue tracker, 3 years,
-    upstream archives not bundled); Linux/aarch64 SDKs regenerated and verified 2026-10-21 (four option-ON-only aarch64 defects fixed); Windows/arm64 `01-c..05-ui` SDKs regenerated, isolated 04 -> 05 chain and relink kit green 2026-10-22 (06-web unsupported there by design; zero-copy and GPU gates need a GPU host); still open:
-    the release tool exports `05-ui`/`06-web` with the owner-controlled `web_public_release` switch (final tags refuse a development
-    candidate); owner decision 2026-10-21: ship relinkable objects for FFmpeg inside the shared `libcrtmedia`
-    (implemented 2026-10-21: `share/crt/relink/libcrtmedia` kit, `verify_dist.py` check; Windows (x64 and arm64), macOS/arm64, Linux/x86_64 and Linux/aarch64 relink proven from stage builds; the aarch64 stage's zero-copy smoke needs a VA-driver host); dual-license choices recorded in the SDK and flagged-file check done 2026-10-21 (both take effect in regenerated SDKs); still open: the other
-    owner-review items ([guide](docs/guides/lgpl_source_offer.md#5-decisions)); `v0.4.0-preview.1` is to be deleted from the distribution by the owner.
-  * [x] Stable-series pin moved to WebKit 2.54.1 (newest micro; Linux/x86_64 gates green, [evidence](docs/acceptance/crtweb_acceptance.md#webkit-2541-re-pin-and-linuxx86_64-replay-2026-10-20));
-    macOS/arm64 and Windows/x64 isolated replays green 2026-10-20; the in-tree driver gate now prefers the port's curl
-    (`CRT_LINK_RPATH_FIRST`, green against the unmodified SDK); support policy adopted 2026-10-21 (60-day release grace, 30-day re-pin start, enforced by `check_webkit_security.py`; [policy](docs/design/libcrtweb_api_policy.md#webkit-support-policy-tranche-10); upstream publishes no end of life; only the latest stable gets fixes, 2.54 expected to end around 2.56.0, March 2027 -- [facts](docs/acceptance/crtweb_acceptance.md#upstream-support-window-of-the-wpe-webkit-stable-series-checked-2026-10-20)).
-
-`tools/check_webkit_security.py` is the development-package advisory snapshot;
-public-release conditions remain under Tranche 10 above.
+No implementation tranche is active. The next planned increment is the SDK
+Producer Contract Gate P0 below; this closure does not start CLI/Studio work.
 
 ## Planned
 
 ### Upper runtime roadmap
 
-The completed cross-host baseline and its exact validation evidence stay in
-[`STATUS.md`](STATUS.md) and [`HISTORY.md`](HISTORY.md); the product boundary
-and dependency order stay in [`docs/design/runtime_roadmap.md`](docs/design/runtime_roadmap.md).
-The allocator baseline decision gate is closed: keep the current allocator and
-leave Scudo conditional. Hardware video decode, Zero-copy decoded textures,
-Encode and capture, Networking and streaming, and Application UI (`05-ui`) are
-all closed on Linux/x86_64, macOS/arm64, and Windows/x64 ([`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md),
-2026-09-22..10-03; tranche-by-tranche detail in
-`docs/acceptance/crtmedia_encode_capture_acceptance.md`,
-`docs/acceptance/crtmedia_networking_acceptance.md` and `docs/acceptance/crtui_acceptance.md`). The
-Web Runtime (`06-web`) is in progress above.
-
-Deferred (not gates; see `docs/design/runtime_roadmap.md`): WebRTC, QuickJS (unless a
-non-WebKit lightweight runtime becomes a real product requirement), WebGPU,
-EME/DRM, and JS-native application bindings.
-
-The remaining execution order is `06-web`.
+Deferred upper-runtime extensions (not prerequisites for the accepted SDK
+stages): WebRTC, QuickJS unless a non-WebKit lightweight runtime becomes a real
+product requirement, WebGPU, EME/DRM and JS-native application bindings. Scope
+and dependency policy belong to [runtime_roadmap.md](docs/design/runtime_roadmap.md);
+original acceptance evidence stays with each stage, not in this queue.
 
 
 ### CRT developer experience: SDK -> CLI -> Studio
 
-Keep this planned while the active Web distribution closure continues. Follow
+The Web stage is closed; this is the next planned producer increment. Follow
 the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence): inventory/host tools
 and CRT-native bootstrap first, then immutable SDK management, source-first ports
 and project workflow. [Studio](docs/design/crt_studio.md) is a later CLI consumer;
 these contracts are design work, not an implemented or released product.
 
-**SDK Producer Contract Gate P0** (follow-up to active Web closure; feeds CLI
-D0/D1, not an extra Tranche 10 blocker):
+**SDK Producer Contract Gate P0** (feeds CLI D0/D1; not started by closing the
+Web stage):
 
 - [ ] Supply external-consumer identity/capability fixtures, distinguishing
   existing manifest/stage/port formats from the proposed development contract.

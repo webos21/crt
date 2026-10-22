@@ -18,12 +18,31 @@ APPROVED = {"web_public_release": {"approved": True, "approved_by": "owner", "ap
 
 
 class Decide(unittest.TestCase):
-    def test_real_default_is_not_approved(self) -> None:
-        config = json.loads((Path(__file__).resolve().parents[1] / "third_party/crt-runtime/release.json").read_text())
-        decision = web.decide(config, SECURITY)
+    def test_missing_approval_is_denied_by_default(self) -> None:
+        decision = web.decide({}, SECURITY)
         self.assertFalse(decision["public_release_allowed"])
         self.assertTrue(decision["development_candidate"])
         self.assertEqual(BLOCKERS, decision["open_blockers"])
+
+    def test_recorded_owner_approval_accepts_only_the_completed_packaging_gate(self) -> None:
+        config = json.loads((Path(__file__).resolve().parents[1] / "third_party/crt-runtime/release.json").read_text())
+        approval = config["web_public_release"]
+        self.assertIs(approval["approved"], True)
+        self.assertTrue(approval["approved_by"])
+        self.assertRegex(approval["approved_utc"], web.ISO_DATE)
+        self.assertEqual(BLOCKERS[:1], approval["accepted_blockers"])
+        current = {**SECURITY, "release_blockers": BLOCKERS[:1]}
+        decision = web.decide(config, current)
+        self.assertTrue(decision["public_release_allowed"])
+        self.assertEqual([], web.check_recorded(
+            {"development_candidate": False, "release_decision": decision},
+            {"public_release_allowed": True}, current))
+        unrelated = web.decide(config, SECURITY)
+        self.assertFalse(unrelated["public_release_allowed"])
+        self.assertEqual(BLOCKERS[1:], unrelated["open_blockers"])
+        for field in ("passed", "pin_is_latest_micro", "series_within_grace"):
+            with self.subTest(field=field):
+                self.assertFalse(web.decide(config, {**current, field: False})["public_release_allowed"])
 
     def test_approval_with_every_blocker_accepted_allows_it(self) -> None:
         decision = web.decide(APPROVED, SECURITY)

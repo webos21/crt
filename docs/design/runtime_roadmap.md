@@ -30,9 +30,9 @@ Development and release follow the cumulative stages defined in
    [`crtui_acceptance.md`](../acceptance/crtui_acceptance.md).
 6. **Web Runtime (`06-web`)** — JavaScriptCore, WebCore, the WebKit
    multi-process runtime, a `PlatformCRT` port, and `crtweb`/WebView
-   integration. In progress: Tranches 0-2 are closed, and Tranche 3 has reached
-   B4 (cross-host WebCore graph plus Linux/x86_64 process/IPC foundation); B5
-   first render is next. See [`crtweb_acceptance.md`](../acceptance/crtweb_acceptance.md)
+   integration, including predecessor-only SDK packaging. Scope, host limits
+   and the closure/release decision belong to
+   [`crtweb_acceptance.md`](../acceptance/crtweb_acceptance.md)
    and [`crtweb_porting.md`](../porting/crtweb_porting.md).
 
 The earlier plan named a QuickJS stage (`05-js`). It is superseded: WebKit
@@ -66,7 +66,8 @@ UI. Dates, per-host corrections, and measured results stay in the
 [monthly history](../history/README.md) and [current-month log](../../HISTORY.md).
 Do not copy that completed checklist into the roadmap again.
 
-Continue `06-web` in the tranche order defined by Web acceptance. Preserve the
+For extensions beyond the accepted stages, use a separately scoped increment
+with evidence in the owning acceptance document. Preserve the
 accepted allocator envelope and [Host ABI firewall](host_abi_firewall.md);
 replace the allocator only when repeatable workload evidence exceeds the
 recorded envelope. Every upper-layer failure feeds a Bionic-compatible CRT/PAL

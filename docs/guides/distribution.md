@@ -23,12 +23,13 @@ external toolchain contract.
 | `03-gfx-simple` | `02-cxx` plus one window, keyboard/mouse input, and a CPU-writable software framebuffer | Industrial HMI and simple native UI |
 | `04-gfx-media` | `03-gfx-simple` plus the GPU API, Skia CPU/GPU rendering, Vulkan/D3D12/Metal presentation, and FFmpeg media | accelerated UI and playback |
 | `05-ui` | 04-gfx-media + crtui + private LVGL 9.6, CRT-owned layout/style/v1 widgets, input/focus/resize, external-surface composition and `MediaView`, the optional Skia/media companions | native application UI |
-| `06-web` (development source stage; release gates in [Web acceptance](../acceptance/crtweb_acceptance.md#10-distribution-and-security-closure)) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
+| `06-web` (source stage; scope and release checks in [Web acceptance](../acceptance/crtweb_acceptance.md#10-distribution-and-security-closure)) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
 `05-ui` is accepted: the repository builds it in-tree (`crt-ui-dist`) and as an
 isolated `04-gfx-media -> 05-ui` stage on Windows/x64, macOS/arm64 and
-Linux/x86_64. It is not yet a release asset: `tools/prepare_release_assets.py`
-does not yet know `05-ui`. The former `05-js` skeleton (`libcrtjs`, no engine)
+Linux/x86_64. `tools/prepare_release_assets.py` supports `05-ui` and `06-web`,
+subject to the [release checks](release_preview.md#05-ui-and-06-web); support
+in the tool is not evidence of an uploaded release. The former `05-js` skeleton (`libcrtjs`, no engine)
 and its `crt-js-*` targets were deleted on 2026-09-29; the QuickJS plan behind
 it is retired ([`runtime_roadmap.md`](../design/runtime_roadmap.md)). `05-ui` was created
 fresh by `crtui` Tranche 0 (2026-09-30) with `crt-ui-build/test/dist` targets.

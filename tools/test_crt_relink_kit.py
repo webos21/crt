@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -26,10 +27,9 @@ WINDOWS_LINK = ('C:\\WINDOWS\\system32\\cmd.exe /C "cd . && C:\\sdk\\tools\\crt-
 
 class Runner(unittest.TestCase):
     def test_relative_paths_are_made_absolute_before_the_link_changes_directory(self) -> None:
-        import json, subprocess, tempfile
-        from pathlib import Path
         with tempfile.TemporaryDirectory() as raw:
-            work = Path(raw)
+            work = Path(raw) / "relative path fixture"
+            work.mkdir()
             kit_dir = work / "sdk" / "share" / "crt" / "relink" / "libcrtmedia"
             kit_dir.mkdir(parents=True)
             (kit_dir / "relink.json").write_text(json.dumps(
@@ -38,11 +38,17 @@ class Runner(unittest.TestCase):
             (work / "libs").mkdir()
             (work / "libs" / "libavutil.a").write_bytes(b"")
             result = subprocess.run([sys.executable, str(kit_dir / "relink.py"), "--print", "--out", "rel/out",
-                                     "--ffmpeg-libdir", "libs"], cwd=work, capture_output=True, text=True)
+                                     "--ffmpeg-libdir", "libs"], cwd=work, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
-            printed = result.stdout.split()
-            self.assertEqual(printed[printed.index("-o") + 1], str((work / "rel" / "out").resolve() / "libcrtmedia.so"))
-            self.assertEqual(printed[-1], str((work / "libs" / "libavutil.a").resolve()))
+            # The runner uses list2cmdline on every host. Keep quoted paths intact
+            # and compare path identities, not Windows vs POSIX separator spelling.
+            printed = [item[1:-1] if item.startswith('"') and item.endswith('"') else item
+                       for item in shlex.split(result.stdout.strip(), posix=False)]
+            output, archive = Path(printed[printed.index("-o") + 1]), Path(printed[-1])
+            self.assertTrue(output.is_absolute())
+            self.assertTrue(archive.is_absolute())
+            self.assertEqual(output.resolve(), (work / "rel" / "out" / "libcrtmedia.so").resolve())
+            self.assertEqual(archive.resolve(), (work / "libs" / "libavutil.a").resolve())
 
 
 class Parse(unittest.TestCase):
@@ -167,21 +173,25 @@ class Installed(unittest.TestCase):
             self.assertEqual([], kit.check_kit(sdk, "libcrtmedia"))
             # A stand-in compiler driver that "links" an ELF whose RUNPATH names this machine's SDK, as the real
             # link does; the runner must leave only $ORIGIN, like the SDK's own library.
-            fixture = root / "fixture.py"
+            fixture = root / "fake compiler.py"
             fixture.write_text(
                 "import sys\nsys.path.insert(0, %r)\nfrom test_crt_elf import write_elf\nfrom pathlib import Path\n"
                 "out = sys.argv[sys.argv.index('-o') + 1]\n"
                 "write_elf(Path(out), '$ORIGIN:/home/build/sdk/lib:/$ORIGIN:/lib/x86_64-linux-gnu')\n"
-                % str(Path(__file__).resolve().parent))
-            driver = root / "driver.sh"
-            driver.write_text('#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, fixture))
-            driver.chmod(0o755)
-            done = subprocess.run([sys.executable, str(folder / "relink.py"), "--sdk", str(sdk), "--cc", str(driver),
-                                   "--out", str(root / "out")], capture_output=True, text=True)
+                % str(Path(__file__).resolve().parent), encoding="utf-8")
+            # Python itself is the fake compiler executable; its script is the
+            # first recipe argument. No shebang, shell or file association is needed.
+            recipe_path = folder / "relink.json"
+            recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+            recipe["args"].insert(0, str(fixture))
+            recipe_path.write_text(json.dumps(recipe), encoding="utf-8")
+            output_dir = root / "relinked output"
+            done = subprocess.run([sys.executable, str(folder / "relink.py"), "--sdk", str(sdk), "--cc", sys.executable,
+                                   "--out", str(output_dir)], capture_output=True, text=True, timeout=30)
             self.assertEqual(0, done.returncode, done.stderr + done.stdout)
             self.assertIn("removed absolute runtime-path entries", done.stdout)
             from crt_elf import runtime_paths
-            self.assertEqual(["$ORIGIN"], [e for value in runtime_paths(root / "out" / "libcrtmedia.so") for e in value.split(":") if e])
+            self.assertEqual(["$ORIGIN"], [e for value in runtime_paths(output_dir / "libcrtmedia.so") for e in value.split(":") if e])
 
     def test_verify_dist_requires_the_kit_for_isolated_ffmpeg_stages_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -11,6 +11,106 @@ substantive update.
 
 ## 2026-10-22
 
+### Close the Windows relink-kit test-portability follow-up
+
+Reproduced both planned failures on Windows/x64, then fixed only the test
+fixtures in `tools/test_crt_relink_kit.py`. Command-output parsing now retains
+quoted paths and compares absolute resolved paths, not mixed separator
+spellings; its working path contains spaces. The ELF stand-in compiler now
+uses `sys.executable` with a Python script as the first fixture recipe argument,
+so it needs neither a POSIX shebang nor shell/file-association fallback. Script
+and output paths contain spaces and the two subprocesses have 30-second
+timeouts. The generated runner still executes and removes the fixture ELF's
+absolute RUNPATHs, with exactly `$ORIGIN` required afterward.
+
+Verification: `python -m unittest -v tools.test_crt_relink_kit` passes 12/12.
+The combined `tools.test_crt_web_release`, `tools.test_crt_source_offer`,
+`tools.test_crt_relink_kit`, `tools.test_license_choices`,
+`tools.test_crt_runtime_notices`, `tools.test_prepare_release_assets` and
+`tools.test_stage_06_web` run 131 cases: 130 executed passes and the existing
+Windows skip for direct POSIX-wrapper execution; no failures/errors.
+Added the resolved follow-up to [Web acceptance](docs/acceptance/crtweb_acceptance.md#tranche-10-closure-and-owner-release-approval-2026-10-22)
+without erasing the failed checkpoint, and removed the completed work from
+TODO. The old TODO anchor points to the completed-history entry area so dated
+snapshots remain navigable; STATUS itself was not refreshed. SDK Producer
+Contract Gate P0 remains planned. Production relink code, SDK binaries and CI
+are unchanged; no Linux/macOS runtime replay, commit/push or release upload
+was performed by this bounded fixture fix.
+Documentation checks pass for 13 Markdown files and 270 local links/anchors,
+including the retained explicit anchor, plus English/fences/conflict checks
+and `git diff --check`; Python compilation also passes.
+
+### Synchronize the public README and the explicitly requested STATUS snapshot
+
+Updated STATUS from its 2026-10-12 B4 checkpoint to the source/history through
+`2d2853d` plus the owner-approved Tranche 10 closure edits. It now distinguishes
+native three-host `06-web`, Linux/aarch64 cross-package and additional in-tree
+evidence, and Windows/arm64's lower-stage-only replay. Recorded public-release
+approval separately from publication, preview withdrawal separately from the
+retained source tag, and VM/device/relink/fixture limitations without upgrading
+skips or cross compilation into native passes. Corrected the old blanket
+`getrusage()` stub claim against `libc/src/resource.c`: Windows self and macOS
+self/children have implemented counters, while the remaining selectors/host
+cases retain their limits.
+
+README remains a user introduction: removed obsolete first-render/future-WebView
+claims and the duplicate completion matrix, linked STATUS/acceptance for scope,
+and clarified CPU WebView transport versus GPU composition. SDK Producer
+Contract Gate P0 remains planned; no CLI/Studio implementation, new runtime
+replay, release upload or commit/push is claimed by this documentation sync.
+Validation: 13 changed Markdown files pass 270 local link/anchor checks,
+English/fence/conflict checks and `git diff --check`. No new runtime replay was
+needed for this documentation-only update; existing test limits are preserved.
+
+### Close Web Tranche 10: owner release approval, regenerated SDKs and withdrawn preview
+
+The owner explicitly approved public Web releases and closure of Tranche 10.
+The recorded native Linux/x86_64, macOS/arm64 and Windows/x64 isolated SDKs,
+Linux/x86_64 -> Linux/aarch64 cross-package proof, five-pair lower-stage
+regeneration and libcrtmedia relink evidence close the accepted scope. No new
+build/runtime replay is claimed: the original records retain VM GPU/VA/audio
+limits, synthetic-device scope, and Windows/arm64's packaged-FFmpeg-only relink.
+Windows/arm64 `06-web` remains unsupported by design.
+
+Read-only GitHub API verification confirms the owner removed the
+`v0.4.0-preview.1` binary release (404) and the public releases list is empty;
+the public repository and tag still return 200. `git ls-remote` confirms tag
+object `88f19a659075546b1d566712488ccf7cfc510cb8` and source commit
+`fd01d7c85f3dc6b96aa5019b0edff2121598c070`. Exact endpoints and the closure
+decision live in [Web acceptance](docs/acceptance/crtweb_acceptance.md#tranche-10-closure-and-owner-release-approval-2026-10-22).
+
+`third_party/crt-runtime/release.json` now records the explicit owner approval
+and UTC timestamp, accepting only the advisory tool's fixed reminder for the
+completed native/cross packaging gate. It does not waive failed advisories,
+stale pins, expired support grace or unrelated blockers. The regression suite
+keeps missing approval denied by default and checks that this actual record
+allows the completed gate but still rejects those other conditions.
+
+Marked SDK regeneration and owner review complete in the LGPL guide; retained
+the source-offer/notices obligations and historical preview notes with a
+withdrawal notice. Removed the completed Web checklist from TODO; SDK Producer
+Contract Gate P0 remains the next planned increment, not started. Updated the
+acceptance header, public README, roadmap and distribution/release guides to
+point to their owning evidence rather than stale B4/development-only status.
+STATUS and the consumer repositories were not changed. Existing immutable
+development SDKs keep their old decisions; approval takes effect only in newly
+generated source assets/packages with current release checks. No GitHub
+release or archive was created, deleted, uploaded or republished by this work.
+
+Validation: the six approval/source-offer/license/notices/release/stage suites
+run 119 tests (118 executed passes, one expected POSIX-only skip). Adding the
+unchanged relink-kit suite gives 131 (128 passes, two failures, one skip): both
+failures reproduce from committed `2d2853d` test source on Windows (mixed path
+separators and a directly executed POSIX fake-compiler script). They are a
+separate Planned test-portability item, not new product relink failures; details
+and exact suite names are in Web acceptance. Sandbox-only Git/compiler/symlink
+errors were resolved by a permitted unsandboxed rerun, not security-setting
+changes. No full SDK/runtime rebuild was needed for the approval/doc edit.
+Documentation checks pass for 12 Markdown files and 254 local links/anchors,
+English text, fences and conflict markers; `git diff --check`, release JSON
+parsing and Python compilation pass. Other than the explicit GitHub withdrawal
+queries, external links were not revalidated.
+
 ### Tranche 10 on Windows/arm64: option-ON SDKs 01-c..05-ui, isolated 04 -> 05 chain, relink kit, and three defects
 
 Run on a 4-vCPU Windows 11 arm64 VM (no GPU). The in-tree `01-c..05-ui` SDKs were regenerated with FFmpeg, curl, Skia, GPU and LVGL ON

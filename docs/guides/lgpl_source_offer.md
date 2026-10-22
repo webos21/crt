@@ -1,10 +1,11 @@
 # LGPL Source Offer
 
-**Status: implemented; owner review in progress (decision 1 recorded 2026-10-21, see section 5). Not legal advice.** The facts below come from the SDK inventories and
+**Status: implemented; SDK regeneration and owner review completed 2026-10-22 (section 5). Not legal advice or a legal-compliance certification.** The facts below come from the SDK inventories and
 the build recipes (checked against the macOS/arm64 `06-web` development SDK of 2026-10-20). The offer text itself is
 no longer written by hand: `tools/crt_source_offer.py` generates `share/licenses/SOURCE-OFFER.md` in every SDK that
 ships FFmpeg (and WebKit in `06-web`), and `tools/prepare_release_assets.py` adds the corresponding-source bundle to
-the release. `public_release_allowed` stays `false` until the Tranche 10 release conditions are met.
+the release. The owner approved public Web releases on 2026-10-22; each newly built release must still pass its
+security/pin/support and packaging checks. Existing development SDKs retain their recorded decision unchanged.
 
 ## 1. Which parts are LGPL
 
@@ -104,7 +105,7 @@ GPL, and the FTL needs only its text and a credit line. The SDK now says so itse
 ("Portions of this software are copyright (c) 2026 The FreeType Project (https://freetype.org). All rights
 reserved.", year read from the pinned source) and `share/licenses/mbedtls/CRT-LICENSE-CHOICE.txt`, all listed in the
 manifest notices; the `06-web` stage now also collects `FTL.TXT` from its private FreeType. Tests:
-`tools/test_license_choices.py`. Takes effect in SDKs regenerated from this tree (not yet rebuilt). The SBOM still
+`tools/test_license_choices.py`. SDK regeneration is complete for the supported stage/host scope below. The SBOM still
 declares `NOASSERTION` for ports; filling their license fields is a separate, optional improvement.
 
 Decided 2026-10-21: **flagged source-tree files** (GPL, GPL-with-exception and MPL classes of `license-scan.json`). Checked
@@ -138,16 +139,33 @@ the NOTICE); and `tools/crt_runtime_notices.py` no longer takes a descriptive co
 "permissions" (`libc/src/arch/macos/common/jit_permissions.c`) for a license header. The NOTICE now has 34 groups for
 137 headed files (was 36 and 139); test: `tools/test_crt_runtime_notices.py`.
 
-Decided 2026-10-21: **already published binaries.** The release `v0.4.0-preview.1` (2026-09-21) carries `04-gfx-media` SDKs
-with FFmpeg 8.1.2 and predates this offer. The distribution policy has changed completely since, so the owner will
-delete that release from the distribution (done by the owner on GitHub, not by tooling) instead of adding the offer to
-it; no release is offered without the generated `SOURCE-OFFER.md` from now on (`verify_dist.py` and the release tool
-enforce that). The git tag is a source reference and is not an object-code distribution.
+Decided 2026-10-21, completed and checked 2026-10-22: **already published binaries.** The owner removed the
+`v0.4.0-preview.1` GitHub release, which carried `04-gfx-media` SDKs with FFmpeg 8.1.2 and predated this offer,
+instead of retrofitting it. Read-only GitHub API checks find no release for that tag (HTTP 404); the public releases
+list is empty and the source tag remains (HTTP 200). Exact tag/commit and check details are in
+[Web closure](../acceptance/crtweb_acceptance.md#tranche-10-closure-and-owner-release-approval-2026-10-22).
+No release is offered without the generated `SOURCE-OFFER.md` from now on (`verify_dist.py` and the release tool
+enforce that). The retained Git tag is a source reference, not an object-code distribution. No release was deleted
+or uploaded by this verification.
 
-Still open:
+Completed 2026-10-22:
 
-1. **SDK coverage of the generator:** macOS/arm64, Windows/x64, Linux/aarch64 and Windows/arm64 (`01-c`..`05-ui`; there is no
-   06-web there) SDKs were regenerated with it (2026-10-20..22).
-2. **Release gate:** `prepare_release_assets.py` exports `05-ui` and `06-web` behind the owner-controlled
-   `web_public_release` switch in `third_party/crt-runtime/release.json` (a final tag refuses a development candidate);
-   the switch stays off until the Tranche 10 conditions are met.
+1. **SDK coverage of the generator:** the supported `01-c`..`05-ui` SDKs were regenerated and verified on
+   Linux/x86_64, macOS/arm64, Windows/x64, Linux/aarch64 and Windows/arm64 (2026-10-20..22). Native isolated
+   `06-web` packaging is accepted on Linux/x86_64, macOS/arm64 and Windows/x64, with the separate x86_64-host ->
+   Linux/aarch64-target compile/package proof. Windows/arm64 `06-web` is not supported by design. The
+   [original case records](../acceptance/crtweb_acceptance.md#10-distribution-and-security-closure) own exact artifacts,
+   scope and exceptions; regeneration is no longer an open item.
+2. **Release gate:** the owner explicitly approved public Web releases in chat on 2026-10-22. The
+   `web_public_release` record in `third_party/crt-runtime/release.json` accepts only the completed
+   "native three-host and cross-target packaging acceptance required" reminder. `prepare_release_assets.py`
+   exports `05-ui` and `06-web`; a final tag still refuses a development candidate. Failed security snapshots,
+   a stale micro pin, a series outside the support grace period, or any other unaccepted blocker still prevent
+   release. New artifacts must embed this approval from their source asset and pass current checks; old SDKs
+   are not rewritten or automatically republished.
+
+Relink kits have stage-build evidence on all five pairs, with each run's limits preserved in the original
+records. In particular, Windows/arm64 did not exercise a different FFmpeg build; the arm64 guests did not close
+physical GPU/zero-copy/hardware-decode gates, and the Linux/aarch64 guest's audio playback issue remains recorded.
+These are accepted scope limits of this closure, not new native-device pass claims. Actual new-release
+assembly/upload is a separate action; this guide records approval, not publication.
