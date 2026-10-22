@@ -33,7 +33,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
+/* No <string.h>: this unit has no libc header on its include path, and a host
+ * MinGW/MSVC header must not supply it by accident (a machine with neither
+ * failed on the include). The two copy helpers are compiler builtins. */
 /* Deliberately no <stdlib.h> (no calloc/free): this translation unit
  * compiles with only libcrtgfx/include and libcrtgfx/src on its own
  * include path (see libcrtgfx/CMakeLists.txt's own crtgfx_backend_objects
@@ -1484,7 +1486,7 @@ int crtgfx_gpu_win32_adapter_identity(
   state = (const struct crtgfx_gpu_win32_device_state*)device->backend_state;
   if (state == NULL || state->dxgi_adapter == NULL) return 0;
   adapter = (crtgfx_dxgi_adapter1*)state->dxgi_adapter;
-  memset(&desc, 0, sizeof(desc));
+  __builtin_memset(&desc, 0, sizeof(desc));
   if (FAILED(adapter->lpVtbl->GetDesc1(adapter, &desc))) return 0;
   if (desc.VendorId == 0 && desc.DeviceId == 0 && desc.AdapterLuid.LowPart == 0 && desc.AdapterLuid.HighPart == 0) return 0;
   /* The user-mode driver version is only reported for the interface the driver implements: a WDDM
@@ -1495,12 +1497,12 @@ int crtgfx_gpu_win32_adapter_identity(
       FAILED(adapter->lpVtbl->CheckInterfaceSupport(adapter, &crtgfx_iid_id3d10_device, &umd))) {
     umd = 0;
   }
-  memcpy(out_device, &desc.AdapterLuid, 8);
-  memcpy(out_device + 8, &desc.VendorId, 4);
-  memcpy(out_device + 12, &desc.DeviceId, 4);
-  memcpy(out_driver, &umd, 8);
-  memcpy(out_driver + 8, &desc.SubSysId, 4);
-  memcpy(out_driver + 12, &desc.Revision, 4);
+  __builtin_memcpy(out_device, &desc.AdapterLuid, 8);
+  __builtin_memcpy(out_device + 8, &desc.VendorId, 4);
+  __builtin_memcpy(out_device + 12, &desc.DeviceId, 4);
+  __builtin_memcpy(out_driver, &umd, 8);
+  __builtin_memcpy(out_driver + 8, &desc.SubSysId, 4);
+  __builtin_memcpy(out_driver + 12, &desc.Revision, 4);
   return 1;
 }
 
