@@ -11,6 +11,42 @@ substantive update.
 
 ## 2026-10-22
 
+### Prefer JavaScriptCore reuse over a deferred QuickJS runtime
+
+Replaced TODO's conditional QuickJS entry and the roadmap's deferred-engine
+proposal with consumer-driven JavaScriptCore reuse outside WebView. The engine
+already belongs to `06-web`; a separate scripting/embedding API, runtime
+closure, startup cost and footprint still require scoped validation. This
+does not introduce another engine or required SDK stage, promise a lightweight
+runtime, or claim standalone embedding has been implemented. The historical
+explanation of the retired `05-js` QuickJS stage remains intact.
+
+### Refine Planned work into producer priorities and conditional follow-ups
+
+Reordered TODO with SDK Producer Contract Gate P0 first, bounded PAL defect
+revalidation next, and independent hardening/consumer-driven extensions after
+it. Retained WebRTC, conditional standalone scripting, WebGPU, EME/DRM, JS-native bindings,
+interactive job control, Toybox expansion and the ELF-loader pointer with links
+to their owning documents. None is promoted into active work or made a blanket
+CLI/Studio prerequisite; the accepted SDK stages remain closed.
+
+Corrected stale queue descriptions against the source: the allocator already
+uses indexed bins/local coalescing/a heap tail, positive-pid Windows probes and
+SIGKILL already exist, and shared fetching already retries transient failures
+and hashes cached archives. Retained only conditional Scudo evaluation,
+remaining signal semantics and an optional FreeType mirror. Narrowed Linux
+curl-dist work to partial-option revalidation, merged the Wayland missing-
+archive report into the clean-build dependency gate, and framed ABI work as
+extending existing audits. Older iostream, macOS binding and shell-performance
+reports require current evidence rather than assumed fixes or blanket rewrites.
+
+This is queue maintenance only: no runtime implementation, new acceptance pass,
+contract version change or CLI/Studio lock promotion. README and STATUS are
+unchanged.
+Validation: both edited Markdown files pass local link/anchor checks (90 links),
+English/fence/conflict checks and `git diff --check`. TODO content before
+Planned and the existing inbound anchor targets are preserved; no build was run.
+
 ### Close the Windows relink-kit test-portability follow-up
 
 Reproduced both planned failures on Windows/x64, then fixed only the test

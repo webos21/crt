@@ -65,26 +65,19 @@ Producer Contract Gate P0 below; this closure does not start CLI/Studio work.
 
 ## Planned
 
-### Upper runtime roadmap
-
-Deferred upper-runtime extensions (not prerequisites for the accepted SDK
-stages): WebRTC, QuickJS unless a non-WebKit lightweight runtime becomes a real
-product requirement, WebGPU, EME/DRM and JS-native application bindings. Scope
-and dependency policy belong to [runtime_roadmap.md](docs/design/runtime_roadmap.md);
-original acceptance evidence stays with each stage, not in this queue.
-
+SDK Producer Contract Gate P0 is next. The remaining sections are independent
+follow-ups, not a prerequisite chain for CLI/Studio or a reopening of accepted
+SDK stages. Promote one bounded item into In Progress with its reproducer and
+acceptance scope; long-term extensions stay conditional on a real consumer.
 
 ### CRT developer experience: SDK -> CLI -> Studio
 
-The Web stage is closed; this is the next planned producer increment. Follow
-the [SDK contract](docs/design/sdk_development_contract.md) and
-[CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence): inventory/host tools
-and CRT-native bootstrap first, then immutable SDK management, source-first ports
-and project workflow. [Studio](docs/design/crt_studio.md) is a later CLI consumer;
-these contracts are design work, not an implemented or released product.
+Follow the [SDK contract](docs/design/sdk_development_contract.md) and
+[CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
+[Studio](docs/design/crt_studio.md) is a later CLI consumer; the development
+contracts remain design work, not an implemented or released product.
 
-**SDK Producer Contract Gate P0** (feeds CLI D0/D1; not started by closing the
-Web stage):
+**SDK Producer Contract Gate P0** (feeds CLI D0/D1; not started):
 
 - [ ] Supply external-consumer identity/capability fixtures, distinguishing
   existing manifest/stage/port formats from the proposed development contract.
@@ -97,243 +90,169 @@ Web stage):
 - [ ] Record independent consumer build/run and ABI evidence for each initial
   native pair before promoting the corresponding artifact/consumer lock.
 
-Contract adoption and review follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review)
-and the `crt-cli`-owned `docs/compatibility.md` record. Lightweight automated
-contract/link checks are planned after machine-readable contracts/fixtures
-exist; they must not duplicate full WebKit builds for documentation changes.
-
-### Runtime architecture hardening backlog
-
-These remain independent follow-ups. Promote one at a time when a concrete
-consumer or failure justifies their cost. The backend object-boundary work
-that had to precede further Upper Runtime expansion is complete ([`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md),
-2026-09-17..18); the items here were never part of that acceptance gate.
-
-1. **Remove the "build once, then reconfigure" CMake pattern.** The native
-   Wayland Vulkan WSI backend's own `CRTGFX_HAVE_NATIVE_WAYLAND` gate
-   checks `EXISTS` on a generated `libxdg-shell-protocol.a` at *configure*
-   time, so a genuinely clean tree needs `configure -> build
-   crtgfx-wayland-build -> reconfigure -> build` -- already documented as a
-   deliberate, temporary workaround for a real dependency-cycle risk, not
-   a permanent design. Skia's own external/nested-build integration is
-   accumulating similar shape. The durable fix is a physically separate
-   superbuild stage (libc++/Wayland/Skia/FFmpeg as one dependency-prefix-
-   producing phase) feeding a single, cycle-free runtime configure for
-   `libcrtgfx`/`libcrtmedia` -- not another one-off `EXISTS` gate per new
-   dependency. Budget real effort here given `05-ui`'s LVGL and `06-web`'s
-   WebKit/JavaScriptCore work will add more such external dependencies.
-
-2. **Move `tools/crt_dist_prerequisites.py`-style manifest thinking to
-   `libc.so`'s own ELF export surface.** The current `CRT_1.0 { global: *;
-   };` whole-surface version script (`libc/CMakeLists.txt`) is the right
-   *shape* of fix for the collision recorded in the 2026-09-16 history entry,
-   but long-term, generating the version-script/export list from an
-   explicit Bionic-compatibility symbol manifest (public headers ->
-   manifest -> generated `.map` file) would prevent accidental exports and
-   give a real basis for `CRT_1.0`/`CRT_1.1`/`CRT_2.0`-style ABI evolution,
-   rather than hand-maintaining `global: *;` indefinitely.
-3. **Make binary/package/ABI lint an explicit acceptance gate.** Extend the
-    distribution dependency and absolute-path checks with a separately
-    runnable ABI audit: compare public exports and unresolved imports against
-    the stage's declared symbol/dependency manifests, reject accidental host
-    ABI leakage, and retain a baseline suitable for detecting incompatible
-    changes between released CRT ABI versions.
-
-### Conditional Scudo production allocator
-
-Do not promote this tranche until the baseline-validation decision gate records
-a repeatable current-allocator limitation. The completed Skia incident was an
-allocator-domain linkage error, not evidence that the allocator algorithm must
-be replaced.
-
-1. **Separate the bootstrap allocator from a production allocator only when
-   measurements justify it.**
-   `libc/src/malloc.c` is a clear, easy-to-audit design for CRT bring-up,
-   but its `malloc()`/`free()`/new-chunk paths are all linear scans
-   (`append_chunk()` walks the whole chunk list to find its tail;
-   `malloc_unlocked()` first-fits linearly; `coalesce_free_blocks()`
-   rescans the whole free list on every `free()`), all under one global
-   `heap_lock` spinlock -- `O(N)` per operation as allocation count `N`
-   grows, a real risk once Skia/FFmpeg/LVGL/WebKit/libc++ are all allocating
-   heavily through it. Keep this implementation as the bootstrap/reference/
-   diagnostic allocator; evaluate LLVM's Scudo Hardened Allocator (size-
-   class allocators, per-thread caches, mmap-backed large allocations,
-   built-in quarantine, official standalone build support) as the long-term
-   production allocator -- a natural fit given this project's own Bionic-
-   compatibility framing, since Scudo has been Android's own default
-   allocator since Android 11.
-2. **Decouple allocator regions from Windows fork emulation before any swap.**
-   Replace `__crt_malloc_os_region_count()`/`_base()`/`_size()` with a small,
-   allocator-agnostic heap-region snapshot interface consumed by both Windows
-   fork implementations. Prove the interface first with the current allocator
-   and the many-region fork workload; Scudo cannot be selected until the same
-   contract can enumerate or otherwise preserve every child-visible region.
-3. **Integrate Scudo behind an explicit allocator selection.** Import it with
-   provenance, preserve Bionic-compatible public allocation behavior, keep the
-   bootstrap allocator selectable for bring-up/diagnostics, and run the exact
-   same correctness, fork, performance, RSS, distribution, and upper-runtime
-   workloads against both implementations. Adoption requires measured benefit
-   on the failing baseline without regressing supported hosts.
+Follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review);
+the CLI repository owns adoption evidence in `docs/compatibility.md`.
+Add lightweight automated contract/link checks once fixtures exist, without
+duplicating full WebKit builds for documentation changes.
 
 ### Windows virtual random-device descriptor duplication
 
-Separate PAL follow-up: `/dev/urandom` duplication/redirection currently
-returns EBADF in mksh before fork. Freeze Bionic dup/dup2/F_DUPFD behavior
-and add virtual-device descriptor regressions before changing that path
-([diagnostic boundary](docs/bringup/windows_mksh_tranche10_crash.md)).
+- [ ] Reproduce `/dev/urandom` dup/redirection EBADF before fork, freeze Bionic
+  dup/dup2/F_DUPFD semantics, and add virtual-device regressions covering flags,
+  ownership and close behavior before fixing the PAL path. Keep this separate
+  from the resolved [mksh/fork crash](docs/bringup/windows_mksh_tranche10_crash.md).
+
+### Focused CRT/PAL follow-ups: revalidate before fixing
+
+These older reports need bounded checks against identified current artifacts;
+neither later large-consumer passes nor a stale build tree settles them.
+
+- [ ] Recheck the packaged Windows `02-cxx` `<iostream>` startup crash against
+  packaged and in-tree builds; if reproducible, compare constructors and
+  `std::ios_base::Init`, then add a startup regression without retries.
+  `<cstdio>` passing is not equivalent coverage
+  ([C++ runtime policy](docs/design/cxx_runtime.md)).
+- [ ] Audit macOS libc symbol binding in the remaining CRT dylibs and the
+  shared-runtime CMake helper. Preserve the accepted crtui/crtmedia fixes;
+  use native Mach-O binding evidence and per-library shared-consumer tests
+  before changing common link order
+  ([UI acceptance](docs/acceptance/crtui_acceptance.md),
+  [host ABI firewall](docs/design/host_abi_firewall.md)).
+- [ ] Revalidate meaningful partial-option combinations of ordinary Linux
+  `crt-gfx-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
+  dependency publication already exists; close only reproduced gaps in shared
+  dependency copying/declaration and packaged example rebuilds, not the
+  already-accepted isolated chain
+  ([distribution contract](docs/guides/distribution.md),
+  [original UI evidence](docs/acceptance/crtui_acceptance.md)).
+
+### Runtime architecture hardening backlog
+
+Independent hardening, not unfinished backend object-boundary acceptance.
+
+- [ ] Remove Wayland's configure-time generated-archive `EXISTS` dependency:
+  prove clean configure/build/dist/example rebuild without manual reconfigure,
+  including publication of `libxdg-shell-protocol.a`. Merge the old missing-
+  archive report into this gate; select a cycle-free dependency/prefix design,
+  considering a superbuild only if the bounded fix needs it
+  ([UI evidence](docs/acceptance/crtui_acceptance.md),
+  [distribution contract](docs/guides/distribution.md)).
+- [ ] Replace libc's ELF `CRT_1.0 { global: *; };` export policy with an explicit
+  Bionic-compatible public-symbol manifest and generated version map, preserving
+  required runtime symbols and establishing an ABI evolution baseline
+  ([libc build](libc/CMakeLists.txt),
+  [ABI boundary policy](docs/design/host_abi_firewall.md)).
+- [ ] Extend existing package/dependency and Web export audits into a separately
+  runnable all-library public export/import baseline and compatibility
+  regression gate; reuse current checks rather than introducing duplicate lint
+  ([distribution verification](tools/verify_dist.py),
+  [Web export audit](tools/crt_web_exports.py)).
 
 ### Windows process signals and Toybox `timeout`
 
-Close the two confirmed Windows PAL gaps that keep Toybox `timeout` disabled:
-`__crt_sys_kill()` currently supports only the calling process's
-`kill(pid, 0)` probe and returns `ENOSYS` for a real child or process group,
-while `deliver_signal()` synthesizes `SA_SIGINFO` with the caller's pid and
-zero `si_code`/`si_status` even when the Windows child registry already knows
-which child exited and its exit code. Keep this tranche limited to
-non-interactive child lifecycle and timeout enforcement; Ctrl-C/Ctrl-Break,
-foreground-terminal arbitration, stopped-child reporting, and re-enabling
-mksh job control remain in the separate deferred section below.
+Positive-pid existence/access probes and `SIGKILL` already exist. Remaining
+work is catchable cross-process delivery, process groups and real child-exit
+siginfo. This is non-interactive lifecycle work, not full POSIX job control
+([signal dispatch](docs/design/signal_delivery.md),
+[Toybox applet status](docs/porting/toybox_applet_status.md)).
 
-1. **Freeze the Bionic-facing contract and reproduce each failure.** Check
-   Bionic's `kill()` pid-domain, errno, default-action, and `SIGCHLD`
-   `siginfo_t` rules before changing the PAL. Add bounded Windows regressions
-   for a live/dead foreign-pid `kill(pid, 0)` probe, positive child signaling,
-   negative process-group signaling, and a child exiting with status 7 whose
-   `SA_SIGINFO` handler must observe the real pid, `CLD_EXITED`, and status 7.
-   Retain direct consumer evidence that `timeout 2 sleep 10` currently runs
-   for roughly 10 seconds instead of enforcing its deadline.
-2. **Thread real child-exit information through signal dispatch.** Extend the
-   private signal backend/dispatch interface so Windows can pass a populated
-   `siginfo_t` from `child_process_table`/`child_pid_table` and
-   `GetExitCodeProcess()` without changing `raise()`'s self-delivery contract.
-   Natural exits must report `CLD_EXITED` and the actual status; a termination
-   mechanism introduced below must distinguish `CLD_KILLED` and its signal.
-   Preserve the existing once-per-state-change notification and blocked-
-   `SIGCHLD`/`pselect()` behavior.
-3. **Implement positive-pid `kill()` with explicit, honest semantics.** Use
-   documented Windows APIs for existence/access probing and `SIGKILL`; design
-   a CRT-owned cooperative delivery channel for catchable signals so
-   `SIGTERM`/user handlers are not silently reduced to unconditional
-   `TerminateProcess()`. Define PID-reuse protection, permissions, pending-
-   signal coalescing, and delivery checkpoints up front. Unsupported signals
-   must fail explicitly rather than report success without delivery.
-4. **Implement the non-interactive process-group subset needed by
-   `timeout`.** Connect the CRT-managed pgid to real spawned-child membership
-   and support Toybox's default `kill(-pgid, SIGTERM)`/`SIGKILL` path, including
-   descendants. Evaluate documented Windows process groups and Job Objects
-   against the post-`fork()` `setpgid(0, 0)` lifecycle before choosing the
-   mechanism; do not pull in undocumented suspend/resume APIs or claim full
-   POSIX job control as part of this tranche.
-5. **Accept through the real packaged consumer.** Require positive-pid and
-   process-group signal tests, correct `SIGCHLD` pid/code/status for natural
-   and killed exits, `timeout 2 sleep 10` completing near two seconds with
-   status 124, `timeout --preserve-status 10 sh -c 'exit 7'` returning 7, and
-   the TERM-to-KILL `-k` path. Re-run the existing `pselect_sigchld`, process-
-   stress, fd-snapshot, fork, waitpid, shell, and full Windows CTest coverage;
-   rebuild the packaged shell/dist and repeat the timeout cases there. Only
-   then enable the applet, update `docs/porting/toybox_applet_status.md`, move the
-   completed record to `HISTORY.md`, and remove this Planned section.
+- [ ] Freeze Bionic pid-domain/errno/default-action and SIGCHLD rules. Add bounded
+  live/dead-pid and child/group regressions, plus a child exiting 7 whose handler
+  must see its real pid, `CLD_EXITED` and status; recheck the timeout deadline
+  failure without discarding the existing probe/SIGKILL behavior.
+- [ ] Carry actual child-registry exit data through dispatch, distinguishing
+  natural and signal-killed exits; preserve raise's self-delivery, once-per-
+  state-change notification, blocked SIGCHLD and pselect behavior.
+- [ ] Design CRT-owned cooperative delivery for catchable signals, with PID-reuse,
+  permissions, pending/coalescing and checkpoint rules. Do not equate SIGTERM
+  with unconditional TerminateProcess; unsupported delivery must fail honestly.
+- [ ] Implement only the descendant/process-group subset needed by timeout,
+  evaluating documented Windows process groups/Job Objects against post-fork
+  setpgid. Do not introduce undocumented suspend/resume APIs.
+- [ ] Accept through packaged timeout: deadline/status 124, preserve-status exit
+  7, and TERM-to-KILL escalation; retain positive-pid/group and SIGCHLD
+  pid/code/status tests. Re-run pselect, process stress, fd snapshots, fork,
+  waitpid, shell and full Windows CTest before enabling the applet.
 
-### Focused CRT/PAL follow-ups
+### Conditional Scudo production allocator
 
-These are real remaining limitations, but none blocks the completed
-`libcrtgfx` CPU-raster milestone. Promote one into active work when a consumer
-or host investigation supplies the required evidence.
+Keep the [baseline decision](docs/acceptance/allocator_baseline.md#final-decision).
+The current allocator has indexed free bins, local coalescing and a heap tail,
+not the former full-heap scans; it still has a global lock
+([indexed-allocator evidence](docs/acceptance/allocator_baseline.md#web-camera-follow-up-2026-10-15)).
+The resolved allocator-domain linkage incident does not justify replacement.
 
-- Measure CRT mksh/Make scaling during FFmpeg configure, including an optimized-build comparison,
-  before changing allocator search/coalescing; evidence in [Windows Tranche 8 investigation](docs/bringup/crtweb_windows_tranche8.md).
-- macOS shared libraries bind libc symbols to Apple's `libSystem`, not the CRT's
-  `libc.dylib`: `crt_configure_shared_runtime()` leaves `-lSystem` ahead of
-  `libc.dylib` and two-level namespace binding takes the first definer. Code
-  compiled against the CRT's 40-byte `pthread_mutex_t` therefore calls Apple's
-  64-byte `pthread_mutex_init()`. `libcrtui.dylib` hit this as a heap overflow
-  (fixed for crtui in `libcrtui/CMakeLists.txt`, with
-  `crtui_contract_shared_test_runs` as the guard; crtmedia fixed and replayed
-  2026-10-14, `HISTORY.md`). `libcrtgfx.dylib` and the other CRT dylibs still need
-  the common binding audit (`nm -m` shows `_pthread_mutex_init (from libSystem)`).
-  Decide whether to fix `crt_configure_shared_runtime()` for all of them and
-  add a dylib-linked test per library. Found 2026-09-30
-  (`docs/acceptance/crtui_acceptance.md`, Tranche 3 macOS replay).
-- Make the ordinary in-tree Linux `crt-gfx-media-dist` verifiable with
-  `CRTMEDIA_ENABLE_CURL=ON`: `libcrtmedia.so` links the shared `libcurl.so.4`
-  in-tree (static zlib is not PIC) and `verify_dist.py` reports `undeclared
-  libcurl.so.4`, which blocks `crt-ui-dist` in a curl-enabled dev tree. Either
-  ship/declare the shared curl chain or document that the ordinary dist is
-  options-OFF only; the isolated stage (static curl) is unaffected. Found
-  2026-09-30 (`docs/acceptance/crtui_acceptance.md`, Tranche 0 Linux replay).
-- The options-default Linux `crt-ui-dist` tree (`out/linux-ui-check`) packaged no
-  `libxdg-shell-protocol.a` (that tree never fetched/built Wayland), so
-  `examples/ui-basic` could not be rebuilt against its own SDK without borrowing the
-  archive from a Wayland-enabled tree. Determine whether a fresh checkout's
-  ordinary Linux dist chain always builds Wayland (then this tree was just
-  stale) or whether `crt-ui-dist` should depend on it. Found 2026-09-30
-  (`docs/acceptance/crtui_acceptance.md`, Tranche 3 Linux replay).
-- Extend the built-in resolver (Linux, Windows; macOS uses the system resolver and
-  already answers AAAA) from its synchronous UDP IPv4/A-record baseline: AAAA,
-  TCP fallback, search domains, caching, and Windows `AF_INET6` sockets, when a
-  consumer needs them. IPv6 literals, sockets and `getaddrinfo()` lists are
-  there on Linux, macOS (2026-10-11) and Windows (2026-10-12), `socket_ipv6_test`.
-- Windows AF_UNIX follow-ups (Gates A/B closed 2026-10-12): `SOCK_DGRAM`, abstract names, `MSG_PEEK` on
-  `SOCK_SEQPACKET`, `SCM_RIGHTS` and `SCM_CREDENTIALS` on a stream socket (needs a CRT-to-CRT framed stream), file
-  descriptor kinds other than files/pipes/memfds/sockets (eventfd, epoll), `dup()` of a socket fd, and reporting
-  socket addresses back with CRT paths instead of host paths. Gate C (Windows `SurfaceClient` consumer replay) closed 2026-10-12.
-- Revisit a CRT-owned ELF loader/Android-linker boundary only after a real
-  upper-runtime consumer requires behavior the host loader adapter cannot
-  provide.
-- Harden FreeType's fetch beyond the single SourceForge URL fix (`5b87197`)
-  -- add retry-on-transient-failure, a documented fallback mirror, and
-  SHA-256 verification of the cached archive before reuse, matching the
-  reliability bar other `porting/recipes/*.json` ports already meet.
-- Root-cause the packaged Windows `02-cxx` `<iostream>` static-initialization
-  crash. Reproduce it against packaged and in-tree builds, compare `.ctors`
-  and `std::ios_base::Init` startup behavior, and keep the stage runner free of
-  retries that could hide the fault. `<cstdio>` working is a diagnostic fact,
-  not evidence that C++ startup is complete.
+- [ ] Evaluate Scudo only after a repeatable current-allocator limitation is
+  measured in a real workload; retain the current implementation as reference.
+- [ ] Before any swap, decouple both Windows fork implementations from
+  `__crt_malloc_os_region_count()`/`_base()`/`_size()` through an allocator-neutral
+  heap-region snapshot contract; prove many-region child preservation first.
+- [ ] If justified, add an explicit allocator selection with pinned provenance
+  and unchanged Bionic public behavior. Compare correctness, fork, performance,
+  RSS, distribution and upper-runtime workloads on supported hosts before
+  adoption; no mandatory Scudo conversion is scheduled.
+
+### Consumer-driven CRT/PAL extensions
+
+These remain visible for future consumers, not automatic CLI prerequisites.
+
+- [ ] Re-measure CRT mksh/Make FFmpeg-configure scaling only if it is still a
+  current bottleneck, including an optimized build and the indexed allocator;
+  do not apply the old allocator diagnosis without new evidence
+  ([Windows investigation](docs/bringup/crtweb_windows_tranche8.md)).
+- [ ] Extend the Linux/Windows built-in DNS resolver beyond A-record UDP lookup
+  when required: AAAA, TCP fallback, search domains and caching. IPv6 literals,
+  sockets and address lists already exist; macOS uses the system resolver
+  ([network port evidence](docs/porting/porting_status.md#curl)).
+- [ ] Extend Windows AF_UNIX only for a concrete consumer: datagrams/abstract
+  names, seqpacket MSG_PEEK, framed-stream ancillary messages, additional fd
+  kinds, socket dup and CRT-path address reporting. Preserve accepted stream/
+  seqpacket and existing file/pipe/memfd/socket-passing subsets
+  ([Web acceptance](docs/acceptance/crtweb_acceptance.md),
+  [PAL porting guide](docs/porting/sysroot_ports.md)).
+- [ ] Revisit a CRT-owned ELF loader only when a real consumer needs semantics
+  the host adapter cannot provide
+  ([loader milestones](docs/design/dynamic_loading.md#project-elf-loader-decision-and-milestones)).
+- [ ] Consider a documented FreeType fallback mirror if source availability
+  warrants it. Reuse existing shared-fetch retries and cached-archive SHA-256
+  validation; these are not missing work
+  ([fetch implementation](tools/fetch_ports.py),
+  [FreeType recipe](porting/recipes/freetype.json)).
+
+### Upper runtime roadmap: long-term extensions
+
+Keep these deferred; none is a prerequisite for the accepted SDK stages.
+Scope and dependency policy belong to
+[Runtime Roadmap: Deferred Scope](docs/design/runtime_roadmap.md#deferred-scope);
+original acceptance evidence stays with each stage.
+
+- [ ] WebRTC: activate only for a concrete real-time communication consumer
+  ([roadmap](docs/design/runtime_roadmap.md#deferred-scope)).
+- [ ] JavaScriptCore reuse for non-WebView scripting: scope a separate embedding
+  API only for a real consumer, reusing the existing engine rather than adding
+  QuickJS or another required SDK stage; validate footprint and runtime closure
+  ([roadmap](docs/design/runtime_roadmap.md#deferred-scope)).
+- [ ] WebGPU: define consumer scope and backend/dependency policy before scheduling
+  ([roadmap](docs/design/runtime_roadmap.md#deferred-scope)).
+- [ ] EME/DRM: require a product and licensing/platform policy before implementation
+  ([roadmap](docs/design/runtime_roadmap.md#deferred-scope)).
+- [ ] JS-native application bindings: define the required application/ABI contract
+  before scheduling
+  ([roadmap](docs/design/runtime_roadmap.md#deferred-scope)).
 
 ### Interactive job control (deferred until it's an actual priority)
 
-`docs/design/job_control.md`'s "Interactive Job Control" section has the decided
-design for all three pieces below; nothing here is implemented yet, and this
-project's own mksh build has job control compiled out entirely on every host
-(`MKSH_NOPROSPECTOFWORK`), not just Windows -- see that section for why this
-is forward-looking policy, not a current gap being actively worked.
-Re-evaluated (2026-08-16) against `docs/design/runtime_roadmap.md`: none of the
-planned upper-runtime components (`crtui`/LVGL, `libcrtweb`/WebKit, `libcrtgfx`, `libcrtmedia`)
-actually depend on POSIX job-control signals (`SIGSTOP`/`SIGTSTP`/`SIGCONT`)
-or real fg/bg switching -- confirmed genuinely optional infrastructure, not
-something blocking the roadmap. (V8's own "signal/process behavior"
-prerequisite in that doc is a separate matter -- `SIGSEGV`-trap-based WASM
-bounds checks and `SIGPROF`-style profiling, the "vectored exception
-handling" question `docs/design/signal_delivery.md` already tracks independently,
-answerable with fully documented Windows APIs.) A full Windows stop/resume
-implementation would also need reversing this project's "avoid undocumented
-NT internals" pattern (`NtSuspendProcess`/`NtResumeProcess` -- see
-`docs/design/job_control.md`'s own "Stopped-child status" note for the design that
-was investigated and the alternatives ruled out). Stays deferred.
-
-- Bridge `SetConsoleCtrlHandler` (`CTRL_C_EVENT`/`CTRL_BREAK_EVENT`, both to
-  `SIGINT`) into `signal_actions[]`/`raise()`, mirroring `SIGCHLD`'s existing
-  pending-flag-plus-checkpoint pattern (`docs/design/signal_delivery.md`).
-- Track the real Windows process-group id behind this project's own
-  CRT-managed `pgid` integer once a job is actually spawned into a new
-  process group, so `tcsetpgrp()` and a targeted `CTRL_BREAK_EVENT` have a
-  real id to act on.
-- Re-enable `MKSH_UNEMPLOYED` (mksh's own job control) once the above exists,
-  and only then decide whether stopped-child (`WIFSTOPPED`) support is worth
-  the low-level Windows work it would need -- `docs/design/job_control.md` currently
-  keeps that explicitly out of scope.
+- [ ] Activate only for a real interactive-shell requirement: console-signal
+  delivery, foreground process-group arbitration and an explicit stopped-child
+  policy before revisiting mksh's current job-control disablement. This is
+  separate from non-interactive timeout/cancellation; do not enable it by merely
+  defining `MKSH_UNEMPLOYED`, which disables job control. Follow the
+  [owning design](docs/design/job_control.md#interactive-job-control-decided-policy-not-yet-implemented).
 
 ### Toybox applet expansion (deferred until it's an actual priority)
 
-Only when the backing Bionic-compatible CRT/PAL surface exists.
-Full applet-by-applet status (what's enabled,
-what's still open and why, the deferred-applet list with each one's
-concrete reason, and the `globals.h`/`flags.h` registration traps found
-while enabling `df`/`stty`) now lives in
-[`docs/porting/toybox_applet_status.md`](docs/porting/toybox_applet_status.md) -- this
-bullet stays a pointer. Still open there: `expand`/`logger`/`fold`/
-`uudecode`/`cal`/`split`/`strings` (a `globals.h` fix, plus a per-applet
-`flags.h` check); `timeout` (tracked by the concrete Windows process-signal
-plan above); and a confirmed-not-guessed deferred list
-(`ps`/`top`/`iotop`/`pgrep`/`pkill`, `mount`/
-`umount`, `ifconfig`, `login`, procfs-heavy commands).
+- [ ] Select additional applets only when an actual consumer needs them and the
+  audited Bionic-compatible CRT/PAL surface and per-applet regressions exist.
+  Keep the applet list, registration details and reasons in
+  [Toybox applet status](docs/porting/toybox_applet_status.md); timeout follows the
+  bounded process-signal gate above, not a blanket applet-enablement pass.

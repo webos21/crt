@@ -104,8 +104,12 @@ benchmark once the lower contracts have stable evidence:
 - **WebRTC** — a consumer-driven integration after the browser baseline, wired
   through WebCore's backend only when a real consumer requires it. It is no
   longer a prerequisite of anything.
-- **QuickJS** — deferred unless a non-WebKit lightweight JavaScript runtime
-  becomes an actual product requirement; not a stage.
+- **JavaScriptCore reuse outside WebView** — if a real consumer needs standalone
+  scripting, reuse the JavaScriptCore engine already brought in by `06-web`
+  rather than introducing QuickJS or a second JavaScript engine. A separate
+  embedding API, dependency/runtime closure, startup cost and footprint need
+  their own scoped validation; the accepted Web runtime does not establish a
+  lightweight standalone scripting product. This is not a new required stage.
 - **WebGPU, EME/DRM, WebXR, microphone in the web runtime, and JS-native
   application bindings.**
 - Video camera capture and application-owned camera permissions are now part of the `06-web`
