@@ -3,6 +3,10 @@
   "groups": {
     "stage 01-c": [
       {
+        "target": "crt-c-config",
+        "what": "offline preflight of the configured C stage (no fetch or build)"
+      },
+      {
         "target": "crt-c-build",
         "what": "compile libc, libm, libdl, PAL, startup, shell, make"
       },
@@ -17,12 +21,16 @@
     ],
     "stage 02-cxx": [
       {
+        "target": "crt-libcxx-config",
+        "what": "offline preflight of the complete imported C++ configuration"
+      },
+      {
         "target": "crt-libcxx-build",
         "what": "compile imported libc++, libc++abi, libunwind"
       },
       {
         "target": "crt-libcxx-test",
-        "what": "run the 02-cxx tests (skipped when the stage inputs are unchanged)"
+        "what": "run the static/shared imported C++ runtime smokes (currently uncached)"
       },
       {
         "target": "crt-libcxx-dist",
@@ -30,6 +38,10 @@
       }
     ],
     "stage 03-gfx-simple": [
+      {
+        "target": "crt-gfx-simple-config",
+        "what": "offline preflight of the complete window/input stage configuration"
+      },
       {
         "target": "crt-gfx-simple-build",
         "what": "compile window, input, software framebuffer"
@@ -45,6 +57,10 @@
     ],
     "stage 04-gfx-media": [
       {
+        "target": "crt-gfx-media-config",
+        "what": "offline preflight of GPU, Skia, FFmpeg and curl configuration"
+      },
+      {
         "target": "crt-gfx-media-build",
         "what": "compile Skia, GPU, FFmpeg, media, networking"
       },
@@ -59,6 +75,10 @@
     ],
     "stage 05-ui": [
       {
+        "target": "crt-ui-config",
+        "what": "offline preflight of the complete cumulative LVGL UI configuration"
+      },
+      {
         "target": "crt-ui-build",
         "what": "compile crtui, LVGL-backed widgets"
       },
@@ -69,6 +89,12 @@
       {
         "target": "crt-ui-dist",
         "what": "package, archive and verify out/<preset>/dist/05-ui (skipped when unchanged)"
+      }
+    ],
+    "stage 06-web": [
+      {
+        "target": "crt-web-config",
+        "what": "offline prerequisite-feature and target-pair preflight; Web build/test/dist still planned"
       }
     ],
     "ports": [
@@ -86,12 +112,6 @@
   },
   "os_specific": {},
   "planned": [
-    "crt-c-config",
-    "crt-libcxx-config",
-    "crt-gfx-simple-config",
-    "crt-gfx-media-config",
-    "crt-ui-config",
-    "crt-web-config",
     "crt-web-build",
     "crt-web-test",
     "crt-web-dist",

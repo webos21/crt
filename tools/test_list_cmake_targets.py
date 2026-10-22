@@ -30,8 +30,24 @@ class Classify(unittest.TestCase):
     def test_os_specific_documented_targets_are_not_missing_elsewhere(self) -> None:
         cat = json.loads(json.dumps(CATALOG))
         cat["groups"]["stage 01-c"].append({"target": "crt-win-only"})
-        r = lt.classify(["crt-c-build", "crt-c-dist", "port-test-recipes"], cat)
+        r = lt.classify(["crt-c-build", "crt-c-dist", "port-test-recipes"], cat, "macos")
         self.assertEqual([], r["missing"])
+
+    def test_os_specific_target_is_required_on_its_own_os(self) -> None:
+        cat = json.loads(json.dumps(CATALOG))
+        cat["groups"]["stage 01-c"].append({"target": "crt-win-only"})
+        r = lt.classify(["crt-c-build", "crt-c-dist", "port-test-recipes"], cat, "windows")
+        self.assertEqual(["crt-win-only"], r["missing"])
+
+    def test_readme_documents_every_public_target_and_no_planned_one(self) -> None:
+        import re
+        catalog = lt.load_catalog()
+        text = (lt.ROOT / "README.md").read_text(encoding="utf-8")
+        build = text.split("## Build\n", 1)[1].split("\n## ", 1)[0]
+        documented = set(re.findall(r"--target ([a-z0-9-]+)", build))
+        listed = {entry["target"] for entries in catalog["groups"].values() for entry in entries}
+        self.assertEqual(listed, documented)
+        self.assertTrue(documented.isdisjoint(catalog["planned"]))
 
     def test_a_new_stage_looking_target_must_be_documented_or_declared_a_part(self) -> None:
         r = lt.classify(["crt-c-build", "crt-c-dist", "port-test-recipes", "crt-gfx-build", "crt-new-dist"], CATALOG)

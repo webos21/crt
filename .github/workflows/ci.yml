@@ -252,6 +252,13 @@ jobs:
       - name: Check the documented build targets exist
         run: python tools/list_cmake_targets.py out/${{ matrix.preset }} --check --json cmake-targets-${{ matrix.name }}.json
 
+      # Offline checks in the existing matrix, not another workflow or full build.
+      - name: Check stage configuration and target catalog regressions
+        run: python -m unittest tools.test_crt_stage_config tools.test_list_cmake_targets tools.test_crt_stage_cache tools.test_lvgl_sources
+
+      - name: Preflight the C and C++ stage configurations without building dependencies
+        run: cmake --build --preset ${{ matrix.preset }} --target crt-c-config crt-libcxx-config
+
       - name: Keep the target list
         uses: actions/upload-artifact@v4
         with:

@@ -60,6 +60,32 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
+### Build-system consolidation
+
+Preserve the accepted SDK recipes and default C-stage workflow. Target ownership
+is [build_targets.json](docs/guides/build_targets.json); scope and replay evidence
+live in the [build-system review](docs/acceptance/build_system_acceptance.md).
+
+- [x] B0 Audit the preset/dependency/cache/catalog changes against a fresh
+  Windows tree; record prior five-host inventory evidence separately from
+  locally replayed builds, and restore the missing completed-work history.
+- [x] B1 Add bounded `crt-<stage>-config` preflight targets: report the selected
+  stage's resolved configuration without fetching, compiling or recursively
+  reconfiguring the running Ninja tree. Test feature-off and unsupported-pair
+  rejection; keep reduced-feature diagnostic builds available.
+- [ ] B2 Add `crt-web-build/test/dist` through the existing isolated Web driver,
+  with explicit predecessor, host tools, work roots and native-pair limits;
+  do not count a wire-only test or skipped browser as full Web acceptance.
+- [ ] B3 Close cache correctness gaps before release automation: include
+  build-affecting configuration and executed test-driver inputs, and detect
+  deleted payloads inside existing output directories and changed predecessors.
+- [ ] B4 Add `crt-dev-release` only after the Development SDK producer and
+  verification below exist; add `crt-full-release` through existing release
+  checks. Neither target uploads or approves a release implicitly.
+- [ ] B5 Replay the new entry points on supported native hosts; narrow the
+  Wayland/xkbcommon target scope only after preserving explicit cross-build use
+  and the clean-build dependency gate in Planned.
+
 ### CRT SDK split: Full SDK and Development SDK
 
 CRT produces two kinds of SDK per native pair from the same sources, stage outputs and port

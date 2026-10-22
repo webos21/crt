@@ -1483,6 +1483,7 @@ endif()
 # Public stage targets. The default workflow deliberately stops at 01-c;
 # later distributions are cumulative and depend on the preceding stage.
 # tools/create_dist.py copies wrappers and metadata, never a compiler/linker.
+include(cmake/crt_stage_config.cmake)
 if(Python3_Interpreter_FOUND)
   add_custom_target(crt-c-build
     DEPENDS c c_shared m m_shared dl dl_shared crt1 crt_shell_artifacts port-build-make

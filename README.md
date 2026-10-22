@@ -490,7 +490,7 @@ cmake --workflow --preset macos-host-ninja-debug
 cmake --workflow --preset windows-host-ninja-debug
 ```
 
-Each stage has `build`, `test` and `dist` targets. They are cumulative: a stage
+Stages `01-c` through `05-ui` have `build`, `test` and `dist` targets. They are cumulative: a stage
 target builds the stages before it.
 
 ```sh
@@ -521,6 +521,28 @@ Outputs are cumulative SDK trees and archives under:
 out/<preset>/dist/
 ```
 
+After `cmake --preset <preset>`, an optional `crt-<stage>-config` preflight
+checks the complete stage's required options without downloading or building:
+
+```sh
+cmake --build --preset <preset> --target crt-c-config
+cmake --build --preset <preset> --target crt-libcxx-config
+cmake --build --preset <preset> --target crt-gfx-simple-config
+cmake --build --preset <preset> --target crt-gfx-media-config
+cmake --build --preset <preset> --target crt-ui-config
+cmake --build --preset <preset> --target crt-web-config
+```
+
+It writes a local `stage-config/<stage>.json` report; it does not enable options
+or certify that dependencies are built. Explicit feature-off diagnostics remain
+available through existing build targets. `crt-web-config` checks features and
+target support only: Web build/test/dist entry points remain planned; use the
+existing [isolated Web procedure](docs/acceptance/crtweb_acceptance.md#10-distribution-and-security-closure).
+
+All port recipes can be built and tested with
+`cmake --build --preset <preset> --target port-test-recipes`; this is a separate,
+potentially long-running operation, not part of a configuration preflight.
+
 ### Rebuilding only what changed
 
 `test` and `dist` steps (and the libc++ build and the stage source assets) keep an
@@ -528,6 +550,10 @@ input hash. A step is skipped when the sources of its stage and of every earlier
 stage, the configuration, and its command line are unchanged since its last
 success, so editing `libcrtui` reruns only the `ui` steps while editing `libc`
 reruns everything after it. Compilation is incremental through Ninja as usual.
+The imported C++ runtime smoke (`crt-libcxx-test`) is currently uncached.
+The cache is a local build optimization, not an integrity or release gate; its
+[remaining correctness checks](docs/acceptance/build_system_acceptance.md#findings-and-limits)
+are tracked separately. Force a rerun after manual changes to generated SDK contents.
 
 ```sh
 CRT_STAGE_CACHE=off cmake --build --preset <preset> --target crt-ui-dist   # never skip

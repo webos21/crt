@@ -52,7 +52,7 @@ def load_catalog() -> dict:
     return json.loads(CATALOG.read_text(encoding="utf-8"))
 
 
-def classify(names: list, catalog: dict) -> dict:
+def classify(names: list, catalog: dict, target_os: str | None = None) -> dict:
     user = {}
     for group, entries in catalog["groups"].items():
         for entry in entries:
@@ -68,7 +68,9 @@ def classify(names: list, catalog: dict) -> dict:
                 break
         else:
             result["internal"][name] = "libraries and tools"
-    result["missing"] = sorted(t for t in user if t not in names and not catalog["os_specific"].get(t))
+    result["missing"] = sorted(
+        t for t in user if t not in names and
+        (target_os is None or not catalog["os_specific"].get(t) or target_os in catalog["os_specific"][t]))
     parts = catalog.get("internal_stage_parts", {})
     result["unlisted_stage_like"] = sorted(
         n for n in result["internal"]
@@ -86,7 +88,6 @@ def main() -> int:
     if args.diff:
         a, b = (json.loads(path.read_text(encoding="utf-8")) for path in args.diff)
         for label, left, right in (("only in " + args.diff[0].name, a, b), ("only in " + args.diff[1].name, b, a)):
-            names = sorted(set(left["user"]) | set(left["internal"]) - set(right["user"]) - set(right["internal"]))
             names = [n for n in sorted(set(left["user"]) | set(left["internal"]))
                      if n not in right["user"] and n not in right["internal"]]
             print(f"{label}: {len(names)}")
@@ -96,7 +97,11 @@ def main() -> int:
     if args.build_dir is None:
         parser.error("a build directory is required")
     catalog = load_catalog()
-    result = classify(target_names(args.build_dir), catalog)
+    cache = (args.build_dir / "CMakeCache.txt").read_text(encoding="utf-8")
+    selected_os = re.search(r"^CRT_TARGET_OS:[^=]+=([^\r\n]+)$", cache, re.M)
+    if selected_os is None:
+        parser.error("build directory has no CRT_TARGET_OS in CMakeCache.txt")
+    result = classify(target_names(args.build_dir), catalog, selected_os.group(1))
     if args.json:
         args.json.write_text(json.dumps(result, indent=1), encoding="utf-8")
     if args.check:

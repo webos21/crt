@@ -11,6 +11,57 @@ substantive update.
 
 ## 2026-10-22
 
+### Add bounded stage configuration preflights and tighten target-catalog checks
+
+Completed build-consolidation B1: six opt-in `crt-<stage>-config` targets inspect
+the already configured tree without fetching, compiling or recursively running
+CMake. They require the complete advertised stage's feature options, report the
+effective pair/tools, reject unsupported Web pairs and missing Linux media link
+inputs, and remove older success reports on failure. Existing reduced-feature
+builds retain their behavior. Local `stage-config/` JSON is diagnostic only;
+SDK formats, ABI, recipes and consumer locks are unchanged.
+
+Fresh Windows/x64 preflights pass in a path containing spaces without creating
+dependency build trees. LVGL-OFF rejects UI but leaves lower preflights usable;
+reapplying the preset restores all six passes. This exposed bare compiler names
+in the cache after a preset reconfigure; resolved CMake tools now take priority,
+with PATH lookup for direct-script use. Windows/aarch64 cross configuration passes
+the lower five configs and rejects Web; no arm64 compile/runtime pass is claimed.
+Both target inventories match at 23 public/378 internal names. Fixed the
+classifier's OS-specific missing-target exemption and added README/catalog
+parity coverage. Thirty tooling tests pass and are wired, with C/C++ preflights,
+into the existing CI matrix; no second workflow or upper-runtime rebuild is added.
+
+The [acceptance record](docs/acceptance/build_system_acceptance.md#b1-local-implementation-and-replay-2026-10-22)
+owns commands, results and limits. TODO keeps checked B0/B1 prerequisites and
+open B2-B5; Web aggregates, cache integrity, Development SDK/release production
+and other-host replay remain unfinished. STATUS was not requested or changed.
+
+### Review and restore tracking of the preceding build-system consolidation
+
+Audited `0208bcd` (feature-enabled presets and build-time Skia/ports/LVGL inputs),
+`027b5db` (stage input-hash cache), `0443910` (target catalog/classifier/CI) and
+`aa81932` (OS-scoped inventory). Those changes existed in source but lacked
+matching completed-work entries here and an active TODO execution outline.
+Added build-consolidation B0-B5 ahead of the SDK split, preserving its S0-S5
+producer dependencies instead of treating a renamed `02-cxx` as Development SDK.
+
+The supplied five-host inventory is retained as prior reported evidence, not a
+new five-host replay. Locally, baseline tooling passes 18 tests and a fresh
+Windows/x64 preset configures without pre-fetched Skia/LVGL; all 17 original
+public targets exist. A real fresh C-stage build, including recipe Make and CRT
+shell, then runs 163 selected CTests: 162 executed passes, the existing COW skip,
+zero failures, 41.18 seconds. Existing upper-stage/other-host measurements in the
+original commits are not repeated or promoted into new acceptance here.
+
+Found and documented limitations: directory-existence checks miss deleted nested
+payloads; excluded `test_*.py` inputs can hide changes to executed test drivers;
+configuration/predecessor identity needs broader cache coverage. Temporary
+fixtures reproduce both false-success skips. C++ smoke currently runs uncached,
+and Wayland/xkbcommon targets remain defined on all OSes; corrected the public
+description and left fixes in the active outline. Exact findings and local logs
+are in the [review](docs/acceptance/build_system_acceptance.md#b0-baseline-review-2026-10-22).
+
 ### Fix Windows iostream through complete priority-constructor startup
 
 The first-cout crash was a CRT initialization-range/order defect. The pinned
