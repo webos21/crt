@@ -196,6 +196,18 @@ static void audit_begin(scenario_audit* audit, const char* name) {
 
 static void audit_end(scenario_audit* audit) {
   audit->after = sample_resources();
+  /* Teardown of a cancelled transfer (worker threads, sockets) finishes asynchronously, and the
+   * in-process test receiver serves one connection at a time, so right after the last close the
+   * count can still include handles that are about to go away. A leak does not go away: sample
+   * again for up to ~2 s and fail only if the count never settles within the tolerance. Seen as a
+   * ~30% failure of "upload cancel" on a 4-vCPU Windows/arm64 VM. */
+  for (int settle = 0; settle < 40 && audit->before.handles >= 0 &&
+                       audit->after.handles - audit->before.handles > HANDLE_TOLERANCE;
+       ++settle) {
+    struct timespec pause = {0, 50L * 1000L * 1000L};
+    nanosleep(&pause, NULL);
+    audit->after = sample_resources();
+  }
   if (audit->before.handles >= 0) {
     int delta = audit->after.handles - audit->before.handles;
     if (delta > HANDLE_TOLERANCE) {
