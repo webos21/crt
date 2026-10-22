@@ -39,6 +39,8 @@ def target_names(build_dir: Path) -> list:
     names = set()
     for line in out.splitlines():
         name, _, rule = line.partition(": ")
+        if name.startswith("cmake_object_order_depends_") or name in ("build.ninja", "cmake_order_depends"):
+            continue  # Ninja bookkeeping, not CMake targets
         if "/" in name or "\\" in name or (name.endswith((".o", ".a", ".so", ".dylib", ".dll", ".exe", ".txt", ".cmake"))
                                           and name != "CMakeCache.txt"):
             continue
