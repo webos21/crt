@@ -10,7 +10,7 @@ The active work queue is [TODO](../../TODO.md#in-progress).
 | --- | --- | --- |
 | Windows virtual random-device dup | Initial failure reproduced; fixed and replayed on Windows/x64 below | Windows fix closed; other native host/architecture replays are not claimed |
 | Windows packaged iostream crash | Initial first-cout fault reproduced; fixed and replayed static/shared on Windows/x64 below | Windows fix closed; native macOS binding audit remains separate |
-| macOS CRT dylib libc binding | Native evidence pending; source risk and existing local fixes identified | Audit actual Mach-O bindings and shared consumers on macOS before a common link-order change |
+| macOS CRT dylib libc binding | Audited on native macOS/arm64 below: one reproduced defect (in-tree `libcrtgfx_gpu.dylib`) fixed, the rest classified | Fix closed on macOS/arm64; Linux/Windows have no Mach-O binding question |
 
 The original triage observations are not passing regressions; the later
 random-device fix has its own evidence below. In particular, the original
@@ -300,30 +300,42 @@ combination is approved here. The CLI-owned
 remains the owner of any future adoption; this producer fix is not a new
 development-contract version or a CLI/Studio compatibility assertion.
 
-## macOS native handoff
+## macOS native binding audit (2026-10-22)
 
-The common [shared-runtime helper](../../CMakeLists.txt) still adds System.
-[crtui](../../libcrtui/CMakeLists.txt) explicitly puts CRT libc first;
-[crtmedia's shared target](../../libcrtmedia/cmake/crtmedia_targets.cmake)
-has its own equivalent macOS guard. Preserve both fixes and the
-[original shared-consumer evidence](../acceptance/crtui_acceptance.md).
-Source order alone does not establish how every remaining dylib binds today.
+Native macOS/arm64, source baseline `d6c00cf` plus this fix. Method as handed off above, with one addition: the
+inventory is a tool, [`tools/audit_macos_bindings.py`](../../tools/audit_macos_bindings.py), that takes every symbol the
+SDK's `libc.dylib`/`libm.dylib`/`libdl.dylib` export (1,304 in the stage SDK) and, for every Mach-O image, reads
+`nm -m -u` to see which library each undefined reference is bound to. `otool -L` order alone is not the evidence.
 
-On native macOS, identify the commit, SDK manifest and dylib hashes, then:
+Audited SDKs: the isolated `04-gfx-media -> 05-ui -> 06-web` chain built the same day (04: 111 images, 06: 151 images:
+49 dylibs and 102 executables, including the Web private closure), and the in-tree developer SDKs
+`out/macos-host-ninja-debug/dist/{01-c,02-cxx,03-gfx-simple,04-gfx-media,05-ui}`.
 
-1. Inventory enabled dylibs from the actual SDK (core, graphics/GPU/Skia,
-   media, UI and Web); retain missing/disabled variants as such.
-2. Capture `otool -L <dylib>` and `nm -m <dylib>`, inspecting actual bindings
-   for malloc/free and pthread initialization/use/destruction. A dependency
-   list alone cannot prove which library defines a call. Separate intended
-   host-boundary imports from CRT-object operations.
-3. Run a minimal shared-linked create/use/destroy consumer per applicable
-   library, including the existing crtui shared contract and media guards.
-   Use CRT headers and the identified SDK, not a static-linked substitute.
-4. If a wrong binding remains, reproduce it with a direct shared consumer
-   before selecting target-local versus common-helper changes. Preserve the
-   [host ABI firewall](../design/host_abi_firewall.md); libc itself still needs
-   its documented OS imports, so blindly banning libSystem is not a fix.
+Results:
 
-No macOS runtime or Mach-O result is claimed by this Windows triage. Leave
-that gate open until native evidence and the applicable regression are recorded.
+| Image | Observation | Decision |
+| --- | --- | --- |
+| In-tree `libcrtgfx_gpu.dylib` | **Reproduced defect.** `libSystem` precedes `libc.dylib` on the link line, so `pthread_mutex_*`/`pthread_cond_*`, `calloc`/`free` and `clock_gettime` bound to Darwin. Darwin's `pthread_mutex_t` is 64 bytes, the CRT's 40 (`pthread_once_t` 16/4, `pthread_rwlock_t` 200/56), and `crtgfx_gpu_fence` is laid out by the CRT headers. A direct shared consumer (`libcrtgfx/tests/gpu_test.c` built with `CRT_CXX_RUNTIME_LINKAGE=shared` against the in-tree 05-ui SDK) trapped in Darwin's `os_unfair_lock_lock_slow`; the same source passes against the isolated-stage SDK, whose link order was already correct. | Fixed: `crtgfx_gpu_shared` puts the CRT libc/libm first (target-local, like crtmedia/crtui/Skia). The consumer passes and the audit is clean. |
+| In-tree `libcrtgfx_skia.dylib` | libc first (already) but no libm: 49 math functions bound to Apple's libm. Functionally benign (same ABI, no state). | Fixed with the same libm-first option, so the gate can be strict for dylibs. |
+| `libcrtgfx.dylib` (window) | `calloc`/`malloc`/`realloc`/`free`/`memcpy`/`clock_gettime` bound to `libSystem` (libSystem is listed before libc). `window_cocoa.c` deliberately uses the host allocator for the buffers it gives CoreGraphics and frees in its own release callback; no allocation crosses the public API, and `crtgfx_now_ms()` accepts both clock ids. `window_smoke_test` and `synthetic_event_test` pass as shared consumers. | Unchanged; allowlisted per symbol with this reason. Changing it would move CoreGraphics-owned buffers to the CRT allocator. |
+| `libc.dylib` | `dlsym` bound to `libSystem`: `pthread.c` and `ifaddrs.c` use `dlsym(RTLD_NEXT)` to reach the real Darwin functions, and libdl depends on libc. | Intended host boundary; allowlisted. |
+| `bin/curl` | The one executable that carries its own static libc (own `malloc`) and loads CRT dylibs bound to `libc.dylib` (`libcurl`, `libmbedtls`, `libz`): two allocator/pthread registries in one process. Forty HTTP rounds (300 KB bodies, varying request headers) were clean; no crossing allocation was found. | Not reproduced as a failure; allowlisted as a latent risk, with the reason in the tool. Relinking it against the shared libc is the fix if a failure appears. |
+| In-tree `crtgfx_skia_gpu_window_demo` | Static libc; 49 pure math functions and one `dlsym` bound to `libSystem` because the frameworks precede `libm.a`/`libdl.a` on that link line. | Math: a note (same ABI, no state). `dlsym`: allowlisted (Metal path loads no library); the isolated-stage rebuild of the example binds both to the CRT. |
+| Everything else | Every CRT-owned reference in the other 140+ images binds to `libc`/`libm`/`libdl`. | Clean. |
+
+Shared-consumer evidence (stage SDK, fully shared libc, no static CRT archive, executables checked to define no
+`malloc`): `libcrtmedia` 11 tests (frame, format, player, transport queue, GPU frame, extractor/codec, demux audio/video/
+malformed, encode+mux, timing discontinuity), `libcrtgfx_gpu` `gpu_test`, `libcrtgfx` window smoke and synthetic events,
+`libcrtui` contract, input, layout, render and surface tests, and a create/use/destroy consumer for the redistributed
+`libz`, `libcurl` (including memory handed back with `curl_free`) and mbedTLS; all print their success marker.
+`libcrtgfx_skia` is exercised as a shared consumer by the stage's own `crtgfx_skia_raster_smoke`. The `libcrtweb.dylib`
+API test needs the WebKit gate environment (host process, fonts) and is not claimed as shared-consumer evidence here;
+the audit shows its bindings clean and the 06-web stage ran its own gates. Probe sources are the repository tests
+themselves; the driver files are local under `out/macos-binding-audit/`.
+
+The audit is now a gate: `tools/verify_dist.py` runs it on macOS SDKs when executed on macOS (the 04-gfx-media stage and
+the in-tree distributions pass it), and `tools/test_audit_macos_bindings.py` covers the decision logic. A CRT image that
+binds a CRT libc symbol to `libSystem`, or a new executable that links a static libc next to CRT dylibs, fails
+verification unless it is added to the tool's reasoned allowlist.
+
+No Linux, Windows or macOS/x86_64 result is claimed; the question is specific to Mach-O two-level namespaces.

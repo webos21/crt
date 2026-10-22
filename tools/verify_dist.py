@@ -5,12 +5,14 @@ import argparse
 from datetime import datetime, timezone, timedelta
 import json
 import re
+import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from create_dist import DIST_PORTING_TOOLS, DIST_PORTING_DIRS, DIST_WRAPPER_TOOLS
 from crt_binary_dependencies import validate_binary_dependencies
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import is_absolute_runtime_entry, runtime_paths
+import audit_macos_bindings
 import crt_relink_kit
 import crt_source_offer
 import crt_web_release
@@ -198,6 +200,17 @@ def validate_source_offer(dist: Path, stage: str, dependencies: dict[str, dict])
         dist, stage, version, crt_source_offer.components_from_sdk(dist, stage))
     if problems:
         raise SystemExit("LGPL source offer: " + "; ".join(problems))
+
+
+def validate_macos_bindings(dist: Path, manifest: dict) -> None:
+    """On a macOS host, no CRT image may bind a CRT libc symbol to Apple's libSystem (tools/audit_macos_bindings.py)."""
+    if manifest.get("target", {}).get("os") != "macos" or sys.platform != "darwin":
+        return
+    if not (dist / "lib" / "libc.dylib").is_file():
+        return
+    problems = audit_macos_bindings.problems(audit_macos_bindings.collect(dist))
+    if problems:
+        raise SystemExit("macOS binding audit: " + "; ".join(problems))
 
 
 def validate_relink_kit(dist: Path, manifest: dict, dependencies: dict[str, dict]) -> None:
@@ -478,6 +491,7 @@ def main() -> None:
     validate_runtime_components(args.stage, redistributed)
     validate_source_offer(dist, args.stage, redistributed)
     validate_relink_kit(dist, manifest, redistributed)
+    validate_macos_bindings(dist, manifest)
     porting = manifest.get("optional_tools", {}).get("porting", {})
     if porting.get("included") is not True or porting.get("python", {}).get("required") is not True:
         raise SystemExit("manifest does not describe the optional packaged porting tools")

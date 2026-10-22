@@ -63,12 +63,14 @@ under an active tranche only to make its execution order legible.
 ### CRT/PAL residual defects: bounded triage and fixes
 
 Windows triage is recorded in the [diagnostic record](docs/bringup/crt_pal_residual_triage.md).
-Only reproduced defects enter fixes; macOS still needs native evidence. This
+Only reproduced defects enter fixes; the Windows and native macOS evidence is recorded. This
 does not reopen accepted SDK stages or start SDK/CLI/Studio implementation.
 
-- [ ] Tranche 3 -- Execute the prepared per-dylib binding/shared-consumer audit
-  on native macOS. Preserve crtui/crtmedia fixes; select any common link-order
-  change only from actual Mach-O/runtime evidence. Native replay remains open.
+- [x] Tranche 3 -- Native macOS/arm64 binding audit done 2026-10-22: one reproduced defect (in-tree
+  `libcrtgfx_gpu.dylib`) fixed, the rest classified, and the audit is a `verify_dist` gate
+  ([evidence](docs/bringup/crt_pal_residual_triage.md#macos-native-binding-audit-2026-10-22)).
+  Open only as latent risks recorded there: the static-libc `curl` tool next to shared libcurl, and the
+  `libcrtweb.dylib` API test as a shared consumer.
 
 ## Planned
 

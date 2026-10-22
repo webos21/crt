@@ -393,6 +393,19 @@ Planned entry without changing the active Web work, STATUS or the root README.
 This completes design consolidation only, not CLI/Studio implementation,
 repository creation or release acceptance.
 
+### CRT/PAL residual defects, Tranche 3: native macOS binding audit
+
+Audited every Mach-O image of the isolated 04/06 SDKs and the in-tree developer SDKs with a new tool
+(`tools/audit_macos_bindings.py`: each CRT-owned libc/libm/libdl symbol an image references, and the library `nm -m` says it
+is bound to). One defect reproduced: the in-tree `libcrtgfx_gpu.dylib` linked `libSystem` ahead of `libc.dylib`, binding
+`pthread_mutex_*`/`pthread_cond_*` to Darwin's 64-byte mutex on the CRT's 40-byte `pthread_mutex_t`; a shared-linked
+`gpu_test` trapped in `os_unfair_lock_lock_slow`. Fixed target-locally (CRT libc/libm first for `crtgfx_gpu_shared`, libm
+added for `crtgfx_skia_shared`); the isolated-stage SDK was already correct. Classified, not changed: the window backend's
+deliberate host allocator (`libcrtgfx.dylib`), libc's `dlsym(RTLD_NEXT)`, math-only bindings of static executables, and the
+`curl` tool's static libc next to shared libcurl (40 clean transfer rounds, latent). Shared-consumer runs of the media (11),
+gpu, window, UI (5) and zlib/curl/mbedTLS libraries pass with a shared libc. The audit now runs in `verify_dist.py` on
+macOS. Details and limits: [triage record](docs/bringup/crt_pal_residual_triage.md#macos-native-binding-audit-2026-10-22).
+
 ### Tranche 10 on macOS/arm64: isolated 04 -> 05 -> 06 chain, relink kit, and six macOS-only stage defects
 
 The first isolated macOS `04-gfx-media -> 05-ui -> 06-web` chain since the Tranche 8/9 macOS work (the 2026-10-20 06-web replay had

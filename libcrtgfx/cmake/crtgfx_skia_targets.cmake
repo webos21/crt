@@ -462,10 +462,11 @@ function(crt_add_crtgfx_skia_shared_target)
       # Frameworks re-export libSystem; Mach-O binds to the first provider.
       # Put CRT libc before every framework/dependency so the C99 transport
       # keeps Bionic socket/pthread ABI, including in the isolated SDK stage.
-      if(TARGET c_shared)
-        target_link_options(crtgfx_skia_shared BEFORE PRIVATE "$<TARGET_FILE:c_shared>")
+      # libm too: Skia's math calls otherwise bind to Apple's libm through libSystem.
+      if(TARGET c_shared AND TARGET m_shared)
+        target_link_options(crtgfx_skia_shared BEFORE PRIVATE "$<TARGET_FILE:c_shared>" "$<TARGET_FILE:m_shared>")
       else()
-        target_link_options(crtgfx_skia_shared BEFORE PRIVATE "${CMAKE_SYSROOT}/lib/libc.dylib")
+        target_link_options(crtgfx_skia_shared BEFORE PRIVATE "${CMAKE_SYSROOT}/lib/libc.dylib" "${CMAKE_SYSROOT}/lib/libm.dylib")
       endif()
     endif()
     target_link_libraries(crtgfx_skia_shared PUBLIC crtgfx_gpu_shared)

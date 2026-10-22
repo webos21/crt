@@ -200,6 +200,18 @@ function(crt_add_crtgfx_gpu_shared_target)
   if(TARGET crt_build_flags)
     target_link_libraries(crtgfx_gpu_shared PRIVATE crt_build_flags)
   endif()
+  if(CRT_TARGET_OS STREQUAL "macos")
+    # Mach-O binds an undefined symbol to the FIRST dylib on the link line that defines it, and the frameworks
+    # re-export libSystem. The shared-runtime helper adds libSystem ahead of libc.dylib, so this library's
+    # pthread_mutex_*/pthread_cond_* calls bound to Darwin's 64-byte mutex on the CRT's 40-byte pthread_mutex_t
+    # (crtgfx_gpu_fence): a direct shared consumer trapped in os_unfair_lock_lock_slow. CRT libc/libm go first
+    # (tools/audit_macos_bindings.py; docs/bringup/crt_pal_residual_triage.md).
+    if(TARGET c_shared AND TARGET m_shared)
+      target_link_options(crtgfx_gpu_shared BEFORE PRIVATE "$<TARGET_FILE:c_shared>" "$<TARGET_FILE:m_shared>")
+    else()
+      target_link_options(crtgfx_gpu_shared BEFORE PRIVATE "${CMAKE_SYSROOT}/lib/libc.dylib" "${CMAKE_SYSROOT}/lib/libm.dylib")
+    endif()
+  endif()
   if(CRT_TARGET_OS STREQUAL "windows")
     if(TARGET crt_windows_dllcrt)
       target_sources(crtgfx_gpu_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)

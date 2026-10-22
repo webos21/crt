@@ -33,6 +33,7 @@ STAGE_VALIDATION_PROJECT_PATHS = (
     # Relink kit of the shared libcrtmedia (FFmpeg is LGPL); written by the 04-gfx-media stage, checked by verify_dist.
     "tools/crt_relink_kit.py",
     "tools/crt_web_release.py",
+    "tools/audit_macos_bindings.py",
     "third_party/crt-runtime/release.json",
     "third_party/crt-runtime/SOURCE-OFFER.template.md",
 )
