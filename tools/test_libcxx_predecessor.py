@@ -60,6 +60,24 @@ class PredecessorFingerprintTests(unittest.TestCase):
             self.assertFalse((self.build_root / recipe["name"]).exists())
         self.assertTrue(unrelated.is_dir())
 
+    def test_startup_and_windows_dll_changes_invalidate_cached_runtime_links(self) -> None:
+        for relative in ("lib/crt1_ctors_end.o", "lib/crt1_ctors_walker.o", "lib/dllcrt.o",
+                         "lib/libc_dll.dll.a", "bin/libc.dll"):
+            with self.subTest(input=relative):
+                path = self.sysroot / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"before")
+                original = DRIVER.predecessor_fingerprint(self.sysroot)
+                DRIVER.write_predecessor_fingerprint(self.build_root, original)
+                self.make_build_trees()
+                path.write_bytes(b"after")
+                changed = DRIVER.predecessor_fingerprint(self.sysroot)
+                self.assertNotEqual(original, changed)
+                self.assertIn(relative, {entry["path"] for entry in changed["files"]})
+                DRIVER.invalidate_stale_builds(self.build_root, self.order, changed)
+                for recipe in self.order:
+                    self.assertFalse((self.build_root / recipe["name"]).exists())
+
     def test_missing_predecessor_libraries_is_rejected(self) -> None:
         empty = self.root / "empty"
         (empty / "lib").mkdir(parents=True)

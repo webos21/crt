@@ -8,11 +8,16 @@ import subprocess
 from pathlib import Path
 
 
+def run_native(*args, **kwargs):
+    kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    return subprocess.run(*args, **kwargs)
+
+
 def compiler_supports_flag(compiler, flag):
     if compiler is None:
         return False
     try:
-        probe = subprocess.run(
+        probe = run_native(
             [str(compiler), "-x", "c++", "-", "-fsyntax-only", flag],
             input="int main(){return 0;}\n",
             capture_output=True,
@@ -150,7 +155,7 @@ def main():
             str(binary),
         ]
         print("+", " ".join(link_command), flush=True)
-        subprocess.run(link_command, env=env, check=True)
+        run_native(link_command, env=env, check=True, timeout=60)
         print("+", binary, flush=True)
         run_env = env
         if args.target_os == "windows":
@@ -173,11 +178,11 @@ def main():
             # prepended, so the loader can actually find those DLLs.
             run_env = os.environ.copy()
             run_env["PATH"] = str(sysroot / "bin") + os.pathsep + run_env.get("PATH", "")
-        subprocess.run([str(binary)], env=run_env, check=True)
+        run_native([str(binary)], env=run_env, check=True, timeout=30)
 
         sdk_object = binary.with_name(f"{binary.stem}_string_sdk.o")
         sdk_flags = ["-fcrt-real-apple-sdk"] if args.target_os == "macos" else []
-        subprocess.run(command + typed_new_delete_flag + sdk_flags + [
+        run_native(command + typed_new_delete_flag + sdk_flags + [
             "-std=c++17", "-O2", "-c",
             str(root / "libstdc++" / "tests" / "imported_libcxx_string_sdk.cc"),
             "-o", str(sdk_object),
@@ -185,13 +190,32 @@ def main():
         string_binary = binary.with_name(f"{binary.stem}_string_abi{binary.suffix}")
         # Load the host's C++ runtime transitively to exercise coalescing too.
         framework_flags = ["-framework", "Foundation"] if args.target_os == "macos" else []
-        subprocess.run(command + typed_new_delete_flag + [
+        run_native(command + typed_new_delete_flag + [
             "-std=c++17", "-O2",
             str(root / "libstdc++" / "tests" / "imported_libcxx_string_abi_test.cc"),
             str(sdk_object), *framework_flags, "-o", str(string_binary),
         ], env=env, check=True)
         print("+", string_binary, flush=True)
-        subprocess.run([str(string_binary)], env=run_env, check=True, timeout=30)
+        run_native([str(string_binary)], env=run_env, check=True, timeout=30)
+
+        stream_binary = binary.with_name(f"{binary.stem}_iostream{binary.suffix}")
+        run_native(command + typed_new_delete_flag + [
+            "-std=c++17",
+            str(root / "libstdc++" / "tests" / "imported_libcxx_iostream_test.cc"),
+            "-o", str(stream_binary),
+        ], env=env, check=True, timeout=60)
+        stream_result = run_native(
+            [str(stream_binary)], env=run_env, timeout=30,
+            capture_output=True, text=True,
+        )
+        expected_stdout = "iostream-before-main\niostream-main:CRT:17\niostream-after-main\n"
+        expected_stderr = "iostream-cerr\niostream-clog\n"
+        if (stream_result.returncode != 0 or stream_result.stdout != expected_stdout
+                or stream_result.stderr != expected_stderr):
+            raise SystemExit(
+                f"iostream {linkage}: exit={stream_result.returncode}, unexpected output: "
+                f"stdout={stream_result.stdout!r} stderr={stream_result.stderr!r}")
+        print(f"imported_libcxx_iostream_test ({linkage}): ok", flush=True)
 
 
 if __name__ == "__main__":

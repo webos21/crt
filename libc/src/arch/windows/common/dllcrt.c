@@ -61,7 +61,7 @@ extern crt_init_func __crt_msvc_ctors_end __attribute__((weak));
 extern crt_init_func __crt_msvc_dtors_begin __attribute__((weak));
 extern crt_init_func __crt_msvc_dtors_end __attribute__((weak));
 
-static void dll_run_ctors(crt_init_func* begin, crt_init_func* end) {
+static void dll_run_forward(crt_init_func* begin, crt_init_func* end) {
   crt_init_func* p;
 
   if (begin == 0 || end == 0) {
@@ -74,7 +74,7 @@ static void dll_run_ctors(crt_init_func* begin, crt_init_func* end) {
   }
 }
 
-static void dll_run_dtors(crt_init_func* begin, crt_init_func* end) {
+static void dll_run_reverse(crt_init_func* begin, crt_init_func* end) {
   crt_init_func* p = end;
 
   if (begin == 0 || end == 0) {
@@ -93,13 +93,14 @@ int crtDllMainCRTStartup(void* module, unsigned long reason, void* reserved) {
   if (reason == 1 /* DLL_PROCESS_ATTACH */) {
     _pei386_runtime_relocator();
     _crt_install_dwarf_unwind_safety_net();
-    dll_run_ctors(&__crt_ctors_begin, &__crt_ctors_end);
-    dll_run_ctors(&__crt_msvc_ctors_begin, &__crt_msvc_ctors_end);
+    /* Same complete GNU priority range/order as executable startup. */
+    dll_run_reverse(&__crt_ctors_begin, &__crt_ctors_end);
+    dll_run_forward(&__crt_msvc_ctors_begin, &__crt_msvc_ctors_end);
   } else if (reason == 0 /* DLL_PROCESS_DETACH */ && reserved == 0) {
     /* FreeLibrary(): destructors run. At process exit (reserved != 0) the other DLLs the objects
      * depend on may already be gone, as for every other DLL; the executable's exit() has run its own. */
-    dll_run_dtors(&__crt_dtors_begin, &__crt_dtors_end);
-    dll_run_dtors(&__crt_msvc_dtors_begin, &__crt_msvc_dtors_end);
+    dll_run_forward(&__crt_dtors_begin, &__crt_dtors_end);
+    dll_run_reverse(&__crt_msvc_dtors_begin, &__crt_msvc_dtors_end);
   }
   return 1;
 }

@@ -16,14 +16,12 @@
  *    ships dedicated crtbegin.o/crtend.o objects. tools/crt-cc places
  *    this object immediately after crt1.o (before anything a program or
  *    the libraries it links might itself contribute to .ctors/.dtors)
- *    so its own slot is always first; ctors_end.c sits last on the link
- *    line for the same reason in the other direction.
+ *    so its own slot is always first. The end object stays last on the link
+ *    line, but now uses .ctors.99999/.dtors.99999 so priority subsections
+ *    are inside the range too (see ctors_end.c).
  *
- *  - MSVC ABI (this project's own CMake-native builds -- libc itself,
- *    tests/, shell/ -- compiled by plain clang with no explicit
- *    --target, which defaults to *-pc-windows-msvc; see the top-level
- *    CMakeLists.txt's own comment on why nothing here needs the
- *    GNU-compatible target crt-cc uses): clang instead emits the fixed,
+ *  - MSVC ABI compatibility inputs (objects compiled without the CRT's
+ *    explicit MinGW target, defaulting to *-pc-windows-msvc): clang emits fixed,
  *    hardcoded section names ".CRT$XCU" (constructors) / ".CRT$XTX"
  *    (destructors) -- confirmed empirically against this exact
  *    toolchain by compiling a constructor/destructor probe with no

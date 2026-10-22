@@ -71,6 +71,7 @@ STAGES = {
             "libstdc++/tests/imported_libcxx_test.cc",
             "libstdc++/tests/imported_libcxx_string_sdk.cc",
             "libstdc++/tests/imported_libcxx_string_abi_test.cc",
+            "libstdc++/tests/imported_libcxx_iostream_test.cc",
         ),
         "source_paths": ("libcxx", "libcxxabi", "libunwind", "cmake", "runtimes", "libc"),
     },

@@ -225,6 +225,25 @@ does not tear down its key at process exit because other threads still run while
 `atexit` handlers execute; thread-exit reclamation is a separate lifecycle
 question.
 
+### Windows constructor priorities
+
+CRT owns constructor/destructor startup for both executables and DLLs. Clang's
+MinGW `.ctors.NNNNN`/`.dtors.NNNNN` priority contributions must be inside the
+module-local range, not silently omitted by plain-section end markers. The
+sorted end markers bracket all valid priorities; GNU init walks the range in
+reverse and GNU fini forward. The independent MSVC ranges retain forward init
+and reverse fini.
+
+An application must not need an explicit `ios_base::Init` workaround to use
+standard streams. Acceptance includes stream use before main and buffered
+destructor output at exit, not merely including `<iostream>`. Startup objects
+are embedded in binaries: fixing/replacing them in an SDK requires relinking
+affected executables and runtime DLLs, not only rebuilding the consumer.
+Imported-runtime cache fingerprints therefore include startup objects and
+canonical Windows runtime DLL/import-library inputs, not only C archives.
+Cause, native host limits and exact regression evidence are owned by the
+[iostream diagnostic](../bringup/crt_pal_residual_triage.md#windows-iostream-priority-initialization-fix-2026-10-22).
+
 ## Exceptions, RTTI, And Unwind
 
 The bootstrap `cxx` library still defaults to `-fno-exceptions` and

@@ -19,12 +19,11 @@
  *    ".ctors"/".dtors" section per function, merged in strict
  *    link-command-line order -- bracketed by __crt_ctors_begin/end and
  *    __crt_dtors_begin/end (ctors_begin.o placed right after crt1.o,
- *    ctors_end.o placed at the very end of the link line -- see
+ *    the priority-sorted ctors_end.o placed at the end of the link line -- see
  *    tools/crt-cc's own comment).
  *
- *  - MSVC ABI (this project's own CMake-native builds -- libc itself,
- *    tests/, shell/ -- compiled by plain clang with no explicit
- *    --target): the fixed section names ".CRT$XCU"/".CRT$XTX", merged
+ *  - MSVC ABI objects (compatibility inputs compiled without the CRT's
+ *    explicit MinGW target): fixed section names ".CRT$XCU"/".CRT$XTX", merged
  *    in alphabetical "$"-suffix order regardless of link-command-line
  *    order -- bracketed by __crt_msvc_ctors_begin/end and
  *    __crt_msvc_dtors_begin/end (".CRT$XCA"/".CRT$XTA" sort before,
@@ -38,6 +37,11 @@
  * executable that happens to have nothing in one of the two regions
  * just walks an empty (single-slot, begin==end) range there -- a no-op,
  * not an error.
+ *
+ * MinGW priority subsections follow plain .ctors/.dtors in the sorted list.
+ * ctors_end.c brackets them with .99999. Walk GNU constructors BACKWARD
+ * (lowest numeric priority first), and GNU destructors FORWARD (the reverse
+ * lifetime order). The MSVC ranges retain forward init/reverse fini.
  *
  * Each walk loop stops by *pointer identity* against its own region's
  * end marker address, not by inspecting a sentinel value -- deliberately
@@ -57,7 +61,7 @@ extern crt_init_func __crt_msvc_ctors_end;
 extern crt_init_func __crt_msvc_dtors_begin;
 extern crt_init_func __crt_msvc_dtors_end;
 
-static void run_ctor_range(crt_init_func* begin, crt_init_func* end) {
+static void run_forward_range(crt_init_func* begin, crt_init_func* end) {
   crt_init_func* p = begin;
 
   for (; p != end; ++p) {
@@ -67,12 +71,11 @@ static void run_ctor_range(crt_init_func* begin, crt_init_func* end) {
   }
 }
 
-static void run_dtor_range(crt_init_func* begin, crt_init_func* end) {
+static void run_reverse_range(crt_init_func* begin, crt_init_func* end) {
   crt_init_func* p = end;
 
-  /* Destructors run in the reverse of construction order, matching
-   * every other libc's convention (glibc, musl, Bionic) and this
-   * project's own Linux implementation. */
+  /* Reverse the GNU priority encoding for constructors, or reverse the
+   * MSVC construction order for destructors. */
   while (p != begin) {
     --p;
     if (*p != 0) {
@@ -82,11 +85,11 @@ static void run_dtor_range(crt_init_func* begin, crt_init_func* end) {
 }
 
 void __crt_run_init_array(void) {
-  run_ctor_range(&__crt_ctors_begin, &__crt_ctors_end);
-  run_ctor_range(&__crt_msvc_ctors_begin, &__crt_msvc_ctors_end);
+  run_reverse_range(&__crt_ctors_begin, &__crt_ctors_end);
+  run_forward_range(&__crt_msvc_ctors_begin, &__crt_msvc_ctors_end);
 }
 
 void __crt_run_fini_array(void) {
-  run_dtor_range(&__crt_dtors_begin, &__crt_dtors_end);
-  run_dtor_range(&__crt_msvc_dtors_begin, &__crt_msvc_dtors_end);
+  run_forward_range(&__crt_dtors_begin, &__crt_dtors_end);
+  run_reverse_range(&__crt_msvc_dtors_begin, &__crt_msvc_dtors_end);
 }

@@ -66,9 +66,6 @@ Windows triage is recorded in the [diagnostic record](docs/bringup/crt_pal_resid
 Only reproduced defects enter fixes; macOS still needs native evidence. This
 does not reopen accepted SDK stages or start SDK/CLI/Studio implementation.
 
-- [ ] Tranche 2 -- Trace and fix the reproduced Windows first-cout-use fault;
-  retain include-only/cstdio controls and static/shared stream-use regressions.
-  Compare rebuilt and packaged runtimes without retry-based acceptance.
 - [ ] Tranche 3 -- Execute the prepared per-dylib binding/shared-consumer audit
   on native macOS. Preserve crtui/crtmedia fixes; select any common link-order
   change only from actual Mach-O/runtime evidence. Native replay remains open.

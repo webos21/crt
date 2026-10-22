@@ -959,6 +959,31 @@ set_tests_properties(init_array_test_runs PROPERTIES
 )
 
 if(CRT_TARGET_OS STREQUAL "windows")
+  add_crt_test(windows_ctor_priority_test windows_ctor_priority_test.c)
+  set_tests_properties(windows_ctor_priority_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "windows_ctor_priority_test: ok" TIMEOUT 15)
+
+  add_library(windows_ctor_priority_dll SHARED
+    windows_ctor_priority_test.c
+    $<TARGET_OBJECTS:crt_windows_dllcrt>
+    $<TARGET_OBJECTS:crt1_ctors_begin>)
+  target_compile_definitions(windows_ctor_priority_dll PRIVATE CRT_CTOR_PRIORITY_DLL=1)
+  target_link_libraries(windows_ctor_priority_dll PRIVATE crt_build_flags c_shared crt_compiler_rt_builtins)
+  crt_configure_shared_runtime(windows_ctor_priority_dll)
+  crt_link_startup_end_objects(windows_ctor_priority_dll)
+  set_target_properties(windows_ctor_priority_dll PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS OFF)
+
+  add_crt_test(windows_ctor_priority_dll_test windows_ctor_priority_dll_test.c)
+  target_compile_definitions(windows_ctor_priority_dll_test PRIVATE
+    CRT_PRIORITY_DLL_PATH="$<TARGET_FILE:windows_ctor_priority_dll>")
+  target_link_libraries(windows_ctor_priority_dll_test PRIVATE dl)
+  add_dependencies(windows_ctor_priority_dll_test windows_ctor_priority_dll)
+  set_tests_properties(windows_ctor_priority_dll_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "windows_ctor_priority_dll_test: ok" TIMEOUT 15
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:c_shared>")
+endif()
+
+if(CRT_TARGET_OS STREQUAL "windows")
   # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see
   # crt_link_startup_end_objects()'s own comment (top-level CMakeLists.txt).
   add_executable(windows_export_hygiene_test

@@ -11,6 +11,50 @@ substantive update.
 
 ## 2026-10-22
 
+### Fix Windows iostream through complete priority-constructor startup
+
+The first-cout crash was a CRT initialization-range/order defect. The pinned
+libc++ places standard-stream setup in `.ctors.65435` (priority 100), beyond
+the old plain `.ctors` end marker. Moved GNU end markers after every valid
+priority subsection, reversed GNU constructor traversal and used forward GNU
+destructor traversal in both executable and DLL startup. MSVC range behavior
+is unchanged. No application Init workaround, forced archive load, upstream
+patch, public ABI or exception/unwind policy change was introduced.
+
+Added EXE/DLL priority regressions: both fail before the fix with constructor
+order 3 instead of 123, then pass with the fix, including reverse lifetime
+order and explicit DLL unload notification. A fresh-cache Windows C-stage
+replay selects 163 cases: 162 executed passes, zero failures, existing COW skip.
+Strict Windows/arm64 compilation passes for changed startup/priority code;
+native arm64 and Linux/macOS execution are not claimed.
+
+The corrected objects alone make the static stream consumer pass; an old
+shared libc++ DLL still fails, confirming that DLLs must be rebuilt too.
+Rebuilt all three imported runtimes in a separate work tree against a corrected
+01-c predecessor, created/verified a separate local 02-cxx SDK, and passed
+static/shared container/exception/RTTI, string-ABI and real stream-lifetime
+smokes. An external consumer using packaged wrapper copies passes as well;
+shared PE DLL imports are checked. The initial wrongly selected cumulative
+C++ predecessor's header-search failure is retained separately, not counted
+as a product regression or successful build.
+
+The smoke now requires exact stdout/stderr through application destruction;
+the new source rides the isolated 02-cxx asset with a closure regression.
+Expanded predecessor fingerprints to include startup objects, builtins and
+Windows runtime DLL/import-library inputs: cached runtime links must not survive
+a startup-only fix while C archives stay unchanged. Dedicated mutation cases
+verify invalidation of the affected nested builds. Predecessor/fetch/source-
+closure tooling passes 19 cases, with no additional CI workflow.
+Exact inputs, hashes, limitations and reproduction logs live in
+the [diagnostic record](docs/bringup/crt_pal_residual_triage.md#windows-iostream-priority-initialization-fix-2026-10-22);
+startup policy lives in [C++ runtime design](docs/design/cxx_runtime.md#windows-constructor-priorities).
+Removed the completed Windows Tranche 2 from TODO; macOS binding Tranche 3
+remains open. Existing SDKs/higher-stage DLLs were not overwritten or replayed,
+and no release or STATUS update is claimed.
+Documentation checks pass for four edited Markdown files and 104 local links/
+anchors, plus English/fence/conflict checks, Python compilation and
+`git diff --check`.
+
 ### Fix Windows virtual random/zero descriptor duplication
 
 The Windows PAL now clones HANDLE-less random/zero descriptor state for dup

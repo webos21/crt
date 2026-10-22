@@ -163,9 +163,20 @@ def predecessor_fingerprint(sysroot: Path) -> dict:
     candidates = []
     for pattern in ("libc.*", "libm.*", "libdl.*"):
         candidates.extend(path for path in library_dir.glob(pattern) if path.is_file())
-    candidates = sorted(set(candidates), key=lambda path: path.name)
     if not candidates:
         raise SystemExit(f"predecessor sysroot contains no C runtime libraries: {library_dir}")
+
+    # Startup objects are linked into each runtime DLL, but Ninja sees them only
+    # as wrapper-supplied flags, not explicit target dependencies. A fixed
+    # ctor range/order must invalidate old DLLs even if libc.a is unchanged.
+    for pattern in ("crt*.o", "dllcrt.o", "libclang_rt.builtins.a",
+                    "libc_dll.*", "libm_dll.*", "libdl_dll.*"):
+        candidates.extend(path for path in library_dir.glob(pattern) if path.is_file())
+    for name in ("libc.dll", "libm.dll", "libdl.dll"):
+        path = sysroot / "bin" / name
+        if path.is_file():
+            candidates.append(path)
+    candidates = sorted(set(candidates), key=lambda path: path.relative_to(sysroot).as_posix())
 
     files = []
     for path in candidates:

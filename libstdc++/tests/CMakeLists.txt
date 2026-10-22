@@ -6,8 +6,8 @@
 # comment at their definition site.
 #
 # imported_libcxx_test.cc/imported_libcxx_string_sdk.cc/
-# imported_libcxx_string_abi_test.cc are not built through either helper
-# here -- they are compiled and run directly by tools/test_libcxx_
+# imported_libcxx_string_abi_test.cc/imported_libcxx_iostream_test.cc are not
+# built through either helper here -- they are compiled and run by tools/test_libcxx_
 # runtime.py, invoked from this project's own crt-libcxx-smoke target
 # (libstdc++/CMakeLists.txt).
 

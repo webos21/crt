@@ -107,6 +107,14 @@ def unbundled_project_headers(stage: str, target_os: str) -> dict:
 
 
 class StageSourceClosure(unittest.TestCase):
+    def test_02_bundles_all_imported_runtime_smoke_sources(self):
+        spec = stage_source.STAGES["02-cxx"]
+        for target_os in ("linux", "macos", "windows"):
+            bundled = expand(stage_source.required_project_paths(spec, target_os))
+            for source in (ROOT / "libstdc++/tests").glob("imported_libcxx*.cc"):
+                with self.subTest(os=target_os, source=source.name):
+                    self.assertIn(source.resolve(), bundled)
+
     def test_04_shared_skia_target_sources_are_bundled(self):
         text = (ROOT / "libcrtgfx/cmake/crtgfx_skia_targets.cmake").read_text(encoding="utf-8")
         names = re.findall(r'\$\{CRTGFX_ROOT\}/(src/[\w./]+\.(?:cc|c))"', text)
