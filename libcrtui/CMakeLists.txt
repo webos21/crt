@@ -15,8 +15,19 @@ set(CRTUI_LVGL_ROOT "${CRTUI_LVGL_FETCH_DIR}/lvgl-9.6.0" CACHE PATH "Extracted L
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/crtui_sources.cmake")
 set(CRTUI_LVGL_SOURCES)
 set(CRTUI_LVGL_PRIVATE_SOURCES)
+# The source list is committed (tools/gen_lvgl_sources.py) so configure does not need LVGL fetched; the fetch is a
+# build-time dependency of crtui. The fetch target declares these files as its outputs so Ninja orders the compile.
+set(CRTUI_LVGL_FETCH_OUTPUTS)
+if(CRTUI_ENABLE_LVGL)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/lvgl_sources.cmake")
+  foreach(crtui_lvgl_relative IN LISTS CRTUI_LVGL_SOURCE_LIST)
+    list(APPEND CRTUI_LVGL_FETCH_OUTPUTS "${CRTUI_LVGL_ROOT}/${crtui_lvgl_relative}")
+  endforeach()
+  list(APPEND CRTUI_LVGL_FETCH_OUTPUTS "${CRTUI_LVGL_ROOT}/include/lvgl/lvgl.h")
+endif()
 if(Python3_Interpreter_FOUND)
   add_custom_target(crtui-lvgl-fetch
+    BYPRODUCTS ${CRTUI_LVGL_FETCH_OUTPUTS}
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/fetch_lvgl.py"
       --recipe "${CRTUI_LVGL_RECIPE}" --dest "${CRTUI_LVGL_FETCH_DIR}"
       --cache "${CRTUI_LVGL_FETCH_DIR}/.downloads"
@@ -26,9 +37,11 @@ if(Python3_Interpreter_FOUND)
 endif()
 if(CRTUI_ENABLE_LVGL)
   if(NOT EXISTS "${CRTUI_LVGL_ROOT}/include/lvgl/lvgl.h")
-    message(FATAL_ERROR "CRTUI_ENABLE_LVGL=ON requires the extracted LVGL source at ${CRTUI_LVGL_ROOT}. Run the crtui-lvgl-fetch target, then reconfigure.")
+    message(STATUS "libcrtui: LVGL is not fetched yet; crtui-lvgl-fetch runs before crtui is compiled")
   endif()
-  file(GLOB_RECURSE CRTUI_LVGL_SOURCES CONFIGURE_DEPENDS "${CRTUI_LVGL_ROOT}/src/*.c")
+  set(CRTUI_LVGL_SOURCES ${CRTUI_LVGL_FETCH_OUTPUTS})
+  list(REMOVE_ITEM CRTUI_LVGL_SOURCES "${CRTUI_LVGL_ROOT}/include/lvgl/lvgl.h")
+  set_source_files_properties(${CRTUI_LVGL_SOURCES} PROPERTIES GENERATED TRUE)
   set(CRTUI_LVGL_PRIVATE_SOURCES ${CRTUI_LVGL_BACKEND_SOURCES})
   # Third-party code: no warnings-as-errors, LVGL reads only crtui's lv_conf.h.
   set(CRTUI_LVGL_COMPILE_OPTIONS -w -DLV_CONF_INCLUDE_SIMPLE=1 -fvisibility=hidden)
@@ -78,6 +91,10 @@ add_library(crtui_shared SHARED
   ${CRTUI_LVGL_SOURCES}
   ${CRTUI_LVGL_PRIVATE_SOURCES}
 )
+if(CRTUI_ENABLE_LVGL AND TARGET crtui-lvgl-fetch)
+  add_dependencies(crtui crtui-lvgl-fetch)
+  add_dependencies(crtui_shared crtui-lvgl-fetch)
+endif()
 if(CRTUI_ENABLE_LVGL)
   target_compile_definitions(crtui_shared PRIVATE CRTUI_HAVE_LVGL=1)
 endif()

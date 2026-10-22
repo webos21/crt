@@ -11,7 +11,12 @@
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "CRT_TARGET_OS": "macos",
-        "CRT_TARGET_ARCH": "host"
+        "CRT_TARGET_ARCH": "host",
+        "CRT_USE_IMPORTED_LIBCXX": "ON",
+        "CRTGFX_ENABLE_SKIA": "ON",
+        "CRTMEDIA_ENABLE_FFMPEG": "ON",
+        "CRTMEDIA_ENABLE_CURL": "ON",
+        "CRTUI_ENABLE_LVGL": "ON"
       }
     },
     {
@@ -24,7 +29,12 @@
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "CRT_TARGET_OS": "linux",
-        "CRT_TARGET_ARCH": "host"
+        "CRT_TARGET_ARCH": "host",
+        "CRT_USE_IMPORTED_LIBCXX": "ON",
+        "CRTGFX_ENABLE_SKIA": "ON",
+        "CRTMEDIA_ENABLE_FFMPEG": "ON",
+        "CRTMEDIA_ENABLE_CURL": "ON",
+        "CRTUI_ENABLE_LVGL": "ON"
       }
     },
     {
@@ -41,7 +51,12 @@
         "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
         "CMAKE_MSVC_RUNTIME_LIBRARY": "",
         "CMAKE_C_STANDARD_LIBRARIES": "",
-        "CMAKE_CXX_STANDARD_LIBRARIES": ""
+        "CMAKE_CXX_STANDARD_LIBRARIES": "",
+        "CRT_USE_IMPORTED_LIBCXX": "ON",
+        "CRTGFX_ENABLE_SKIA": "ON",
+        "CRTMEDIA_ENABLE_FFMPEG": "ON",
+        "CRTMEDIA_ENABLE_CURL": "ON",
+        "CRTUI_ENABLE_LVGL": "ON"
       }
     }
   ],
@@ -49,17 +64,23 @@
     {
       "name": "macos-host-ninja-debug",
       "configurePreset": "macos-host-ninja-debug",
-      "targets": ["crt-c-build"]
+      "targets": [
+        "crt-c-build"
+      ]
     },
     {
       "name": "linux-host-ninja-debug",
       "configurePreset": "linux-host-ninja-debug",
-      "targets": ["crt-c-build"]
+      "targets": [
+        "crt-c-build"
+      ]
     },
     {
       "name": "windows-host-ninja-debug",
       "configurePreset": "windows-host-ninja-debug",
-      "targets": ["crt-c-build"]
+      "targets": [
+        "crt-c-build"
+      ]
     }
   ],
   "testPresets": [
@@ -70,7 +91,9 @@
         "outputOnFailure": true
       },
       "filter": {
-        "exclude": {"name": "^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)"}
+        "exclude": {
+          "name": "^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)"
+        }
       }
     },
     {
@@ -80,7 +103,9 @@
         "outputOnFailure": true
       },
       "filter": {
-        "exclude": {"name": "^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)"}
+        "exclude": {
+          "name": "^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)"
+        }
       }
     },
     {
@@ -90,7 +115,9 @@
         "outputOnFailure": true
       },
       "filter": {
-        "exclude": {"name": "^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)"}
+        "exclude": {
+          "name": "^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)"
+        }
       }
     }
   ],

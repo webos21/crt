@@ -1,0 +1,109 @@
+{
+  "comment": "Inputs of each stage step for tools/crt_stage_cache.py. Entries are files, directories or globs relative to the repository root; test_*.py files are never inputs. A stage's hash covers its own inputs plus those of every stage in its 'includes' (transitively), so editing libc invalidates every later stage while editing libcrtui invalidates only ui and web.",
+  "stages": {
+    "c": {
+      "inputs": [
+        "CMakeLists.txt",
+        "CMakePresets.json",
+        "cmake",
+        "include",
+        "libc",
+        "libm",
+        "libdl",
+        "shell",
+        "third_party",
+        "porting/recipes/make.json",
+        "porting/shims",
+        "porting/DISTRIBUTION_README.md",
+        "tools/create_dist.py",
+        "tools/verify_dist.py",
+        "tools/create_stage_source.py",
+        "tools/create_rootfs.py",
+        "tools/fetch_ports.py",
+        "tools/audit_macos_bindings.py",
+        "tools/stage_cache.json",
+        "tools/crt-*",
+        "tools/crt_*.py"
+      ]
+    },
+    "cxx": {
+      "inputs": [
+        "libstdc++",
+        "tools/build_stage_02_cxx.py"
+      ],
+      "includes": [
+        "c"
+      ]
+    },
+    "gfx-simple": {
+      "inputs": [
+        "libcrtgfx/include",
+        "libcrtgfx/src",
+        "libcrtgfx/cmake",
+        "libcrtgfx/CMakeLists.txt",
+        "libcrtgfx/tests",
+        "libcrtgfx/tools",
+        "libcrtgfx/third_party",
+        "examples/gfx-simple",
+        "distribution/stages/03-gfx-simple",
+        "tools/build_stage_03_gfx_simple.py",
+        "porting/recipes/expat.json",
+        "porting/recipes/libffi.json"
+      ],
+      "includes": [
+        "cxx"
+      ]
+    },
+    "gfx-media": {
+      "inputs": [
+        "libcrtmedia",
+        "examples/gfx-gpu",
+        "examples/gfx-skia",
+        "examples/media-player",
+        "examples/media-stream",
+        "distribution/stages/04-gfx-media",
+        "libcrtgfx/assets",
+        "tools/build_stage_04_gfx_media.py",
+        "tools/fetch_skia.py",
+        "tools/build_skia.py",
+        "porting/recipes/freetype.json",
+        "porting/recipes/ffmpeg.json",
+        "porting/recipes/curl.json",
+        "porting/recipes/mbedtls.json",
+        "porting/recipes/zlib.json"
+      ],
+      "includes": [
+        "gfx-simple"
+      ]
+    },
+    "ui": {
+      "inputs": [
+        "libcrtui",
+        "examples/ui-basic",
+        "distribution/stages/05-ui",
+        "tools/build_stage_05_ui.py",
+        "tools/fetch_lvgl.py",
+        "tools/gen_lvgl_sources.py"
+      ],
+      "includes": [
+        "gfx-media"
+      ]
+    },
+    "web": {
+      "inputs": [
+        "libcrtweb",
+        "examples/web-browser",
+        "distribution/stages/06-web",
+        "porting/recipes",
+        "tools/build_stage_06_web.py",
+        "tools/build_webkit_*.py",
+        "tools/fetch_webkit*.py",
+        "tools/check_webkit_*.py",
+        "tools/scan_webkit_headers.py"
+      ],
+      "includes": [
+        "ui"
+      ]
+    }
+  }
+}

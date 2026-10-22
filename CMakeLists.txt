@@ -1278,7 +1278,28 @@ if(Python3_Interpreter_FOUND)
       set(CRT_PORT_BUILD_DEPENDS rootfs port-fetch-${recipe_name})
       set(CRT_PORT_BUILD_SHELL_ARGS --use-crt-shell)
     endif()
+    # Declared outputs let Ninja order consumers after the port without the files existing at configure time
+    # (restat keeps consumers from relinking when the port build changed nothing).
+    set(CRT_PORT_INSTALL_LIB "${CRT_PORT_TEST_ROOT}/install/lib")
+    set(CRT_PORT_BYPRODUCTS)
+    if(recipe_name STREQUAL "freetype")
+      set(CRT_PORT_BYPRODUCTS "${CRT_PORT_INSTALL_LIB}/libfreetype.a")
+    elseif(recipe_name STREQUAL "zlib")
+      set(CRT_PORT_BYPRODUCTS "${CRT_PORT_INSTALL_LIB}/libz.a")
+    elseif(recipe_name STREQUAL "mbedtls")
+      set(CRT_PORT_BYPRODUCTS "${CRT_PORT_INSTALL_LIB}/libmbedtls.a" "${CRT_PORT_INSTALL_LIB}/libmbedx509.a"
+        "${CRT_PORT_INSTALL_LIB}/libmbedcrypto.a")
+    elseif(recipe_name STREQUAL "curl")
+      set(CRT_PORT_BYPRODUCTS "${CRT_PORT_INSTALL_LIB}/libcurl.a")
+      if(CRT_TARGET_OS STREQUAL "linux")
+        list(APPEND CRT_PORT_BYPRODUCTS "${CRT_PORT_INSTALL_LIB}/libcurl.so")
+      endif()
+    elseif(recipe_name STREQUAL "ffmpeg")
+      set(CRT_PORT_BYPRODUCTS "${CRT_PORT_INSTALL_LIB}/libavformat.a" "${CRT_PORT_INSTALL_LIB}/libavcodec.a"
+        "${CRT_PORT_INSTALL_LIB}/libswresample.a" "${CRT_PORT_INSTALL_LIB}/libavutil.a")
+    endif()
     add_custom_target(port-build-${recipe_name}
+      BYPRODUCTS ${CRT_PORT_BYPRODUCTS}
       COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
         "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-port-build.py"
         --preset "${CRT_BUILD_PRESET_NAME}"
@@ -1380,6 +1401,25 @@ if(Python3_Interpreter_FOUND)
   endforeach()
   if(CRT_WEB_PORT_TARGETS)
     add_custom_target(port-build-web DEPENDS ${CRT_WEB_PORT_TARGETS})
+
+  # Build-time prerequisites of the optional upper-layer features. The presets enable the features on a clean tree, so
+  # configure no longer needs the ports, Skia or LVGL to exist; these edges make Ninja fetch/build them first.
+  # (Declared here because the subdirectories are processed before the port-build-* targets exist.)
+  foreach(crt_feature_target IN ITEMS crtmedia crtmedia_shared crtmedia_backend_objects)
+    if(TARGET ${crt_feature_target})
+      if(CRTMEDIA_ENABLE_FFMPEG AND TARGET port-build-ffmpeg)
+        add_dependencies(${crt_feature_target} port-build-ffmpeg)
+      endif()
+      if(CRTMEDIA_ENABLE_CURL AND TARGET port-build-curl)
+        add_dependencies(${crt_feature_target} port-build-curl)
+      endif()
+    endif()
+  endforeach()
+  foreach(crt_feature_target IN ITEMS crtgfx_skia_objects crtgfx_skia crtgfx_skia_shared)
+    if(TARGET ${crt_feature_target} AND CRTGFX_ENABLE_SKIA AND TARGET crtgfx-skia-build)
+      add_dependencies(${crt_feature_target} crtgfx-skia-build)
+    endif()
+  endforeach()
     add_custom_target(port-test-web DEPENDS ${CRT_WEB_PORT_TEST_TARGETS})
   endif()
 

@@ -155,7 +155,13 @@ endif()
 # isn't already present -- self-healing across a freetype port that
 # builds successfully sometime after libskia.a already did, without
 # needing a full cache wipe/reconfigure from scratch to notice.
-if(CRTGFX_SKIA_LIBRARIES AND EXISTS "${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a")
+# Build-time dependency, not a configure-time precondition: with CRTGFX_ENABLE_SKIA=ON the library paths are the
+# deterministic outputs of crtgfx-skia-build / port-build-freetype, which run before anything that links them.
+# (A preset can therefore enable Skia on a clean tree; the fetch and build happen when a target needs them.)
+if(CRTGFX_ENABLE_SKIA AND NOT CRTGFX_SKIA_LIBRARIES)
+  set(CRTGFX_SKIA_LIBRARIES "${CRTGFX_SKIA_INSTALL_PREFIX}/lib/libskia.a" CACHE STRING "Libraries needed to link Skia CPU raster support" FORCE)
+endif()
+if(CRTGFX_SKIA_LIBRARIES AND (CRTGFX_ENABLE_SKIA OR EXISTS "${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a"))
   set(CRTGFX_SKIA_FREETYPE_LIBRARY "${CRTGFX_SKIA_FREETYPE_PREFIX}/lib/libfreetype.a")
   if(NOT CRTGFX_SKIA_FREETYPE_LIBRARY IN_LIST CRTGFX_SKIA_LIBRARIES)
     set(CRTGFX_SKIA_LIBRARIES "${CRTGFX_SKIA_LIBRARIES};${CRTGFX_SKIA_FREETYPE_LIBRARY}" CACHE STRING "Libraries needed to link Skia CPU raster support" FORCE)
@@ -264,10 +270,7 @@ if(DEFINED CACHE{CRTGFX_SKIA_WAS_AVAILABLE})
 endif()
 option(CRTGFX_ENABLE_SKIA "Build libcrtgfx Skia CPU raster bridge when the full libc++ runtime is available" OFF)
 if(CRTGFX_ENABLE_SKIA AND NOT EXISTS "${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h")
-  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON but ${CRTGFX_SKIA_ROOT}/include/core/SkSurface.h was not found")
-endif()
-if(CRTGFX_ENABLE_SKIA AND NOT CRTGFX_SKIA_LIBRARIES)
-  message(FATAL_ERROR "CRTGFX_ENABLE_SKIA=ON requires CRTGFX_SKIA_LIBRARIES. Run crtgfx-skia-build, then reconfigure, or set the library path explicitly.")
+  message(STATUS "libcrtgfx: Skia sources are not fetched yet; crtgfx-skia-fetch runs before the first target that needs them")
 endif()
 # Windows-only: crtgfx_skia_objects/crtgfx_skia_raster_smoke's own C++ code
 # (skia_bridge.cc, tests/skia_raster_smoke.cc) needs a real <vector>/<memory>/
@@ -618,6 +621,7 @@ if(Python3_Interpreter_FOUND)
   )
 
   add_custom_target(crtgfx-skia-build
+    BYPRODUCTS "${CRTGFX_SKIA_INSTALL_PREFIX}/lib/libskia.a"
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_skia.py"
       --root "${CMAKE_SOURCE_DIR}"

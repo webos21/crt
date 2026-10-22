@@ -11,10 +11,13 @@
 set(CRTMEDIA_FFMPEG_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PATH
   "Shared porting/recipes install prefix (ffmpeg) for libcrtmedia's demux/decode bridge")
 set(CRTMEDIA_FFMPEG_LIBRARIES "")
-if(EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavformat.a" AND
-   EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavcodec.a" AND
-   EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libswresample.a" AND
-   EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavutil.a")
+# With CRTMEDIA_ENABLE_FFMPEG=ON the libraries are the declared outputs of port-build-ffmpeg and are not required
+# to exist at configure time (build-time dependency, see the end of this file's target section).
+if(CRTMEDIA_ENABLE_FFMPEG OR
+   (EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavformat.a" AND
+    EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavcodec.a" AND
+    EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libswresample.a" AND
+    EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavutil.a"))
   # Link order matters for a plain (non-cyclic-group) static link: a
   # library only satisfies symbols requested by something *already*
   # queued before it, so this lists each library before whichever
@@ -28,12 +31,6 @@ if(EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/lib/libavformat.a" AND
   )
 endif()
 option(CRTMEDIA_ENABLE_FFMPEG "Build libcrtmedia's FFmpeg-backed demux/decode bridge when available" OFF)
-if(CRTMEDIA_ENABLE_FFMPEG AND NOT EXISTS "${CRTMEDIA_FFMPEG_PORT_PREFIX}/include/libavformat/avformat.h")
-  message(FATAL_ERROR "CRTMEDIA_ENABLE_FFMPEG=ON but ${CRTMEDIA_FFMPEG_PORT_PREFIX}/include/libavformat/avformat.h was not found")
-endif()
-if(CRTMEDIA_ENABLE_FFMPEG AND NOT CRTMEDIA_FFMPEG_LIBRARIES)
-  message(FATAL_ERROR "CRTMEDIA_ENABLE_FFMPEG=ON requires CRTMEDIA_FFMPEG_LIBRARIES. Run the port-build-ffmpeg target, then reconfigure.")
-endif()
 
 # libcurl-backed HTTP transport (crtmedia/extractor.h's additive URL-based
 # open, Networking & Streaming Tranche 2, docs/acceptance/crtmedia_networking_
@@ -45,11 +42,12 @@ set(CRTMEDIA_CURL_PORT_PREFIX "${CMAKE_BINARY_DIR}/port-tests/install" CACHE PAT
   "Shared porting/recipes install prefix (curl) for libcrtmedia's HTTP transport")
 set(CRTMEDIA_CURL_LIBRARIES "")
 set(CRTMEDIA_CURL_SHARED_LIBRARIES "")
-if(EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.a" AND
-   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedtls.a" AND
-   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedx509.a" AND
-   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedcrypto.a" AND
-   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libz.a")
+if(CRTMEDIA_ENABLE_CURL OR
+   (EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.a" AND
+    EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedtls.a" AND
+    EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedx509.a" AND
+    EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libmbedcrypto.a" AND
+    EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libz.a"))
   # Same static link order curl.json's own http-roundtrip-static test uses:
   # curl -> mbedtls -> mbedx509 -> mbedcrypto -> z.
   set(CRTMEDIA_CURL_LIBRARIES
@@ -61,7 +59,7 @@ if(EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.a" AND
   )
 endif()
 if(CRT_TARGET_OS STREQUAL "linux" AND
-   EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.so")
+   (CRTMEDIA_ENABLE_CURL OR EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/lib/libcurl.so"))
   # The Linux zlib static archive is intentionally not PIC, so it cannot be
   # folded into libcrtmedia.so. curl's shared artifact already records its
   # mbedTLS/zlib/runtime dependencies and is the correct shared-target edge.
@@ -70,39 +68,6 @@ if(CRT_TARGET_OS STREQUAL "linux" AND
   )
 endif()
 option(CRTMEDIA_ENABLE_CURL "Build libcrtmedia's libcurl-backed HTTP transport when available" OFF)
-if(CRTMEDIA_ENABLE_CURL AND NOT EXISTS "${CRTMEDIA_CURL_PORT_PREFIX}/include/curl/curl.h")
-  message(FATAL_ERROR "CRTMEDIA_ENABLE_CURL=ON but ${CRTMEDIA_CURL_PORT_PREFIX}/include/curl/curl.h was not found")
-endif()
-if(CRTMEDIA_ENABLE_CURL AND NOT CRTMEDIA_CURL_LIBRARIES)
-  message(FATAL_ERROR "CRTMEDIA_ENABLE_CURL=ON requires CRTMEDIA_CURL_LIBRARIES. Run the port-build-curl target, then reconfigure.")
-endif()
-if(CRTMEDIA_ENABLE_CURL AND CRT_TARGET_OS STREQUAL "linux" AND
-   NOT CRTMEDIA_CURL_SHARED_LIBRARIES)
-  message(FATAL_ERROR "CRTMEDIA_ENABLE_CURL=ON on Linux requires shared libcurl for libcrtmedia.so. Run the port-build-curl target, then reconfigure.")
-endif()
-
-# crtmedia_backend_objects: real per-host audio output backends for
-# crtmedia/audio_sink.h (TODO.md's upper-runtime roadmap "Build the
-# software player" step -- "host audio sinks: WASAPI, CoreAudio, and
-# PipeWire/ALSA"). Mirrors libcrtgfx's own crtgfx_backend_objects OBJECT
-# library (libcrtgfx/CMakeLists.txt, ~line 807), including that target's
-# own Linux-only crt_build_flags exception below -- src/arch/windows/
-# audio_sink_wasapi.c hand-rolls every COM type/vtable it needs (see that
-# file's own top comment) rather than #include-ing any host SDK header,
-# so it is deliberately compiled with only this library's own include/src
-# on its path, not this project's own libc, to keep that isolation real
-# rather than accidental; src/arch/linux/audio_sink_linux.c has no such
-# concern (this project's own libc *is* the right Linux syscall surface,
-# see that file's own top comment) and needs crt_build_flags for its own
-# real <time.h>/<sys/ioctl.h>/<sys/socket.h>/... includes to resolve at
-# all. src/arch/macos/audio_sink_coreaudio.c (real CoreAudio AudioQueue)
-# also uses this project's own libc headers normally, same as Linux's own
-# audio_sink_linux.c -- there is no Windows-style header-collision concern
-# on macOS either (CoreAudio's own hand-declared types do not collide with
-# this project's own headers), and that file genuinely needs a real
-# pthread_mutex_t/pthread_cond_t for its own buffer-pool bookkeeping (see
-# that file's own top comment for why locking/signaling this project's own
-# mutex/cond from a real foreign CoreAudio-spawned thread is safe).
 set(CRTMEDIA_BACKEND_SOURCES "")
 if(CRT_TARGET_OS STREQUAL "windows")
   list(APPEND CRTMEDIA_BACKEND_SOURCES
@@ -400,7 +365,15 @@ if(CRT_TARGET_OS STREQUAL "linux" AND CRTMEDIA_ENABLE_FFMPEG)
   if(CRTMEDIA_LINUX_VAAPI_LIB AND CRTMEDIA_LINUX_VAAPI_DRM_LIB)
     set(CRTMEDIA_LINUX_VAAPI_LIBS "${CRTMEDIA_LINUX_VAAPI_LIB}" "${CRTMEDIA_LINUX_VAAPI_DRM_LIB}")
   else()
-    message(FATAL_ERROR "CRTMEDIA_ENABLE_FFMPEG=ON on Linux requires libva/libva-drm (install libva-dev). Run 'find_library' failed: va=${CRTMEDIA_LINUX_VAAPI_LIB} va-drm=${CRTMEDIA_LINUX_VAAPI_DRM_LIB}")
+    # Not fatal at configure: the presets enable FFmpeg, and a libc-only workflow must not need libva. The targets
+    # that link FFmpeg depend on crtmedia-require-libva, which fails with the same message when they are built.
+    message(STATUS "libcrtmedia: libva/libva-drm not found (va=${CRTMEDIA_LINUX_VAAPI_LIB} va-drm=${CRTMEDIA_LINUX_VAAPI_DRM_LIB}); FFmpeg-enabled targets will fail until libva-dev is installed")
+    set(CRTMEDIA_LINUX_VAAPI_MISSING TRUE)
+    add_custom_target(crtmedia-require-libva
+      COMMAND "${CMAKE_COMMAND}"
+        "-DCRT_FAIL_MESSAGE=CRTMEDIA_ENABLE_FFMPEG=ON on Linux requires libva and libva-drm (install libva-dev), then reconfigure."
+        -P "${CMAKE_SOURCE_DIR}/cmake/fail_with_message.cmake"
+      VERBATIM USES_TERMINAL)
   endif()
 endif()
 
@@ -412,6 +385,13 @@ set(CRTMEDIA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(CRTMEDIA_CRT_STATIC_LIBS c m dl cxx)
 set(CRTMEDIA_CRT_SHARED_LIBS c_shared m_shared dl_shared cxx_shared)
 crt_add_crtmedia_targets()
+if(CRTMEDIA_LINUX_VAAPI_MISSING)
+  foreach(crtmedia_target IN ITEMS crtmedia crtmedia_shared crtmedia_backend_objects)
+    if(TARGET ${crtmedia_target})
+      add_dependencies(${crtmedia_target} crtmedia-require-libva)
+    endif()
+  endforeach()
+endif()
 if(CRT_TARGET_OS STREQUAL "windows" AND TARGET crtgfx-mingw-w64-headers-fetch
    AND TARGET crtmedia_backend_objects)
   # capture_mf.c includes real mingw-w64 Media Foundation headers from

@@ -197,7 +197,23 @@ if(Python3_Interpreter_FOUND)
     COMMENT "Building libcxx/libcxxabi/libunwind recipes through the CRT toolchain"
     USES_TERMINAL
   )
+  # Declared outputs: libcrtgfx and the other imported-libc++ consumers link these sysroot files, which do not exist
+  # at configure time on a clean tree (restat keeps consumers from relinking when nothing changed).
+  set(CRT_LIBCXX_SYSROOT_OUTPUTS)
+  if(CRT_USE_IMPORTED_LIBCXX)
+    if(CRT_TARGET_OS STREQUAL "macos")
+      set(CRT_LIBCXX_SYSROOT_OUTPUTS
+        "${CRT_LIBCXX_SYSROOT}/lib/libc++.a" "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.a"
+        "${CRT_LIBCXX_SYSROOT}/lib/libc++.dylib" "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.dylib")
+    elseif(CRT_TARGET_OS STREQUAL "linux")
+      set(CRT_LIBCXX_SYSROOT_OUTPUTS
+        "${CRT_LIBCXX_SYSROOT}/lib/libc++.a" "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.a"
+        "${CRT_LIBCXX_SYSROOT}/lib/libunwind.a" "${CRT_LIBCXX_SYSROOT}/lib/libc++.so"
+        "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.so" "${CRT_LIBCXX_SYSROOT}/lib/libunwind.so")
+    endif()
+  endif()
   add_custom_target(crt-libcxx-sysroot
+    BYPRODUCTS ${CRT_LIBCXX_SYSROOT_OUTPUTS}
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}"
       --build-dir "${CMAKE_BINARY_DIR}"
