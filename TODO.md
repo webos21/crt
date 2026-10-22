@@ -60,21 +60,12 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-### CRT/PAL residual defects: bounded triage and fixes
-
-Windows triage is recorded in the [diagnostic record](docs/bringup/crt_pal_residual_triage.md).
-Only reproduced defects enter fixes; the Windows and native macOS evidence is recorded. This
-does not reopen accepted SDK stages or start SDK/CLI/Studio implementation.
-
-- [x] Tranche 3 -- Native macOS/arm64 binding audit done 2026-10-22: one reproduced defect (in-tree
-  `libcrtgfx_gpu.dylib`) fixed, the rest classified, and the audit is a `verify_dist` gate
-  ([evidence](docs/bringup/crt_pal_residual_triage.md#macos-native-binding-audit-2026-10-22)).
-  Open only as latent risks recorded there: the static-libc `curl` tool next to shared libcurl, and the
-  `libcrtweb.dylib` API test as a shared consumer.
+None. The CRT/PAL residual-defect triage finished 2026-10-22 ([record](docs/bringup/crt_pal_residual_triage.md),
+[HISTORY.md](HISTORY.md)); its latent risks stay listed in that record, not as scheduled work.
 
 ## Planned
 
-SDK Producer Contract Gate P0 follows the bounded residual-defect triage above.
+SDK Producer Contract Gate P0 is the next step now that the bounded residual-defect triage is closed.
 The remaining sections are independent follow-ups, not a prerequisite chain for
 CLI/Studio or a reopening of accepted SDK stages; long-term extensions stay
 conditional on a real consumer.
@@ -86,16 +77,27 @@ Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [Studio](docs/design/crt_studio.md) is a later CLI consumer; the development
 contracts remain design work, not an implemented or released product.
 
+**Adopted direction (2026-10-22):** CRT produces a **Bootstrap SDK** (`02-cxx` plus the
+libcurl/TLS/zlib ports the CLI links) from the existing stage and port outputs, a **CLI
+runtime bundle** for end users, and the unchanged Full SDK; `crt-cli` consumes only the pinned
+Bootstrap SDK ([artifacts](docs/design/sdk_development_contract.md#bootstrap-sdk-profile-and-artifacts-adopted-direction-2026-10-22)).
+The `crt-cli` repository is laid out as `crt new` generates it and must build and run with its
+own `crt build`/`crt run` ([layout and self-test](docs/design/crt_cli.md#9-joint-development-sequence)).
+
 **SDK Producer Contract Gate P0** (feeds CLI D0/D1; not started):
 
 - [ ] Supply external-consumer identity/capability fixtures, distinguishing
   existing manifest/stage/port formats from the proposed development contract.
-- [ ] Publish SDK-owned C/C++ startup/link/runtime-query rules and public imports;
-  consumers must not reconstruct flags or depend on producer build trees.
+- [ ] Define the Bootstrap SDK profile: contents fixed by the real CLI link result, identity and
+  digests, produced from the same recipes with no second build system; publish the SDK-owned
+  startup/link/runtime-query rules and public imports it exposes.
+- [ ] Publish the runtime-bundle contract: closure computed from the CLI's ELF/Mach-O/PE imports,
+  app-local placement, Windows import resolution at load.
 - [ ] Define host-tools/rootfs identity and runtime closure separately from the
   target sysroot; validate actual native tool/alias execution.
-- [ ] Validate the minimum CRT-native CLI HTTP/TLS/runtime closure and trust
-  inputs for bootstrap without an installed development SDK.
+- [ ] Validate the minimum CRT-native CLI HTTP/TLS stack (libcurl with a CRT-built TLS backend)
+  and trust inputs for bootstrap without an installed development SDK, including fail-closed
+  negative cases.
 - [ ] Record independent consumer build/run and ABI evidence for each initial
   native pair before promoting the corresponding artifact/consumer lock.
 

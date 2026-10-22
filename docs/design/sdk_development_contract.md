@@ -192,6 +192,27 @@ pinned crt-cli source + pinned SDK -> CLI bootstrap archive
                                  installation/management without an SDK
 ```
 
+### Bootstrap SDK profile and artifacts (adopted direction, 2026-10-22)
+
+Building the CLI needs a development SDK; running it must not. CRT therefore
+produces three artifacts from the same sources, stage outputs and port recipes:
+
+| Artifact | For | Content |
+| --- | --- | --- |
+| **Bootstrap SDK** | `crt-cli` developers and CI | The `02-cxx` stage plus the ports the CLI links: libcurl, its TLS backend, zlib, and any other library the real link result requires (headers, link libraries, startup, toolchain files, notices) |
+| **CLI runtime bundle** | End users | The CLI executable and only the runtime files its import closure needs, placed app-local |
+| **Full SDK** | CRT application developers | Unchanged, up to `06-web` |
+
+The Bootstrap SDK is a reduced packaging of verified `01-c`/`02-cxx` and port
+outputs, not a second build system, ABI or recipe set. Do not start it with a
+separate compile path: extract it after the external CLI build against the
+existing outputs succeeds. The ports are produced and validated by CRT;
+`crt-cli` neither ports them nor vendors CRT headers or libraries, and consumes
+only the pinned Bootstrap SDK identity. The runtime closure is computed from the
+CLI's actual ELF/Mach-O/PE imports, never from a guessed list. Whether a static
+CLI is viable is a separate technical check; the default is a minimal dynamic
+bundle.
+
 Do not introduce a cycle in which CRT runtime/SDK builds require the CLI.
 If CRT product assembly includes the CLI, explicitly supply the external source
 revision/hash and an already produced SDK. CLI source vendoring, unpinned

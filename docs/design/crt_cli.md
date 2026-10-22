@@ -378,6 +378,25 @@ completion checklist. Each repository's TODO/acceptance owns actual status.
 | D6 Deployment/automation stability | Runtime closure and notices/source contracts | test/package, locked/offline/cancel, versioned JSON | App runs without SDK/store/build roots; CI/AI controls workflow through commands; repeated child-process acceptance |
 | D7 Studio integration | Consumer-driven generic UI/input/PAL gaps | CLI compatibility and debug-adapter contracts | A thin [Studio](crt_studio.md) frontend uses the same workflow |
 
+**Repository layout and self-test (adopted direction, 2026-10-22).** The
+`crt-cli` repository is laid out exactly as `crt new` generates a project
+(`crt.toml`, `crt.lock`, sources, tests, and a CMake entry that delegates to the
+SDK's `crt-toolchain.cmake`); it has no private layout. The template is owned by
+this repository and is what `crt new --template cxx` emits. The first binary is
+built by an ordinary external CMake build against the pinned Bootstrap SDK
+([bootstrap artifacts](sdk_development_contract.md#6-bootstrapping-a-crt-built-cli)).
+From the first stage that has `new`/`build`/`run`, the acceptance test is that
+`crt build` and `crt run` work on the CLI's own tree (and `crt test` once it
+exists) using the installed Bootstrap SDK profile, and that a fresh `crt new`
+project builds and runs the same way. A layout the CLI cannot build with its own
+commands is a defect of the template, not an exception.
+
+Bootstrap proceeds B0 (SDK-based build; `--version`, `--help`,
+`doctor --bootstrap`), B1 (run without an SDK from the runtime bundle),
+B2 (CRT-native HTTPS download with fail-closed trust checks) and B3
+(SDK/Host Tools installation), mapped onto D0-D2. Host Tools are not needed to
+start the CLI. A checksum file alone is not publisher authentication.
+
 D0 snapshots may start with manually installed existing SDKs. Unfinished D1/D2
 work does not block runtime development or recipe-schema fixtures. Conversely,
 D3 acceptance must not substitute Git Bash for an actual CRT host environment.
