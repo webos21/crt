@@ -1,6 +1,7 @@
 """Host filesystem operations; keep Win32 extended paths out of tool arguments."""
 import os
 import shutil
+import time
 
 
 def filesystem_path(path):
@@ -38,3 +39,21 @@ def copy_tree(source, destination, **kwargs):
         raise OSError(f"source-tree copy failed ({len(failures)} errors; first {len(examples)}): "
                       + " | ".join(examples)) from None
     return destination
+
+
+def atomic_replace(source, destination):
+    """Bound Windows sharing/access contention without weakening publication.
+
+    Keep the prepared tree hidden until the same atomic rename succeeds. A
+    persistent permissions failure still raises; no non-atomic fallback, ACL
+    change, target deletion or process termination is permitted here.
+    """
+    for attempt in range(8):
+        try:
+            os.replace(filesystem_path(source), filesystem_path(destination))
+            return
+        except OSError as error:
+            if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 7:
+                raise
+            print(f"atomic publication retry {attempt + 1}/8 (WinError {error.winerror})", flush=True)
+            time.sleep(min(0.1 * 2 ** attempt, 1.0))

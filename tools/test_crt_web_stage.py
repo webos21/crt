@@ -95,6 +95,29 @@ class WebStage(unittest.TestCase):
         producer.assert_not_called()
         self.assertFalse(list(self.work.glob("run-*")))
 
+    def test_explicit_retry_is_scoped_and_forwards_existing_isolated_guards(self):
+        predecessor = self.make_sdk("predecessor", "05-ui")
+        recipe = self.root / "06-web.json"
+        recipe.write_text(json.dumps({"source": {"archive": "pinned.tar.xz"}}))
+        run_root = self.work / "run-owned"
+        marker = run_root / "driver/build/06-web/inputs.json"
+        marker.parent.mkdir(parents=True)
+        marker.write_text('{}')
+        previous = self.root / "previous.tar.xz"
+        with patch("build_stage_06_web.build_kind", return_value="native"), \
+             patch("build_stage_06_web.require_predecessor"), patch.object(adapter, "preflight_host_inputs"), \
+             patch.object(adapter, "run", side_effect=RuntimeError("stop after command")) as run:
+            with self.assertRaisesRegex(RuntimeError, "stop after command"):
+                adapter.main(self.args("build") + ["--predecessor", str(predecessor), "--recipe", str(recipe),
+                    "--retry-run", str(run_root), "--previous-source-asset", str(previous)])
+            command = run.call_args.args[0]
+            self.assertIn("--reuse-work-root", command)
+            self.assertEqual(previous.resolve(), command[command.index("--previous-source-asset") + 1])
+            self.assertEqual(run_root / "driver", command[command.index("--work-root") + 1])
+            with self.assertRaisesRegex(ValueError, "owned direct"):
+                adapter.main(self.args("build") + ["--predecessor", str(predecessor), "--recipe", str(recipe),
+                    "--retry-run", str(self.root / "outside")])
+
     def test_archive_has_canonical_root_and_does_not_change_input(self):
         with patch("build_stage_06_web.build_kind", return_value="native"), patch.object(adapter, "run"):
             self.assertEqual(0, adapter.main(self.args("dist") + ["--archive-dir", str(self.root / "archives")]))

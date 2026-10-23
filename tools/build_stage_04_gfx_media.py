@@ -18,6 +18,7 @@ from pathlib import Path
 from crt_dist_prerequisites import external_prerequisites_for
 import crt_relink_kit
 import crt_source_offer
+from crt_file_ops import atomic_replace, copy_tree
 from crt_elf import needed_libraries, relocate_absolute_runtime_paths, remove_absolute_runtime_paths
 from crt_text_relocate import relocate_text_prefixes
 
@@ -282,14 +283,14 @@ def publish_tree(staged: Path, output: Path) -> None:
     ))
     candidate = publish_root / output.name
     try:
-        shutil.copytree(staged, candidate, symlinks=True)
+        copy_tree(staged, candidate, symlinks=True)
         if sys.platform == "darwin":
             # Rewrite while still under the hidden publish_root, targeting
             # the real final `output` path, so the atomic os.replace()
             # below still exposes either a fully-correct tree or nothing
             # -- never a half-patched one visible at the real output path.
             rewrite_stale_macho_rpaths(candidate, staged, output)
-        os.replace(candidate, output)
+        atomic_replace(candidate, output)
     finally:
         remove_tree(publish_root, ignore_errors=True)
 

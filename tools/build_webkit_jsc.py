@@ -62,7 +62,8 @@ def run(command, env=None, cwd=None, check=True, capture=False):
     print("+", " ".join(str(part) for part in command), flush=True)
     return subprocess.run(
         [str(part) for part in command], env=env, cwd=cwd, check=check,
-        capture_output=capture, text=True)
+        capture_output=capture, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
 
 
 class Phases:
@@ -101,6 +102,35 @@ def tool_version(command) -> str:
     return (completed.stdout or completed.stderr).strip().splitlines()[0] if (completed.stdout or completed.stderr) else "?"
 
 
+def host_patch_command() -> list[str]:
+    """Select a build-host tool, not the target's runtime or an ambient shell.
+
+    Strawberry's patch 2.5.9 asserts on our unchanged multi-hunk COFF patch.
+    Git for Windows is already required for the pinned source checkout; its
+    apply engine produces the exact manifest hashes without changing patches.
+    POSIX hosts keep their established patch implementation.
+    """
+    windows = sys.platform == "win32"
+    name = "git" if windows else "patch"
+    executable = shutil.which(name)
+    if not executable:
+        raise SystemExit(f"missing host patch tool: {name}")
+    if windows:
+        return [executable, "-c", "core.longpaths=true", "-c", "core.autocrlf=false",
+                "-c", "apply.ignoreWhitespace=no", "apply", "--no-index", "--whitespace=nowarn", "-p1"]
+    return [executable, "-p1", "-i"]
+
+
+def patch_environment(tree: Path) -> dict:
+    # A composed tree may live inside the CRT checkout. Never discover or
+    # update that enclosing repository/index, even with inherited Git env vars.
+    env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(tree.resolve().parent))
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                 "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"):
+        env.pop(name, None)
+    return env
+
+
 def require_host_tools() -> dict:
     """The build-host tools (they run on the build machine, whatever the target) and
     their versions, which also go into the configure fingerprint."""
@@ -118,12 +148,14 @@ def require_host_tools() -> dict:
     modules = run(["perl", "-MEnglish", "-MFindBin", "-MJSON::PP", "-e", "print 1"], capture=True, check=False)
     if modules.stdout.strip() != "1":
         raise SystemExit("perl needs the English, FindBin and JSON::PP modules (WebKitCommon.cmake requires them)")
+    patch_command = host_patch_command()
     return {
         "cmake": tool_version(["cmake", "--version"]),
         "ninja": tool_version(["ninja", "--version"]),
         "perl": tool_version(["perl", "-e", "print $^V"]),
         "python": tool_version([sys.executable, "--version"]),
         "ruby": ruby_version,
+        "patch": {"command": patch_command, "version": tool_version([patch_command[0], "--version"])},
     }
 
 
@@ -222,7 +254,8 @@ def apply_patches(tree: Path, target_os: str, extra_targets: tuple = ()) -> list
         if len(set(states)) != 1:
             raise SystemExit(f"patch {entry['id']}: its files are in mixed states {states}")
         if states[0] == "pristine":
-            run(["patch", "-p1", "-i", PATCHES / entry["patch"]], cwd=tree)
+            run(host_patch_command() + [PATCHES / entry["patch"]], cwd=tree,
+                env=patch_environment(tree))
             for item in entry["files"]:
                 if sha256_file(tree / item["file"]) != item["sha256_after"]:
                     raise SystemExit(f"patch {entry['id']}: result of {item['file']} does not hash to sha256_after")

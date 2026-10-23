@@ -14,6 +14,7 @@ import sys
 import tempfile
 import tarfile
 import unittest
+from unittest import mock
 
 import build_stage_06_web as stage
 import check_webkit_security as security
@@ -273,7 +274,15 @@ class PackagingTests(unittest.TestCase):
                 path = sdk / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.touch()
-            stage.require_predecessor(sdk, manifest)
+            with self.assertRaisesRegex(ValueError, "must declare"):
+                stage.require_predecessor(sdk, manifest)
+            next(entry for entry in manifest["redistributed_dependencies"] if entry["name"] == "ffmpeg")["relink_kit"] = "share/crt/relink/libcrtmedia"
+            with mock.patch.object(stage.crt_relink_kit, "check_kit", return_value=[]) as check:
+                stage.require_predecessor(sdk, manifest)
+                check.assert_called_once_with(sdk, "libcrtmedia")
+            with mock.patch.object(stage.crt_relink_kit, "check_kit", return_value=["damaged object"]):
+                with self.assertRaisesRegex(ValueError, "damaged object"):
+                    stage.require_predecessor(sdk, manifest)
             (sdk / "bin/libcrtmedia.dll").unlink()
             with self.assertRaisesRegex(ValueError, "bin/libcrtmedia.dll"):
                 stage.require_predecessor(sdk, manifest)

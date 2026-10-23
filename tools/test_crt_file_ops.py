@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from crt_file_ops import copy_tree, filesystem_path
+from crt_file_ops import atomic_replace, copy_tree, filesystem_path
 
 
 class FileOperations(unittest.TestCase):
@@ -53,6 +53,58 @@ class FileOperations(unittest.TestCase):
                 copy_tree(self.root / "source", self.root / "destination")
         self.assertIn("1000 errors; first 3", str(error.exception))
         self.assertLess(len(str(error.exception)), 2500)
+
+    def test_windows_replace_retries_only_bounded_known_errors(self):
+        error = PermissionError("busy")
+        error.winerror = 5
+        with patch("crt_file_ops.os.name", "nt"), patch("crt_file_ops.filesystem_path", side_effect=str), \
+                patch("crt_file_ops.os.replace", side_effect=[error, None]) as replace, \
+                patch("crt_file_ops.time.sleep") as sleep:
+            atomic_replace("hidden", "final")
+            self.assertEqual(2, replace.call_count)
+            sleep.assert_called_once_with(0.1)
+        with patch("crt_file_ops.os.name", "nt"), patch("crt_file_ops.filesystem_path", side_effect=str), \
+                patch("crt_file_ops.os.replace", side_effect=error) as replace, \
+                patch("crt_file_ops.time.sleep"):
+            with self.assertRaises(PermissionError):
+                atomic_replace("hidden", "final")
+            self.assertEqual(8, replace.call_count)
+        with patch("crt_file_ops.os.name", "posix"), patch("crt_file_ops.os.replace", side_effect=error) as replace:
+            with self.assertRaises(PermissionError):
+                atomic_replace("hidden", "final")
+            self.assertEqual(1, replace.call_count)
+
+    def test_unrelated_replace_error_is_not_retried(self):
+        with patch("crt_file_ops.os.replace", side_effect=FileNotFoundError("missing")) as replace, \
+                patch("crt_file_ops.time.sleep") as sleep:
+            with self.assertRaises(FileNotFoundError):
+                atomic_replace(self.root / "hidden", self.root / "final")
+            replace.assert_called_once()
+            sleep.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "native Windows directory sharing")
+    def test_native_directory_handle_is_released_before_atomic_publish(self):
+        import ctypes
+        from ctypes import wintypes
+        import threading
+        source, destination = self.root / "hidden", self.root / "final"
+        source.mkdir()
+        (source / "payload").write_bytes(b"verified")
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                      ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        handle = kernel.CreateFileW(str(source), 0x80, 3, None, 3, 0x02000000, None)
+        self.assertNotEqual(handle, wintypes.HANDLE(-1).value, ctypes.get_last_error())
+        timer = threading.Timer(0.25, lambda: kernel.CloseHandle(handle))
+        timer.start()
+        try:
+            atomic_replace(source, destination)
+        finally:
+            timer.join()
+        self.assertEqual(b"verified", (destination / "payload").read_bytes())
+        self.assertFalse(source.exists())
 
     @unittest.skipUnless(os.name == "nt", "Win32-only path spelling")
     def test_unc_and_existing_extended_paths(self):

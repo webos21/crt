@@ -84,12 +84,18 @@ def main(argv=None):
     parser.add_argument("--recipe", type=Path)
     parser.add_argument("--asset", type=Path)
     parser.add_argument("--source-cache", type=Path)
+    parser.add_argument("--retry-run", type=Path, help="explicit owned failed run; existing isolated input guards still apply")
+    parser.add_argument("--previous-source-asset", type=Path, help="with retry-run: prove a packaging-only source change")
     parser.add_argument("--work-root", required=True, type=Path)
     parser.add_argument("--archive-dir", type=Path)
     parser.add_argument("--target-os", required=True)
     parser.add_argument("--target-arch", required=True)
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args(argv)
+    if args.previous_source_asset and not args.retry_run:
+        parser.error("--previous-source-asset requires --retry-run")
+    if args.phase != "build" and (args.retry_run or args.previous_source_asset):
+        parser.error("retry options apply only to build")
     if args.jobs < 1:
         parser.error("--jobs must be positive")
     # This adapter is native-only. The separate isolated driver's explicit
@@ -116,13 +122,25 @@ def main(argv=None):
                 raise ValueError("predecessor, output and work-root must be disjoint")
         require_predecessor(predecessor, json.loads((predecessor / "manifest.json").read_text()))
         preflight_host_inputs(args.target_os)
-        # Each changed-input run gets a fresh object tree; only explicit pinned
-        # source caches are reusable. Stage-cache handles unchanged invocations.
-        run_root = Path(tempfile.mkdtemp(prefix="run-", dir=work))
+        # Fresh by default. Explicit recovery is delegated to the isolated
+        # driver's existing predecessor/source/packaging-only identity guards.
+        if args.retry_run:
+            run_root = args.retry_run.resolve()
+            marker = run_root / "driver/build/06-web/inputs.json"
+            if (args.retry_run.is_symlink() or run_root.parent != work or
+                    not run_root.name.startswith("run-") or not marker.is_file() or
+                    not marker.resolve().is_relative_to(run_root)):
+                raise ValueError("retry-run must be an owned direct run-* child with isolated input evidence")
+        else:
+            run_root = Path(tempfile.mkdtemp(prefix="run-", dir=work))
         candidate = run_root / "candidate" / "06-web"
         command = [sys.executable, ROOT / "tools/crt-stage-build.py", "--sdk-root", predecessor,
                    "--recipe", args.recipe.resolve(), "--work-root", run_root / "driver",
                    "--output", candidate, "--dependency-jobs", args.jobs]
+        if args.retry_run:
+            command += ["--reuse-work-root"]
+        if args.previous_source_asset:
+            command += ["--previous-source-asset", args.previous_source_asset.resolve()]
         asset = args.asset
         if asset is None:
             recipe = json.loads(args.recipe.read_text(encoding="utf-8"))

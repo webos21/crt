@@ -3,10 +3,12 @@
 
 import hashlib
 import json
+import os
 import shutil
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -102,6 +104,37 @@ class FindArchive(TempCase):
             (self.tmp / f"crt-{TAG}-{os_}-x86_64-01-c{suffix}").write_bytes(b"z")
         with self.assertRaisesRegex(release.ReleaseError, "several archives"):
             release.find_archive(self.tmp, TAG, "01-c")
+
+
+class ArchiveTimestamps(TempCase):
+    def test_windows_zip_clamps_dates_preserves_bytes_empty_dirs_and_source_mtimes(self):
+        sdk = self.tmp / "06-web"
+        (sdk / "empty directory").mkdir(parents=True)
+        old, future = sdk / "old.txt", sdk / "future.txt"
+        old.write_bytes(b"epoch source bytes")
+        future.write_bytes(b"future source bytes")
+        os.utime(old, (0, 0))
+        os.utime(future, (7258118400, 7258118400))  # year 2200
+        times = {path: path.stat().st_mtime_ns for path in (old, future)}
+        archive = release.archive_directory(sdk, "06-web", TAG, "windows", "x86_64", self.tmp)
+        with zipfile.ZipFile(archive) as handle:
+            self.assertEqual(b"epoch source bytes", handle.read("06-web/old.txt"))
+            self.assertEqual(b"future source bytes", handle.read("06-web/future.txt"))
+            self.assertEqual((1980, 1, 1), handle.getinfo("06-web/old.txt").date_time[:3])
+            self.assertEqual((2107, 12, 31), handle.getinfo("06-web/future.txt").date_time[:3])
+            self.assertIn("06-web/empty directory/", handle.namelist())
+        self.assertEqual(times, {path: path.stat().st_mtime_ns for path in times})
+
+    def test_zip_write_failure_does_not_replace_an_existing_archive(self):
+        sdk = self.tmp / "06-web"
+        sdk.mkdir()
+        output = self.tmp / (release.archive_base_name(TAG, "windows", "x86_64", "06-web") + ".zip")
+        output.write_bytes(b"existing archive")
+        with mock.patch.object(zipfile.ZipFile, "write", side_effect=OSError("injected write failure")):
+            with self.assertRaisesRegex(OSError, "injected"):
+                release.archive_directory(sdk, "06-web", TAG, "windows", "x86_64", self.tmp)
+        self.assertEqual(b"existing archive", output.read_bytes())
+        self.assertFalse(list(self.tmp.glob(".crt-zip-*")))
 
 
 class ReleaseGrade(TempCase):

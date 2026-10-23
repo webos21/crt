@@ -75,14 +75,10 @@ as one follow-up batch, not interleaved with these implementation steps.
   stage's resolved configuration without fetching, compiling or recursively
   reconfiguring the running Ninja tree. Test feature-off and unsupported-pair
   rejection; keep reduced-feature diagnostic builds available.
-- [ ] B2 Add `crt-web-build/test/dist` through the existing isolated Web driver,
-  with explicit predecessor, host tools, work roots and native-pair limits;
-  do not count a wire-only test or skipped browser as full Web acceptance.
-  - [x] Native-only wiring, explicit replay inputs and rollback fixtures.
-  - [x] Produce and verify the current ordinary Windows 05-ui predecessor.
-  - [x] Fix deep Windows source copying and retain the executed external recipe;
-    preserve every pinned source file and bound aggregate error reports.
-  - [ ] Finish the fresh Windows Web build and positive packaged test/dist replay.
+- [x] B2 Add `crt-web-build/test/dist` through the existing isolated Web driver;
+  complete Windows native production, packaged browser/network/ABI, ZIP and
+  extracted spaces-path replay with source/predecessor guards intact
+  ([evidence](docs/acceptance/build_system_acceptance.md#windows-b2-completion-2026-10-23)).
 - [x] B3 Close cache correctness gaps before release automation: include
   build-affecting configuration and executed test-driver inputs, and detect
   deleted payloads inside existing output directories and changed predecessors.

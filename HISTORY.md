@@ -11,6 +11,116 @@ substantive update.
 
 ## 2026-10-23
 
+### Complete Windows B2 Web production and extracted-archive acceptance
+
+`crt-web-build` now succeeds through the isolated producer and atomic publication;
+`crt-web-test` replays the newly produced SDK in a disposable copy. The remaining
+dist failure was ZIP's pre-1980 timestamp limit, exposed by epoch-dated pinned
+source files. Windows archive assembly now clamps only ZIP metadata via the
+standard library, preserves SDK bytes and mtimes/empty directories, and replaces
+the final archive atomically only after writing succeeds. POSIX tar assembly is
+unchanged. The failed ZIP is retained separately, not shipped as a successful one.
+
+`crt-web-dist` succeeds. The actual ZIP passes CRC and full payload comparison;
+all 3,674 files match the SDK. Its extracted copy in a spaces-named relocated
+directory passes ordinary verification plus browser observation, HTTP/TLS trust
+negatives and host ABI again. All 27 inherited Development runtime files match
+Full06 byte-for-byte; the producer SDK remains unchanged by replay. Final tooling
+regression: 233 selected, 230 pass/three existing skips; exact CI command: 96
+selected, 95 pass/one existing skip. No second CI workflow or full WebKit CI job.
+
+B2's Windows entry-point gate is checked and its completed detail removed from
+TODO; B4 clean/tagged matching release rehearsal and B5 Linux/macOS native replay
+remain open. This is a local `development` artifact from the explicitly recorded
+dirty source asset, not clean release provenance or CLI/Studio adoption. No tag,
+upload or public release was created. Artifact hashes, commands and limitations
+are in the [completion evidence](docs/acceptance/build_system_acceptance.md#windows-b2-completion-2026-10-23).
+
+### Bound Windows SDK publication contention and guarded recovery
+
+The fresh relink-capable Windows run passed compilation, packaged browser/network
+and ABI checks and `verify_dist`, then failed at its final directory rename with
+WinError 5. This is not an accepted/published 06 SDK. The precise holder or cause
+of the access denial was not established; no browser/compiler process remained
+when inspected. Preserved the validated staging tree and failed log.
+
+The common host filesystem helper now retries only Windows errors 5/32/33 up to
+eight atomic replace attempts (4.5 seconds of bounded backoff), retaining extended
+filesystem paths, with persistent/other errors propagated. No ACL changes,
+process killing, destination deletion or non-atomic publication fallback. Both
+04 and 05/06 publishers use it. Real Windows directory-handle contention and a
+complete SDK publication-copy probe pass, with source and output inventories
+equal. Added explicitly scoped run recovery to the in-tree Web adapter, forwarding
+the isolated driver's existing source/predecessor/packaging-only checks rather
+than bypassing them.
+
+Regression selects 231 tests: 228 pass and three existing skips; the exact CI
+tooling command selects 94: 93 pass and one existing skip. A new source asset's
+packaging-only retry is accepted by the existing comparison of compiled inputs
+and unchanged predecessor; complete publication/test/dist is still pending.
+See [acceptance](docs/acceptance/build_system_acceptance.md#windows-atomic-publication-and-guarded-recovery-2026-10-23).
+
+### Bridge ordinary media SDKs to the isolated Web relink contract
+
+The repaired Windows producer compiled WebKit and reached final SDK verification,
+then correctly rejected the inherited FFmpeg dependency: ordinary CMake 04/05
+developer SDKs did not create/declare the libcrtmedia relink kit required once
+06 becomes an isolated artifact. Their legacy developer verification was not a
+promise of isolated-Web predecessor completeness. No candidate was published.
+
+Ordinary media packaging now captures the real Ninja link/objects and declares
+the kit; UI packaging preserves and validates it. Build-prefix libraries map to
+installed SDK files only after byte equality, and the ordinary bootstrap import
+descriptor is retained verbatim as checksummed kit support, not another runtime.
+Declared kits are checked even for ordinary SDKs; Web preflight rejects absent
+declarations or damaged kits before fetching/building dependencies. Existing
+isolated-kit and compile/predecessor identity guards were not weakened.
+
+New separate 04/05 SDKs verify, while all 239 inherited bin/lib/libexec/system-bin
+payloads match the preserved old 05 SDK byte-for-byte. The actual kit relinks a
+Windows DLL, and an SDK-built consumer imports that relinked DLL and runs with
+System32-only PATH. Full tooling/distribution regression: 227 selected, 224 pass,
+three existing skips; the exact CI tooling command selects 90, 89 pass and one
+existing Darwin-only skip. A new frozen Web source asset and fresh work directory
+retain the stricter predecessor contract; B2 production/test/dist is still open.
+See the [acceptance record](docs/acceptance/build_system_acceptance.md#ordinary-media-relink-predecessor-repair-2026-10-23).
+
+### Fix the Windows carried-patch host-tool boundary
+
+Reproduced the Strawberry patch 2.5.9 `hunk` assertion on disposable pristine
+files, independently of the full Web build. Git for Windows applies the exact
+same 0003 patch successfully and every output matches the existing manifest.
+Windows now explicitly selects Git's apply engine; POSIX build hosts retain
+native patch. Preflight checks the selected tool before expensive dependencies,
+records its command/version, and CMake fingerprints the resolved host executable.
+The invocation isolates parent Git discovery and inherited Git worktree/index
+settings, preserves bytes and never updates a repository index. No carried patch,
+upstream source, hash requirement or global Git/Windows setting changed.
+
+Native Windows tests also apply all three target patch sets to pinned file
+copies: Windows 18 patches/50 files, Linux 17/39 and macOS 22/48, with unchanged
+upstream inputs. These are patch-byte checks on a Windows build host, not native
+Linux/macOS acceptance. The full regression selects 210 tests: 207 pass and three
+existing host-inapplicable skips (`patch-fix-unit.log`). B2's whole-build and
+packaged test/dist gates remain open for the new source-asset replay; failed runs
+are preserved. Evidence is in the
+[build-system acceptance](docs/acceptance/build_system_acceptance.md#b2-host-patch-repair-2026-10-23).
+
+### Record the B2 Windows build-host patch failure
+
+The fresh `run-41yecki4` producer exited unsuccessfully after completing its
+target dependency phase and reaching WebKit carried-patch application. The
+selected host tool, `C:\Strawberry\c\bin\patch.exe` (its diagnostic identifies
+patch 2.5.9), asserted on `hunk` while applying
+`0003-coff-assembler-flavor.patch` to `Source/WTF/wtf/InlineASM.h`, exiting 3.
+This is the observed immediate failure, not evidence of a WebKit compile/runtime
+defect; tool selection and a bounded comparative reproduction remain to do.
+The source-copy repair progressed past its former failure point, but B2 remains
+open: no new 06-web SDK was published and packaged test/dist did not run.
+Preserved the original source identity, predecessor, failed work and log; no
+automatic retry or provenance relabeling was performed. Exact evidence is in
+the [build-system acceptance](docs/acceptance/build_system_acceptance.md#b2-host-patch-failure-2026-10-23).
+
 ### Repair deep Windows Web source materialization and executed-recipe identity
 
 The overnight B2 build completed its target dependencies but stopped before

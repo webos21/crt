@@ -29,6 +29,7 @@ from crt_linux_runtime import normalize_cxx_aliases
 import crt_macho
 import crt_source_offer
 import crt_web_release
+import crt_relink_kit
 from crt_file_ops import copy_tree
 from crt_stage_recipe import validate_recipe
 from create_dist import DIST_PORTING_TOOLS, write_posix_activation
@@ -192,6 +193,12 @@ def require_predecessor(sdk, manifest):
                  "include/crtgfx/shared_image.h", "include/crtgfx/skia_shared.h"):
         if not (sdk / file).is_file():
             raise ValueError(f"06-web requires the option-ON 05-ui predecessor: missing {file}")
+    ffmpeg = next(entry for entry in manifest["redistributed_dependencies"] if entry["name"] == "ffmpeg")
+    if ffmpeg.get("relink_kit") != "share/crt/relink/libcrtmedia":
+        raise ValueError("06-web predecessor must declare its libcrtmedia relink kit; rebuild crt-gfx-media-dist/crt-ui-dist")
+    problems = crt_relink_kit.check_kit(sdk, "libcrtmedia")
+    if problems:
+        raise ValueError("06-web predecessor libcrtmedia relink kit: " + "; ".join(problems))
 
 
 def validate_layout(sdk, work, output):

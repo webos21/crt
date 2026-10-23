@@ -1,13 +1,82 @@
 #!/usr/bin/env python3
 """Tests for the JavaScriptCore build-mode contract and native ABI audit."""
 
+import hashlib
+import json
+import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_webkit_jsc
+
+
+class HostPatchTests(unittest.TestCase):
+    def test_windows_selects_git_even_if_old_patch_is_on_path(self):
+        with mock.patch.object(build_webkit_jsc.sys, "platform", "win32"), \
+                mock.patch.object(build_webkit_jsc.shutil, "which", return_value="C:/Git/bin/git.exe") as which:
+            command = build_webkit_jsc.host_patch_command()
+        which.assert_called_once_with("git")
+        self.assertEqual(command[0], "C:/Git/bin/git.exe")
+        self.assertIn("--no-index", command)
+        self.assertIn("core.longpaths=true", command)
+        self.assertNotIn("--unsafe-paths", command)
+
+    def test_missing_host_tool_fails_closed(self):
+        with mock.patch.object(build_webkit_jsc.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(SystemExit, "missing host patch tool"):
+                build_webkit_jsc.host_patch_command()
+
+    def test_posix_host_preserves_native_patch(self):
+        with mock.patch.object(build_webkit_jsc.sys, "platform", "linux"), \
+                mock.patch.object(build_webkit_jsc.shutil, "which", return_value="/usr/bin/patch"):
+            self.assertEqual(["/usr/bin/patch", "-p1", "-i"], build_webkit_jsc.host_patch_command())
+
+    @unittest.skipUnless(shutil.which("git"), "native Git required")
+    def test_real_git_apply_checks_hashes_and_leaves_parent_repository_alone(self):
+        with tempfile.TemporaryDirectory(prefix="host patch spaces ") as directory:
+            root = Path(directory)
+            git = shutil.which("git")
+            build_webkit_jsc.run([git, "init", "--quiet", root])
+            # Deliberately nested within another repository, without its own .git.
+            tree = root / "nested composed tree"
+            tree.mkdir()
+            patches = root / "patches"
+            patches.mkdir()
+            before, after = b"one\ntwo\nthree\n", b"one\nchanged\nthree\n"
+            files = []
+            for name in ("first.h", "second.h"):
+                (tree / name).write_bytes(before)
+                files.append({"file": name, "sha256_before": hashlib.sha256(before).hexdigest(),
+                              "sha256_after": hashlib.sha256(after).hexdigest()})
+            (patches / "fixture.patch").write_bytes(b"".join(
+                f"--- a/{name}\n+++ b/{name}\n@@ -1,3 +1,3 @@\n one\n-two\n+changed\n three\n".encode()
+                for name in ("first.h", "second.h")))
+            (patches / "manifest.json").write_text(json.dumps({"patches": [
+                {"id": "fixture", "patch": "fixture.patch", "targets": ["windows"], "files": files}]}))
+            command = [git, "-c", "core.longpaths=true", "-c", "core.autocrlf=false",
+                       "apply", "--no-index", "--whitespace=nowarn", "-p1"]
+            with mock.patch.object(build_webkit_jsc, "PATCHES", patches), \
+                    mock.patch.object(build_webkit_jsc, "host_patch_command", return_value=command), \
+                    mock.patch.dict(os.environ, {"GIT_DIR": str(root / ".git"), "GIT_WORK_TREE": str(root),
+                                                 "GIT_INDEX_FILE": str(root / "must-not-exist.index")}):
+                result = build_webkit_jsc.apply_patches(tree, "windows")
+                self.assertEqual(len(result), 1)
+                for item in files:
+                    self.assertEqual(after, (tree / item["file"]).read_bytes())
+                with mock.patch.object(build_webkit_jsc, "run") as run:
+                    self.assertEqual(result, build_webkit_jsc.apply_patches(tree, "windows"))
+                    run.assert_not_called()
+                (tree / "first.h").write_bytes(b"tampered\n")
+                with self.assertRaisesRegex(SystemExit, "hashes to"):
+                    build_webkit_jsc.apply_patches(tree, "windows")
+            self.assertFalse((root / "must-not-exist.index").exists())
+            self.assertFalse((root / ".git/index").exists())
 
 
 class BuildWebKitJSCModeTests(unittest.TestCase):

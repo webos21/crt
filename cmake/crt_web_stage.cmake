@@ -4,13 +4,15 @@ set(CRT_WEB_PREDECESSOR "" CACHE PATH "External 05-ui predecessor (empty builds 
 set(CRT_WEB_STAGE_RECIPE "" CACHE FILEPATH "Pinned 06-web source recipe (empty uses the generated recipe)")
 set(CRT_WEB_STAGE_ASSET "" CACHE FILEPATH "Local pinned 06-web source archive")
 set(CRT_WEB_SOURCE_CACHE "" CACHE PATH "Verified source-only WebKit cache")
+set(CRT_WEB_RETRY_RUN "" CACHE PATH "Explicit failed run-* child for guarded isolated recovery (empty starts fresh)")
+set(CRT_WEB_PREVIOUS_SOURCE_ASSET "" CACHE FILEPATH "With retry-run: verified old source archive for packaging-only repair")
 set(CRT_WEB_REPLAY_SDK "" CACHE PATH "Explicit existing 06-web SDK for test/dist replay only; does not validate a new build")
 set(CRT_WEB_WORK_ROOT "${CMAKE_BINARY_DIR}/isolated-web" CACHE PATH "Web build and test work roots")
 set(CRT_WEB_JOBS "4" CACHE STRING "Bounded isolated Web dependency/build parallelism")
 set(CRT_WEB_HOST_PERL_LIB "$ENV{CRT_WEB_HOST_PERL_LIB}" CACHE PATH "Prepared Windows POSIX build-host Perl modules; never target SDK content")
 if(Python3_Interpreter_FOUND)
   set(crt_web_host_inputs)
-  foreach(crt_web_host_program IN ITEMS cmake ninja git perl ruby openssl clang clang++ cc c++ gcc g++ make gmake mingw32-make)
+  foreach(crt_web_host_program IN ITEMS cmake ninja git patch perl ruby openssl clang clang++ cc c++ gcc g++ make gmake mingw32-make)
     unset(crt_web_host_found)
     find_program(crt_web_host_found NAMES "${crt_web_host_program}" NO_CACHE)
     if(crt_web_host_found)
@@ -38,6 +40,12 @@ if(Python3_Interpreter_FOUND)
   endif()
   if(CRT_WEB_SOURCE_CACHE)
     list(APPEND crt_web_optional --source-cache "${CRT_WEB_SOURCE_CACHE}")
+  endif()
+  if(CRT_WEB_RETRY_RUN)
+    list(APPEND crt_web_optional --retry-run "${CRT_WEB_RETRY_RUN}")
+  endif()
+  if(CRT_WEB_PREVIOUS_SOURCE_ASSET)
+    list(APPEND crt_web_optional --previous-source-asset "${CRT_WEB_PREVIOUS_SOURCE_ASSET}")
   endif()
   # Pass the actual selected host tools instead of relying on the ambient PATH.
   set(crt_web_env "${CMAKE_COMMAND}" -E env
@@ -72,7 +80,7 @@ if(Python3_Interpreter_FOUND)
     --work-root "${CRT_WEB_WORK_ROOT}" --jobs "${CRT_WEB_JOBS}")
   crt_add_cached_stage_target(crt-web-build NAME web-build STAGE web
     DEPENDS ${crt_web_build_depends}
-    INPUTS "${crt_web_predecessor}" "${crt_web_recipe}" ${CRT_WEB_STAGE_ASSET} ${crt_web_host_inputs}
+    INPUTS "${crt_web_predecessor}" "${crt_web_recipe}" ${CRT_WEB_STAGE_ASSET} ${CRT_WEB_PREVIOUS_SOURCE_ASSET} ${crt_web_host_inputs}
     OUTPUTS "${CRT_DIST_ROOT}/06-web"
     COMMAND ${crt_web_command} --phase build --sdk "${CRT_DIST_ROOT}/06-web"
       --predecessor "${crt_web_predecessor}" --recipe "${crt_web_recipe}" ${crt_web_optional})

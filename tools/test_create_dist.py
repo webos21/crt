@@ -32,6 +32,25 @@ class ComponentInstall(unittest.TestCase):
         self.assertEqual(os.environ["ZERO_AR_DATE"], "external")
         self.assertTrue(run.call_args.kwargs["check"])
 
+    def test_ordinary_media_dist_builds_and_declares_real_relink_kit(self):
+        dependencies = [{"name": "ffmpeg"}]
+        with mock.patch.object(create_dist.crt_relink_kit, "find_output", return_value="bin/libcrtmedia.dll"), \
+                mock.patch.object(create_dist.crt_relink_kit, "build_kit") as build, \
+                mock.patch.object(create_dist.crt_relink_kit, "check_kit", return_value=[]):
+            create_dist.install_media_relink_kit(Path("build"), Path("sdk"), dependencies, "windows", True)
+            build.assert_called_once_with(Path("build"), "bin/libcrtmedia.dll", Path("sdk"), "libcrtmedia")
+            self.assertEqual(dependencies[0]["relink_kit"], "share/crt/relink/libcrtmedia")
+            create_dist.install_media_relink_kit(Path("build"), Path("sdk"), dependencies, "windows", False)
+            self.assertEqual(build.call_count, 1)  # UI retains its predecessor's exact kit
+
+    def test_missing_or_damaged_inherited_kit_is_not_upgraded_by_declaration(self):
+        with self.assertRaisesRegex(SystemExit, "rebuild crt-gfx-media-dist"):
+            create_dist.install_media_relink_kit(Path("build"), Path("sdk"), [{"name": "ffmpeg"}], "windows", False)
+        with mock.patch.object(create_dist.crt_relink_kit, "check_kit", return_value=["damaged"]):
+            with self.assertRaisesRegex(SystemExit, "damaged"):
+                create_dist.install_media_relink_kit(Path("build"), Path("sdk"),
+                    [{"name": "ffmpeg", "relink_kit": "share/crt/relink/libcrtmedia"}], "windows", False)
+
     @mock.patch.dict(os.environ, {"KEEP_TOOLCHAIN": "yes"}, clear=True)
     @mock.patch.object(create_dist.subprocess, "run")
     def test_other_hosts_keep_their_install_environment(self, run):

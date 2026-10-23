@@ -1299,6 +1299,11 @@ def main() -> int:
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, destination)
     else:
+        patch_command = jsc.host_patch_command()
+        (work / "host-patch-tool.json").write_text(json.dumps({
+            "command": patch_command,
+            "version": jsc.tool_version([patch_command[0], "--version"]),
+        }, indent=2) + "\n", encoding="utf-8")
         tree = jsc.compose_port_source(args.recipe, work)
         applied = jsc.apply_patches(tree, target_os, ("crt-port", f"crt-port-{target_os}"))
         (work / "carried-patches.json").write_text(json.dumps(applied, indent=2) + "\n", encoding="utf-8")

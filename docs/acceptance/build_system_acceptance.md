@@ -137,9 +137,9 @@ is claimed by this tranche.
 
 ## B2 Web target wiring and Windows gate
 
-This records the initial 2026-10-22 checkpoint. The later
-[deep-work-root repair](#deep-windows-work-root-repair-2026-10-23) owns the current
-attempt and its active log; earlier failed attempts are preserved as evidence.
+This records the initial 2026-10-22 checkpoint. Its pending/failed observations
+are superseded by [Windows B2 completion](#windows-b2-completion-2026-10-23),
+with intermediate repair attempts retained below as evidence, not active runs.
 
 `1033c86` committed/pushed B0/B1 before further implementation. Added native-only
 `crt-web-build/test/dist`, reusing `crt-stage-build.py` and the existing isolated
@@ -193,7 +193,7 @@ bundled in the target SDK. The retry explicitly fixes the completed 05-ui and
 its 06-web recipe, without rerunning the unrelated predecessor graph.
 After it verifies, run
 `crt-web-test` and `crt-web-dist` from this same tree.
-Positive current Web production/replay remains pending. Linux/macOS replay will
+At that checkpoint positive Web production/replay remained pending. Linux/macOS replay will
 be collected as one batch **after** the Windows implementation/replay, per owner
 direction, not performed in parallel here.
 
@@ -419,7 +419,7 @@ to match. A fixture rejects stale/wrong-OS recipes and proves override retention
 Current fresh source: `out/build-system-producer/stage-sources-deep/06-web.json`,
 SHA-256 `40873c8c61d8e92ac70b5005e2bfd6d6b16b5fc76a1cf4e31a463a36fe599a4a`.
 The same completed 05-ui and pristine upstream cache remain inputs; no failed
-dependency/compile cache guard was relaxed for the changed drivers. Active log:
+dependency/compile cache guard was relaxed for the changed drivers. Retained log:
 `out/build-system-producer/web-producer-deep.log`. Whole Web production/test/dist
 and clean/tagged positive collection are **not yet accepted**. Continue Windows
 first; native Linux/macOS replay remains one later batch.
@@ -438,3 +438,273 @@ its original compile provenance is retained and the prior SDK is backed up.
 Static/shared HTTPS/inflate plus trust negatives pass again from a spaces-named
 consumer directory (`helper-closure-refresh.log`, `refreshed-consumer.log` under
 `out/build-system-development`). No SDK is relabeled clean or release-approved.
+
+### B2 host-patch failure (2026-10-23)
+
+The fresh `isolated-web/run-41yecki4` run is **failed**, not still running.
+`out/build-system-producer/web-producer-deep.log` ends at 09:38 local time with
+the outer `crt-web-build` exiting 1. Target dependency installation/smokes
+finished under their existing platform policies; source materialization progressed
+past the previous copy failure. WebKit configure/compile had not started.
+
+The first failing command (log lines 16735..16744) is `patch -p1 -i` for the
+unchanged carried `libcrtweb/patches/0003-coff-assembler-flavor.patch`:
+
+```text
+patching file Source/WTF/wtf/InlineASM.h
+Program: C:\Strawberry\c\bin\patch.exe
+File: .\src\patch\2.5.9\patch-2.5.9-src\patch.c, Line 354
+Expression: hunk
+```
+
+The host tool exits 3; the Python drivers propagate that failure. Current host
+resolution also selects this Strawberry executable. This establishes an immediate
+build-host tool failure, not its underlying trigger (tool version, input format
+or path handling), and does not establish a WebKit/CRT compile/runtime defect.
+Next: compare carried-patch application with explicitly identified host tools in
+a disposable bounded reproduction, then fix tool selection/preflight and cache
+identity as supported by that evidence. Do not change upstream source or shorten
+the work root merely to bypass the assertion.
+
+No `out/build-system-producer/dist/06-web` or run-local `candidate/06-web` exists
+after this failure. Packaged test/dist and Full06/Development runtime comparison
+were therefore not run. B2 stays unchecked; B4 clean/tagged rehearsal and B5 native
+Linux/macOS replay remain open. The source asset SHA above, its
+`1033c86`/dirty creation identity, complete predecessor and failed work are retained.
+No automatic retry or release was started.
+
+### B2 host-patch repair (2026-10-23)
+
+`out/build-system-review/reproduce_host_patch.py` copies only the pinned files
+listed by the unchanged 0003 manifest entry. Strawberry's selected patch 2.5.9
+again asserts on `hunk` and exits 3, even in this smaller spaces-named root.
+Git for Windows applies that same LF patch with exit 0 and all recorded output
+hashes match (`host-patch-comparison.json`). This isolates the actionable host
+tool incompatibility without attributing it to WebKit, CRT target code or deep
+paths; the internal defect in Strawberry's old patch is not further diagnosed.
+
+`host_patch_command()` selects an absolute Git executable on Windows build
+hosts, retaining native `patch` on POSIX build hosts. Git's command-local long
+path/autocrlf/whitespace settings preserve the manifest bytes. No fuzzy/whitespace
+matching, unsafe-path option, source patch rewrite or global configuration is
+introduced. A discovery ceiling and removal of inherited Git repository/index
+overrides keep the enclosing CRT repository/index outside this operation.
+The early host-tool preflight records tool command/version; the Web port records
+`host-patch-tool.json`, and CMake includes the resolved host executable as a cache
+input. Subprocesses launched through the common WebKit runner are hidden on
+Windows.
+
+Fresh copied-file replay of every carried patch set on this Windows build host
+passes each existing before/after SHA check: Windows 18 patches over 50 files,
+Linux 17/39, macOS 22/48 (`carried-patch-probe-result.json`). Original cache files
+remain unchanged. Sequential patches can touch the same file; the diagnostic
+therefore composes each set once from pristine inputs, not by replaying an early
+patch's intermediate hash over a fully patched tree. The isolated single-patch
+unit fixture separately covers idempotence, tamper rejection, spaces paths and
+parent-index protection. These probes do not claim native Linux/macOS replay.
+
+Combined tooling/distribution regression (`patch-fix-unit.log`): 210 selected,
+207 pass, three existing skips, zero failures, 12.929 seconds. The new small
+host-patch fixtures join the existing CI tooling command, not a new workflow or
+another full WebKit CI build. B2 remains open until the new Windows source asset
+finishes real production and packaged browser/test/dist verification.
+
+The exact existing CI tooling command passes all 69 cases in 6.427 seconds
+(`patch-ci-tooling.log`). A new `out/build-system-patch-config` tree configures
+successfully and its target catalog check passes; this is separate from the
+long-lived producer cache (`patch-fresh-config.log`, `patch-target-catalog.log`).
+
+The next immutable local source asset is `stage-sources-patch/06-web.json` under
+`out/build-system-producer`, SHA-256
+`6b2a5e04e7c68168b5e9694951d80f905703c2c7556efe4493629e30c5e7b5d3`.
+Its creation identity is `61ea067` plus dirty changes, not a clean release.
+The new producer is `isolated-web/run-jgfd4365`, logging to
+`out/build-system-producer/web-producer-patch.log`; it passed the early Git tool
+preflight and started dependency production. No object-cache/source identity
+guard was loosened to reuse the failed run's objects. The hidden one-shot runner
+`out/build-system-review/run_patch_replay.py` will run packaged test/dist only
+after producer success, against that just-built output via explicit replay,
+then compare the Development profile's inherited runtime digests. Its durable
+status is `patch-replay-status.json`; passing small tests is not B2 completion.
+
+### Ordinary media relink predecessor repair (2026-10-23)
+
+`run-jgfd4365` is now **failed**, not active. The real pinned patch set and WebKit
+compilation passed, as did SDK consumer assembly. At final candidate verification
+`web-producer-patch.log` reports `the FFmpeg dependency does not declare its
+libcrtmedia relink kit`. No final 06 SDK was published and packaged test/dist did
+not start. Both the ordinary 05 input and staged 06 manifest lack the declaration;
+the original 05 also has no kit. This is a producer-boundary gap: legacy ordinary
+developer verification skipped kits without `built_from`, but isolated 06 requires
+one. Do not waive that final gate or add a declaration without the actual objects.
+
+`create_dist.py` now builds/checks/declares the kit when it installs `crt-media`;
+later UI packaging validates and inherits it. Existing isolated kit creation is
+unchanged. The exporter substitutes ordinary build-prefix libraries only when
+their installed SDK bytes match; absent build-tree libraries still fail. The
+ordinary bootstrap C++ import descriptor is retained verbatim as support, not
+substituted with an unrelated imported-libc++ archive. Support files receive an
+additive checksum manifest checked when present. No kit format version changed.
+Ordinary SDK verification checks declared kits; only unupgraded legacy developer
+SDKs retain their old exemption. Web's predecessor check now rejects missing
+declarations or invalid kit contents before dependency work starts.
+
+`out/build-system-review/rebuild_media_predecessor.py` runs the existing ordinary
+04/05 packaging commands against their already-built objects, into new output
+directories, never overwriting the failed input. Current outputs:
+`out/build-system-media-kit-current/{04-gfx-media,05-ui}`. Both verify. Their
+`predecessor-payload-comparison.json` confirms all 239 files under the original
+05 SDK's bin/lib/libexec/system-bin are present and byte-identical. Old SDKs,
+source assets, compile objects and failure logs are preserved.
+
+The generated kit's real native `relink.py --cc <LLVM clang>` succeeds, followed
+by `test_relinked_media.py`: a C consumer compiled through `crt-cc.cmd` imports
+`libcrtmedia.dll`, executes against the **relinked** app-local DLL and validates
+frame plane geometry with System32-only PATH (`relinked media spaces/consumer-result.json`).
+The initial raw-mksh diagnostic lacked the official CMD wrapper's shell setup;
+the accepted consumer uses the documented Windows wrapper, not a Git Bash build.
+The temporary smoke adds no public header/API or upstream patch.
+
+Full regression (`out/build-system-review/relink-fix-unit.log`): 227 selected,
+224 pass, three existing skips, 14.374 seconds. Exact existing CI tooling command
+(`relink-ci-tooling.log`): 90 selected, 89 pass, one Darwin-only skip, 7.124 seconds.
+These include missing/damaged inherited-kit, byte-mismatch, native import-support
+and declared ordinary-kit validation checks. Linux/macOS native replay remains B5.
+
+New immutable source recipe: `out/build-system-producer/stage-sources-relink/06-web.json`,
+SHA-256 `fbcfad5007ae2b12d3c48be1f3a12495f38eacf0f45da2bc91c0a4778bb8ced4`,
+created from `61ea067` plus dirty changes. It uses the new relink-capable 05 input;
+neither source nor predecessor guards are relaxed to reuse the failed run's
+objects. The one-shot `run_relink_replay.py` records `relink-replay-status.json`,
+logs `web-producer-relink.log`/`web-packaged-relink.log`, and only on successful
+production runs packaged test/dist then compares Development runtime digests.
+B2 remains open until those final results; B4 tagged rehearsal is also still open.
+
+At 13:35 local time the `run-f2n0wl7c` session was no longer available. Native
+Windows process enumeration found no producer/compiler processes; its log ended
+during host gperf configure without a terminal error or exit status. Record this
+attempt as **interrupted**, not a compile failure or pass. The original status,
+work and log are retained. A fresh one-shot attempt with identical frozen source
+and predecessor inputs uses `relink-replay-restart-status.json` and
+`web-producer-relink-restart.log`/`web-packaged-relink-restart.log`. No source,
+runtime or cache validation guard changed for this recovery.
+
+### Windows atomic publication and guarded recovery (2026-10-23)
+
+`run-ucq8w1dm` passed its complete SDK validation, including browser observation,
+HTTP/TLS/host ABI and `verify_dist` (`web-producer-relink-restart.log`, lines
+16864..16873), then failed at `os.replace(hidden-copy, candidate/06-web)` with
+WinError 5. Thus the producer target failed and no final SDK was published.
+Native process inspection afterwards found no browser/compiler processes. The
+exact production access-denial cause is not attributed to antivirus or any
+particular process without evidence. The original staging SDK and log remain.
+
+`crt_file_ops.atomic_replace` uses extended Windows filesystem paths and retries
+only WinError 5/32/33, at most eight attempts with 4.5 seconds total backoff. It
+propagates persistent access denial and unrelated errors. 04 and 05/06 publication
+still copy to a hidden sibling and expose the final name only through a successful
+atomic rename. No ACL change, process termination, target deletion or non-atomic
+fallback is introduced. A native directory handle deliberately opened without
+delete sharing blocks rename until released; the helper then succeeds. Fixtures
+also prove bounded exhaustion, immediate unrelated-error propagation and no POSIX
+retry. Existing rollback tests remain passing.
+
+The whole validated SDK also publishes to a disposable probe directory through
+the new helper (`publication-probe.log`, `publication-probe-result.json`), with
+equal full tree inventories and unchanged staging source, 15.719 seconds. This
+is a publication-copy probe, not final B2 acceptance or a new SHA-256 algorithm;
+its inventory fingerprint uses the existing truncated helper.
+
+The optional in-tree recovery inputs `CRT_WEB_RETRY_RUN` and
+`CRT_WEB_PREVIOUS_SOURCE_ASSET` select an explicit owned direct `run-*` child of
+the work root. Missing/outside/symlinked recovery roots are rejected. The adapter
+forwards `--reuse-work-root` and the old archive to the **existing** isolated
+driver: an unchanged predecessor and unchanged compiled inputs remain mandatory.
+Fresh runs remain the default. No arbitrary object cache or permissive resume
+flag was added; final browser/ABI/dist checks are still required.
+
+Full regression (`publication-full-unit.log`): 231 selected, 228 pass, three
+existing skips, 14.314 seconds. Exact CI tooling (`publication-ci-tooling.log`):
+94 selected, 93 pass, one existing skip, 7.453 seconds. The new helper is already
+part of the shared SDK/source tool closure.
+
+New frozen source recipe: `stage-sources-publication/06-web.json` under
+`out/build-system-producer`, SHA-256
+`a16492e42773c35f06ca14f3d448dd402ed1c6c3d1821e5ad91d3f5cddc65525`,
+created from `61ea067` plus dirty changes. The old `fbcfad...` archive is retained
+as the verified previous source. `run-ucq8w1dm/driver/build/06-web/inputs.json`
+records `packaging_retry: true` after the existing compile-input comparison and
+unchanged predecessor check. Source identity was updated honestly, not relabeled
+clean. Current one-shot recovery status is `relink-replay-publication-status.json`,
+logs `web-producer-relink-publication.log`/`web-packaged-relink-publication.log`.
+The final B2 gate remains open until successful publication, packaged test/dist
+and Full/Development inherited runtime comparison.
+
+## Windows B2 completion (2026-10-23)
+
+**Accepted here:** Windows/x86_64 native `crt-web-build/test/dist`, including
+real isolated Web production, packaged and extracted/relocated SDK validation.
+This supersedes the pending checkpoints above, not the preserved failure evidence.
+B5 still owns Linux/macOS native replay; B4 still owns clean/tagged matching
+Dev/Full release assembly. No consumer lock, public upload or source tag changed.
+
+The guarded publication-only recovery completed `crt-web-build` successfully
+(`web-producer-relink-publication.log`). It used the explicitly recorded unchanged
+relink-capable predecessor and compile-input checks; dependency inputs were not
+relabeled reusable after a code change. Both producer and disposable packaged
+test ran the existing browser, network and host ABI gates without bypasses.
+The published SDK is `out/build-system-producer/dist/06-web`.
+
+The next failure was confined to ZIP creation: `shutil.make_archive` rejected
+epoch-dated source files with `ZIP does not support timestamps before 1980`.
+The SDK and packaged test had already passed. `prepare_release_assets` now uses
+the standard library's `strict_timestamps=False` for Windows ZIP metadata,
+retaining source bytes/mtimes and empty directories; POSIX tar behavior remains
+unchanged. Archive construction uses a temporary sibling and atomic replacement,
+so failed writes preserve an existing archive. This follows the documented
+[ZIP timestamp bounds](https://docs.python.org/3/library/zipfile.html#zipfile.ZipFile),
+not a workaround that retimestamps the SDK. The failed partial ZIP is retained as
+`crt-development-windows-x86_64-06-web.zip.failed-timestamp`.
+
+Final native commands/results, driven by `out/build-system-review/finish_web_acceptance.py`:
+
+```powershell
+cmake --build out/build-system-producer --target crt-web-dist --parallel 4
+python tools/verify_dist.py --dist "out/build-system-final replay spaces/06-web" --stage 06-web
+python tools/crt_web_stage.py --phase test --sdk "out/build-system-final replay spaces/06-web" --work-root "out/build-system-final replay work spaces" --target-os windows --target-arch x86_64 --jobs 4
+```
+
+The configured explicit replay input is the **newly produced** SDK, not an old
+artifact substituted for build acceptance. All three commands exit 0. The first
+includes `crt-web-test` as a prerequisite. The ZIP's full CRC check passes and
+all 3,674 extracted payload files hash identically to the producer. The extracted
+spaces-path SDK repeats packaged browser observation, positive/negative HTTP/TLS
+and host ABI checks and ordinary verification. All 27 files named by the existing
+Development profile's runtime digest map match Full06. Full producer file hashes
+remain unchanged after all replay; no source/build-tree-hidden Dev test is claimed.
+
+Final artifact:
+
+- Name: `crt-development-windows-x86_64-06-web.zip`
+- Size: 380,422,542 bytes
+- SHA-256: `1ca97ccdedc5c115d37959002848e5c89ad12171c0a1ccfa6c5158cdbfb36c98`
+
+Evidence in `out/build-system-review`: `final-web-acceptance.json` (`passed: true`),
+`final-web-dist.log`, `final-web-extracted-verify.log` and
+`final-web-extracted-test.log`. The relocated test receipt is
+`out/build-system-final replay work spaces/test-result.json`; its evidence copy
+is `test-ici269h3`. Earlier in-place disposable test receipts remain under
+`out/build-system-producer/isolated-web`.
+
+Final regression (`final-tooling-unit.log`): 233 selected, 230 pass, three existing
+host-inapplicable skips, 14.408 seconds. Exact existing CI tooling command
+(`final-ci-tooling.log`): 96 selected, 95 pass, one existing Darwin-only skip,
+7.244 seconds. Fresh CMake/catalog checks also passed. Small regression fixtures
+extend the existing job only; no duplicate workflow/full Web build was added.
+
+Provenance remains the frozen `a16492...` source asset above, CRT commit `61ea067`
+with dirty changes at creation. The final host-side ZIP helper fix does not alter
+that compiled SDK/source identity. The local tag is `development`, and the older
+Development SDK's compile identity is retained too: matching runtime bytes is not
+a claim of matching clean producer commits. B4 must regenerate matching clean,
+tagged artifacts before release collection. No artifact was uploaded or promoted.

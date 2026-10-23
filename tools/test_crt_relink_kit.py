@@ -115,6 +115,36 @@ class Rewrite(unittest.TestCase):
         with self.assertRaises(SystemExit):
             kit.rewrite(["/sdk/tools/crt-cc", "-shared", "port-tests/install/lib/libx.a"], self.build, ["/sdk"], {}, {})
 
+    def test_ordinary_build_libraries_require_identical_installed_bytes(self):
+        sdk = Path(self.temp.name) / "sdk"
+        (sdk / "lib").mkdir(parents=True)
+        source = self.build / "port-prefix/lib/libavcodec.a"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"exact archive")
+        installed = sdk / "lib/libavcodec.a"
+        installed.write_bytes(source.read_bytes())
+        tokens = ["clang", "port-prefix/lib/libavcodec.a"]
+        self.assertEqual(["clang", "@SDK@/lib/libavcodec.a"],
+                         kit.rewrite(tokens, self.build, [str(sdk)], {}, {}))
+        installed.write_bytes(b"wrong archive with same name")
+        with self.assertRaisesRegex(SystemExit, "differs from build"):
+            kit.rewrite(tokens, self.build, [str(sdk)], {}, {})
+
+    def test_ordinary_bootstrap_import_is_retained_as_support_not_runtime(self):
+        source = self.build / "lib/libc++_dll.dll.a"
+        source.parent.mkdir()
+        source.write_bytes(b"exact import descriptor")
+        support = {}
+        result = kit.rewrite(["clang", "lib/libc++_dll.dll.a"], self.build, [], {}, support)
+        self.assertEqual(["clang", "@SUPPORT@/libc++_dll.dll.a"], result)
+        self.assertEqual(source, support["libc++_dll.dll.a"])
+
+    def test_ordinary_developer_sdk_with_declared_kit_is_checked(self):
+        dependencies = {"ffmpeg": {"relink_kit": "share/crt/relink/libcrtmedia"}}
+        with mock.patch.object(kit, "check_kit", return_value=["tampered support"]):
+            with self.assertRaisesRegex(SystemExit, "tampered support"):
+                verify_dist.validate_relink_kit(Path("sdk"), {}, dependencies)
+
     def test_colliding_object_names_stay_distinct(self) -> None:
         other = self.build / "libcrtmedia" / "CMakeFiles" / "other.dir"
         other.mkdir(parents=True)

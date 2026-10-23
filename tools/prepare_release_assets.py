@@ -42,6 +42,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -270,8 +271,21 @@ def archive_directory(sdk: Path, stage: str, version: str, target_os: str,
                       arch: str, output_dir: Path) -> Path:
     """Archive an extracted SDK directory byte-for-byte under its release name."""
     base = output_dir / archive_base_name(version, target_os, arch, stage)
-    fmt = "zip" if target_os == "windows" else "xztar"
-    return Path(shutil.make_archive(str(base), fmt, root_dir=sdk.parent,
+    if target_os == "windows":
+        from crt_file_ops import atomic_replace, filesystem_path
+        output = base.with_name(base.name + ".zip")
+        # Pinned source assets intentionally use epoch timestamps. ZIP cannot
+        # represent dates before 1980 (or after 2107): clamp archive metadata,
+        # never touch SDK bytes/mtimes or retimestamp the source checkout.
+        with tempfile.TemporaryDirectory(prefix=".crt-zip-", dir=output_dir) as directory:
+            candidate = Path(directory) / output.name
+            with zipfile.ZipFile(candidate, "w", compression=zipfile.ZIP_DEFLATED,
+                                 strict_timestamps=False) as archive:
+                for path in [sdk, *sorted(sdk.rglob("*"))]:
+                    archive.write(filesystem_path(path), path.relative_to(sdk.parent).as_posix())
+            atomic_replace(candidate, output)
+        return output
+    return Path(shutil.make_archive(str(base), "xztar", root_dir=sdk.parent,
                                     base_dir=sdk.name))
 
 

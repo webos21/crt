@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import crt_runtime_notices
+import crt_relink_kit
 import crt_source_offer
 from create_rootfs import TOYBOX_APPLETS
 from crt_dist_prerequisites import external_prerequisites_for
@@ -32,6 +33,7 @@ DIST_PORTING_TOOLS = (
     "crt_pe.py", "crt_macho.py", "crt_binary_dependencies.py",
     "crt_dev_profile.py",
     "crt_file_ops.py",
+    "crt_relink_kit.py",
 )
 DIST_PORTING_DIRS = ("recipes", "tests", "shims")
 DIST_WRAPPER_TOOLS = ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd")
@@ -633,6 +635,22 @@ def copy_media_development_dependencies(root: Path, destination: Path, prefix: P
     return manifest["redistributed_dependencies"]
 
 
+def install_media_relink_kit(build, destination, dependencies, target_os, media_installed):
+    """Ordinary media SDKs must also be valid isolated-Web predecessors."""
+    ffmpeg = next((entry for entry in dependencies if entry.get("name") == "ffmpeg"), None)
+    if ffmpeg is None:
+        return
+    relative = (crt_relink_kit.KIT_RELATIVE / "libcrtmedia").as_posix()
+    if media_installed:
+        crt_relink_kit.build_kit(build, crt_relink_kit.find_output(build, target_os), destination, "libcrtmedia")
+    elif ffmpeg.get("relink_kit") != relative:
+        raise SystemExit("inherited media SDK has no relink declaration; rebuild crt-gfx-media-dist first")
+    problems = crt_relink_kit.check_kit(destination, "libcrtmedia")
+    if problems:
+        raise SystemExit("libcrtmedia relink kit: " + "; ".join(problems))
+    ffmpeg["relink_kit"] = relative
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
@@ -731,6 +749,8 @@ def main() -> None:
         root, destination, args.stage, redistributed_dependencies)
     # FFmpeg is LGPL: a stage that ships it carries the generated source offer (tools/crt_source_offer.py).
     if any(item.get("name") == "ffmpeg" for item in redistributed_dependencies):
+        install_media_relink_kit(build_dir, destination, redistributed_dependencies, args.target_os,
+                                "crt-media" in args.component)
         offer = crt_source_offer.install_offer(destination, crt_source_offer.render_offer(
             root, crt_source_offer.load_config(root), args.stage, args.release_version,
             crt_source_offer.components_from_root(root, args.stage, True), crt_source_offer.try_commit(root)))

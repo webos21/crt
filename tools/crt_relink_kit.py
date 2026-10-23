@@ -202,6 +202,24 @@ def rewrite(tokens: list, build: Path, sdk_roots: list, objects: dict, support: 
         elif token.lower().endswith(SUPPORT_SUFFIXES) and resolved.is_file():
             support[resolved.name] = resolved
             result.append(f"@SUPPORT@/{resolved.name}")
+        elif resolved.is_file() and token.lower().endswith((".a", ".lib", ".so", ".dylib")):
+            # Ordinary CMake names build/install-prefix libraries, not the SDK.
+            # A matching basename alone never authorizes substitution.
+            candidates = [Path(root) / "lib" / resolved.name for root in sdk_roots]
+            installed = next((path for path in candidates if path.is_file()), None)
+            if installed is not None:
+                if sha256(installed) != sha256(resolved):
+                    raise SystemExit(f"installed relink input differs from build: {resolved.name}")
+                result.append(f"@SDK@/lib/{resolved.name}")
+            elif build in resolved.parents and token.lower().endswith(".dll.a"):
+                # Retain an ordinary bootstrap import descriptor verbatim as
+                # kit support, not as another runtime or a substituted archive.
+                support[resolved.name] = resolved
+                result.append(f"@SUPPORT@/{resolved.name}")
+            elif absolute and build not in resolved.parents:
+                result.append(token)
+            else:
+                raise SystemExit(f"relink library is not installed in the SDK: {original}")
         elif absolute and build not in resolved.parents:
             result.append(token)  # a host library outside the build and the SDK (recorded as such)
         else:
@@ -242,6 +260,9 @@ def build_kit(build: Path, output: str, sdk: Path, name: str, ninja: str = "ninj
         (kit / "support").mkdir()
         for support_name, source in support.items():
             shutil.copy2(source, kit / "support" / support_name)
+        (kit / "support/MANIFEST.json").write_text(json.dumps(
+            {name: sha256(source) for name, source in sorted(support.items())}, indent=2) + "\n",
+            encoding="utf-8", newline="\n")
     (kit / "objects" / "MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     recipe = {"format": 1, "name": name, "output": Path(output).name, "compiler": args[0] if "@SDK@" in args[0] else Path(args[0]).name,
               "ffmpeg_archives": list(FFMPEG_ARCHIVES), "args": args[1:]}
@@ -268,6 +289,12 @@ def check_kit(sdk: Path, name: str, kit_root: Path | None = None) -> list:
         return problems
     recipe = json.loads((kit / "relink.json").read_text(encoding="utf-8"))
     manifest = json.loads((kit / "objects" / "MANIFEST.json").read_text(encoding="utf-8"))
+    support_manifest = kit / "support/MANIFEST.json"
+    if support_manifest.is_file():
+        for filename, digest in json.loads(support_manifest.read_text(encoding="utf-8")).items():
+            path = kit / "support" / filename
+            if not path.is_file() or sha256(path) != digest:
+                problems.append(f"relink kit support {filename} is missing or differs from its manifest")
     if not manifest:
         problems.append("the relink kit has no objects")
     for object_name, digest in manifest.items():

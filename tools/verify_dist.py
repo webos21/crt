@@ -216,8 +216,10 @@ def validate_macos_bindings(dist: Path, manifest: dict) -> None:
 
 def validate_relink_kit(dist: Path, manifest: dict, dependencies: dict[str, dict]) -> None:
     """The isolated stage build of an SDK that ships FFmpeg also ships the kit to relink the shared libcrtmedia."""
-    if "ffmpeg" not in dependencies or "built_from" not in manifest:
-        return  # in-tree developer SDKs are not release artifacts and carry no kit
+    if "ffmpeg" not in dependencies:
+        return
+    if "built_from" not in manifest and "relink_kit" not in dependencies["ffmpeg"]:
+        return  # legacy in-tree developer SDK; not a valid isolated-Web predecessor
     if dependencies["ffmpeg"].get("relink_kit") != "share/crt/relink/libcrtmedia":
         raise SystemExit("the FFmpeg dependency does not declare its libcrtmedia relink kit")
     problems = crt_relink_kit.check_kit(dist, "libcrtmedia")
