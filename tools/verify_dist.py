@@ -16,6 +16,7 @@ import audit_macos_bindings
 import crt_relink_kit
 import crt_source_offer
 import crt_web_release
+import crt_dev_profile
 from crt_stage_recipe import recipe_filename_for_stage, validate_recipe
 
 
@@ -476,6 +477,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", required=True, type=Path)
     parser.add_argument("--stage", required=True)
+    parser.add_argument("--profile", choices=("dev",), help="require the Development SDK packaging profile")
     args = parser.parse_args()
     dist = args.dist.resolve()
 
@@ -486,6 +488,10 @@ def main() -> None:
     manifest = validate_manifest_schema(
         json.loads((dist / "manifest.json").read_text(encoding="utf-8")),
         args.stage)
+    if args.profile == "dev" or (dist / crt_dev_profile.SIDECAR).exists():
+        problems = crt_dev_profile.check(dist, manifest)
+        if problems:
+            raise SystemExit("Development SDK: " + "; ".join(problems))
     validate_external_prerequisites(manifest)
     redistributed = validate_redistributed_dependencies(dist, manifest)
     validate_runtime_components(args.stage, redistributed)

@@ -792,5 +792,35 @@ class PackagingTests(unittest.TestCase):
                 validate_web_stage(root, manifest, redistributed, "")
 
 
+class ExecutedRecipeTests(unittest.TestCase):
+    def test_override_is_installed_and_stale_predecessor_is_not_published(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            asset, staged = root / "asset", root / "sdk"
+            asset.mkdir()
+            destination = staged / "stages/recipes/06-web.json"
+            destination.parent.mkdir(parents=True)
+            recipe = {"schema_version": 2, "input_stage": "05-ui", "output_stage": "06-web",
+                      "target": {"os": "windows"}, "build": {"entrypoint": "tools/build_stage_06_web.py"},
+                      "source": {"url": "https://example.test/release/source.tar.xz", "archive": "source.tar.xz",
+                                 "size": 10, "sha256": "a" * 64, "source_commit": "c" * 40}}
+            destination.write_text(json.dumps(recipe))
+            (asset / "stage.json").write_text(json.dumps({"source_commit": "c" * 40}))
+            manifest = {"target": {"os": "windows", "arch": "x86_64"}}
+            # Legacy direct invocation is allowed only with the matching recipe.
+            stage.install_build_recipe(asset, staged, manifest, "a" * 64)
+            with self.assertRaisesRegex(ValueError, "verified source asset"):
+                stage.install_build_recipe(asset, staged, manifest, "b" * 64)
+            recipe["source"]["sha256"] = "b" * 64
+            receipt = asset / "stage-build-recipe.json"
+            receipt.write_text(json.dumps(recipe))
+            stage.install_build_recipe(asset, staged, manifest, "b" * 64)
+            self.assertEqual("b" * 64, json.loads(destination.read_text())["source"]["sha256"])
+            recipe["target"]["os"] = "linux"
+            receipt.write_text(json.dumps(recipe))
+            with self.assertRaisesRegex(ValueError, "verified source asset"):
+                stage.install_build_recipe(asset, staged, manifest, "b" * 64)
+
+
 if __name__ == "__main__":
     unittest.main()

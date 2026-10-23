@@ -29,6 +29,8 @@ from crt_linux_runtime import normalize_cxx_aliases
 import crt_macho
 import crt_source_offer
 import crt_web_release
+from crt_file_ops import copy_tree
+from crt_stage_recipe import validate_recipe
 from create_dist import DIST_PORTING_TOOLS, write_posix_activation
 from fetch_ports import load_recipes, resolve_recipe_order
 import build_webkit_crt_port as web
@@ -157,6 +159,23 @@ def validate_packaging_retry(archive, old_sha, asset):
     new_driver = (asset / "tools/build_stage_06_web.py").read_text()
     if previous != current or old_driver is None or not driver_roots(old_driver) <= driver_roots(new_driver) or compile_driver_identity(old_driver) != compile_driver_identity(new_driver):
         raise ValueError("compiled inputs/configuration changed: a packaging-only retry requires a fresh work-root")
+
+
+def install_build_recipe(asset, staged, manifest, source_sha256):
+    """Keep the actual verified override, not the predecessor's stale pointer."""
+    receipt = asset / "stage-build-recipe.json"
+    if not receipt.is_file():
+        receipt = staged / "stages/recipes/06-web.json"
+    recipe = json.loads(receipt.read_text(encoding="utf-8"))
+    validate_recipe(recipe)
+    metadata = json.loads((asset / "stage.json").read_text(encoding="utf-8"))
+    if (recipe["output_stage"] != "06-web" or recipe["target"]["os"] != manifest["target"]["os"]
+            or recipe["source"]["sha256"] != source_sha256
+            or recipe["source"]["source_commit"] != metadata["source_commit"]):
+        raise ValueError("executed Web source recipe does not match its verified source asset")
+    destination = staged / "stages/recipes/06-web.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(recipe, indent=2) + "\n", encoding="utf-8")
 
 
 def require_predecessor(sdk, manifest):
@@ -887,6 +906,7 @@ def main():
         staged.rename(checkpoint)
         print(f"Retained previous generated SDK checkpoint: {checkpoint}", flush=True)
     shutil.copytree(sdk, staged, symlinks=True)
+    install_build_recipe(asset, staged, manifest, args.source_sha256)
     if cross:
         # Compiler wrappers are build interfaces, not target runtime objects.
         # The 06 source asset carries the cross-aware revision; libc/libc++ and
@@ -957,7 +977,7 @@ def main():
     run(port_command, env)
     web_work = work / "webkit"
     if args.source_cache and not (web_work / "product").exists():
-        shutil.copytree(args.source_cache.resolve(), web_work / "product", symlinks=True)
+        copy_tree(args.source_cache.resolve(), web_work / "product", symlinks=True)
     # Keep OpenSSL curl private/static inside WebKit. The predecessor's media
     # library already owns a different libcurl SONAME (mbedTLS); overwriting it
     # or resolving both backends by loader order is not a packaging contract.

@@ -104,6 +104,10 @@ schema. Introduce the development contract through a versioned sidecar
 versioned manifest extension. The location/schema require joint review during
 the first implementation.
 
+The first **packaging profile** now occupies that path (see the implementation
+boundary below). It is not the general SDK Build Contract v1 specified by this
+section; CLI adoption and the remaining build/run/capability fields stay open.
+
 The producer must supply at least:
 
 1. **Identity:** source commit, release/build ID, stage, target OS/architecture,
@@ -216,8 +220,59 @@ headers or libraries, and consumes only the pinned Development SDK identity.
 The runtime closure is computed from the CLI's actual ELF/Mach-O/PE imports,
 never from a guessed list. Whether a static CLI is viable is a separate technical
 check; the default is a minimal dynamic bundle. No CA bundle is baked into the
-curl port; who supplies the CLI's trust material is a decision for the first
-implementation, not an assumption.
+curl port. The producer reference contract requires a **consumer-supplied
+explicit CA file**, peer verification and hostname verification. It does not
+inherit ambient CA environment variables or disable verification. The eventual
+CLI trust-store selection, distribution and updating policy remain CLI work.
+
+#### Implemented packaging profile boundary
+
+The producer's `share/crt/contracts/development.json` uses `format: 1` and
+`profile: dev`; this version belongs only to the reduced packaging profile,
+not to SDK manifest format 1, stage recipe version 2, port recipe version 1,
+or the proposed general development contract. Manifest `stage` remains
+`02-cxx`. Current fields describe target/version, producer and base-source
+identity, retained compile provenance, the base-manifest SHA-256, inherited
+runtime digests, explicit-CA policy and SDK-owned consumer compile options.
+Unknown predecessor identity is retained as unknown, not guessed from HEAD.
+Metadata-only retries must not upgrade unknown/dirty compile provenance into
+a clean build. `verify_dist.py --profile dev` checks this profile and the
+ordinary distribution gates together.
+
+The shared networking build and dependency-record implementation is the same
+one used by `04-gfx-media`. No graphics/media/UI/Web dependency is installed.
+Windows consumers use the existing media port's POSIX/Bionic curl-header
+persona, exposed through `consumer_compile_options`, rather than leaking host
+Winsock headers. Windows zlib's `.so` spelling is intentionally preserved:
+the shared-runtime check reads PE's DLL characteristic instead of mistaking
+an import archive for a DLL. The profile ships dependency notices, the Apache
+choice for Mbed TLS and `share/crt/development-sbom.spdx.json`; it has no FFmpeg
+or WebKit and therefore no LGPL source offer for those absent components.
+
+The local archive is `crt-<tag>-<os>-<arch>-dev.{zip,tar.xz}`, extracting to
+`dev/`. Its collector emits `SHA256SUMS-dev-<os>-<arch>` and
+`release-manifest-dev-<os>-<arch>.json`; `VERSION` must equal the actual tag.
+`crt-dev-release` compares runtime digests and known clean source/compile
+identities with the Full `02-cxx` baseline before assembly. `crt-full-release`
+collects the cumulative `06-web` Full SDK through existing release/security/
+source-offer gates, additionally comparing its inherited runtime with Dev.
+The clean collector checkout must match the producer commit. New Full collection
+also requires explicit clean creation provenance in the pinned Web source asset's
+`stage.json`; old/dirty local assets are not upgraded to release-grade by a later
+clean checkout. This additive source-asset fact does not change stage recipe
+schema version 2 or provide publisher authentication.
+The other Full stage archives remain available through their existing
+procedures; this target does not weaken isolated `04` release checks. Neither
+target uploads, signs, changes a tag, or grants new owner approval.
+
+This is an implemented producer candidate, not consumer adoption. The review
+baselines are CRT `1033c86`, CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and
+Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`. The consumer ledger was read;
+no lock, consumer repository or runnable compatibility record was changed.
+CLI must adopt the promoted producer artifact in its own ledger, after the
+remaining native gates, not label this working-tree candidate compatible.
+Evidence and pending Windows/other-host gates are in the
+[build-system acceptance record](../acceptance/build_system_acceptance.md).
 
 Do not introduce a cycle in which CRT runtime/SDK builds require the CLI.
 If CRT product assembly includes the CLI, explicitly supply the external source

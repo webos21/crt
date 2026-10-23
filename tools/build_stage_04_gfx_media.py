@@ -193,7 +193,7 @@ def rewrite_stale_macho_rpaths(root: Path, old_root: Path, new_root: Path) -> No
                 existing_rpaths.add(new_value)
 
 
-def portable_macho_dependency_paths(root: Path) -> None:
+def portable_macho_dependency_paths(root: Path, extra_roots: tuple[Path, ...] = ()) -> None:
     """Make Mach-O dylib ids/dependencies installed under `root` relocatable.
 
     The curl/mbedTLS/zlib layer (Networking & Streaming Tranche 6) is built by
@@ -208,7 +208,7 @@ def portable_macho_dependency_paths(root: Path) -> None:
     the `@loader_path` RPATH rewrite_stale_macho_rpaths() installs. Only paths
     under `root` are touched -- system/framework dependencies stay as they are.
     """
-    root_strs = {str(root), str(root.resolve())}
+    root_strs = {str(value) for path in (root, *extra_roots) for value in (path, path.resolve())}
 
     def under_root(value: str) -> bool:
         return any(value == r or value.startswith(r + os.sep) for r in root_strs)
@@ -632,8 +632,29 @@ def existing_relative_files(root: Path, patterns: tuple[str, ...]) -> list[str]:
     return sorted(set(found))
 
 
+def network_dependency_records(staged: Path, asset: Path, sources: Path) -> list[dict]:
+    """Shared Development SDK/media networking payload and notice contract."""
+    result = []
+    for name, notices, headers, libraries, patterns in (
+        ("curl", ("COPYING", "LICENSES/curl.txt"), ["include/curl"], ["lib/libcurl.a"],
+         ("lib/libcurl.so*", "lib/libcurl*.dylib", "bin/libcurl*.dll", "lib/libcurl*.dll", "lib/libcurl*.dll.a")),
+        ("mbedtls", ("LICENSE", "LICENSE.md"), ["include/mbedtls", "include/psa"],
+         ["lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a"],
+         ("lib/libmbed*.so*", "lib/libmbed*.dylib", "bin/libmbed*.dll", "lib/libmbed*.dll", "lib/libmbed*.dll.a")),
+        ("zlib", ("LICENSE", "README"), ["include/zlib.h", "include/zconf.h"], ["lib/libz.a"],
+         ("lib/libz.so*", "lib/libz*.dylib", "bin/libz*.dll", "lib/libz*.dll.a")),
+    ):
+        source = next(sources.glob(name + "-*"), None)
+        if source is None:
+            raise ValueError(f"missing verified {name} source")
+        result.append(copy_dependency_record(staged, name, asset / "porting/recipes" / (name + ".json"),
+                       first_existing(source, notices), headers, libraries, existing_relative_files(staged, patterns)))
+    return result
+
+
 def fetch_port_sources(asset: Path, staged: Path, temp_root: Path,
-                       env: dict[str, str]) -> Path:
+                       env: dict[str, str], ports: tuple[str, ...] = ("freetype", "ffmpeg", "curl"),
+                       download_cache: Path | None = None) -> Path:
     """Only the fetch+checksum-verify step -- always run, even when the
     slow configure/make/install below is skipped by the --work-root cache,
     because add_redistributed_dependencies() still needs a real verified
@@ -643,15 +664,13 @@ def fetch_port_sources(asset: Path, staged: Path, temp_root: Path,
     run([
         sys.executable, str(staged / "tools" / "fetch_ports.py"),
         "--dest", str(source_root),
-        "--cache", str(Path(asset).parent / "port-downloads"),
-        "--port", "freetype",
-        "--port", "ffmpeg",
+        "--cache", str(download_cache if download_cache is not None else Path(asset).parent / "port-downloads"),
         # Networking & Streaming Tranche 6: curl (and, through its recipe
         # dependencies, mbedtls/zlib/make) is fetched and checksum-verified
         # here too so add_redistributed_dependencies() can read each
         # license from a verified checkout; the slow build is a separate,
         # separately cached layer (build_curl_ports() below).
-        "--port", "curl",
+        *[value for name in ports for value in ("--port", name)],
     ], env, asset)
     return source_root
 
@@ -886,28 +905,7 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
             first_existing(skia_source, ("LICENSE",)),
             ["include/include", "include/modules/skcms"],
             ["lib/libskia.a"], []),
-        # Networking & Streaming Tranche 6: crtmedia's HTTP(S) transport.
-        copy_dependency_record(
-            staged, "curl", asset / "porting" / "recipes" / "curl.json",
-            first_existing(curl_source, ("COPYING", "LICENSES/curl.txt")),
-            ["include/curl"], ["lib/libcurl.a"],
-            existing_relative_files(staged, (
-                "lib/libcurl.so*", "lib/libcurl*.dylib",
-                "bin/libcurl*.dll", "lib/libcurl*.dll.a"))),
-        copy_dependency_record(
-            staged, "mbedtls", asset / "porting" / "recipes" / "mbedtls.json",
-            first_existing(mbedtls_source, ("LICENSE", "LICENSE.md")),
-            ["include/mbedtls", "include/psa"],
-            ["lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a"],
-            existing_relative_files(staged, (
-                "lib/libmbed*.so*", "lib/libmbed*.dylib",
-                "bin/libmbed*.dll", "lib/libmbed*.dll.a"))),
-        copy_dependency_record(
-            staged, "zlib", asset / "porting" / "recipes" / "zlib.json",
-            first_existing(zlib_source, ("LICENSE", "README")),
-            ["include/zlib.h", "include/zconf.h"], ["lib/libz.a"],
-            existing_relative_files(staged, (
-                "lib/libz.so*", "lib/libz*.dylib", "bin/libz*.dll", "lib/libz*.dll.a"))),
+        *network_dependency_records(staged, asset, port_sources),
     ]
     record_license_choices(staged, freetype_source, dependencies)
     retained = [item for item in manifest.get("redistributed_dependencies", [])

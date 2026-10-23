@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +30,8 @@ DIST_PORTING_TOOLS = (
     "crt-port-build.py", "fetch_ports.py", "crt-native-tool", "crt-stage-build.py",
     "crt_stage_recipe.py", "crt_dist_prerequisites.py", "crt_elf.py", "crt_text_relocate.py",
     "crt_pe.py", "crt_macho.py", "crt_binary_dependencies.py",
+    "crt_dev_profile.py",
+    "crt_file_ops.py",
 )
 DIST_PORTING_DIRS = ("recipes", "tests", "shims")
 DIST_WRAPPER_TOOLS = ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd")
@@ -561,6 +564,16 @@ set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
             "crt_shell_available": True,
         }),
     }
+    # Additive provenance, not a new manifest format. Source-stage archives
+    # already carry the immutable producer commit outside Git.
+    stage_metadata = root / "stage.json"
+    source_commit = None
+    if stage_metadata.is_file():
+        source_commit = json.loads(stage_metadata.read_text()).get("source_commit")
+    elif (root / ".git").exists():
+        source_commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+    if source_commit:
+        manifest["source_commit"] = source_commit
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (destination / "VERSION").write_text(release_version + "\n", encoding="utf-8")
 
@@ -590,15 +603,31 @@ def copy_media_development_dependencies(root: Path, destination: Path, prefix: P
             shutil.copy2(source, target)
     shutil.copy2(skia_library, destination / "lib/libskia.a")
     shutil.copytree(skia_source / "modules/skcms", destination / "include/modules/skcms", dirs_exist_ok=True)
-    # Linux crtmedia.so deliberately links the media transport dynamically.
-    # Its SONAME closure must travel too; never substitute the host libcurl.
-    for pattern in ("libcurl.so*", "libmbed*.so*", "libz.so*"):
-        for source in (prefix / "lib").glob(pattern):
-            if source.is_file():
-                copied = destination / "lib" / source.name
-                shutil.copy2(source, copied)
-                remove_absolute_runtime_paths(copied, require_origin=True)
-    from build_stage_04_gfx_media import add_redistributed_dependencies
+    # Shared networking artifacts and import libraries are part of the SDK
+    # on every OS. Windows zlib intentionally uses a PE DLL with a .so name;
+    # Mbed TLS installs its DLLs in lib/, curl installs its DLL in bin/.
+    for directory, patterns in (
+        ("lib", ("libcurl.so*", "libmbed*.so*", "libz.so*", "libcurl*.dylib", "libmbed*.dylib", "libz*.dylib",
+                 "libcurl*.dll*", "libmbed*.dll*", "libz*.dll*")),
+        ("bin", ("libcurl*.dll", "libmbed*.dll", "libz*.dll")),
+    ):
+        for pattern in patterns:
+            for source in (prefix / directory).glob(pattern):
+                if source.is_file():
+                    copied = destination / directory / source.name
+                    copied.parent.mkdir(parents=True, exist_ok=True)
+                    if copied.is_symlink() or copied.exists():
+                        copied.unlink()
+                    if source.is_symlink():
+                        copied.symlink_to(source.resolve().name)
+                    else:
+                        shutil.copy2(source, copied)
+                        with copied.open("rb") as handle:
+                            if handle.read(4) == b"\x7fELF":
+                                remove_absolute_runtime_paths(copied, require_origin=True)
+    from build_stage_04_gfx_media import add_redistributed_dependencies, portable_macho_dependency_paths
+    if sys.platform == "darwin":
+        portable_macho_dependency_paths(destination, (prefix,))
     manifest = {"redistributed_dependencies": dependencies}
     add_redistributed_dependencies(root, destination, sources, skia_source, manifest)
     return manifest["redistributed_dependencies"]

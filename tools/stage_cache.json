@@ -1,5 +1,5 @@
 {
-  "comment": "Inputs of each stage step for tools/crt_stage_cache.py. Entries are files, directories or globs relative to the repository root; test_*.py files are never inputs. A stage's hash covers its own inputs plus those of every stage in its 'includes' (transitively), so editing libc invalidates every later stage while editing libcrtui invalidates only ui and web.",
+  "comment": "Source inputs for tools/crt_stage_cache.py. Broad source globs omit unit test_*.py files, but executed command scripts and explicit inputs are always content-hashed. Stage includes are transitive. CMake also supplies configuration, external predecessors and output inventories.",
   "stages": {
     "c": {
       "inputs": [
@@ -29,7 +29,8 @@
     "cxx": {
       "inputs": [
         "libstdc++",
-        "tools/build_stage_02_cxx.py"
+        "tools/build_stage_02_cxx.py",
+        "tools/test_libcxx_runtime.py"
       ],
       "includes": [
         "c"
@@ -99,7 +100,10 @@
         "tools/build_webkit_*.py",
         "tools/fetch_webkit*.py",
         "tools/check_webkit_*.py",
-        "tools/scan_webkit_headers.py"
+        "tools/scan_webkit_headers.py",
+        "tools/test_stage_06_browser.py",
+        "tools/test_stage_06_devices.py",
+        "tools/test_crtweb_network.py"
       ],
       "includes": [
         "ui"

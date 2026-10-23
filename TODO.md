@@ -65,6 +65,8 @@ under an active tranche only to make its execution order legible.
 Preserve the accepted SDK recipes and default C-stage workflow. Target ownership
 is [build_targets.json](docs/guides/build_targets.json); scope and replay evidence
 live in the [build-system review](docs/acceptance/build_system_acceptance.md).
+Finish Windows implementation/replay first; collect Linux/macOS native replay
+as one follow-up batch, not interleaved with these implementation steps.
 
 - [x] B0 Audit the preset/dependency/cache/catalog changes against a fresh
   Windows tree; record prior five-host inventory evidence separately from
@@ -76,12 +78,23 @@ live in the [build-system review](docs/acceptance/build_system_acceptance.md).
 - [ ] B2 Add `crt-web-build/test/dist` through the existing isolated Web driver,
   with explicit predecessor, host tools, work roots and native-pair limits;
   do not count a wire-only test or skipped browser as full Web acceptance.
-- [ ] B3 Close cache correctness gaps before release automation: include
+  - [x] Native-only wiring, explicit replay inputs and rollback fixtures.
+  - [x] Produce and verify the current ordinary Windows 05-ui predecessor.
+  - [x] Fix deep Windows source copying and retain the executed external recipe;
+    preserve every pinned source file and bound aggregate error reports.
+  - [ ] Finish the fresh Windows Web build and positive packaged test/dist replay.
+- [x] B3 Close cache correctness gaps before release automation: include
   build-affecting configuration and executed test-driver inputs, and detect
   deleted payloads inside existing output directories and changed predecessors.
 - [ ] B4 Add `crt-dev-release` only after the Development SDK producer and
   verification below exist; add `crt-full-release` through existing release
   checks. Neither target uploads or approves a release implicitly.
+  - [x] Producer/profile and strict local release-target implementations;
+    Windows SDK-only static/shared HTTPS/inflate and trust-negative replay.
+  - [x] Windows normal CMake producer/consumer and relocated-path replay;
+    inherited runtime bytes match the current Full predecessor.
+  - [ ] Finish clean/tagged matching-artifact
+    positive rehearsal and final review before calling release assembly accepted.
 - [ ] B5 Replay the new entry points on supported native hosts; narrow the
   Wayland/xkbcommon target scope only after preserving explicit cross-build use
   and the clean-build dependency gate in Planned.
@@ -101,21 +114,22 @@ is assembled by `crt-cli` from its own link result. The `crt-cli` repository is 
 stays in the CLI repository. Residual-defect triage finished 2026-10-22
 ([record](docs/bringup/crt_pal_residual_triage.md)).
 
-- [ ] S0 Freeze the split in the design docs: Development SDK content rule, archive and release asset
+- [x] S0 Freeze the split in the design docs: Development SDK content rule, archive and release asset
   names, how the `dev` profile is expressed (manifest stays `02-cxx`; identity in the development-contract
   sidecar), notice/SBOM scope (no FFmpeg, so no LGPL source offer), and who supplies the CLI's TLS trust
   material (the curl port bakes in no CA bundle).
-- [ ] S1 Add a CLI-shaped reference consumer to this repository's tests (C++17: HTTPS GET with
+- [x] S1 Add a CLI-shaped reference consumer to this repository's tests (C++17: HTTPS GET with
   certificate verification plus zlib inflate) linked only through the Development SDK wrappers; its
   ELF/Mach-O/PE imports, via `crt_binary_dependencies.py`, define the runtime closure instead of a guessed list.
 - [ ] S2 Producer: build zlib, Mbed TLS and libcurl through one shared implementation with the
-  `04-gfx-media` stage builder (today they are built only there), then assemble the Development SDK on top of
+  `04-gfx-media` stage builder, then assemble the Development SDK on top of
   `02-cxx` for Linux x86_64/aarch64, macOS arm64 and Windows x64/arm64.
 - [ ] S3 Verification: `verify_dist.py` profile checks (no `03+` content, ports present static and shared,
   declared dependencies and notices, relocation, the macOS binding audit with a shared consumer, Windows
   imports resolving at load); an external build and run from the Development SDK alone, with CRT's source
   and build tree hidden.
-- [ ] S4 Release tool: `prepare_release_assets.py` publishes both kinds (checksums, release manifest, recipes
+- [ ] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
+  (`crt_sdk_release.py`) for both kinds (checksums, release manifest, recipes
   pointing at the release, `VERSION` equal to the tag) and checks that the two share the source commit and the
   runtime-file digests.
 - [ ] S5 Native replay on Linux x86_64, macOS arm64 and Windows x64 (aarch64 targets compile-only unless

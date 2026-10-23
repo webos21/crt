@@ -47,6 +47,7 @@ import tarfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from crt_file_ops import copy_tree, filesystem_path
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS = ROOT / "libcrtweb" / "tests" / "jsc"
@@ -169,7 +170,7 @@ def compose_port_source(recipe: Path, work: Path) -> Path:
         commit_source.checkout(source, checkout)
     tree = work / "src" / "webkit-crt"
     if tree.exists():
-        shutil.rmtree(tree)
+        shutil.rmtree(filesystem_path(tree))
     tree.parent.mkdir(parents=True, exist_ok=True)
     # Hard links where possible: the tree is large and only the overlay and patches write to it.
     def link_or_copy(src, dst):
@@ -177,17 +178,17 @@ def compose_port_source(recipe: Path, work: Path) -> Path:
             os.link(src, dst)
         except OSError:
             shutil.copy2(src, dst)
-    shutil.copytree(checkout, tree, ignore=shutil.ignore_patterns(".git"), copy_function=link_or_copy)
+    copy_tree(checkout, tree, ignore=shutil.ignore_patterns(".git"), copy_function=link_or_copy)
     # Break the hard links of every file a patch will touch, so the checkout stays pristine.
     manifest = json.loads((PATCHES / "manifest.json").read_text(encoding="utf-8"))
     for entry in manifest["patches"]:
         for item in entry["files"]:
-            target = tree / item["file"]
+            target = Path(filesystem_path(tree / item["file"]))
             if target.exists():
                 data = target.read_bytes()
                 target.unlink()
                 target.write_bytes(data)
-    shutil.copytree(PORT_OVERLAY, tree, dirs_exist_ok=True)
+    copy_tree(PORT_OVERLAY, tree, dirs_exist_ok=True)
     return tree
 
 

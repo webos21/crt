@@ -535,13 +535,46 @@ cmake --build --preset <preset> --target crt-web-config
 
 It writes a local `stage-config/<stage>.json` report; it does not enable options
 or certify that dependencies are built. Explicit feature-off diagnostics remain
-available through existing build targets. `crt-web-config` checks features and
-target support only: Web build/test/dist entry points remain planned; use the
-existing [isolated Web procedure](docs/acceptance/crtweb_acceptance.md#10-distribution-and-security-closure).
+available through existing build targets. Web uses the existing isolated builder,
+including its mandatory candidate checks, rather than an in-tree engine build:
+
+```sh
+cmake --build --preset <preset> --target crt-web-build
+cmake --build --preset <preset> --target crt-web-test
+cmake --build --preset <preset> --target crt-web-dist
+```
+
+These targets support native Linux/x86_64, macOS/aarch64 and Windows/x64.
+`CRT_WEB_PREDECESSOR` can select an external 05-ui SDK; `CRT_WEB_STAGE_RECIPE`,
+`CRT_WEB_STAGE_ASSET` and `CRT_WEB_SOURCE_CACHE` select pinned source inputs.
+Windows also needs the established build-host toolchain (Git Bash/POSIX Perl,
+native MinGW tools and native WebKit generators); set `CRT_WEB_HOST_PERL_LIB`
+to a prepared POSIX Perl module directory when Git's Perl lacks IPC::Cmd or
+ExtUtils::MakeMaker. It is a host-only input, fingerprinted but never packaged.
+`CRT_WEB_REPLAY_SDK` explicitly selects an existing 06-web SDK for **test/dist
+only**, never as evidence of a new build. See the
+[Web target record](docs/acceptance/build_system_acceptance.md) and
+[isolated cross-build procedure](docs/acceptance/crtweb_acceptance.md#10-distribution-and-security-closure).
 
 All port recipes can be built and tested with
 `cmake --build --preset <preset> --target port-test-recipes`; this is a separate,
 potentially long-running operation, not part of a configuration preflight.
+
+Tagged release assembly uses two local-only targets:
+
+```sh
+cmake --build --preset <preset> --target crt-dev-release
+cmake --build --preset <preset> --target crt-full-release
+```
+
+They require a real `CRT_RELEASE_TAG`, a clean source tree, matching producer
+commits and byte-identical inherited runtimes. The default `development` tag
+fails immediately. Development SDK means `02-cxx` plus zlib/Mbed TLS/curl, not
+a development-candidate Web build; Full SDK here is cumulative `06-web`.
+No target uploads a release. New producer paths are under
+[Windows acceptance](docs/acceptance/build_system_acceptance.md); Linux/macOS
+replay follows the Windows implementation, so target existence is not a claim
+that this release path has passed on every host.
 
 ### Rebuilding only what changed
 
@@ -551,9 +584,11 @@ stage, the configuration, and its command line are unchanged since its last
 success, so editing `libcrtui` reruns only the `ui` steps while editing `libc`
 reruns everything after it. Compilation is incremental through Ninja as usual.
 The imported C++ runtime smoke (`crt-libcxx-test`) is currently uncached.
-The cache is a local build optimization, not an integrity or release gate; its
-[remaining correctness checks](docs/acceptance/build_system_acceptance.md#findings-and-limits)
-are tracked separately. Force a rerun after manual changes to generated SDK contents.
+The cache also checks output inventories, executed drivers, build configuration
+and explicit predecessor/tool inputs. A missing or changed nested payload reruns
+the owning step. It is a local build optimization, not publisher authentication
+or a substitute for release verification; see the
+[cache acceptance record](docs/acceptance/build_system_acceptance.md#b3-cache-correctness).
 
 ```sh
 CRT_STAGE_CACHE=off cmake --build --preset <preset> --target crt-ui-dist   # never skip

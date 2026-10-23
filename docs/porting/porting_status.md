@@ -193,6 +193,9 @@ Key issues already resolved include MinGW version macro assumptions,
 
 ## zlib
 
+Additional Windows SDK-only static/shared C++ consumer and PE-SONAME evidence:
+[Development SDK replay](../acceptance/build_system_acceptance.md#development-sdk-windows-replay).
+
 - Version: `1.3.1`
 - Recipe: `porting/recipes/zlib.json`
 - Build system: `configure`
@@ -330,6 +333,9 @@ surface.
 
 ## mbedTLS
 
+Additional Windows static/shared TLS/trust and runtime-closure evidence:
+[Development SDK replay](../acceptance/build_system_acceptance.md#development-sdk-windows-replay).
+
 - Version: `3.6.7`
 - Recipe: `porting/recipes/mbedtls.json`
 - Build system: `configure` recipe with `skip_configure`
@@ -388,6 +394,9 @@ Important follow-ups:
   exposed the missing surface.
 
 ## curl
+
+Additional Windows SDK-only C++17 HTTPS and Bionic-header-persona evidence:
+[Development SDK replay](../acceptance/build_system_acceptance.md#development-sdk-windows-replay).
 
 - Version: `8.21.0`
 - Recipe: `porting/recipes/curl.json`

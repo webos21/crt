@@ -2,14 +2,15 @@
 """Input-hash cache for the build-tree stage steps (config, test, dist).
 
 A step is skipped when the SHA-256 of everything it depends on equals the hash recorded by its last successful
-run and the outputs it declared still exist. The hash covers, in order:
+run and its declared outputs still match their recorded content/type/link inventory. The hash covers:
 
 * the stage's source roots and files (tools/stage_cache.json), hashed by content (with a per-file cache keyed by
-  path, size and mtime so unchanged files are not read again),
+  path, size, mtime and ctime so unchanged files are not read again),
 * the hashes of the upstream steps it names with --after (so editing libc invalidates every later stage, while
   editing libcrtui invalidates only 05-ui and later),
 * the --key values (configuration that changes the result: compiler, options, release tag, ...),
-* the command line itself.
+* the command line, executed scripts (including test drivers), explicit artifact/configuration inputs,
+  resolved tools and build-affecting environment. A source/input edit during execution prevents caching.
 
 Usage:
   crt_stage_cache.py run --name NAME --stage STAGE --state-dir DIR [--after NAME ...] [--key K=V ...]
@@ -79,10 +80,10 @@ class FileHashes:
 
     def digest(self, key: str, path: Path) -> str:
         stat = path.stat()
-        stamp = [stat.st_size, stat.st_mtime_ns]
+        stamp = [stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
         cached = self.entries.get(key)
-        if cached and cached[:2] == stamp:
-            return cached[2]
+        if cached and cached[:3] == stamp:
+            return cached[3]
         sha = hashlib.sha256()
         with path.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1 << 20), b""):
@@ -137,6 +138,56 @@ def read_state(state_dir: Path, name: str) -> dict:
         return {}
 
 
+def path_inventory(paths, hashes):
+    """Content/type/link/execute-bit identity, not directory existence alone.
+
+    Ignore Git bookkeeping and Python bytecode, neither of which is a target
+    payload. Never follow directory symlinks (cycles); record their link text.
+    """
+    result = []
+    for value in sorted(map(str, paths)):
+        root = Path(value).resolve() if not Path(value).is_symlink() else Path(value).absolute()
+        def visit(path):
+            name = str(path)
+            if path.is_symlink():
+                result.append((name, "link", os.readlink(path),
+                               hashes.digest("artifact:" + name, path) if path.is_file() else ""))
+            elif path.is_file():
+                result.append((name, "file", path.stat().st_mode & 0o111,
+                               hashes.digest("artifact:" + name, path)))
+            elif path.is_dir():
+                result.append((name, "dir"))
+                for child in sorted(path.iterdir()):
+                    if child.name not in (".git", "__pycache__"):
+                        visit(child)
+            else:
+                result.append((name, "missing"))
+        visit(root)
+    return hashlib.sha256(json.dumps(result, separators=(",", ":")).encode()).hexdigest()
+
+
+def command_files(command, root):
+    """Hash executed scripts even when their test_* names are not source globs."""
+    result = []
+    for index, token in enumerate(command):
+        if token == "++":
+            continue
+        path = Path(token)
+        if not path.is_absolute():
+            local = root / path
+            path = local if local.is_file() else path
+        if path.is_file() and (path.suffix in (".py", ".cmake") or index == 0):
+            result.append(path)
+    return result
+
+
+def producer_commit(root):
+    if not (root / ".git").exists():
+        return None
+    return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True,
+                          check=True, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0).stdout.strip()
+
+
 def run_step(args: argparse.Namespace, command: list) -> int:
     config = load_config()
     if args.stage not in config["stages"]:
@@ -147,21 +198,40 @@ def run_step(args: argparse.Namespace, command: list) -> int:
     after = []
     for upstream in args.after:
         previous = read_state(state_dir, upstream)
-        after.append(f"{upstream}={previous.get('hash', 'never-ran')}")
+        after.append(f"{upstream}={previous.get('hash', 'never-ran')}:{previous.get('outputs', '')}")
     keys = dict(item.split("=", 1) for item in args.key)
+    if args.name.endswith("-dist") or args.name.startswith("stage-") or args.name in ("dev-sdk", "web-build"):
+        # Packaging/source correspondence must move to the merged commit even
+        # when that commit changed documentation only. Compilation/tests remain
+        # source-driven and do not pay for a doc-only commit.
+        keys["producer_commit"] = producer_commit(Path(args.root)) or "source-asset"
+    extra_inputs = [*getattr(args, "input", []), *getattr(args, "config_file", []),
+                    *command_files(command, Path(args.root))]
+    keys["artifact_inputs"] = path_inventory(extra_inputs, hashes)
+    # Wrapper/tool selection and environment-only compile/link settings must
+    # not survive a changed invocation just because CMake's options match.
+    for name, content in sorted(os.environ.items()):
+        if name.startswith("CRT_") and name != "CRT_STAGE_CACHE" or name in (
+                "CC", "CXX", "AR", "RANLIB", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "PATH"):
+            keys["env:" + name] = content
     value = input_hash(Path(args.root), stage, after, keys, command, hashes)
-    hashes.save()
     recorded = read_state(state_dir, args.name)
     outputs_exist = all(Path(path).exists() for path in args.output)
+    outputs = path_inventory(args.output, hashes)
+    hashes.save()
     disabled = os.environ.get("CRT_STAGE_CACHE", "").lower() in ("off", "0", "false")
-    if not disabled and recorded.get("hash") == value and recorded.get("status") == "ok" and outputs_exist:
+    if (not disabled and recorded.get("hash") == value and recorded.get("status") == "ok"
+            and outputs_exist and recorded.get("outputs") == outputs):
         print(f"[stage-cache] {args.name}: up to date ({value[:12]})", flush=True)
         if args.stamp:
             Path(args.stamp).touch()
         return 0
     reason = "disabled" if disabled else ("first run" if not recorded else
-             "outputs missing" if recorded.get("hash") == value else "inputs changed")
+             "outputs changed or missing" if recorded.get("hash") == value else "inputs changed")
     print(f"[stage-cache] {args.name}: running ({reason}, {value[:12]})", flush=True)
+    # Invalidate the old success before execution, including interruptions or
+    # spawn errors, not just ordinary nonzero process exits.
+    state_file(state_dir, args.name).unlink(missing_ok=True)
     result = 0
     sequence, current = [], []
     for token in command:
@@ -172,13 +242,28 @@ def run_step(args: argparse.Namespace, command: list) -> int:
             current.append(token)
     sequence.append(current)
     for part in sequence:  # "A ++ B": run sequentially, stop at the first failure
-        result = subprocess.run(part).returncode
+        result = subprocess.run(part, stdout=sys.stdout if hasattr(sys.stdout, "buffer") else None,
+                                stderr=sys.stderr if hasattr(sys.stderr, "buffer") else None,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0).returncode
         if result != 0:
             break
     if result == 0:
+        if not all(Path(path).exists() for path in args.output):
+            print(f"[stage-cache] {args.name}: successful command did not create its declared outputs", file=sys.stderr)
+            return 1
+        # Commands can change their inputs (the nested runtime driver owns
+        # configure stamps); never record a success against pre-run payloads.
+        keys["artifact_inputs"] = path_inventory(extra_inputs, hashes)
+        after_value = input_hash(Path(args.root), stage, after, keys, command, hashes)
+        if after_value != value:
+            print(f"[stage-cache] {args.name}: inputs changed during execution; success is not cached", flush=True)
+            hashes.save()
+            return 0
+        outputs = path_inventory(args.output, hashes)
+        hashes.save()
         state_dir.mkdir(parents=True, exist_ok=True)
         state_file(state_dir, args.name).write_text(
-            json.dumps({"name": args.name, "stage": args.stage, "hash": value, "status": "ok"}, indent=1),
+            json.dumps({"name": args.name, "stage": args.stage, "hash": value, "outputs": outputs, "status": "ok"}, indent=1),
             encoding="utf-8")
         if args.stamp:
             Path(args.stamp).touch()
@@ -198,6 +283,8 @@ def main() -> int:
     run.add_argument("--after", action="append", default=[])
     run.add_argument("--key", action="append", default=[])
     run.add_argument("--output", action="append", default=[])
+    run.add_argument("--input", action="append", default=[], help="content-pinned external file or directory")
+    run.add_argument("--config-file", action="append", default=[], help="resolved build configuration input")
     run.add_argument("--stamp", help="file touched on success or skip (the Ninja output of the step)")
     show = sub.add_parser("hash")
     show.add_argument("--stage", required=True)

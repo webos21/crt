@@ -733,40 +733,14 @@ if(CRT_USE_COMPILER_RT)
       set(CRT_COMPILER_RT_BUILTINS_SOURCE "${CRT_COMPILER_RT_BUILTINS}")
       set(CRT_COMPILER_RT_FILTER_DIR "${CMAKE_BINARY_DIR}/compiler-rt")
       set(CRT_COMPILER_RT_FILTERED "${CRT_COMPILER_RT_FILTER_DIR}/libclang_rt.builtins.a")
-      file(MAKE_DIRECTORY "${CRT_COMPILER_RT_FILTER_DIR}")
-      file(COPY_FILE "${CRT_COMPILER_RT_BUILTINS_SOURCE}"
-        "${CRT_COMPILER_RT_FILTERED}" ONLY_IF_DIFFERENT)
-      execute_process(
-        COMMAND "${CMAKE_AR}" t "${CRT_COMPILER_RT_FILTERED}"
-        OUTPUT_VARIABLE CRT_COMPILER_RT_MEMBERS
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE CRT_COMPILER_RT_LIST_RESULT)
-      if(NOT CRT_COMPILER_RT_LIST_RESULT EQUAL 0)
-        message(FATAL_ERROR "cannot inspect compiler-rt builtins with ${CMAKE_AR}")
-      endif()
-      string(REPLACE "\r\n" ";" CRT_COMPILER_RT_MEMBER_LIST "${CRT_COMPILER_RT_MEMBERS}")
-      string(REPLACE "\n" ";" CRT_COMPILER_RT_MEMBER_LIST "${CRT_COMPILER_RT_MEMBER_LIST}")
       # eprintf.c.obj is the same kind of problem: it is a GCC-compatibility
       # helper whose object also defines an inline-UCRT `fprintf` and
       # `__local_stdio_printf_options`, which resolves a consumer's `fprintf`
       # ahead of libc.dll's import library (builtins precede it on the link
       # line) and drags `__acrt_iob_func`/`__stdio_common_vfprintf` in.  No
       # builtin helper needs it.
-      set(CRT_COMPILER_RT_DROP_MEMBERS "")
-      foreach(CRT_COMPILER_RT_MEMBER IN LISTS CRT_COMPILER_RT_MEMBER_LIST)
-        if(CRT_COMPILER_RT_MEMBER MATCHES "(^|[\\\\/])(emutls|eprintf)\\.c\\.(obj|o)$")
-          list(APPEND CRT_COMPILER_RT_DROP_MEMBERS "${CRT_COMPILER_RT_MEMBER}")
-        endif()
-      endforeach()
-      foreach(CRT_COMPILER_RT_MEMBER IN LISTS CRT_COMPILER_RT_DROP_MEMBERS)
-        execute_process(
-          COMMAND "${CMAKE_AR}" d "${CRT_COMPILER_RT_FILTERED}"
-                  "${CRT_COMPILER_RT_MEMBER}"
-          RESULT_VARIABLE CRT_COMPILER_RT_FILTER_RESULT)
-        if(NOT CRT_COMPILER_RT_FILTER_RESULT EQUAL 0)
-          message(FATAL_ERROR "cannot remove ${CRT_COMPILER_RT_MEMBER} from compiler-rt builtins")
-        endif()
-      endforeach()
+      include(cmake/filter_windows_builtins.cmake)
+      crt_filter_windows_builtins("${CRT_COMPILER_RT_BUILTINS_SOURCE}" "${CRT_COMPILER_RT_FILTERED}" "${CMAKE_AR}")
       set(CRT_COMPILER_RT_BUILTINS "${CRT_COMPILER_RT_FILTERED}")
       message(STATUS "compiler-rt builtins (without emutls/eprintf): ${CRT_COMPILER_RT_BUILTINS}")
     else()
@@ -1025,15 +999,56 @@ if(Python3_Interpreter_FOUND)
   # crt_add_cached_stage_target(<target> NAME <step> STAGE <stage> [OUTPUTS <paths>] [DEPENDS <targets>]
   #                             COMMAND <cmd> [++ <cmd> ...])     ("++" runs the commands in sequence)
   function(crt_add_cached_stage_target target)
-    cmake_parse_arguments(ARG "" "NAME;STAGE" "OUTPUTS;DEPENDS;COMMAND" ${ARGN})
+    cmake_parse_arguments(ARG "" "NAME;STAGE" "OUTPUTS;INPUTS;AFTER;DEPENDS;COMMAND" ${ARGN})
     set(crt_cache_outputs)
+    if(target MATCHES "^crt-stage-[0-9]+-source$")
+      list(GET ARG_OUTPUTS 0 crt_cache_recipe)
+      get_filename_component(crt_cache_stage_id "${crt_cache_recipe}" NAME_WE)
+      list(APPEND ARG_OUTPUTS "${CRT_STAGE_SOURCE_ROOT}/crt-${CRT_RELEASE_TAG}-${CRT_TARGET_OS}-${crt_cache_stage_id}-source.tar.xz")
+    elseif(target MATCHES "-dist$" AND ARG_OUTPUTS)
+      list(GET ARG_OUTPUTS 0 crt_cache_sdk)
+      get_filename_component(crt_cache_stage_id "${crt_cache_sdk}" NAME)
+      string(TOLOWER "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" crt_cache_arch)
+      if(crt_cache_arch MATCHES "^(amd64|x64)$")
+        set(crt_cache_arch x86_64)
+      elseif(crt_cache_arch STREQUAL "arm64")
+        set(crt_cache_arch aarch64)
+      endif()
+      set(crt_cache_archive_ext tar.xz)
+      if(CRT_TARGET_OS STREQUAL "windows")
+        set(crt_cache_archive_ext zip)
+      endif()
+      list(APPEND ARG_OUTPUTS "${CRT_DIST_ROOT}/crt-${CRT_RELEASE_TAG}-${CRT_TARGET_OS}-${crt_cache_arch}-${crt_cache_stage_id}.${crt_cache_archive_ext}")
+    endif()
     foreach(crt_cache_output IN LISTS ARG_OUTPUTS)
       list(APPEND crt_cache_outputs --output "${crt_cache_output}")
+    endforeach()
+    set(crt_cache_inputs)
+    foreach(crt_cache_input IN LISTS ARG_INPUTS)
+      list(APPEND crt_cache_inputs --input "${crt_cache_input}")
+    endforeach()
+    foreach(crt_cache_dependency IN LISTS ARG_DEPENDS)
+      if(TARGET "${crt_cache_dependency}")
+        get_target_property(crt_cache_type "${crt_cache_dependency}" TYPE)
+        if(crt_cache_type MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY)$")
+          list(APPEND crt_cache_inputs --input "$<TARGET_FILE:${crt_cache_dependency}>")
+        endif()
+      endif()
+    endforeach()
+    foreach(crt_cache_upstream IN LISTS ARG_AFTER)
+      list(APPEND crt_cache_inputs --after "${crt_cache_upstream}")
+    endforeach()
+    foreach(crt_cache_tool IN ITEMS "${CMAKE_C_COMPILER}" "${CMAKE_CXX_COMPILER}"
+                                    "${CMAKE_AR}" "${CMAKE_RANLIB}" "${Python3_EXECUTABLE}")
+      if(NOT crt_cache_tool STREQUAL "")
+        list(APPEND crt_cache_inputs --input "${crt_cache_tool}")
+      endif()
     endforeach()
     add_custom_target(${target}
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt_stage_cache.py" run
         --root "${CMAKE_SOURCE_DIR}" --state-dir "${CRT_STAGE_CACHE_DIR}"
         --name "${ARG_NAME}" --stage "${ARG_STAGE}" ${CRT_STAGE_CACHE_KEYS} ${crt_cache_outputs}
+        --config-file "${CMAKE_BINARY_DIR}/CMakeCache.txt" ${crt_cache_inputs}
         -- ${ARG_COMMAND}
       DEPENDS ${ARG_DEPENDS}
       VERBATIM
@@ -1441,6 +1456,8 @@ if(Python3_Interpreter_FOUND)
   endforeach()
   if(CRT_WEB_PORT_TARGETS)
     add_custom_target(port-build-web DEPENDS ${CRT_WEB_PORT_TARGETS})
+    add_custom_target(port-test-web DEPENDS ${CRT_WEB_PORT_TEST_TARGETS})
+  endif()
 
   # Build-time prerequisites of the optional upper-layer features. The presets enable the features on a clean tree, so
   # configure no longer needs the ports, Skia or LVGL to exist; these edges make Ninja fetch/build them first.
@@ -1460,9 +1477,6 @@ if(Python3_Interpreter_FOUND)
       add_dependencies(${crt_feature_target} crtgfx-skia-build)
     endif()
   endforeach()
-    add_custom_target(port-test-web DEPENDS ${CRT_WEB_PORT_TEST_TARGETS})
-  endif()
-
   add_custom_target(port-build-configure
     DEPENDS ${CRT_CONFIGURE_PORT_TARGETS}
   )
@@ -1484,6 +1498,8 @@ endif()
 # later distributions are cumulative and depend on the preceding stage.
 # tools/create_dist.py copies wrappers and metadata, never a compiler/linker.
 include(cmake/crt_stage_config.cmake)
+include(cmake/crt_web_stage.cmake)
+include(cmake/crt_sdk_release.cmake)
 if(Python3_Interpreter_FOUND)
   add_custom_target(crt-c-build
     DEPENDS c c_shared m m_shared dl dl_shared crt1 crt_shell_artifacts port-build-make
@@ -1615,6 +1631,7 @@ if(Python3_Interpreter_FOUND)
       list(APPEND CRT_LIBCXX_DIST_DEPENDS cxx cxx_shared)
     endif()
     crt_add_cached_stage_target(crt-libcxx-dist NAME cxx-dist STAGE cxx OUTPUTS "${CRT_DIST_ROOT}/02-cxx"
+      INPUTS "${CRT_DIST_ROOT}/01-c" "${CRT_LIBCXX_INSTALL_PREFIX}"
       DEPENDS ${CRT_LIBCXX_DIST_DEPENDS} crt-stage-03-source
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
         --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
@@ -1719,6 +1736,7 @@ if(Python3_Interpreter_FOUND)
     endif()
   endif()
   crt_add_cached_stage_target(crt-gfx-simple-dist NAME gfx-simple-dist STAGE gfx-simple
+    INPUTS "${CRT_DIST_ROOT}/02-cxx"
     OUTPUTS "${CRT_DIST_ROOT}/03-gfx-simple"
     DEPENDS crt-libcxx-dist crt-gfx-simple-build crt-stage-04-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
@@ -1812,6 +1830,7 @@ if(Python3_Interpreter_FOUND)
       --skia-source "${CRTGFX_SKIA_ROOT}" --skia-library "${CRT_STAGE_SKIA_LIBRARY}")
   endif()
   crt_add_cached_stage_target(crt-gfx-media-dist NAME gfx-media-dist STAGE gfx-media
+    INPUTS "${CRT_DIST_ROOT}/03-gfx-simple"
     OUTPUTS "${CRT_DIST_ROOT}/04-gfx-media"
     DEPENDS crt-gfx-simple-dist crt-gfx-media-build crt-stage-05-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
@@ -1865,6 +1884,7 @@ if(Python3_Interpreter_FOUND)
     )
   else()
     crt_add_cached_stage_target(crt-ui-dist NAME ui-dist STAGE ui OUTPUTS "${CRT_DIST_ROOT}/05-ui"
+      INPUTS "${CRT_DIST_ROOT}/04-gfx-media"
       DEPENDS crt-gfx-media-dist crt-ui-build crt-stage-06-source
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
         --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"

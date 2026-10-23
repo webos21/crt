@@ -25,6 +25,8 @@ STAGE_VALIDATION_PROJECT_PATHS = (
     "tools/crt_pe.py",
     "tools/crt_macho.py",
     "tools/crt_binary_dependencies.py",
+    "tools/crt_dev_profile.py",
+    "tools/crt_file_ops.py",
     # create_dist.py imports it; the registry is read only for the stage that introduces a component.
     "tools/crt_runtime_notices.py",
     "third_party/crt-runtime/components.json",
@@ -555,7 +557,8 @@ def main() -> None:
     project_paths = required_project_paths(spec, args.target_os)
     source_paths = required_source_paths(root, spec, args.target_os)
     commit = git(root, "rev-parse", "HEAD")
-    if not args.allow_dirty and git(root, "status", "--porcelain"):
+    working_tree_dirty = bool(git(root, "status", "--porcelain"))
+    if not args.allow_dirty and working_tree_dirty:
         raise SystemExit("refusing to create a release source asset from a dirty worktree; use --allow-dirty only for local testing")
 
     missing = [path for path in project_paths if not (root / path).exists()]
@@ -579,6 +582,7 @@ def main() -> None:
         "input_stage": spec["input_stage"],
         "target": {"os": args.target_os},
         "source_commit": commit,
+        "working_tree_dirty": working_tree_dirty,
         "entrypoint": spec["entrypoint"],
     }
     with lzma.open(asset, "wb", preset=9) as compressed:

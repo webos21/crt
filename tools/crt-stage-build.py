@@ -130,6 +130,11 @@ def main() -> None:
         raise SystemExit("stage entrypoint escapes the extracted source") from exc
     if not entrypoint.is_file():
         raise SystemExit(f"stage entrypoint is missing: {entrypoint}")
+    if recipe["output_stage"] == "06-web":
+        # Explicit execution metadata, not a source-code patch: an external
+        # recipe override must also become the output SDK's rebuild recipe.
+        # Legacy entrypoints ignore this file; the tarball itself is unchanged.
+        (source_dir / "stage-build-recipe.json").write_text(json.dumps(recipe, indent=2) + "\n", encoding="utf-8")
     command = [
         sys.executable, str(entrypoint),
         "--sdk-root", str(sdk_root),

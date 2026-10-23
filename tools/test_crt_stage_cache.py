@@ -40,10 +40,11 @@ class StageCache(unittest.TestCase):
         if self.patch[1] is not None:
             os.environ["CRT_STAGE_CACHE"] = self.patch[1]
 
-    def run_step(self, name, stage, *, after=(), keys=(), outputs=(), command=None, stamp=None):
+    def run_step(self, name, stage, *, after=(), keys=(), outputs=(), inputs=(), config_files=(), command=None, stamp=None):
         command = command or [sys.executable, "-c", f"open({str(self.marker)!r}, 'a').write('x')"]
         args = Namespace(name=name, stage=stage, state_dir=str(self.state), root=str(self.root), after=list(after),
-                         key=list(keys), output=[str(o) for o in outputs], stamp=stamp)
+                         key=list(keys), output=[str(o) for o in outputs], input=list(inputs),
+                         config_file=list(config_files), stamp=stamp)
         with contextlib.redirect_stdout(io.StringIO()) as out:
             code = cache.run_step(args, command)
         return code, out.getvalue()
@@ -114,13 +115,15 @@ class StageCache(unittest.TestCase):
     def test_missing_output_and_key_changes_rerun(self) -> None:
         output = Path(self.temp.name) / "dist"
         output.mkdir()
-        self.run_step("c-dist", "c", outputs=[output], keys=["cc=1"])
-        self.run_step("c-dist", "c", outputs=[output], keys=["cc=1"])
+        command = [sys.executable, "-c", f"from pathlib import Path; Path({str(output)!r}).mkdir(exist_ok=True); "
+                   f"open({str(self.marker)!r}, 'a').write('x')"]
+        self.run_step("c-dist", "c", outputs=[output], keys=["cc=1"], command=command)
+        self.run_step("c-dist", "c", outputs=[output], keys=["cc=1"], command=command)
         self.assertEqual(1, self.runs())
-        self.run_step("c-dist", "c", outputs=[output], keys=["cc=2"])
+        self.run_step("c-dist", "c", outputs=[output], keys=["cc=2"], command=command)
         self.assertEqual(2, self.runs(), "a changed configuration key reruns")
         output.rmdir()
-        self.run_step("c-dist", "c", outputs=[output], keys=["cc=2"])
+        self.run_step("c-dist", "c", outputs=[output], keys=["cc=2"], command=command)
         self.assertEqual(3, self.runs(), "a missing declared output reruns")
 
     def test_cache_can_be_disabled_and_stamp_is_touched(self) -> None:
@@ -138,6 +141,92 @@ class StageCache(unittest.TestCase):
         (self.root / "tools/real.py").write_text("x\n")
         names = [name for name, _ in cache.expand(self.root, ["tools/*.py"])]
         self.assertEqual(["tools/real.py"], names)
+
+    def test_deleted_or_corrupt_nested_payload_reruns(self):
+        output = Path(self.temp.name) / "sdk"
+        command = [sys.executable, "-c", f"from pathlib import Path; p=Path({str(output)!r}); p.mkdir(exist_ok=True); "
+                   f"(p/'runtime.dll').write_text('valid'); open({str(self.marker)!r}, 'a').write('x')"]
+        self.run_step("payload", "c", outputs=[output], command=command)
+        self.run_step("payload", "c", outputs=[output], command=command)
+        self.assertEqual(1, self.runs())
+        (output / "runtime.dll").unlink()
+        self.run_step("payload", "c", outputs=[output], command=command)
+        self.assertEqual(2, self.runs())
+        (output / "runtime.dll").write_text("corrupt")
+        self.run_step("payload", "c", outputs=[output], command=command)
+        self.assertEqual(3, self.runs())
+
+    def test_executed_test_driver_is_hashed_despite_glob_exclusion(self):
+        driver = self.root / "tools/test_driver.py"
+        driver.write_text(f"open({str(self.marker)!r}, 'a').write('x')")
+        command = [sys.executable, str(driver)]
+        self.run_step("driver", "c", command=command)
+        self.run_step("driver", "c", command=command)
+        self.assertEqual(1, self.runs())
+        driver.write_text("raise SystemExit(7)")
+        self.assertEqual(7, self.run_step("driver", "c", command=command)[0])
+        self.assertEqual({}, cache.read_state(self.state, "driver"))
+
+    def test_changed_predecessor_config_and_env_are_inputs(self):
+        predecessor = Path(self.temp.name) / "predecessor.dll"
+        predecessor.write_text("original")
+        config_file = Path(self.temp.name) / "CMakeCache.txt"
+        config_file.write_text("CMAKE_C_FLAGS:STRING=-O0")
+        options = dict(inputs=[predecessor], config_files=[config_file])
+        self.run_step("inputs", "c", **options)
+        self.run_step("inputs", "c", **options)
+        self.assertEqual(1, self.runs())
+        predecessor.write_text("updated")
+        self.run_step("inputs", "c", **options)
+        config_file.write_text("CMAKE_C_FLAGS:STRING=-O2")
+        self.run_step("inputs", "c", **options)
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"CRT_CXX_RUNTIME_LINKAGE": "shared"}):
+            self.run_step("inputs", "c", **options)
+        self.assertEqual(4, self.runs())
+
+    def test_missing_declared_output_is_failure_even_with_zero_exit(self):
+        code, _ = self.run_step("missing", "c", outputs=[Path(self.temp.name) / "absent"])
+        self.assertEqual(1, code)
+        self.assertEqual({}, cache.read_state(self.state, "missing"))
+
+    def test_spawn_failure_invalidates_old_success(self):
+        self.run_step("spawn", "c")
+        with self.assertRaises(OSError):
+            self.run_step("spawn", "c", command=[str(self.root / "missing.exe")])
+        self.assertEqual({}, cache.read_state(self.state, "spawn"))
+
+    def test_symlink_target_change_invalidates_inventory(self):
+        root = Path(self.temp.name)
+        (root / "first").write_text("one")
+        (root / "second").write_text("two")
+        alias = root / "alias"
+        try:
+            alias.symlink_to("first")
+        except OSError as error:
+            self.skipTest(f"native symlinks unavailable: {error}")
+        before = cache.path_inventory([alias], cache.FileHashes(None))
+        alias.unlink()
+        alias.symlink_to("second")
+        self.assertNotEqual(before, cache.path_inventory([alias], cache.FileHashes(None)))
+
+    def test_changed_source_during_command_does_not_cache_a_false_success(self):
+        source = self.root / "libc/a.c"
+        command = [sys.executable, "-c", f"open({str(source)!r}, 'w').write('changed during execution')"]
+        self.assertEqual(0, self.run_step("racing", "c", command=command)[0])
+        self.assertEqual({}, cache.read_state(self.state, "racing"))
+
+    def test_packaging_commit_changes_without_invalidating_unchanged_tests(self):
+        from unittest.mock import patch
+        with patch.object(cache, "producer_commit", return_value="a" * 40):
+            self.run_step("c-dist", "c")
+            self.run_step("c-dist", "c")
+            self.run_step("c-test", "c")
+        self.assertEqual(2, self.runs())
+        with patch.object(cache, "producer_commit", return_value="b" * 40):
+            self.run_step("c-dist", "c")
+            self.run_step("c-test", "c")
+        self.assertEqual(3, self.runs())
 
 
 if __name__ == "__main__":

@@ -152,8 +152,18 @@ if(NOT CRT_TARGET_ARCH STREQUAL "host")
   list(APPEND CRT_LIBCXX_PLATFORM_ARGUMENTS --target-arch "${CRT_TARGET_ARCH}")
 endif()
 if(Python3_Interpreter_FOUND)
+  set(crt_libcxx_components libcxxabi libcxx)
+  if(NOT CRT_TARGET_OS STREQUAL "macos")
+    list(PREPEND crt_libcxx_components libunwind)
+  endif()
+  set(crt_libcxx_source_outputs)
+  set(crt_libcxx_config_outputs)
+  foreach(crt_libcxx_component IN LISTS crt_libcxx_components)
+    list(APPEND crt_libcxx_source_outputs "${CRT_LIBCXX_FETCH_ROOT}/${crt_libcxx_component}")
+    list(APPEND crt_libcxx_config_outputs "${CRT_LIBCXX_BUILD_ROOT}/${crt_libcxx_component}/CMakeCache.txt")
+  endforeach()
   crt_add_cached_stage_target(crt-libcxx-fetch NAME cxx-fetch STAGE cxx
-    OUTPUTS "${CRT_LIBCXX_FETCH_ROOT}"
+    OUTPUTS ${crt_libcxx_source_outputs}
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
       --root "${CMAKE_SOURCE_DIR}"
@@ -165,7 +175,8 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --phase fetch)
   crt_add_cached_stage_target(crt-libcxx-configure NAME cxx-configure STAGE cxx
-    OUTPUTS "${CRT_LIBCXX_BUILD_ROOT}"
+    OUTPUTS ${crt_libcxx_config_outputs}
+    INPUTS "${CRT_SYSROOT}"
     DEPENDS crt-libcxx-fetch
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
@@ -180,6 +191,8 @@ if(Python3_Interpreter_FOUND)
       --phase configure)
   crt_add_cached_stage_target(crt-libcxx-build NAME cxx-build STAGE cxx
     OUTPUTS "${CRT_LIBCXX_INSTALL_PREFIX}"
+    INPUTS "${CRT_SYSROOT}"
+    AFTER cxx-configure
     DEPENDS crt-libcxx-configure
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONUNBUFFERED=1
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/crt-libcxx-build.py"
@@ -205,6 +218,14 @@ if(Python3_Interpreter_FOUND)
         "${CRT_LIBCXX_SYSROOT}/lib/libc++.a" "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.a"
         "${CRT_LIBCXX_SYSROOT}/lib/libunwind.a" "${CRT_LIBCXX_SYSROOT}/lib/libc++.so"
         "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.so" "${CRT_LIBCXX_SYSROOT}/lib/libunwind.so")
+    elseif(CRT_TARGET_OS STREQUAL "windows")
+      set(CRT_LIBCXX_SYSROOT_OUTPUTS
+        "${CRT_LIBCXX_SYSROOT}/lib/libc++.a" "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.a"
+        "${CRT_LIBCXX_SYSROOT}/lib/libunwind.a"
+        "${CRT_LIBCXX_SYSROOT}/lib/libc++.dll.a" "${CRT_LIBCXX_SYSROOT}/lib/libc++abi.dll.a"
+        "${CRT_LIBCXX_SYSROOT}/lib/libunwind.dll.a"
+        "${CRT_LIBCXX_SYSROOT}/bin/libc++.dll" "${CRT_LIBCXX_SYSROOT}/bin/libc++abi.dll"
+        "${CRT_LIBCXX_SYSROOT}/bin/libunwind.dll")
     endif()
   endif()
   add_custom_target(crt-libcxx-sysroot

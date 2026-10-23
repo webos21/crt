@@ -9,7 +9,113 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-23
+
+### Repair deep Windows Web source materialization and executed-recipe identity
+
+The overnight B2 build completed its target dependencies but stopped before
+WebKit compilation while copying the complete pinned checkout into the actual
+deep work root. The aggregated Python exception contained 411 failing entries,
+not a missing upstream package: 345 files and 66 directories hit Win32 path
+limits. Preserve the failed source asset, predecessor, work directory and log.
+
+Added host-only extended-path filesystem copying for the Web cache/composition
+steps, retaining hardlink break-before-overlay semantics and all upstream files.
+Git's long-path option is per invocation, never a global setting. Copy failures
+now report the total and at most three bounded examples instead of serializing
+an enormous list. A complete deeper cache copy validates the product pin and
+pristine checkout; all formerly failing files match their sources byte-for-byte,
+all 66 directories exist, and measured destination paths span 259..302 characters.
+No source exclusions, shortened work root, registry change or new upstream patch
+was used. Native tooling/Web/distribution regressions select 206 cases: 203 pass,
+three existing host-inapplicable skips, zero failures.
+The exact existing-CI tooling command also passes all 65 cases; it gains only
+small filesystem/recipe fixtures, not another workflow or full Web build.
+
+Also fixed an external-recipe override retaining the predecessor's stale 06-web
+pointer in the result SDK. The generic driver emits a verified execution receipt;
+the Web producer validates schema/OS/SHA/commit and installs that actual recipe
+only into its staged copy. Legacy direct invocation needs an already matching
+recipe. This does not change recipe schema 2 or mutate the predecessor/tarball.
+Native execution confirms the override is staged while the complete predecessor
+inventory stays unchanged. The completed Development port builds are reused by
+the guarded metadata-only path to include the new tool helper; verification and
+both HTTPS consumer link modes pass again without upgrading compile provenance.
+
+A new source asset and fresh Web run retain the dependency/compile identity
+guards; no failed objects are relabeled as reusable. Whole Web build, packaged
+browser test/dist and clean tagged release assembly remain open in TODO. Linux/
+macOS replay is still deferred. Exact evidence and active log are in the
+[build-system acceptance](docs/acceptance/build_system_acceptance.md#deep-windows-work-root-repair-2026-10-23).
+
 ## 2026-10-22
+
+### Harden stage reuse and implement the Windows Development SDK reference path
+
+Committed/pushed the prior configuration-target checkpoint as `1033c86`, then
+implemented Web and local Dev/Full release entry points. These are not declared
+accepted yet: current Windows Web production and a clean tagged
+positive release rehearsal remain in TODO, with Linux/macOS replay explicitly
+deferred until Windows completes. Old Web SDKs were correctly rejected by the
+current SOURCE-OFFER/relink gates, never patched into passing artifacts.
+
+Completed B3 cache hardening: actual output inventories, tarball/archive outputs,
+executed-driver/complete configuration/tool/environment/predecessor inputs,
+failed-run invalidation and no caching when inputs change during execution.
+libc++ fetch/configure boundaries no longer fingerprint a parent mutated by its
+later build. Windows core replay passes 162 executed tests plus one existing
+COW skip (163 selected, 49.51 seconds), then the same target skips correctly.
+Windows tooling passes 114 regression cases including native symlink retargeting,
+real archiver filtering and atomic directory publication. The
+[cache record](docs/acceptance/build_system_acceptance.md#b3-cache-correctness)
+owns commands, observations and the local metadata-cache limitation.
+
+Implemented the reduced SDK producer through the existing media networking
+build, not new recipes. Actual Windows zlib/Mbed TLS/curl static/shared builds
+complete; packaging checks expose and correct PE/.so suffix assumptions,
+Mbed TLS DLL location declarations and absolute text metadata. A metadata-only
+retry verifies unchanged predecessor/runtime and recipe build identity, retains
+compiled artifacts/provenance and does not grant clean release identity.
+The resulting 02-cxx/dev profile verifies and its relocated C++17 reference
+consumer passes HTTPS/inflate plus wrong/missing/malformed-CA negatives in both
+link modes. Actual shared PE imports produce ten app-local SDK runtime files;
+the process runs with System32-only PATH. This is producer evidence, not CLI
+adoption or a shipping static CLI decision. The normal CMake producer/consumer
+then passes against the current ordinary 02-cxx, including another spaces-path
+replay. Its inherited core-runtime digests exactly match the current Full 05-ui
+predecessor. Both are still dirty local development artifacts, not a clean
+tagged release; the Full 06-web comparison remains pending. The cache correctly
+refuses to record producer reuse when source inputs change during compilation.
+S0/S1 are checked; multi-host S2-S5 stay open.
+
+Fresh ordinary Windows upper-stage production also exposes missing DLL import-
+library BYPRODUCTS and preparation edges incorrectly inside the non-Windows
+Web-port-list condition. Corrected the graph; current ordinary 05-ui production
+and Web-predecessor verification pass. Full Web production is still pending.
+Also eliminated configure-time compiler-rt archive mtime churn without relaxing
+the predecessor-byte fingerprint: filter privately, copy only changed bytes.
+A no-change native reconfigure/`c_shared` build now does no work. Final fresh
+catalog checks find 28 public/380 internal targets; each local release target
+separately rejects the default tag without starting a producer. Final review
+also separates the CRT source identity from WebKit's upstream source pin when
+checking Full/Development pairs.
+Windows Web host-tool preflight now exposes/fingerprints the existing POSIX
+Perl module overlay and checks prerequisites before fetching target ports.
+The initial missing-module failure is retained separately from the configured
+retry. Additional distribution/wrapper regressions select 49 tests, with two
+existing host-inapplicable skips and no failures.
+New release collectors also bind their clean checkout to the SDK producer
+commit. Stage-source `stage.json` now records creation-time dirty state
+additively; the new Full collector checks the pinned Web source asset and rejects
+legacy/dirty creation provenance instead of upgrading it from collector state.
+Old source assets remain valid local development/replay inputs. Clean-source
+and collector-mismatch fixtures pass; native tagged assembly is still pending.
+Exact failed/successful checkpoints and active build logs are in the
+[build-system acceptance](docs/acceptance/build_system_acceptance.md).
+The [SDK design](docs/design/sdk_development_contract.md#implemented-packaging-profile-boundary)
+owns the limited profile fields, trust/notice/SBOM policy and source/runtime
+release comparison. Consumer baselines were inspected read-only; no CLI/Studio
+lock, STATUS, public tag, release upload or extra CI workflow changed.
 
 ### Add bounded stage configuration preflights and tighten target-catalog checks
 

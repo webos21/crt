@@ -23,6 +23,7 @@ files" is a measured statement, not a sampled one.
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -53,7 +54,8 @@ def product_source(recipe: dict) -> dict:
 
 
 def git(repo: Path, *arguments: str, capture: bool = True, check: bool = True) -> str:
-    completed = subprocess.run(["git", "-C", str(repo), *arguments], check=check,
+    options = ["-c", "core.longpaths=true"] if os.name == "nt" else []
+    completed = subprocess.run(["git", *options, "-C", str(repo), *arguments], check=check,
                                capture_output=capture, text=True)
     return completed.stdout if capture else ""
 

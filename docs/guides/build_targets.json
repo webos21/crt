@@ -94,13 +94,35 @@
     "stage 06-web": [
       {
         "target": "crt-web-config",
-        "what": "offline prerequisite-feature and target-pair preflight; Web build/test/dist still planned"
+        "what": "offline prerequisite-feature and target-pair preflight"
+      },
+      {
+        "target": "crt-web-build",
+        "what": "produce a native 06-web SDK through the isolated driver, including its mandatory candidate validation"
+      },
+      {
+        "target": "crt-web-test",
+        "what": "replay packaged browser, HTTP/TLS and Host ABI checks on a disposable SDK copy"
+      },
+      {
+        "target": "crt-web-dist",
+        "what": "test, verify and archive 06-web locally; no publication"
       }
     ],
     "ports": [
       {
         "target": "port-test-recipes",
         "what": "build and test every porting recipe"
+      }
+    ],
+    "release": [
+      {
+        "target": "crt-dev-release",
+        "what": "build and verify the dev profile, compare the Full runtime baseline, and prepare local tagged assets"
+      },
+      {
+        "target": "crt-full-release",
+        "what": "prepare the cumulative 06-web Full SDK with existing security/source/release gates; no upload"
       }
     ],
     "maintenance": [
@@ -111,14 +133,9 @@
     ]
   },
   "os_specific": {},
-  "planned": [
-    "crt-web-build",
-    "crt-web-test",
-    "crt-web-dist",
-    "crt-dev-release",
-    "crt-full-release"
-  ],
+  "planned": [],
   "internal_stage_parts": {
+    "crt-development-sdk-test": "internal Development SDK HTTPS/inflate reference consumer gate",
     "crt-gfx-build": "graphics half of crt-gfx-media-build",
     "crt-gfx-test": "graphics half of crt-gfx-media-test",
     "crt-media-build": "media half of crt-gfx-media-build",
