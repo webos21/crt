@@ -96,7 +96,10 @@ build-structure completion gate.
     inherited runtime bytes match the current Full predecessor.
 - [ ] B5 Replay the new entry points on supported native hosts; narrow the
   Wayland/xkbcommon target scope only after preserving explicit cross-build use
-  and the clean-build dependency gate in Planned.
+  and the clean-build dependency gate in Planned. Windows/x64 and macOS/arm64
+  replayed ([macOS evidence](docs/acceptance/build_system_acceptance.md#macosarm64-native-replay-b5-2026-10-23));
+  Linux native replay is open. Narrow the stage cache key from the complete `PATH` to the identity of the
+  tools actually used.
 
 ### CRT SDK split: Full SDK and Development SDK
 

@@ -692,9 +692,15 @@ def validate_candidate(staged, work, asset, env):
         # package activation before its first instruction. No build prefix.
         candidate_env["PATH"] = os.pathsep.join((str(private / "lib"), str(staged / "bin"), candidate_env.get("PATH", "")))
     runtime_link = [] if windows else ["-Wl,-rpath," + str(staged / "lib")]
+    # The probe is a hosted C++ program with an ordinary `int main()`; the wrapper's freestanding default would
+    # mangle it (`__Z4mainv`) and leave crt1's `_start` without a `main` on the POSIX hosts.
+    # It also loads libcrtweb.dylib/.so, which binds to the SDK's shared libc: link the shared libc too, or the
+    # executable's own static libc keeps a second environ/malloc and CRTWEB_PROCESS_DIR never reaches the launcher
+    # (the macOS two-libc defect found by tools/audit_macos_bindings.py).
+    probe_env = candidate_env if windows else dict(candidate_env, CRT_CXX_HOSTED="1", CRT_CXX_RUNTIME_LINKAGE="shared")
     run([staged / ("tools/crt-c++.cmd" if windows else "tools/crt-c++"), asset / "libcrtweb/tests/webkit/crtweb_network_test.cpp",
          "-I" + str(staged / "include"), "-L" + str(staged / "lib"), "-lcrtweb",
-         *runtime_link, "-o", probe], candidate_env)
+         *runtime_link, "-o", probe], probe_env)
     network_env = dict(candidate_env, CRTWEB_PROCESS_DIR=str(private),
                        FONTCONFIG_FILE=web.crt_path(work / "packaged-browser-observation/fonts.conf") if windows else
                        str(work / "packaged-browser-observation/fonts.conf"))

@@ -423,6 +423,32 @@ class PackagingTests(unittest.TestCase):
             actual = {call.args[0].relative_to(sdk).as_posix() for call in paths.call_args_list}
             self.assertEqual(actual, {"lib/libcrtweb.so", "examples/bin/crtweb_browser"} |
                              {"libexec/crtweb/" + name for name in ("crtweb_host", "WebProcess", "NetworkProcess", "crtweb_gpu_worker")})
+    def test_network_probe_links_a_hosted_program_against_the_shared_libc_on_posix_hosts(self):
+        """The probe loads libcrtweb, which binds to the SDK's shared libc: a static libc in the executable keeps a
+        second environ, so CRTWEB_PROCESS_DIR never reaches the launcher (macOS: every network case failed)."""
+        from unittest.mock import patch
+        for target_os, windows in (("macos", False), ("linux", False), ("windows", True)):
+            with self.subTest(target_os=target_os), tempfile.TemporaryDirectory() as directory:
+                sdk, work = Path(directory) / "sdk", Path(directory) / "work"
+                compiles = []
+
+                def record(command, env=None, *rest, **keywords):
+                    if any("crtweb_network_test.cpp" in str(item) for item in command):
+                        compiles.append(dict(env or {}))
+
+                with patch.object(stage, "set_runtime_paths"), patch.object(stage, "remove_staged_absolute_elf_rpaths"), \
+                     patch.object(stage, "run", side_effect=record), patch.object(stage, "write_json"), \
+                     patch.object(stage, "normalize_candidate_paths"), \
+                     patch.object(stage.network, "run_gate", return_value={"passed": True}), \
+                     patch.object(stage.web.jsc, "host_abi_audit", return_value={"ok": True}):
+                    stage.validate_candidate(sdk, work, ROOT, {"CRT_TARGET_OS": target_os})
+                self.assertEqual(1, len(compiles), "the network probe is compiled exactly once")
+                if windows:
+                    self.assertNotIn("CRT_CXX_RUNTIME_LINKAGE", compiles[0])
+                else:
+                    self.assertEqual("shared", compiles[0].get("CRT_CXX_RUNTIME_LINKAGE"))
+                    self.assertEqual("1", compiles[0].get("CRT_CXX_HOSTED"))
+
     def test_target_discovery_includes_freetype_and_pkg_config_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

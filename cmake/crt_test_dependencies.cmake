@@ -1,0 +1,12 @@
+# Keep stage test runners usable before any all/default build has happened.
+function(crt_add_registered_test_dependencies aggregate prefix)
+  get_property(registered GLOBAL PROPERTY CRT_REGISTERED_TESTS)
+  foreach(test IN LISTS registered)
+    if(test MATCHES "${prefix}")
+      string(REGEX REPLACE "_runs$" "" executable "${test}")
+      if(TARGET "${executable}")
+        add_dependencies(${aggregate} "${executable}")
+      endif()
+    endif()
+  endforeach()
+endfunction()

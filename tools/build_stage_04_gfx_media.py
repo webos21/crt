@@ -19,6 +19,7 @@ from crt_dist_prerequisites import external_prerequisites_for
 import crt_relink_kit
 import crt_source_offer
 from crt_file_ops import atomic_replace, copy_tree
+from crt_macho import rpaths as macho_rpaths
 from crt_elf import needed_libraries, relocate_absolute_runtime_paths, remove_absolute_runtime_paths
 from crt_text_relocate import relocate_text_prefixes
 
@@ -194,6 +195,9 @@ def rewrite_stale_macho_rpaths(root: Path, old_root: Path, new_root: Path) -> No
                 existing_rpaths.add(new_value)
 
 
+_SYSTEM_RPATH_PREFIXES = ("/usr/lib", "/System/", "/Library/Frameworks")
+
+
 def portable_macho_dependency_paths(root: Path, extra_roots: tuple[Path, ...] = ()) -> None:
     """Make Mach-O dylib ids/dependencies installed under `root` relocatable.
 
@@ -243,6 +247,13 @@ def portable_macho_dependency_paths(root: Path, extra_roots: tuple[Path, ...] = 
                 subprocess.run(
                     ["install_name_tool", "-change", dep,
                      "@rpath/" + Path(dep).name, str(path)], check=True)
+        # The port link adds the wrapper's absolute SDK rpath (<sdk>/lib, or a temporary work tree's); the
+        # relative @loader_path/@executable_path entries stay. A dangling absolute rpath is rejected by
+        # verify_dist.py and would point into the build machine after publication. Operating-system locations
+        # are not ours to remove.
+        for entry in macho_rpaths(path):
+            if entry.startswith("/") and not entry.startswith(_SYSTEM_RPATH_PREFIXES):
+                subprocess.run(["install_name_tool", "-delete_rpath", entry, str(path)], check=True)
         if path.parent.name == "bin":
             listing = subprocess.run(
                 ["otool", "-l", str(path)], capture_output=True, text=True, check=False)

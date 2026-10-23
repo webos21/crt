@@ -16,6 +16,44 @@ DRIVER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(DRIVER)
 
 
+class SourcePatchTests(unittest.TestCase):
+    def test_replacement_containing_original_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.cpp"
+            original = "#elif __has_feature(cxx_thread_local)"
+            replacement = original + " && !defined(_WIN32)"
+            source.write_text(original + "\n", encoding="utf-8")
+            recipe = {"name": "fixture", "patches": [
+                {"file": source.name, "find": original, "replace": replacement}]}
+            DRIVER.apply_patches(recipe, root)
+            stamp = source.stat().st_mtime_ns
+            for _ in range(3):
+                DRIVER.apply_patches(recipe, root)
+            self.assertEqual(source.read_text(), replacement + "\n")
+            self.assertEqual(source.stat().st_mtime_ns, stamp)
+
+    def test_missing_nonempty_replacement_still_rejects_drift(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "source.cpp").write_text("unrelated upstream\n", encoding="utf-8")
+            recipe = {"name": "fixture", "patches": [
+                {"file": "source.cpp", "find": "expected", "replace": "patched"}]}
+            with self.assertRaisesRegex(SystemExit, "patch target text not found"):
+                DRIVER.apply_patches(recipe, root)
+
+    def test_deletion_remains_idempotent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source.cpp"
+            source.write_text("remove me\nkeep me\n", encoding="utf-8")
+            recipe = {"name": "fixture", "patches": [
+                {"file": source.name, "find": "remove me\n", "replace": ""}]}
+            DRIVER.apply_patches(recipe, root)
+            DRIVER.apply_patches(recipe, root)
+            self.assertEqual(source.read_text(), "keep me\n")
+
+
 class SparseFetchRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

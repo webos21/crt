@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import create_dist
+from crt_macho import rpaths as macho_rpaths
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLS = {"cc": "clang", "cxx": "clang++", "ar": "llvm-ar", "ranlib": "llvm-ranlib"}
@@ -84,6 +85,41 @@ def write_sdk(target_os: str, arch: str, triple: str, version="development") -> 
     create_dist.write_sdk_files(REPO_ROOT, dest, target_os, arch, triple,
                                 "03-gfx-simple", TOOLS, [], version)
     return dest
+
+
+@unittest.skipUnless(sys.platform == "darwin", "needs the Mach-O tools of a macOS host")
+class MachoPortableRpath(unittest.TestCase):
+    """The shared networking libraries copied into an SDK must not keep the port link's absolute rpath."""
+
+    def build_dylib(self, directory: Path, rpaths: list) -> Path:
+        source = directory / "x.c"
+        source.write_text("int crt_probe(void) { return 7; }\n", encoding="utf-8")
+        output = directory / "libprobe.dylib"
+        command = ["clang", "-dynamiclib", str(source), "-o", str(output)]
+        for entry in rpaths:
+            command += [f"-Wl,-rpath,{entry}"]
+        subprocess.run(command, check=True, capture_output=True)
+        return output
+
+    def test_absolute_rpath_is_removed_and_relative_ones_stay(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            library = self.build_dylib(Path(directory), ["/build/tree/dist/01-c/lib", "@loader_path"])
+            self.assertEqual(["/build/tree/dist/01-c/lib", "@loader_path"], macho_rpaths(library))
+            create_dist.remove_absolute_macho_rpaths(library)
+            self.assertEqual(["@loader_path"], macho_rpaths(library))
+            create_dist.remove_absolute_macho_rpaths(library)  # idempotent
+            self.assertEqual(["@loader_path"], macho_rpaths(library))
+
+
+    def test_shared_port_paths_helper_removes_only_absolute_build_rpaths(self) -> None:
+        """portable_macho_dependency_paths is used by the media SDK and the Development SDK alike."""
+        from build_stage_04_gfx_media import portable_macho_dependency_paths
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = self.build_dylib(root, ["/build/tree/dist/01-c/lib", "@loader_path", "/usr/lib/swift"])
+            portable_macho_dependency_paths(root)
+            self.assertEqual(["@loader_path", "/usr/lib/swift"], macho_rpaths(library),
+                             "the build-tree rpath goes; relative and operating-system entries stay")
 
 
 class ActivationScripts(unittest.TestCase):

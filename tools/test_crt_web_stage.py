@@ -113,7 +113,7 @@ class WebStage(unittest.TestCase):
             command = run.call_args.args[0]
             self.assertIn("--reuse-work-root", command)
             self.assertEqual(previous.resolve(), command[command.index("--previous-source-asset") + 1])
-            self.assertEqual(run_root / "driver", command[command.index("--work-root") + 1])
+            self.assertEqual((run_root / "driver").resolve(), command[command.index("--work-root") + 1])
             with self.assertRaisesRegex(ValueError, "owned direct"):
                 adapter.main(self.args("build") + ["--predecessor", str(predecessor), "--recipe", str(recipe),
                     "--retry-run", str(self.root / "outside")])

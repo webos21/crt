@@ -625,8 +625,13 @@ def copy_media_development_dependencies(root: Path, destination: Path, prefix: P
                     else:
                         shutil.copy2(source, copied)
                         with copied.open("rb") as handle:
-                            if handle.read(4) == b"\x7fELF":
-                                remove_absolute_runtime_paths(copied, require_origin=True)
+                            magic = handle.read(4)
+                        if magic == b"\x7fELF":
+                            remove_absolute_runtime_paths(copied, require_origin=True)
+                        elif sys.platform == "darwin" and copied.suffix == ".dylib":
+                            # The port link added the wrapper's absolute SDK rpath (<sdk>/lib); the library keeps its
+                            # relative @loader_path entry and resolves siblings from its own directory.
+                            remove_absolute_macho_rpaths(copied)
     from build_stage_04_gfx_media import add_redistributed_dependencies, portable_macho_dependency_paths
     if sys.platform == "darwin":
         portable_macho_dependency_paths(destination, (prefix,))

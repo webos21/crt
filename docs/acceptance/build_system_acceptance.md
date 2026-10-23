@@ -750,3 +750,54 @@ review remain required for build-system consolidation. The existing dirty
 `development` artifacts remain useful Windows acceptance evidence, not matching
 clean release inputs. No build, SDK regeneration, tag or upload was performed
 for this documentation change.
+
+## macOS/arm64 native replay (B5, 2026-10-23)
+
+Replay of the in-tree entry points on this macOS/arm64 host, under `out/macos-host-ninja-debug` (preset
+`macos-host-ninja-debug`), source `925b1d1` plus the uncommitted fixes listed below. Logs and helper scripts are
+local under `out/build-system-macos-20261023`. This accepts macOS/arm64 entry-point behavior only; it is not a
+clean/tagged release assembly, and no tag, upload or public artifact was produced.
+
+Results:
+
+- `cmake --workflow --preset macos-host-ninja-debug`: 142/142 C-stage tests; `crt-<stage>-config` preflights and the
+  catalog check (`tools/list_cmake_targets.py --check`) pass.
+- `crt-gfx-media-test` 29/29, `crt-ui-test` 9/9; `crt-c/libcxx/gfx-simple/gfx-media/ui-dist` produce and verify
+  their SDKs.
+- `crt-web-build/test/dist` complete on the real isolated Web driver: about 35 minutes for the build (8,302 WebKit
+  steps), packaged browser, HTTP/TLS and Host ABI checks, `verify_dist`, and
+  `crt-development-macos-aarch64-06-web.tar.xz` (83,880,440 bytes, SHA-256
+  `a1be973f458f64fe82df52539e70bf7af673cc60c82a569a845507fa533a0e7b`).
+- `crt-development-sdk` and `crt-development-sdk-test`: the SDK verifies and an SDK-only consumer passes its four
+  static-link HTTPS cases (verified, wrong-ca, missing-ca, malformed-ca).
+- `crt-dev-release` / `crt-full-release` reject the default `development` tag in 0 s with the version-format message,
+  before any build.
+- Cache: with nothing changed, `crt-web-test` returns in 5 s and every upstream step reports "up to date";
+  `crt-web-dist` still spends about 100 s re-verifying and re-archiving `dist/06-web` (not a cached step).
+- `tools/audit_macos_bindings.py` over the new `06-web` (148 images) and Development SDK (101 images) reports no
+  binding violation beyond the recorded pure-math note.
+
+Defects found by the native replay and fixed (each has a regression test that fails without the fix):
+
+1. macOS static link ordered the application's constructors before libc++'s standard-stream initialization:
+   `iostream` smokes crashed at start. `tools/crt-c++` now places the static C++ runtime before application objects.
+2. libc++abi patch application appended its condition on every configure, changing a source and invalidating the
+   cache; it is idempotent now (`tools/crt-libcxx-build.py`).
+3. Selected CTest entries had no build dependency on their executables: 24 of 29 media tests were Not Run on a clean
+   tree (`cmake/crt_test_dependencies.cmake`).
+4. The default `02-cxx` sysroot and dist overwrote each other; the default preset now has one publisher.
+5. Shared networking libraries (zlib, Mbed TLS, curl) copied into the media SDK and the Development SDK kept the
+   port link's absolute `LC_RPATH`, which `verify_dist` rightly rejects: `portable_macho_dependency_paths` now removes
+   absolute build-tree rpaths and keeps relative and operating-system entries.
+6. `crtui_contract_shared_test` could not find the SDK's libc++ after `crtui_shared` moved to it.
+7. The packaged network probe linked a static libc next to `libcrtweb`, which binds to the shared libc: two `environ`
+   tables, so `CRTWEB_PROCESS_DIR` never reached the launcher and all ten network cases failed with the same static
+   program that passes when linked against the shared libc. The probe is now compiled hosted and against the shared
+   libc on POSIX hosts (the same class as the Tranche 3 `curl` finding).
+
+Limits and open questions: Linux native replay remains pending. Windows/arm64 is not claimed. A cascade rerun of the
+upstream steps after a failed `crt-web-test` was observed once and could not be traced to a changed input (sources,
+command lines and `HEAD` were unchanged); the cache key includes the complete `PATH`, so a different launching
+shell invalidates every step, which should be narrowed to tool identity. The Wayland/xkbcommon target scope
+(B5's second item) is unchanged.
+

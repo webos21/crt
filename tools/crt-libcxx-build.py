@@ -495,11 +495,13 @@ def apply_patches(recipe, checkout_dir):
         target = checkout_dir / patch["file"]
         text = target.read_text(encoding="utf-8")
         find = patch["find"]
-        if patch["replace"] in text and find not in text:
-            # Already applied by a previous run -- see the recipe.json
-            # docstring's "idempotent" note above.
+        if patch["replace"] and patch["replace"] in text:
+            # Replacement may contain the original selector (for example an
+            # added && condition). Do not append that condition on every run.
             continue
         if find not in text:
+            if not patch["replace"]:
+                continue
             raise SystemExit(
                 f"{recipe['name']}: patch target text not found in {patch['file']} "
                 f"(upstream source changed? patch: {patch.get('reason', '(no reason given)')})"

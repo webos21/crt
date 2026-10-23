@@ -103,7 +103,7 @@ target_compile_definitions(crtui_shared PRIVATE CRTUI_BUILD_LIBRARY=1)
 if(CRT_TARGET_OS STREQUAL "windows")
   target_sources(crtui_shared PRIVATE $<TARGET_OBJECTS:crt_windows_dllcrt>)
 endif()
-target_link_libraries(crtui_shared PRIVATE crt_build_flags c_shared m_shared dl_shared cxx_shared)
+target_link_libraries(crtui_shared PRIVATE crt_build_flags c_shared m_shared dl_shared crt_cxx_runtime_shared)
 target_include_directories(crtui_shared PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
@@ -487,6 +487,12 @@ if(CRT_TARGET_OS STREQUAL "macos")
     -Wl,-dead_strip
   )
   target_link_libraries(crtui_contract_shared_test PRIVATE System)
+  if(CRT_USE_IMPORTED_LIBCXX)
+    # crtui_shared links the SDK's libc++ (crt_cxx_runtime_shared), whose install name is @rpath/libc++.1.dylib,
+    # so the test needs that directory (and the libc/libm/libdl it depends on) on its run path.
+    target_link_options(crtui_contract_shared_test PRIVATE
+      "-Wl,-rpath,${CRT_LIBCXX_SYSROOT}/lib" "-Wl,-rpath,${CMAKE_BINARY_DIR}/lib")
+  endif()
   crt_link_startup_end_objects(crtui_contract_shared_test)
   add_dependencies(crtui_contract_shared_test c crt1 crtui_shared)
 

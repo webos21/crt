@@ -1113,9 +1113,13 @@ add_custom_target(sysroot
 if(CRT_TARGET_OS STREQUAL "macos")
   # Match create_dist.py: install-time ranlib timestamps must not change the
   # predecessor fingerprint between lightweight and packaged SDK refreshes.
+  set(CRT_MACOS_SYSROOT_ARCHIVES
+    "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" "${CRT_SYSROOT}/lib/libdl.a")
+  if(CRT_USE_COMPILER_RT AND CRT_COMPILER_RT_BUILTINS AND EXISTS "${CRT_COMPILER_RT_BUILTINS}")
+    list(APPEND CRT_MACOS_SYSROOT_ARCHIVES "${CRT_SYSROOT}/lib/libclang_rt.builtins.a")
+  endif()
   add_custom_command(TARGET sysroot POST_BUILD
-    COMMAND "${CMAKE_RANLIB}" -D
-      "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" "${CRT_SYSROOT}/lib/libdl.a"
+    COMMAND "${CMAKE_RANLIB}" -D ${CRT_MACOS_SYSROOT_ARCHIVES}
     VERBATIM)
 endif()
 if(TARGET crtbegin_so)
@@ -1498,6 +1502,7 @@ endif()
 # later distributions are cumulative and depend on the preceding stage.
 # tools/create_dist.py copies wrappers and metadata, never a compiler/linker.
 include(cmake/crt_stage_config.cmake)
+include(cmake/crt_test_dependencies.cmake)
 include(cmake/crt_web_stage.cmake)
 include(cmake/crt_sdk_release.cmake)
 if(Python3_Interpreter_FOUND)
@@ -1642,13 +1647,11 @@ if(Python3_Interpreter_FOUND)
         --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
       ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
         --dist "${CRT_DIST_ROOT}/02-cxx" --stage 02-cxx)
-    # Both targets publish the cumulative C++ SDK at CRT_LIBCXX_SYSROOT.
-    # Serialize the writers: otherwise a distribution build can remove and
-    # replace dist/02-cxx while a concurrent sysroot refresh (or one of its
-    # consumers) is using libc++.a/libc++abi.a. Keep crt-libcxx-sysroot as the
-    # lightweight standalone entry point, then let the release-grade dist
-    # publisher add its recipe/archive/verification metadata.
-    add_dependencies(crt-libcxx-dist crt-libcxx-sysroot)
+    # Default imported-runtime sysroot is an alias of this sole publisher.
+    # The separate diagnostic/bootstrap sysroot still precedes packaging.
+    if(NOT CRT_LIBCXX_SYSROOT_USES_DIST)
+      add_dependencies(crt-libcxx-dist crt-libcxx-sysroot)
+    endif()
 
     if(CRT_USE_IMPORTED_LIBCXX)
       # Web consumers compile/link against dist/02-cxx. When requested beside
@@ -1871,6 +1874,11 @@ if(Python3_Interpreter_FOUND)
   if(TARGET crtui_contract_shared_test)
     add_dependencies(crt-ui-test crtui_contract_shared_test)
   endif()
+  # Feature-enabled and host-specific tests extend these CTest filters. Build
+  # every registered executable they select, not just the bootstrap subset.
+  crt_add_registered_test_dependencies(crt-gfx-test "^crtgfx_")
+  crt_add_registered_test_dependencies(crt-media-test "^crtmedia_")
+  crt_add_registered_test_dependencies(crt-ui-test "^crtui_")
   if(NOT CRTUI_ENABLE_LVGL)
     # The 05-ui SDK installs the ui-basic sample, which exists only when crtui's private LVGL
     # renderer is built. Fail up front with the reason instead of building 04-gfx-media and then

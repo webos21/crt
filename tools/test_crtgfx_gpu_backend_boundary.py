@@ -156,7 +156,8 @@ class CrtgfxGpuBackendBoundaryTest(unittest.TestCase):
             with self.subTest(in_tree=in_tree), tempfile.TemporaryDirectory() as directory:
                 source = Path(directory)
                 (source / "dummy.cc").write_text("int dummy;\n")
-                core = "add_library(c_shared SHARED dummy.cc)" if in_tree else ""
+                core = ("add_library(c_shared SHARED dummy.cc)\n"
+                        "add_library(m_shared SHARED dummy.cc)") if in_tree else ""
                 (source / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.25)
 project(metal_link CXX)
 set(CRT_TARGET_OS macos)
@@ -178,17 +179,22 @@ file(GENERATE OUTPUT "${{CMAKE_BINARY_DIR}}/early-core.txt"
                 result = subprocess.run(["cmake", "-S", str(source), "-B", str(build), "-G", "Ninja"],
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                early = (build / "early-core.txt").read_text().split(";")[0]
+                early_core = (build / "early-core.txt").read_text().split(";")
+                early = early_core[0]
                 if in_tree:
-                    self.assertEqual(Path(early).parent, build)
+                    self.assertEqual(Path(early).parent.resolve(), build.resolve())
                     self.assertIn("c_shared", Path(early).name)
+                    self.assertIn("m_shared", Path(early_core[1]).name)
                 else:
                     self.assertEqual(early, f"{source}/sdk/lib/libc.dylib")
+                    self.assertEqual(early_core[1], f"{source}/sdk/lib/libm.dylib")
                 commands = subprocess.check_output(["ninja", "-C", str(build), "-t", "commands",
                                                     "crtgfx_skia_shared"], text=True)
                 link = next(line for line in commands.splitlines() if "-framework Foundation" in line)
                 provider = "libc_shared" if in_tree else "/sdk/lib/libc.dylib"
                 self.assertLess(link.index(provider), link.index("-framework Foundation"))
+                math_provider = "libm_shared" if in_tree else "/sdk/lib/libm.dylib"
+                self.assertLess(link.index(math_provider), link.index("-framework Foundation"))
 
 
 if __name__ == "__main__":

@@ -228,7 +228,19 @@ if(Python3_Interpreter_FOUND)
         "${CRT_LIBCXX_SYSROOT}/bin/libunwind.dll")
     endif()
   endif()
-  add_custom_target(crt-libcxx-sysroot
+  if(CRT_USE_IMPORTED_LIBCXX AND CRT_LIBCXX_SYSROOT STREQUAL "${CRT_DIST_ROOT}/02-cxx")
+    # The normal preset has one 02-cxx publisher. Recreating a lightweight
+    # copy here would discard packaged recipes and change manifest timestamps
+    # on every consumer build, invalidating all downstream SDK caches.
+    add_custom_target(crt-libcxx-sysroot
+      BYPRODUCTS ${CRT_LIBCXX_SYSROOT_OUTPUTS}
+      COMMAND "${CMAKE_COMMAND}" -E true
+      DEPENDS crt-libcxx-dist
+      VERBATIM)
+    set(CRT_LIBCXX_SYSROOT_USES_DIST TRUE PARENT_SCOPE)
+  else()
+    # Preserve the explicitly separate sysroot/bootstrap diagnostic paths.
+    add_custom_target(crt-libcxx-sysroot
     BYPRODUCTS ${CRT_LIBCXX_SYSROOT_OUTPUTS}
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}"
@@ -244,7 +256,8 @@ if(Python3_Interpreter_FOUND)
     DEPENDS crt-libcxx-build
     COMMENT "Creating the cumulative C++ CRT sysroot"
     USES_TERMINAL
-  )
+    )
+  endif()
   set(CRT_LIBCXX_SMOKE_BINARY
     "${CMAKE_BINARY_DIR}/external/llvm-runtimes/smoke/imported_libcxx_test${CMAKE_EXECUTABLE_SUFFIX}")
   add_custom_target(crt-libcxx-smoke
@@ -258,4 +271,27 @@ if(Python3_Interpreter_FOUND)
     COMMENT "Linking and running static/shared Android libc++ through the CRT sysroot"
     USES_TERMINAL
   )
+endif()
+
+# Upper-runtime libraries must link the same C++ runtime shipped in the SDK,
+# not a bootstrap library with the same install name but different contents.
+add_library(crt_cxx_runtime_shared INTERFACE)
+if(CRT_USE_IMPORTED_LIBCXX)
+  if(CRT_TARGET_OS STREQUAL "macos")
+    set(crt_cxx_shared_suffix dylib)
+    set(crt_cxx_shared_components c++ c++abi)
+  elseif(CRT_TARGET_OS STREQUAL "windows")
+    set(crt_cxx_shared_suffix dll.a)
+    set(crt_cxx_shared_components c++ c++abi unwind)
+  else()
+    set(crt_cxx_shared_suffix so)
+    set(crt_cxx_shared_components c++ c++abi unwind)
+  endif()
+  foreach(component IN LISTS crt_cxx_shared_components)
+    target_link_libraries(crt_cxx_runtime_shared INTERFACE
+      "${CRT_LIBCXX_SYSROOT}/lib/lib${component}.${crt_cxx_shared_suffix}")
+  endforeach()
+  add_dependencies(crt_cxx_runtime_shared crt-libcxx-sysroot)
+else()
+  target_link_libraries(crt_cxx_runtime_shared INTERFACE cxx_shared)
 endif()

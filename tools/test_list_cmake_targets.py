@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for tools/list_cmake_targets.py (classification only; the ninja call is exercised by CI)."""
+"""Target-catalog and stage-test dependency fixtures; no runtime compilation."""
 
 import json
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +16,38 @@ CATALOG = {"groups": {"stage 01-c": [{"target": "crt-c-build"}, {"target": "crt-
                       "ports": [{"target": "port-test-recipes"}]},
            "os_specific": {"crt-win-only": ["windows"]},
            "internal_stage_parts": {"crt-gfx-build": "part"}}
+
+
+class StageTestDependencies(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("cmake") and shutil.which("ninja"), "needs host CMake/Ninja")
+    def test_selected_registered_targets_are_built_without_default_build(self):
+        with tempfile.TemporaryDirectory(prefix="stage test dependencies ") as directory:
+            root = Path(directory)
+            helper = lt.ROOT / "cmake/crt_test_dependencies.cmake"
+            (root / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 3.20)\nproject(Fixture NONE)\n'
+                f'include("{helper.as_posix()}")\n'
+                'foreach(stage gfx media ui)\n'
+                '  add_custom_target(crt-${stage}-test)\n'
+                '  add_custom_target(crt${stage}_feature_test COMMAND "${CMAKE_COMMAND}" -E touch "${stage}.passed")\n'
+                '  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crt${stage}_feature_test_runs)\n'
+                'endforeach()\n'
+                'set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS crtgfx_python_unit_runs)\n'
+                'foreach(stage gfx media ui)\n'
+                '  crt_add_registered_test_dependencies(crt-${stage}-test "^crt${stage}_")\n'
+                'endforeach()\n', encoding="utf-8")
+            build = root / "build"
+            configured = subprocess.run(["cmake", "-S", str(root), "-B", str(build), "-G", "Ninja"],
+                                        capture_output=True, text=True)
+            self.assertEqual(configured.returncode, 0, configured.stdout + configured.stderr)
+            for stage in ("gfx", "media", "ui"):
+                result = subprocess.run(["cmake", "--build", str(build), "--target", f"crt-{stage}-test"],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertTrue((build / f"{stage}.passed").is_file())
+                for other in ({"gfx", "media", "ui"} - {stage}):
+                    self.assertFalse((build / f"{other}.passed").exists())
+                (build / f"{stage}.passed").unlink()
 
 
 class Classify(unittest.TestCase):

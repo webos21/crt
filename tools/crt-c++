@@ -636,9 +636,8 @@ else
   libs="${crt_sysroot_link}/lib/crt1.o -L${crt_sysroot_link}/lib"
 fi
 # See the matching declaration in tools/crt-cc: prelibs holds objects that
-# must land on the link line *before* the user arguments -- currently only
-# Windows' .ctors/.dtors "begin" sentinel needs this (see the windows)
-# case's own comment below). Empty everywhere else.
+# must land on the link line *before* the user arguments: Windows' constructor
+# begin sentinel and Darwin's static C++ runtime (see the platform branches).
 prelibs=""
 # See the matching comment in tools/crt-cc: on Linux, the static archives
 # are only safe to link into an executable (never compiled with -fPIC),
@@ -673,8 +672,12 @@ case "$target_os" in
       # allocation object from libc++.a and apply libc++'s own Darwin
       # not-weak policy so dyld cannot interpose the host C++ runtime. Avoid
       # force-loading the whole archive: that would run unused iostream
-      # initializers and change ordinary static archive semantics.
-      cxx_runtime_libs="-Wl,-u,__Znwm -Wl,-u,__ZnwmSt11align_val_t -Wl,-force_symbols_not_weak_list,$notweak_list ${crt_sysroot_link}/lib/libc++.a $cxx_abi_lib"
+      # initializers and change ordinary static archive semantics. Mach-O
+      # initializer order follows input order across objects, so place the
+      # archive before application objects: a selected iostream member must
+      # initialize its streams before application global constructors use them.
+      prelibs="$prelibs -Wl,-u,__Znwm -Wl,-u,__ZnwmSt11align_val_t -Wl,-force_symbols_not_weak_list,$notweak_list ${crt_sysroot_link}/lib/libc++.a $cxx_abi_lib"
+      cxx_runtime_libs=""
     fi
     if [ "$shared_mode" -eq 1 ] || [ "$runtime_linkage" = shared ]; then
       crt_core_libs="${crt_sysroot_link}/lib/libc.dylib ${crt_sysroot_link}/lib/libm.dylib ${crt_sysroot_link}/lib/libdl.dylib"
