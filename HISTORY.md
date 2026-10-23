@@ -11,6 +11,24 @@ substantive update.
 
 ## 2026-10-23
 
+### Separate release qualification from build-system consolidation
+
+Split B4's completed local SDK producer/release-target implementation and Windows
+replay from the unperformed clean/tagged positive release rehearsal. B4 is checked
+only for that implementation scope; build-system consolidation still requires B5
+native replay and final entry-point review. The independent Planned item
+`Release qualification and assembly rehearsal` now owns matching clean source /
+versioned Development and Full artifacts, real positive release collection and
+final artifact review. The SDK split's S4 links to that single rehearsal rather
+than scheduling another copy.
+
+Preserved all provenance and release checks: existing dirty `development` SDKs
+are not relabeled by later commits, and runtime byte equality is not matching
+clean producer identity. The acceptance document records the new scope and
+interprets earlier combined-B4 checkpoints without erasing their evidence.
+Documentation-only review; no build, tag, upload, consumer-lock change or public
+release. See the [owning acceptance contract](docs/acceptance/build_system_acceptance.md#release-qualification-scope-split-2026-10-23).
+
 ### Complete Windows B2 Web production and extracted-archive acceptance
 
 `crt-web-build` now succeeds through the isolated producer and atomic publication;

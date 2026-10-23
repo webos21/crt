@@ -8,6 +8,11 @@ owns user-facing target names; [distribution](../guides/distribution.md) owns
 SDK construction and isolation. [TODO](../../TODO.md#build-system-consolidation)
 owns the ordered B0-B5 work. Existing Full SDK and proposed Development SDK
 production remain separate from release publication approval.
+Build-system consolidation closes after native entry-point replay and final
+review, not after an actual clean/tagged release collection. The separate
+[release qualification item](../../TODO.md#release-qualification-and-assembly-rehearsal)
+retains that positive rehearsal and its final artifact review; see the
+[scope split](#release-qualification-scope-split-2026-10-23).
 
 ## B0 baseline review (2026-10-22)
 
@@ -645,8 +650,10 @@ and Full/Development inherited runtime comparison.
 **Accepted here:** Windows/x86_64 native `crt-web-build/test/dist`, including
 real isolated Web production, packaged and extracted/relocated SDK validation.
 This supersedes the pending checkpoints above, not the preserved failure evidence.
-B5 still owns Linux/macOS native replay; B4 still owns clean/tagged matching
-Dev/Full release assembly. No consumer lock, public upload or source tag changed.
+B5 still owns Linux/macOS native replay. Clean/tagged matching Dev/Full release
+assembly remains unaccepted and is now tracked in the separate release
+qualification item below, not B4's implementation scope. No consumer lock,
+public upload or source tag changed.
 
 The guarded publication-only recovery completed `crt-web-build` successfully
 (`web-producer-relink-publication.log`). It used the explicitly recorded unchanged
@@ -706,5 +713,40 @@ Provenance remains the frozen `a16492...` source asset above, CRT commit `61ea06
 with dirty changes at creation. The final host-side ZIP helper fix does not alter
 that compiled SDK/source identity. The local tag is `development`, and the older
 Development SDK's compile identity is retained too: matching runtime bytes is not
-a claim of matching clean producer commits. B4 must regenerate matching clean,
-tagged artifacts before release collection. No artifact was uploaded or promoted.
+a claim of matching clean producer commits. The separate release qualification
+must regenerate matching clean, tagged artifacts before release collection.
+No artifact was uploaded or promoted.
+
+## Release qualification scope split (2026-10-23)
+
+B4 is complete for local Development SDK production, the strict
+`crt-dev-release` / `crt-full-release` implementations, regression fixtures and
+the recorded Windows producer/consumer/relocation replay. It does **not** accept
+actual clean/tagged release assembly. Earlier checkpoints calling that remaining
+rehearsal "B4" describe the former combined scope; their test results and failure
+evidence are unchanged.
+
+The independent [Planned work](../../TODO.md#release-qualification-and-assembly-rehearsal)
+starts after build-system consolidation and the required native SDK producer /
+verification gates. Before accepting local release assembly it must establish:
+
+1. A selected release/rehearsal version and one fixed, clean CRT source commit
+   for both Development and Full SDKs and the corresponding source assets.
+   Producer/base/compile and collector identities must satisfy the existing
+   equality/cleanliness checks; `VERSION` and recipe release URLs must match the
+   chosen version. A later clean commit cannot relabel an older dirty SDK.
+2. Real positive `crt-dev-release` and `crt-full-release` runs on those matching
+   artifacts, not just synthetic fixtures or default-tag rejection. Retain the
+   archive/extraction verification, checksums, release manifests, source-offer /
+   security checks and inherited-runtime byte equality without bypasses.
+3. Final review of the exact artifact identities, commands, results and limits
+   before marking release assembly accepted. Tag creation, upload and public
+   publication remain separately authorized actions; a local rehearsal grants
+   none of them implicitly.
+
+This is a scheduling/ownership split only: no release gate is weakened and no
+native replay is newly claimed. B5 Linux/macOS replay and final build-entry-point
+review remain required for build-system consolidation. The existing dirty
+`development` artifacts remain useful Windows acceptance evidence, not matching
+clean release inputs. No build, SDK regeneration, tag or upload was performed
+for this documentation change.

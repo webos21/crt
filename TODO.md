@@ -67,6 +67,9 @@ is [build_targets.json](docs/guides/build_targets.json); scope and replay eviden
 live in the [build-system review](docs/acceptance/build_system_acceptance.md).
 Finish Windows implementation/replay first; collect Linux/macOS native replay
 as one follow-up batch, not interleaved with these implementation steps.
+Close this consolidation after B5 and final build-entry-point review; actual
+clean/tagged release qualification is the separate Planned item below, not a
+build-structure completion gate.
 
 - [x] B0 Audit the preset/dependency/cache/catalog changes against a fresh
   Windows tree; record prior five-host inventory evidence separately from
@@ -82,15 +85,15 @@ as one follow-up batch, not interleaved with these implementation steps.
 - [x] B3 Close cache correctness gaps before release automation: include
   build-affecting configuration and executed test-driver inputs, and detect
   deleted payloads inside existing output directories and changed predecessors.
-- [ ] B4 Add `crt-dev-release` only after the Development SDK producer and
-  verification below exist; add `crt-full-release` through existing release
-  checks. Neither target uploads or approves a release implicitly.
+- [x] B4 Implement the Development SDK producer and `crt-dev-release` /
+  `crt-full-release` entry points with strict local release gates and regression
+  coverage. This closes implementation and Windows replay only, not actual
+  clean/tagged release assembly acceptance
+  ([scope](docs/acceptance/build_system_acceptance.md#release-qualification-scope-split-2026-10-23)).
   - [x] Producer/profile and strict local release-target implementations;
     Windows SDK-only static/shared HTTPS/inflate and trust-negative replay.
   - [x] Windows normal CMake producer/consumer and relocated-path replay;
     inherited runtime bytes match the current Full predecessor.
-  - [ ] Finish clean/tagged matching-artifact
-    positive rehearsal and final review before calling release assembly accepted.
 - [ ] B5 Replay the new entry points on supported native hosts; narrow the
   Wayland/xkbcommon target scope only after preserving explicit cross-build use
   and the clean-build dependency gate in Planned.
@@ -127,7 +130,8 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
 - [ ] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
   (`crt_sdk_release.py`) for both kinds (checksums, release manifest, recipes
   pointing at the release, `VERSION` equal to the tag) and checks that the two share the source commit and the
-  runtime-file digests.
+  runtime-file digests. Local implementation/fixtures are B4 evidence; actual positive collection belongs to
+  [release qualification](#release-qualification-and-assembly-rehearsal), not a second rehearsal here.
 - [ ] S5 Native replay on Linux x86_64, macOS arm64 and Windows x64 (aarch64 targets compile-only unless
   run natively), including negative cases (missing port, mismatched digest, stale Full SDK). Hand the
   identity to `crt-cli`, whose lock owns adoption.
@@ -141,6 +145,20 @@ SDK Producer Contract Gate P0 below continues after, and partly through, the SDK
 The remaining sections are independent follow-ups, not a prerequisite chain for
 CLI/Studio or a reopening of accepted SDK stages; long-term extensions stay
 conditional on a real consumer.
+
+### Release qualification and assembly rehearsal
+
+Start after build-system consolidation and the required native SDK producer /
+verification gates. B4 supplied the local tools, not release-qualified artifacts;
+the [acceptance contract](docs/acceptance/build_system_acceptance.md#release-qualification-scope-split-2026-10-23)
+owns the checks and existing provenance limitations.
+
+- [ ] Select a clean fixed source commit and release/rehearsal version; generate
+  matching Development/Full SDKs and source assets without relabeling old builds.
+- [ ] Run real `crt-dev-release` and `crt-full-release` positive collection;
+  verify archives, checksums, manifests, source identity and runtime equality.
+- [ ] Complete final evidence review before accepting release assembly. Tag
+  creation, upload and public release require separate authorization.
 
 ### CRT developer experience: SDK -> CLI -> Studio
 
