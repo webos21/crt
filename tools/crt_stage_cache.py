@@ -10,7 +10,7 @@ run and its declared outputs still match their recorded content/type/link invent
   editing libcrtui invalidates only 05-ui and later),
 * the --key values (configuration that changes the result: compiler, options, release tag, ...),
 * the command line, executed scripts (including test drivers), explicit artifact/configuration inputs,
-  resolved tools and build-affecting environment. A source/input edit during execution prevents caching.
+  the identity of the resolved tools (not the PATH string) and build-affecting environment. A source/input edit during execution prevents caching.
 
 Usage:
   crt_stage_cache.py run --name NAME --stage STAGE --state-dir DIR [--after NAME ...] [--key K=V ...]
@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -181,6 +182,27 @@ def command_files(command, root):
     return result
 
 
+def tool_identity(programs, path=None):
+    """Identity of the programs a step may run, resolved through PATH.
+
+    The key is what was found (real path, size, modification time), never the PATH string: another shell, a
+    reordered PATH or an unrelated directory must not invalidate a step whose tools are the same files.
+    """
+    found = []
+    for name in sorted(programs):
+        located = shutil.which(name, path=path)
+        if not located:
+            found.append((name, None))
+            continue
+        real = os.path.realpath(located)
+        try:
+            status = os.stat(real)
+            found.append((name, real, status.st_size, status.st_mtime_ns))
+        except OSError:
+            found.append((name, real, None, None))
+    return hashlib.sha256(json.dumps(found, separators=(",", ":")).encode()).hexdigest()
+
+
 def producer_commit(root):
     if not (root / ".git").exists():
         return None
@@ -212,8 +234,10 @@ def run_step(args: argparse.Namespace, command: list) -> int:
     # not survive a changed invocation just because CMake's options match.
     for name, content in sorted(os.environ.items()):
         if name.startswith("CRT_") and name != "CRT_STAGE_CACHE" or name in (
-                "CC", "CXX", "AR", "RANLIB", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "PATH"):
+                "CC", "CXX", "AR", "RANLIB", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS"):
             keys["env:" + name] = content
+    # PATH itself is not a key (see tool_identity): the programs it resolves are.
+    keys["tools"] = tool_identity(config.get("tool_identity", {}).get("programs", ()), os.environ.get("PATH"))
     value = input_hash(Path(args.root), stage, after, keys, command, hashes)
     recorded = read_state(state_dir, args.name)
     outputs_exist = all(Path(path).exists() for path in args.output)

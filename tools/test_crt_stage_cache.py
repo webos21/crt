@@ -15,6 +15,69 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crt_stage_cache as cache
 
 
+class ToolIdentity(unittest.TestCase):
+    """The cache key follows which tool files are found, not the PATH string."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.first, self.second, self.unrelated = (self.base / n for n in ("first", "second", "unrelated"))
+        for directory in (self.first, self.second, self.unrelated):
+            directory.mkdir()
+
+    def tool(self, directory: Path, name: str = "faketool", text: str = "#!/bin/sh\n") -> Path:
+        path = directory / name
+        path.write_text(text)
+        path.chmod(0o755)
+        return path
+
+    def identity(self, *directories: Path, names=("faketool",)) -> str:
+        return cache.tool_identity(names, os.pathsep.join(str(d) for d in directories))
+
+    def test_unrelated_and_reordered_directories_do_not_change_the_identity(self) -> None:
+        self.tool(self.first)
+        baseline = self.identity(self.first)
+        self.assertEqual(baseline, self.identity(self.unrelated, self.first))
+        self.assertEqual(baseline, self.identity(self.first, self.unrelated))
+        self.assertEqual(baseline, self.identity(self.unrelated, self.first, self.unrelated))
+
+    def test_a_different_file_found_first_changes_the_identity(self) -> None:
+        self.tool(self.first)
+        self.tool(self.second)
+        self.assertNotEqual(self.identity(self.first, self.second), self.identity(self.second, self.first))
+
+    def test_a_modified_tool_changes_the_identity(self) -> None:
+        path = self.tool(self.first)
+        before = self.identity(self.first)
+        path.write_text("#!/bin/sh\necho changed\n")
+        self.assertNotEqual(before, self.identity(self.first))
+
+    def test_a_missing_tool_is_recorded_and_installing_it_changes_the_identity(self) -> None:
+        absent = self.identity(self.first)
+        self.assertEqual(absent, self.identity(self.unrelated, self.first), "still absent")
+        self.tool(self.first)
+        self.assertNotEqual(absent, self.identity(self.first))
+
+    @unittest.skipIf(os.name == "nt", "needs POSIX symlinks")
+    def test_a_symlink_is_identified_by_its_target_not_its_name(self) -> None:
+        real = self.tool(self.first, "realtool")
+        (self.second / "faketool").symlink_to(real)
+        (self.unrelated / "faketool").symlink_to(real)
+        self.assertEqual(self.identity(self.second), self.identity(self.unrelated))
+        other = self.tool(self.first, "othertool", "#!/bin/sh\necho other\n")
+        (self.unrelated / "faketool").unlink()
+        (self.unrelated / "faketool").symlink_to(other)
+        self.assertNotEqual(self.identity(self.second), self.identity(self.unrelated))
+
+    def test_only_listed_programs_count(self) -> None:
+        self.tool(self.first, "listed")
+        self.tool(self.first, "unlisted")
+        before = self.identity(self.first, names=("listed",))
+        (self.first / "unlisted").write_text("changed")
+        self.assertEqual(before, self.identity(self.first, names=("listed",)))
+
+
 class StageCache(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -51,6 +114,27 @@ class StageCache(unittest.TestCase):
 
     def runs(self) -> int:
         return len(self.marker.read_text()) if self.marker.exists() else 0
+
+    def test_the_path_string_is_not_a_key_but_the_resolved_tools_are(self) -> None:
+        from unittest.mock import patch
+        bin_a, bin_b, other = (Path(self.temp.name) / n for n in ("bin_a", "bin_b", "other"))
+        for directory in (bin_a, bin_b, other):
+            directory.mkdir()
+        for directory in (bin_a, bin_b):
+            (directory / "faketool").write_text("#!/bin/sh\n")
+            (directory / "faketool").chmod(0o755)
+        (bin_b / "faketool").write_text("#!/bin/sh\necho second\n")
+        config = json.loads(cache.CONFIG.read_text())
+        config["tool_identity"] = {"programs": ["faketool"]}
+        cache.CONFIG.write_text(json.dumps(config))
+        with patch.dict(os.environ, {"PATH": f"{bin_a}"}):
+            self.run_step("tooled", "c")
+        with patch.dict(os.environ, {"PATH": f"{other}{os.pathsep}{bin_a}{os.pathsep}/nowhere"}):
+            self.run_step("tooled", "c")
+        self.assertEqual(1, self.runs(), "a different PATH string that resolves the same tool must not rerun")
+        with patch.dict(os.environ, {"PATH": f"{bin_b}{os.pathsep}{bin_a}"}):
+            self.run_step("tooled", "c")
+        self.assertEqual(2, self.runs(), "a PATH that resolves a different tool file must rerun")
 
     def test_second_run_with_the_same_inputs_is_skipped(self) -> None:
         self.assertEqual(0, self.run_step("c-dist", "c")[0])

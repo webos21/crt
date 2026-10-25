@@ -98,8 +98,8 @@ build-structure completion gate.
   Wayland/xkbcommon target scope only after preserving explicit cross-build use
   and the clean-build dependency gate in Planned. Windows/x64 and macOS/arm64
   replayed ([macOS evidence](docs/acceptance/build_system_acceptance.md#macosarm64-native-replay-b5-2026-10-23));
-  Linux native replay is open. Narrow the stage cache key from the complete `PATH` to the identity of the
-  tools actually used.
+  Linux native replay is open. The stage cache key follows the identity of the tools it resolves, not the
+  `PATH` string ([evidence](docs/acceptance/build_system_acceptance.md#stage-cache-key-tool-identity-instead-of-the-path-string-2026-10-26)).
 
 ### CRT SDK split: Full SDK and Development SDK
 

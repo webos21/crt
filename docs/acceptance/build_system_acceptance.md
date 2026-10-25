@@ -797,7 +797,25 @@ Defects found by the native replay and fixed (each has a regression test that fa
 
 Limits and open questions: Linux native replay remains pending. Windows/arm64 is not claimed. A cascade rerun of the
 upstream steps after a failed `crt-web-test` was observed once and could not be traced to a changed input (sources,
-command lines and `HEAD` were unchanged); the cache key includes the complete `PATH`, so a different launching
-shell invalidates every step, which should be narrowed to tool identity. The Wayland/xkbcommon target scope
-(B5's second item) is unchanged.
+command lines and `HEAD` were unchanged); the cache key then included the complete `PATH`, so a different launching
+shell invalidated every step (narrowed below). The Wayland/xkbcommon target scope (B5's second item) is unchanged.
+
+### Stage cache key: tool identity instead of the `PATH` string (2026-10-26)
+
+`tools/crt_stage_cache.py` no longer puts the `PATH` string in a step's key. It records the identity of the programs a
+step may run (`tool_identity.programs` in `tools/stage_cache.json`): each is resolved through `PATH`, followed to its
+real file, and recorded as real path, size and modification time. Reordering `PATH`, or adding or removing a directory
+that does not change which of those files is found, keeps the cache; a different file found first, a modified tool,
+or a newly installed tool that was absent changes the key. `CRT_*`, `CC`, `CXX`, `AR`, `RANLIB` and the flag
+variables stay in the key by value. No tool version is executed, so a check costs a stat per listed program.
+
+Evidence on macOS/arm64: six new `ToolIdentity` tests and a step-level test (25 tests in the module; the step-level
+test fails with the old `PATH`-string key). On the real tree, after one run to record the new keys, the same
+`crt-libcxx-dist` ran four times with the `PATH` prefixed with an unrelated directory, suffixed with unrelated and
+nonexistent directories, and replaced by a different minimal `PATH`: 0 steps re-ran and 7 reported "up to date" each
+time (1-2 s). With a different `cmake` placed first the key changes, as it should.
+
+Cost: the key format changed, so every step reruns once after this commit (a full `crt-web-build` is about 35 minutes
+on this host). The program list is a hand-kept inventory of what the build resolves through `PATH`; a step that starts
+depending on another program must add it, or a change to that program is not noticed.
 

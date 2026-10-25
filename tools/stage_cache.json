@@ -109,5 +109,49 @@
         "ui"
       ]
     }
+  },
+  "tool_identity": {
+    "comment": "Programs whose identity (resolved real path, size, modification time) is part of every step's key. The key does not use the PATH string: reordering PATH, or adding a directory that does not change which of these programs is found, keeps the cache. Listed here are the tools the build resolves through PATH (compilers, archivers, generators, interpreters, packaging); add a program here when a step starts depending on one.",
+    "programs": [
+      "python3",
+      "python",
+      "cmake",
+      "ninja",
+      "git",
+      "patch",
+      "perl",
+      "ruby",
+      "gperf",
+      "make",
+      "gmake",
+      "mingw32-make",
+      "clang",
+      "clang++",
+      "ld",
+      "ld.lld",
+      "lld-link",
+      "ar",
+      "llvm-ar",
+      "ranlib",
+      "llvm-ranlib",
+      "nm",
+      "llvm-nm",
+      "readelf",
+      "llvm-readelf",
+      "llvm-readobj",
+      "llvm-objdump",
+      "strip",
+      "gn",
+      "pkg-config",
+      "openssl",
+      "install_name_tool",
+      "otool",
+      "xcrun",
+      "tar",
+      "xz",
+      "unzip",
+      "sh",
+      "bash"
+    ]
   }
 }
