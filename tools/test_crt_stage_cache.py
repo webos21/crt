@@ -15,6 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crt_stage_cache as cache
 
 
+EXECUTABLE_SUFFIX = ".cmd" if os.name == "nt" else ""
+
+
 class ToolIdentity(unittest.TestCase):
     """The cache key follows which tool files are found, not the PATH string."""
 
@@ -27,7 +30,8 @@ class ToolIdentity(unittest.TestCase):
             directory.mkdir()
 
     def tool(self, directory: Path, name: str = "faketool", text: str = "#!/bin/sh\n") -> Path:
-        path = directory / name
+        # shutil.which only finds a Windows file whose extension is in PATHEXT, so the fake program is a .cmd there.
+        path = directory / (name + EXECUTABLE_SUFFIX)
         path.write_text(text)
         path.chmod(0o755)
         return path
@@ -74,7 +78,7 @@ class ToolIdentity(unittest.TestCase):
         self.tool(self.first, "listed")
         self.tool(self.first, "unlisted")
         before = self.identity(self.first, names=("listed",))
-        (self.first / "unlisted").write_text("changed")
+        (self.first / ("unlisted" + EXECUTABLE_SUFFIX)).write_text("changed")
         self.assertEqual(before, self.identity(self.first, names=("listed",)))
 
 
@@ -121,9 +125,9 @@ class StageCache(unittest.TestCase):
         for directory in (bin_a, bin_b, other):
             directory.mkdir()
         for directory in (bin_a, bin_b):
-            (directory / "faketool").write_text("#!/bin/sh\n")
-            (directory / "faketool").chmod(0o755)
-        (bin_b / "faketool").write_text("#!/bin/sh\necho second\n")
+            (directory / ("faketool" + EXECUTABLE_SUFFIX)).write_text("#!/bin/sh\n")
+            (directory / ("faketool" + EXECUTABLE_SUFFIX)).chmod(0o755)
+        (bin_b / ("faketool" + EXECUTABLE_SUFFIX)).write_text("#!/bin/sh\necho second\n")
         config = json.loads(cache.CONFIG.read_text())
         config["tool_identity"] = {"programs": ["faketool"]}
         cache.CONFIG.write_text(json.dumps(config))

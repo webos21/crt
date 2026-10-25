@@ -807,13 +807,19 @@ step may run (`tool_identity.programs` in `tools/stage_cache.json`): each is res
 real file, and recorded as real path, size and modification time. Reordering `PATH`, or adding or removing a directory
 that does not change which of those files is found, keeps the cache; a different file found first, a modified tool,
 or a newly installed tool that was absent changes the key. `CRT_*`, `CC`, `CXX`, `AR`, `RANLIB` and the flag
-variables stay in the key by value. No tool version is executed, so a check costs a stat per listed program.
+variables stay in the key by value. No tool version is executed, so a check costs a stat per listed program. The identity is the file's path, size and
+modification time, not its content: a tool replaced by a different file of the same size and the same timestamp at the
+same path is not noticed.
 
 Evidence on macOS/arm64: six new `ToolIdentity` tests and a step-level test (25 tests in the module; the step-level
 test fails with the old `PATH`-string key). On the real tree, after one run to record the new keys, the same
 `crt-libcxx-dist` ran four times with the `PATH` prefixed with an unrelated directory, suffixed with unrelated and
 nonexistent directories, and replaced by a different minimal `PATH`: 0 steps re-ran and 7 reported "up to date" each
 time (1-2 s). With a different `cmake` placed first the key changes, as it should.
+
+Windows note: `shutil.which` only finds a program whose extension is in `PATHEXT`, so the tests create their fake
+programs as `.cmd` there. The first revision (30beb3a) built them without an extension; macOS and Linux passed and the
+two Windows hosts failed four of the new tests for that reason, not because of the implementation.
 
 Cost: the key format changed, so every step reruns once after this commit (a full `crt-web-build` is about 35 minutes
 on this host). The program list is a hand-kept inventory of what the build resolves through `PATH`; a step that starts
