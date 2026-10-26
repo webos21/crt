@@ -137,10 +137,10 @@ names, and the download URLs inside the packaged stage recipes all agree.
    assets they reference:
 
    ```sh
-   cmake --build --preset <os>-host-ninja-debug --target crt-gfx-simple-dist
+   cmake --build --preset <os>-host-ninja-debug --target crt-gfx-dist
    ```
 
-3. Build the release-grade `04-gfx-media`. The ordinary `crt-gfx-media-dist`
+3. Build the release-grade `04-gfx-media`. The ordinary `crt-media-dist`
    target is an in-tree developer SDK (the presets now enable Skia and FFmpeg, but it is built from the
    repository build tree) and is **not** releasable. Use the isolated
    option-ON stage build from the packaged `03-gfx-simple` SDK, with the local

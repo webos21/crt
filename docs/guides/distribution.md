@@ -25,6 +25,35 @@ external toolchain contract.
 | `05-ui` | 04-gfx-media + crtui + private LVGL 9.6, CRT-owned layout/style/v1 widgets, input/focus/resize, external-surface composition and `MediaView`, the optional Skia/media companions | native application UI |
 | `06-web` (source stage; scope and release checks in [Web acceptance](../acceptance/crtweb_acceptance.md#10-distribution-and-security-closure)) | `05-ui` plus JavaScriptCore/WebKit, `libcrtweb`, and the WebView | web runtime |
 
+### CMake stage command names
+
+Each public prefix below has `-config`, `-build`, `-test` and `-dist` targets:
+
+| SDK stage ID | Public CMake prefix | Previous public prefix |
+| --- | --- | --- |
+| `01-c` | `crt-c` | unchanged |
+| `02-cxx` | `crt-cxx` | `crt-libcxx` |
+| `03-gfx-simple` | `crt-gfx` | `crt-gfx-simple` |
+| `04-gfx-media` | `crt-media` | `crt-gfx-media` |
+| `05-ui` | `crt-ui` | unchanged |
+| `06-web` | `crt-web` | unchanged |
+
+For an existing build directory, rerun `cmake --preset <preset>` to regenerate
+the target graph, then use the new names. Retired public prefixes have no aliases.
+The former internal `crt-gfx-build/test` and `crt-media-build/test` were partial
+stage-04 aggregates; their names are now `crt-internal-media-gfx-build/test` and
+`crt-internal-media-runtime-build/test`. Public `crt-gfx-*` always selects stage
+03, while `crt-media-*` selects the complete stage 04.
+
+This changes in-tree CMake target names only. SDK stage IDs, install components,
+archive/directory names, source recipes, cache step IDs and the standalone
+`tools/crt-libcxx-build.py` driver retain their names. Preflight reports still use
+the internal stage IDs (`stage-config/libcxx.json`, `gfx-simple.json` and
+`gfx-media.json`). Older acceptance logs retain the commands used at their
+recorded source commits; apply this mapping when reproducing them in a newer tree.
+
+### Stage production
+
 `05-ui` is accepted: the repository builds it in-tree (`crt-ui-dist`) and as an
 isolated `04-gfx-media -> 05-ui` stage on Windows/x64, macOS/arm64 and
 Linux/x86_64. `tools/prepare_release_assets.py` supports `05-ui` and `06-web`,
@@ -105,24 +134,24 @@ cmake --build --preset <preset> --target crt-c-build
 cmake --build --preset <preset> --target crt-c-test
 cmake --build --preset <preset> --target crt-c-dist
 
-cmake --build --preset <preset> --target crt-libcxx-build
-cmake --build --preset <preset> --target crt-libcxx-test
-cmake --build --preset <preset> --target crt-libcxx-dist
+cmake --build --preset <preset> --target crt-cxx-build
+cmake --build --preset <preset> --target crt-cxx-test
+cmake --build --preset <preset> --target crt-cxx-dist
 
-cmake --build --preset <preset> --target crt-gfx-simple-build
-cmake --build --preset <preset> --target crt-gfx-simple-test
-cmake --build --preset <preset> --target crt-gfx-simple-dist
+cmake --build --preset <preset> --target crt-gfx-build
+cmake --build --preset <preset> --target crt-gfx-test
+cmake --build --preset <preset> --target crt-gfx-dist
 
-cmake --build --preset <preset> --target crt-gfx-media-build
-cmake --build --preset <preset> --target crt-gfx-media-test
-cmake --build --preset <preset> --target crt-gfx-media-dist
+cmake --build --preset <preset> --target crt-media-build
+cmake --build --preset <preset> --target crt-media-test
+cmake --build --preset <preset> --target crt-media-dist
 
 cmake --build --preset <preset> --target crt-ui-build
 cmake --build --preset <preset> --target crt-ui-test
 cmake --build --preset <preset> --target crt-ui-dist
 ```
 
-The more focused `crt-gfx-build/test` and `crt-media-build/test` targets are
+The more focused `crt-internal-media-gfx-build/test` and `crt-internal-media-runtime-build/test` targets are
 also available. A `*-dist` target builds all preceding stages automatically.
 Advanced graphics packaging reflects the configured capabilities; enable and
 build the imported libc++, Skia, Vulkan/Metal/D3D12, and FFmpeg paths before

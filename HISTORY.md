@@ -9,6 +9,29 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-27
+
+### Unify public CMake stage target names
+
+Renamed stage 02, 03 and 04 public command prefixes to `crt-cxx`, `crt-gfx` and
+`crt-media`, each with config/build/test/dist actions. Stages 01, 05 and 06
+retain their names. The old stage-04 partial aggregates move to explicit
+`crt-internal-media-gfx-*` and `crt-internal-media-runtime-*` names, so public
+Graphics selects window/input and public Media selects the full GPU/media stage.
+Updated dependencies, preflight mapping, catalog/classification, CI, diagnostics
+and current build/use documentation. SDK stage IDs, archive paths, install
+components, cache step identities and Python driver filenames retain their names;
+old public prefixes have no aliases. Historical acceptance commands retain their
+original source-baseline meaning, with a linked migration procedure.
+
+The renamed Linux entries publish/verify C through UI SDKs and pass their native
+tests and imported C++ smokes. Fresh-graph regressions cover all 24 stage targets,
+scope separation and existing preflight IDs; the existing CI tooling check passes.
+The completed naming item is removed from TODO. The
+[acceptance record](docs/acceptance/build_system_acceptance.md#public-stage-target-naming-2026-10-26)
+owns commands, counts, producer/consumer review baselines and limits, including
+Web graph-only coverage and no new native macOS/Windows replay.
+
 ## 2026-10-26
 
 ### Complete build-system consolidation (B5)

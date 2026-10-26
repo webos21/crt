@@ -45,7 +45,7 @@ class ComponentInstall(unittest.TestCase):
             self.assertEqual(build.call_count, 1)  # UI retains its predecessor's exact kit
 
     def test_missing_or_damaged_inherited_kit_is_not_upgraded_by_declaration(self):
-        with self.assertRaisesRegex(SystemExit, "rebuild crt-gfx-media-dist"):
+        with self.assertRaisesRegex(SystemExit, "rebuild crt-media-dist"):
             create_dist.install_media_relink_kit(Path("build"), Path("sdk"), [{"name": "ffmpeg"}], "windows", False)
         with mock.patch.object(create_dist.crt_relink_kit, "check_kit", return_value=["damaged"]):
             with self.assertRaisesRegex(SystemExit, "damaged"):

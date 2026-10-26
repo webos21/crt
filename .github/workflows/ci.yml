@@ -257,7 +257,7 @@ jobs:
         run: python -m unittest tools.test_crt_stage_config tools.test_list_cmake_targets tools.test_wayland_build_graph tools.test_crt_stage_cache tools.test_crt_web_stage tools.test_dev_sdk tools.test_windows_builtins_filter tools.test_crt_file_ops tools.test_stage_06_web.ExecutedRecipeTests tools.test_stage_06_web.PackagingTests.test_windows_predecessor_uses_pe_layout_and_complete_provenance tools.test_build_webkit_jsc.HostPatchTests tools.test_create_dist.ComponentInstall tools.test_crt_relink_kit tools.test_prepare_release_assets.ArchiveTimestamps tools.test_lvgl_sources tools.test_libcxx_fetch
 
       - name: Preflight the C and C++ stage configurations without building dependencies
-        run: cmake --build --preset ${{ matrix.preset }} --target crt-c-config crt-libcxx-config
+        run: cmake --build --preset ${{ matrix.preset }} --target crt-c-config crt-cxx-config
 
       - name: Keep the target list
         uses: actions/upload-artifact@v4

@@ -231,7 +231,7 @@ function(crt_add_crtgfx_gpu_shared_target)
     # target's own framework list is PRIVATE, so it never propagates here.
     # A real, confirmed bug (2026-09-09): crtgfx_gpu_shared's own real
     # .dylib link failed outright the first time anything actually forced
-    # this shared library to build standalone (crt-gfx-media-dist).
+    # this shared library to build standalone (crt-media-dist).
     target_link_libraries(crtgfx_gpu_shared PRIVATE
       "-framework Metal"
       "-framework CoreGraphics"

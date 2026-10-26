@@ -1191,7 +1191,7 @@ if(Python3_Interpreter_FOUND)
     # Windows only, and only the other direction from the
     # CRT_USE_IMPORTED_LIBCXX=ON case just above (mutually exclusive, to
     # avoid a real dependency cycle: rootfs -> crt-libcxx-sysroot ->
-    # crt-libcxx-build -> crt-libcxx-configure -> rootfs). Before a
+    # crt-cxx-build -> crt-libcxx-configure -> rootfs). Before a
     # successfully staged libc++ is actually in use, crt-libcxx-configure/
     # -build themselves need the rootfs to already exist first --
     # tools/crt-libcxx-build.py launches tools/crt-cc/tools/crt-c++
@@ -1200,8 +1200,8 @@ if(Python3_Interpreter_FOUND)
     # mksh.exe copy has no toybox alongside it, so it cannot resolve
     # "printf" and every compile fails outright).
     add_dependencies(crt-libcxx-configure rootfs)
-    if(TARGET crt-libcxx-build)
-      add_dependencies(crt-libcxx-build rootfs)
+    if(TARGET crt-cxx-build)
+      add_dependencies(crt-cxx-build rootfs)
     endif()
   endif()
   if(CRT_TARGET_OS STREQUAL "windows" AND TARGET crtgfx-skia-build)
@@ -1618,28 +1618,28 @@ if(Python3_Interpreter_FOUND)
     ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
       --dist "${CRT_DIST_ROOT}/01-c" --stage 01-c)
 
-  if(TARGET crt-libcxx-build)
+  if(TARGET crt-cxx-build)
     # Both publishers write 01-c. Do not fingerprint/read it while crt-c-dist
     # is replacing the lightweight sysroot with its packaged counterpart.
     add_dependencies(crt-libcxx-configure crt-c-dist)
     add_dependencies(crt-libcxx-sysroot crt-c-dist)
-    add_custom_target(crt-libcxx-test DEPENDS crt-libcxx-smoke)
+    add_custom_target(crt-cxx-test DEPENDS crt-libcxx-smoke)
     # crt-cxx component install (libstdc++/CMakeLists.txt) only installs
     # the bootstrap `cxx`/`cxx_shared` targets' own build output (its own
     # install(TARGETS ...) call is guarded the identical way, `if(NOT
     # CRT_USE_IMPORTED_LIBCXX)`) -- without CRT_USE_IMPORTED_LIBCXX, this
     # dist stage's real content IS that bootstrap ABI shim, not the
-    # separate real-Android-libc++ build crt-libcxx-build itself produces.
+    # separate real-Android-libc++ build crt-cxx-build itself produces.
     # Missing this dependency is a real, reproducible bug: `cmake --build
-    # --target crt-libcxx-dist` from a tree where nothing else happened to
+    # --target crt-cxx-dist` from a tree where nothing else happened to
     # build `cxx`/`cxx_shared` first failed outright ("file INSTALL cannot
     # find .../lib/libc++.a") because ninja had no reason to build them at
     # all before running this install step.
-    set(CRT_LIBCXX_DIST_DEPENDS crt-c-dist crt-libcxx-build)
+    set(CRT_LIBCXX_DIST_DEPENDS crt-c-dist crt-cxx-build)
     if(NOT CRT_USE_IMPORTED_LIBCXX)
       list(APPEND CRT_LIBCXX_DIST_DEPENDS cxx cxx_shared)
     endif()
-    crt_add_cached_stage_target(crt-libcxx-dist NAME cxx-dist STAGE cxx OUTPUTS "${CRT_DIST_ROOT}/02-cxx"
+    crt_add_cached_stage_target(crt-cxx-dist NAME cxx-dist STAGE cxx OUTPUTS "${CRT_DIST_ROOT}/02-cxx"
       INPUTS "${CRT_DIST_ROOT}/01-c" "${CRT_LIBCXX_INSTALL_PREFIX}"
       DEPENDS ${CRT_LIBCXX_DIST_DEPENDS} crt-stage-03-source
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
@@ -1654,13 +1654,13 @@ if(Python3_Interpreter_FOUND)
     # Default imported-runtime sysroot is an alias of this sole publisher.
     # The separate diagnostic/bootstrap sysroot still precedes packaging.
     if(NOT CRT_LIBCXX_SYSROOT_USES_DIST)
-      add_dependencies(crt-libcxx-dist crt-libcxx-sysroot)
+      add_dependencies(crt-cxx-dist crt-libcxx-sysroot)
     endif()
 
     if(CRT_USE_IMPORTED_LIBCXX)
       # Web consumers compile/link against dist/02-cxx. When requested beside
       # crt-ui-dist, waiting only for the lightweight sysroot leaves them free
-      # to read headers/libraries while crt-libcxx-dist replaces that directory.
+      # to read headers/libraries while crt-cxx-dist replaces that directory.
       # Windows 9A replay reproduced a missing cstddef in the GPU/surface tests.
       foreach(crt_web_consumer IN ITEMS crtweb_web_surface_test crtweb_webview_test crtweb_webview_gpu_test
           crtweb_gpu_worker crtweb_gpu_resource_test crtgfx_skia_shared_image_test
@@ -1668,13 +1668,13 @@ if(Python3_Interpreter_FOUND)
           # together raced the dist publisher ("cstddef/cctype not found") on Windows (9B replay).
           crtgfx_skia_objects crtui_skia crtui_skia_media)
         if(TARGET ${crt_web_consumer})
-          add_dependencies(${crt_web_consumer} crt-libcxx-dist)
+          add_dependencies(${crt_web_consumer} crt-cxx-dist)
         endif()
       endforeach()
     endif()
 
     # Backend-boundary Tranche 6: one bounded, cross-host acceptance entry
-    # point for PR CI and local release checks. crt-libcxx-dist supplies a
+    # point for PR CI and local release checks. crt-cxx-dist supplies a
     # freshly generated and verify_dist.py-audited 02-cxx SDK (including
     # binary dependency/import validation); the runner executes the focused
     # ABI/allocator/GPU checks and creates its own clean backend-disabled tree.
@@ -1691,7 +1691,7 @@ if(Python3_Interpreter_FOUND)
         --c-compiler "${CMAKE_C_COMPILER}"
         --cxx-compiler "${CMAKE_CXX_COMPILER}"
       DEPENDS
-        crt-libcxx-dist
+        crt-cxx-dist
         header_abi_test
         host_abi_firewall_test
         host_abi_firewall_fault_test
@@ -1712,9 +1712,9 @@ if(Python3_Interpreter_FOUND)
   # split, TODO.md's decided item) -- this is what makes the Simple
   # Graphics stage's own dist actually window-only: no GPU/Skia object
   # code ever gets pulled into this DEPENDS list at all.
-  add_custom_target(crt-gfx-simple-build DEPENDS crtgfx_window crtgfx_window_shared crtgfx_window_smoke crtgfx_synthetic_event crtgfx_window_demo)
-  crt_add_cached_stage_target(crt-gfx-simple-test NAME gfx-simple-test STAGE gfx-simple
-    DEPENDS crt-gfx-simple-build
+  add_custom_target(crt-gfx-build DEPENDS crtgfx_window crtgfx_window_shared crtgfx_window_smoke crtgfx_synthetic_event crtgfx_window_demo)
+  crt_add_cached_stage_target(crt-gfx-test NAME gfx-simple-test STAGE gfx-simple
+    DEPENDS crt-gfx-build
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_window_smoke_runs"
     ++ "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_synthetic_event_runs")
   set(CRT_GFX_SIMPLE_DIST_ARGS)
@@ -1725,7 +1725,7 @@ if(Python3_Interpreter_FOUND)
       --xkbcommon-source "${CRTGFX_XKBCOMMON_ROOT}"
     )
     # Match the configured backend, even before its generated archive exists.
-    # crt-gfx-simple-build builds the producer through the backend dependency.
+    # crt-gfx-build builds the producer through the backend dependency.
     if(CRTGFX_NATIVE_WAYLAND_ENABLED)
       list(APPEND CRT_GFX_SIMPLE_NATIVE_INPUTS "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}")
       if(CRTGFX_WAYLAND_HOST_SCANNER)
@@ -1737,10 +1737,10 @@ if(Python3_Interpreter_FOUND)
       )
     endif()
   endif()
-  crt_add_cached_stage_target(crt-gfx-simple-dist NAME gfx-simple-dist STAGE gfx-simple
+  crt_add_cached_stage_target(crt-gfx-dist NAME gfx-simple-dist STAGE gfx-simple
     INPUTS "${CRT_DIST_ROOT}/02-cxx" ${CRT_GFX_SIMPLE_NATIVE_INPUTS}
     OUTPUTS "${CRT_DIST_ROOT}/03-gfx-simple"
-    DEPENDS crt-libcxx-dist crt-gfx-simple-build crt-stage-04-source
+    DEPENDS crt-cxx-dist crt-gfx-build crt-stage-04-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/03-gfx-simple" --base "${CRT_DIST_ROOT}/02-cxx"
@@ -1758,25 +1758,25 @@ if(Python3_Interpreter_FOUND)
   # NOT depend on crtgfx_skia/crtgfx_skia_raster_smoke etc. -- Skia stays
   # opt-in (CRTGFX_ENABLE_SKIA), matching this target's own pre-split
   # scope, which never forced the optional Skia build either.
-  # Also DEPENDS crt-gfx-simple-build (not just this stage's own targets):
-  # crt-gfx-test's own ctest filter below is the broad "^crtgfx_.*_runs",
+  # Also DEPENDS crt-gfx-build (not just this stage's own targets):
+  # crt-internal-media-gfx-test's own ctest filter below is the broad "^crtgfx_.*_runs",
   # which matches crtgfx_window_smoke_runs/crtgfx_synthetic_event_runs
-  # too -- a real, confirmed gap found running `crt-gfx-build` alone from
+  # too -- a real, confirmed gap found running `crt-internal-media-gfx-build` alone from
   # a genuinely fresh out/ (2026-09-08): those two tests are registered
   # globally regardless of which aggregate target built them, but nothing
-  # in crt-gfx-build's own (pre-this-fix) DEPENDS ever built them, so
+  # in crt-internal-media-gfx-build's own (pre-this-fix) DEPENDS ever built them, so
   # ctest correctly reported them "Not Run" rather than a false pass.
-  add_custom_target(crt-gfx-build DEPENDS crt-gfx-simple-build crtgfx_window crtgfx_window_shared crtgfx_gpu crtgfx_gpu_shared crtgfx_gpu_test crtgfx_gpu_window_demo)
-  crt_add_cached_stage_target(crt-gfx-test NAME gfx-test STAGE gfx-simple
-    DEPENDS crt-gfx-build
+  add_custom_target(crt-internal-media-gfx-build DEPENDS crt-gfx-build crtgfx_window crtgfx_window_shared crtgfx_gpu crtgfx_gpu_shared crtgfx_gpu_test crtgfx_gpu_window_demo)
+  crt_add_cached_stage_target(crt-internal-media-gfx-test NAME gfx-test STAGE gfx-simple
+    DEPENDS crt-internal-media-gfx-build
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_.*_runs")
-  # crt-media-test's filter below selects all five always-registered media
+  # crt-internal-media-runtime-test's filter below selects all five always-registered media
   # tests, so its build aggregate must produce their executables as well as
   # the two libraries. A real clean-tree Windows run (2026-09-09) exposed
   # the omission: ctest found all five registrations but reported every one
   # Not Run until the executables were built manually. Keep this symmetric
-  # with crt-gfx-simple-build's test-target dependencies above.
-  add_custom_target(crt-media-build DEPENDS
+  # with crt-gfx-build's test-target dependencies above.
+  add_custom_target(crt-internal-media-runtime-build DEPENDS
     crtmedia
     crtmedia_shared
     crtmedia_frame_test
@@ -1788,10 +1788,10 @@ if(Python3_Interpreter_FOUND)
   if(TARGET crtmedia_player_demo)
     # The FFmpeg-enabled crt-media install ships this executable. A clean
     # cumulative SDK build must produce it before create_dist invokes install.
-    add_dependencies(crt-media-build crtmedia_player_demo)
+    add_dependencies(crt-internal-media-runtime-build crtmedia_player_demo)
   endif()
-  crt_add_cached_stage_target(crt-media-test NAME media-test STAGE gfx-media
-    DEPENDS crt-media-build
+  crt_add_cached_stage_target(crt-internal-media-runtime-test NAME media-test STAGE gfx-media
+    DEPENDS crt-internal-media-runtime-build
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtmedia_.*_runs")
   # The media stage's packaged Skia demo consumes CRT_LIBCXX_SYSROOT
   # (dist/02-cxx). Keep the cumulative predecessor ahead of that direct
@@ -1800,16 +1800,16 @@ if(Python3_Interpreter_FOUND)
   # observe their dist/02-cxx replacement while linking. A real macOS
   # Tranche 4 replay exposed exactly that race in
   # crtgfx_skia_gpu_window_demo. add_dependencies provides the required target
-  # ordering to Ninja; merely adding crt-gfx-simple-dist to the list below
+  # ordering to Ninja; merely adding crt-gfx-dist to the list below
   # would still leave all list entries eligible to run in parallel.
-  add_dependencies(crt-gfx-build crt-gfx-simple-dist)
-  add_dependencies(crt-media-build crt-gfx-simple-dist)
+  add_dependencies(crt-internal-media-gfx-build crt-gfx-dist)
+  add_dependencies(crt-internal-media-runtime-build crt-gfx-dist)
   set(CRT_GFX_MEDIA_BUILD_DEPENDS
-    crt-gfx-build
-    crt-media-build
+    crt-internal-media-gfx-build
+    crt-internal-media-runtime-build
   )
   if(TARGET crtgfx_skia_gpu_window_demo)
-    add_dependencies(crtgfx_skia_gpu_window_demo crt-gfx-simple-dist)
+    add_dependencies(crtgfx_skia_gpu_window_demo crt-gfx-dist)
     list(APPEND CRT_GFX_MEDIA_BUILD_DEPENDS crtgfx_skia_gpu_window_demo)
   endif()
   if(TARGET crtgfx_skia_shared)
@@ -1818,11 +1818,11 @@ if(Python3_Interpreter_FOUND)
     # reached the stage-04 install without ever producing the shared bridge
     # (Linux Tranche 5 replay, 2026-10-02).  Build every installed artifact
     # explicitly, after the cumulative C++/gfx-simple SDK is complete.
-    add_dependencies(crtgfx_skia_shared crt-gfx-simple-dist)
+    add_dependencies(crtgfx_skia_shared crt-gfx-dist)
     list(APPEND CRT_GFX_MEDIA_BUILD_DEPENDS crtgfx_skia_shared)
   endif()
-  add_custom_target(crt-gfx-media-build DEPENDS ${CRT_GFX_MEDIA_BUILD_DEPENDS})
-  add_custom_target(crt-gfx-media-test DEPENDS crt-gfx-test crt-media-test)
+  add_custom_target(crt-media-build DEPENDS ${CRT_GFX_MEDIA_BUILD_DEPENDS})
+  add_custom_target(crt-media-test DEPENDS crt-internal-media-gfx-test crt-internal-media-runtime-test)
   set(CRT_FULL_MEDIA_DIST_ARGS)
   if(CRTGFX_ENABLE_SKIA AND CRTMEDIA_ENABLE_FFMPEG AND CRTMEDIA_ENABLE_CURL)
     list(GET CRTGFX_SKIA_LIBRARIES 0 CRT_STAGE_SKIA_LIBRARY)
@@ -1831,10 +1831,10 @@ if(Python3_Interpreter_FOUND)
       --media-source-root "${CMAKE_BINARY_DIR}/port-tests/src"
       --skia-source "${CRTGFX_SKIA_ROOT}" --skia-library "${CRT_STAGE_SKIA_LIBRARY}")
   endif()
-  crt_add_cached_stage_target(crt-gfx-media-dist NAME gfx-media-dist STAGE gfx-media
+  crt_add_cached_stage_target(crt-media-dist NAME gfx-media-dist STAGE gfx-media
     INPUTS "${CRT_DIST_ROOT}/03-gfx-simple"
     OUTPUTS "${CRT_DIST_ROOT}/04-gfx-media"
-    DEPENDS crt-gfx-simple-dist crt-gfx-media-build crt-stage-05-source
+    DEPENDS crt-gfx-dist crt-media-build crt-stage-05-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
       --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
       --dest "${CRT_DIST_ROOT}/04-gfx-media" --base "${CRT_DIST_ROOT}/03-gfx-simple"
@@ -1875,8 +1875,8 @@ if(Python3_Interpreter_FOUND)
   endif()
   # Feature-enabled and host-specific tests extend these CTest filters. Build
   # every registered executable they select, not just the bootstrap subset.
-  crt_add_registered_test_dependencies(crt-gfx-test "^crtgfx_")
-  crt_add_registered_test_dependencies(crt-media-test "^crtmedia_")
+  crt_add_registered_test_dependencies(crt-internal-media-gfx-test "^crtgfx_")
+  crt_add_registered_test_dependencies(crt-internal-media-runtime-test "^crtmedia_")
   crt_add_registered_test_dependencies(crt-ui-test "^crtui_")
   if(NOT CRTUI_ENABLE_LVGL)
     # The 05-ui SDK installs the ui-basic sample, which exists only when crtui's private LVGL
@@ -1892,7 +1892,7 @@ if(Python3_Interpreter_FOUND)
   else()
     crt_add_cached_stage_target(crt-ui-dist NAME ui-dist STAGE ui OUTPUTS "${CRT_DIST_ROOT}/05-ui"
       INPUTS "${CRT_DIST_ROOT}/04-gfx-media"
-      DEPENDS crt-gfx-media-dist crt-ui-build crt-stage-06-source
+      DEPENDS crt-media-dist crt-ui-build crt-stage-06-source
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
         --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
         --dest "${CRT_DIST_ROOT}/05-ui" --base "${CRT_DIST_ROOT}/04-gfx-media"

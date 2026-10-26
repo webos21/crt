@@ -58,7 +58,7 @@ def main() -> None:
     disabled = args.disabled_build_dir.resolve()
 
     # Enabled-tree evidence: the CMake target has already built every binary
-    # selected here and crt-libcxx-dist has already run verify_dist.py against
+    # selected here and crt-cxx-dist has already run verify_dist.py against
     # dist/02-cxx, including ELF/PE/Mach-O dependency classification.
     run([
         args.ctest, "--test-dir", str(build_dir), "--output-on-failure",

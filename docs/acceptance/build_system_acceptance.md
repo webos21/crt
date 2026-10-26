@@ -15,6 +15,76 @@ review, not after an actual clean/tagged release collection. The separate
 retains that positive rehearsal and its final artifact review; see the
 [scope split](#release-qualification-scope-split-2026-10-23).
 
+## Public stage target naming (2026-10-26)
+
+The implemented public CMake prefixes are `crt-c`, `crt-cxx`, `crt-gfx`,
+`crt-media`, `crt-ui` and `crt-web`, each with `config/build/test/dist` actions.
+The [distribution guide](../guides/distribution.md#cmake-stage-command-names)
+owns the migration table and existing-build-tree procedure. Stage 01, 05 and
+06 retain their public names. The twelve old stage-02/03/04 public names are
+removed without aliases. Earlier commands below remain evidence for their
+recorded source commits, not commands to copy unchanged into the current tree.
+
+The old internal GPU-graphics and media-runtime aggregates now use the
+`crt-internal-media-gfx-*` and `crt-internal-media-runtime-*` namespaces. This
+frees `crt-gfx-build/test` for window/input stage 03 and `crt-media-build/test`
+for the complete stage 04. All ordering, test-executable dependencies and
+publisher/predecessor edges are retained with the new target names. Preflight
+commands map the new public prefixes to the existing internal stage IDs;
+cache step names, report paths, install components and SDK stage/archive names
+remain unchanged. `tools/crt-libcxx-build.py` retains its filename.
+
+Implementation review baseline: CRT `857f8313199bd4e9dc1c6d8cc98c01743c80fe40`;
+working-tree source identity and local replay receipts are under
+`out/build-target-renaming-20261026`.
+
+### Naming regressions and entry points
+
+- Catalog and README parity retain **28 public / 379 internal** targets with
+  no missing documented targets or undeclared stage-like names (`targets.json`).
+  Public and internal catalog sets are disjoint, and all 24 requested stage
+  targets are present with the twelve retired names absent.
+- The production preflight module is exercised in a CMake/Ninja fixture for
+  all six name-to-stage mappings. A fresh Linux root-project graph checks stage
+  03's window-only commands, stage 04's two internal test dependencies and a
+  dry-run of all 24 public stage targets, including Web build/test/dist. It
+  fetches and builds nothing. These cases run in the existing CI tooling check.
+- Local replay of that CI check passes **111/115**, with four conditional
+  platform/fixture skips (`ci-tooling-tests.log`). The focused catalog, graph,
+  configuration and distribution suite passes **33/36**, with three skips
+  (`target-tests.log`).
+- Native Linux/amd64 replay exits **0** (`native-replay.log`, `native-exit.json`,
+  `native-results.json`). Reconfiguring the existing `out/build-system-b5-cold`
+  tree and invoking the six config targets plus all fifteen stage-01-through-05
+  build/test/dist targets by their current names publishes and verifies all five
+  SDKs. The exact 21-target command is retained in `native-command.json`.
+  C **144/144**, public Graphics **1/1 + 1/1**, stage-04 Graphics **10/10**,
+  Media **30/30**, UI **8/8** and all six static/shared imported-C++ smokes pass.
+  Archive filenames and manifest stage IDs remain `01-c`, `02-cxx`,
+  `03-gfx-simple`, `04-gfx-media` and `05-ui`; the receipt records sizes/hashes.
+  This is an incremental native replay, not a second empty-root acceptance.
+
+The naming change is complete. Web build/test/dist is covered by the fresh
+root-project graph/dry-run and existing Web-driver fixtures; a new WebKit
+engine build and native macOS/Windows replay are **Not run** for this command
+rename. Their earlier native evidence remains attached to the recorded
+baselines. No runtime API, ABI or compiler/link policy changes.
+
+### Producer/consumer boundary review
+
+The owner is CRT's in-tree CMake command surface, its catalog, CI, build-driver
+diagnostics and current build/use guides. SDK manifests remain format 1, port
+recipes remain schema version 1 and isolated-stage recipes remain schema
+version 2; no SDK/CLI wire or packaging format changes. Inspecting the consumer
+baselines CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and Studio
+`27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807` finds documentation-only consumers
+and no approved runtime combination in CLI's `docs/compatibility.md`. Those
+repositories do not implement a consumer of these producer target names.
+No consumer repository, artifact lock or adoption record is changed. A future
+adoption still requires producer artifact promotion first; naming fixtures do
+not approve a runnable CLI/Studio combination. `contract-review.json` retains
+the producer/consumer baselines and scope.
+
 ## B5 closure (2026-10-26)
 
 **Build-system consolidation is complete.** The earlier native replay left two

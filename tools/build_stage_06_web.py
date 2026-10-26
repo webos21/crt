@@ -195,7 +195,7 @@ def require_predecessor(sdk, manifest):
             raise ValueError(f"06-web requires the option-ON 05-ui predecessor: missing {file}")
     ffmpeg = next(entry for entry in manifest["redistributed_dependencies"] if entry["name"] == "ffmpeg")
     if ffmpeg.get("relink_kit") != "share/crt/relink/libcrtmedia":
-        raise ValueError("06-web predecessor must declare its libcrtmedia relink kit; rebuild crt-gfx-media-dist/crt-ui-dist")
+        raise ValueError("06-web predecessor must declare its libcrtmedia relink kit; rebuild crt-media-dist/crt-ui-dist")
     problems = crt_relink_kit.check_kit(sdk, "libcrtmedia")
     if problems:
         raise ValueError("06-web predecessor libcrtmedia relink kit: " + "; ".join(problems))

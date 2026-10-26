@@ -1079,7 +1079,7 @@ def main():
     if not libcxx_headers.is_dir():
         raise SystemExit(
             f"CRT_USE_IMPORTED_LIBCXX headers not found: {libcxx_headers}\n"
-            "Build libc++ first (crt-libcxx-build, or reconfigure with "
+            "Build libc++ first (crt-cxx-build, or reconfigure with "
             "-DCRT_USE_IMPORTED_LIBCXX=ON and build crt-libcxx-sysroot) -- "
             "Skia's own C++ code needs a real project-owned <vector>/"
             "<string>/... implementation, never a host libc++ substitute."

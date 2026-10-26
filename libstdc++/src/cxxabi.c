@@ -12,7 +12,7 @@
  * __cxa_guard_acquire() below, which drags this whole translation unit's
  * other symbols in right alongside once the linker pulls it in. macOS
  * (gets a real __cxa_atexit from libSystem.dylib -- see libc/src/exit.c's
- * own comment) and Windows (separate, still-open crt-libcxx-build work,
+ * own comment) and Windows (separate, still-open crt-cxx-build work,
  * TODO.md) are unaffected and keep this file's copy exactly as before. */
 #if !defined(CRT_TARGET_OS_LINUX)
 #define CRT_CXXABI_C_OWNS_CXA_ATEXIT 1

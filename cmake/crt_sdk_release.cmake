@@ -7,7 +7,7 @@ if(Python3_Interpreter_FOUND)
   set(crt_dev_depends)
   if(NOT crt_dev_predecessor)
     set(crt_dev_predecessor "${CRT_DIST_ROOT}/02-cxx")
-    set(crt_dev_depends crt-libcxx-dist)
+    set(crt_dev_depends crt-cxx-dist)
   endif()
   crt_add_cached_stage_target(crt-development-sdk NAME dev-sdk STAGE cxx
     DEPENDS ${crt_dev_depends}

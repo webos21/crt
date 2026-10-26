@@ -26,7 +26,7 @@ INTERNAL_RULES = (
     ("stage cache", r"^crt-stage-cache-reset$"),
     ("port recipes", r"^(port-(build|fetch|rebuild|test)-.+|port-build-(recipes|configure|web)|port-test-recipes)$"),
     ("feature preparation", r"^(crt-libcxx-(fetch|configure|sysroot|smoke)|crtgfx-(skia|wayland|xkbcommon|mingw-w64).*|crtui-lvgl-fetch|crtmedia-require-libva)$"),
-    ("stage aggregates", r"^crt-(gfx|media)-(build|test)$"),
+    ("stage aggregates", r"^crt-internal-media-(gfx|runtime)-(build|test)$"),
     ("acceptance gates", r"^crtgfx-boundary-acceptance$"),
     ("cmake defaults", r"^(all|clean|install.*|test|edit_cache|rebuild_cache|list_install_components|package.*|ZERO_CHECK|CMakeCache\.txt)$"),
     ("test programs", r"(_test|_smoke|_demo|_runs|_victim)$|^(android_log_test)$"),

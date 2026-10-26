@@ -21,55 +21,55 @@
     ],
     "stage 02-cxx": [
       {
-        "target": "crt-libcxx-config",
+        "target": "crt-cxx-config",
         "what": "offline preflight of the complete imported C++ configuration"
       },
       {
-        "target": "crt-libcxx-build",
+        "target": "crt-cxx-build",
         "what": "compile imported libc++, libc++abi, libunwind"
       },
       {
-        "target": "crt-libcxx-test",
+        "target": "crt-cxx-test",
         "what": "run the static/shared imported C++ runtime smokes (currently uncached)"
       },
       {
-        "target": "crt-libcxx-dist",
+        "target": "crt-cxx-dist",
         "what": "package, archive and verify out/<preset>/dist/02-cxx (skipped when unchanged)"
       }
     ],
     "stage 03-gfx-simple": [
       {
-        "target": "crt-gfx-simple-config",
+        "target": "crt-gfx-config",
         "what": "offline preflight of the complete window/input stage configuration"
       },
       {
-        "target": "crt-gfx-simple-build",
+        "target": "crt-gfx-build",
         "what": "compile window, input, software framebuffer"
       },
       {
-        "target": "crt-gfx-simple-test",
+        "target": "crt-gfx-test",
         "what": "run the 03-gfx-simple tests (skipped when the stage inputs are unchanged)"
       },
       {
-        "target": "crt-gfx-simple-dist",
+        "target": "crt-gfx-dist",
         "what": "package, archive and verify out/<preset>/dist/03-gfx-simple (skipped when unchanged)"
       }
     ],
     "stage 04-gfx-media": [
       {
-        "target": "crt-gfx-media-config",
+        "target": "crt-media-config",
         "what": "offline preflight of GPU, Skia, FFmpeg and curl configuration"
       },
       {
-        "target": "crt-gfx-media-build",
+        "target": "crt-media-build",
         "what": "compile Skia, GPU, FFmpeg, media, networking"
       },
       {
-        "target": "crt-gfx-media-test",
+        "target": "crt-media-test",
         "what": "run the 04-gfx-media tests (skipped when the stage inputs are unchanged)"
       },
       {
-        "target": "crt-gfx-media-dist",
+        "target": "crt-media-dist",
         "what": "package, archive and verify out/<preset>/dist/04-gfx-media (skipped when unchanged)"
       }
     ],
@@ -136,10 +136,10 @@
   "planned": [],
   "internal_stage_parts": {
     "crt-development-sdk-test": "internal Development SDK HTTPS/inflate reference consumer gate",
-    "crt-gfx-build": "graphics half of crt-gfx-media-build",
-    "crt-gfx-test": "graphics half of crt-gfx-media-test",
-    "crt-media-build": "media half of crt-gfx-media-build",
-    "crt-media-test": "media half of crt-gfx-media-test"
+    "crt-internal-media-gfx-build": "graphics half of crt-media-build",
+    "crt-internal-media-gfx-test": "graphics half of crt-media-test",
+    "crt-internal-media-runtime-build": "media half of crt-media-build",
+    "crt-internal-media-runtime-test": "media half of crt-media-test"
   },
   "internal_os_scope": {
     "comment": "Wayland/xkbcommon port targets are defined by default for Linux targets, including cross builds, independently of the build host. Other target OSes require CRTGFX_ENABLE_WAYLAND_PORT_TARGETS=ON for standalone port experiments. The historical five-host inventory predates this narrowing; registration fixtures do not imply foreign native build acceptance.",

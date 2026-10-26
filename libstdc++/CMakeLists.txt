@@ -189,7 +189,7 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       ${CRT_LIBCXX_PLATFORM_ARGUMENTS}
       --phase configure)
-  crt_add_cached_stage_target(crt-libcxx-build NAME cxx-build STAGE cxx
+  crt_add_cached_stage_target(crt-cxx-build NAME cxx-build STAGE cxx
     OUTPUTS "${CRT_LIBCXX_INSTALL_PREFIX}"
     INPUTS "${CRT_SYSROOT}"
     AFTER cxx-configure
@@ -235,7 +235,7 @@ if(Python3_Interpreter_FOUND)
     add_custom_target(crt-libcxx-sysroot
       BYPRODUCTS ${CRT_LIBCXX_SYSROOT_OUTPUTS}
       COMMAND "${CMAKE_COMMAND}" -E true
-      DEPENDS crt-libcxx-dist
+      DEPENDS crt-cxx-dist
       VERBATIM)
     set(CRT_LIBCXX_SYSROOT_USES_DIST TRUE PARENT_SCOPE)
   else()
@@ -253,7 +253,7 @@ if(Python3_Interpreter_FOUND)
       --stage 02-cxx
       --target-os "${CRT_TARGET_OS}"
       --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
-    DEPENDS crt-libcxx-build
+    DEPENDS crt-cxx-build
     COMMENT "Creating the cumulative C++ CRT sysroot"
     USES_TERMINAL
     )

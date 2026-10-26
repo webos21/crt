@@ -15,7 +15,7 @@
  * symbols anywhere in this project was libstdc++/src/cxxabi.c, part of the
  * bootstrap `cxx`/`cxx_shared` targets -- fine for that bootstrap ABI shim
  * on its own, but it left the imported-libc++ path (libstdc++/third_party/
- * {libcxx,libcxxabi,libunwind}, driven by crt-libcxx-build) with no
+ * {libcxx,libcxxabi,libunwind}, driven by crt-cxx-build) with no
  * provider at all: libc++.so/libc++abi.so call __cxa_atexit()/
  * __cxa_thread_atexit()'s own fallback path (see below) expecting the
  * platform libc to supply it, exactly like real glibc/Bionic, and got an
@@ -24,7 +24,7 @@
  * Scoped to Linux only for now, matching CRT_LINUX_AUXV_FILE/
  * CRT_LINUX_TERMIOS_FILE in libc/CMakeLists.txt: macOS already gets a real
  * __cxa_atexit() from libSystem.dylib (see exit.c's own comment), and
- * Windows' own crt-libcxx-build gaps are separate, still-open, tracked
+ * Windows' own crt-cxx-build gaps are separate, still-open, tracked
  * work (TODO.md) this file does not touch. libstdc++/src/cxxabi.c keeps
  * its own copy of these three symbols for macOS/Windows' bootstrap `cxx`/
  * `cxx_shared` targets, guarded out on Linux (see that file's own comment)

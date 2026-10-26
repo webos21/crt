@@ -250,8 +250,8 @@ The default project workflow deliberately stops at the C runtime stage:
 
 ```sh
 cmake --workflow --preset linux-host-ninja-debug
-cmake --build --preset linux-host-ninja-debug --target crt-libcxx-dist
-cmake --build --preset linux-host-ninja-debug --target crt-gfx-simple-dist
+cmake --build --preset linux-host-ninja-debug --target crt-cxx-dist
+cmake --build --preset linux-host-ninja-debug --target crt-gfx-dist
 ```
 
 The build layout should include explicit toolchain files, for example:

@@ -15,10 +15,29 @@ import list_cmake_targets as lt
 CATALOG = {"groups": {"stage 01-c": [{"target": "crt-c-build"}, {"target": "crt-c-dist"}],
                       "ports": [{"target": "port-test-recipes"}]},
            "os_specific": {"crt-win-only": ["windows"]},
-           "internal_stage_parts": {"crt-gfx-build": "part"}}
+           "internal_stage_parts": {"crt-internal-media-gfx-build": "part"}}
 
 
 class StageTestDependencies(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("cmake") and shutil.which("ninja"), "needs host CMake/Ninja")
+    def test_public_config_names_forward_existing_stage_ids(self):
+        with tempfile.TemporaryDirectory(prefix="stage config names ") as raw:
+            root = Path(raw)
+            helper = lt.ROOT / "cmake/crt_stage_config.cmake"
+            (root / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 3.25)\nproject(Fixture NONE)\n'
+                'set(Python3_Interpreter_FOUND TRUE)\n'
+                f'set(Python3_EXECUTABLE "{Path(sys.executable).as_posix()}")\n'
+                f'include("{helper.as_posix()}")\n', encoding="utf-8")
+            result = subprocess.run(["cmake", "-S", str(root), "-B", str(root / "build"),
+                                     "-G", "Ninja"], capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for public, stage in [('c', 'c'), ('cxx', 'libcxx'), ('gfx', 'gfx-simple'),
+                                  ('media', 'gfx-media'), ('ui', 'ui'), ('web', 'web')]:
+                commands = subprocess.check_output(['ninja', '-C', str(root / 'build'), '-t',
+                    'commands', f'crt-{public}-config'], text=True, timeout=30)
+                self.assertIn(f'--stage {stage}', commands)
+
     @unittest.skipUnless(shutil.which("cmake") and shutil.which("ninja"), "needs host CMake/Ninja")
     def test_selected_registered_targets_are_built_without_default_build(self):
         with tempfile.TemporaryDirectory(prefix="stage test dependencies ") as directory:
@@ -51,6 +70,19 @@ class StageTestDependencies(unittest.TestCase):
 
 
 class Classify(unittest.TestCase):
+    def test_stage_names_are_complete_and_disjoint_from_internal_helpers(self):
+        catalog = lt.load_catalog()
+        stages = ['01-c', '02-cxx', '03-gfx-simple', '04-gfx-media', '05-ui', '06-web']
+        for stage, name in zip(stages, ['c', 'cxx', 'gfx', 'media', 'ui', 'web']):
+            self.assertEqual([f'crt-{name}-{action}' for action in ['config', 'build', 'test', 'dist']],
+                             [e['target'] for e in catalog['groups'][f'stage {stage}']])
+        public = {e['target'] for entries in catalog['groups'].values() for e in entries}
+        self.assertTrue(public.isdisjoint(catalog['internal_stage_parts']))
+        helpers = {name: meaning for name, meaning in catalog['internal_stage_parts'].items()
+                   if name.startswith('crt-internal-media-')}
+        classified = lt.classify(list(helpers), catalog)
+        self.assertEqual({name: 'stage aggregates' for name in helpers}, classified['internal'])
+
     def test_listed_targets_are_user_facing_and_the_rest_internal(self) -> None:
         r = lt.classify(["crt-c-build", "crt-c-dist", "port-build-zlib", "crtgfx-skia-build", "crt_stage_x_test", "libc"], CATALOG)
         self.assertEqual({"crt-c-build": "stage 01-c", "crt-c-dist": "stage 01-c"}, r["user"])
@@ -85,7 +117,7 @@ class Classify(unittest.TestCase):
         self.assertTrue(documented.isdisjoint(catalog["planned"]))
 
     def test_a_new_stage_looking_target_must_be_documented_or_declared_a_part(self) -> None:
-        r = lt.classify(["crt-c-build", "crt-c-dist", "port-test-recipes", "crt-gfx-build", "crt-new-dist"], CATALOG)
+        r = lt.classify(["crt-c-build", "crt-c-dist", "port-test-recipes", "crt-internal-media-gfx-build", "crt-new-dist"], CATALOG)
         self.assertEqual(["crt-new-dist"], r["unlisted_stage_like"])
 
     def test_the_real_catalog_lists_only_stage_looking_or_known_targets(self) -> None:

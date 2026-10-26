@@ -505,13 +505,13 @@ The CMake targets are deliberately staged:
 ```sh
 cmake --build --preset <host-preset> --target crt-libcxx-fetch
 cmake --build --preset <host-preset> --target crt-libcxx-configure
-cmake --build --preset <host-preset> --target crt-libcxx-build
+cmake --build --preset <host-preset> --target crt-cxx-build
 cmake --build --preset <host-preset> --target crt-libcxx-sysroot
 cmake --build --preset <host-preset> --target crt-libcxx-smoke
-cmake --build --preset <host-preset> --target crt-libcxx-dist
+cmake --build --preset <host-preset> --target crt-cxx-dist
 ```
 
-`crt-libcxx-configure` and `crt-libcxx-build` always use `tools/crt-cc` and
+`crt-libcxx-configure` and `crt-cxx-build` always use `tools/crt-cc` and
 `tools/crt-c++`, with exceptions/RTTI enabled only for the imported runtime.
 The C++ build consumes `dist/01-c`; the sysroot/dist targets create the
 cumulative `dist/02-cxx` headers and runtime libraries. The smoke target then

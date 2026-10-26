@@ -23,7 +23,7 @@ def main():
     headers = install / "include" / "c++" / "v1"
     libraries = install / "lib"
     if not headers.is_dir() or not libraries.is_dir():
-        raise SystemExit("Android libc++ install is incomplete; run crt-libcxx-build successfully first")
+        raise SystemExit("Android libc++ install is incomplete; run crt-cxx-build successfully first")
 
     copy_tree(headers, sysroot / "include" / "c++" / "v1")
     copied = []

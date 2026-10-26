@@ -74,7 +74,7 @@ def copy_libcxx(install: Path, destination: Path, target_os: str) -> None:
     headers = install / "include" / "c++" / "v1"
     libraries = install / "lib"
     if not headers.is_dir() or not libraries.is_dir():
-        raise SystemExit("libc++ install is incomplete; run crt-libcxx-build first")
+        raise SystemExit("libc++ install is incomplete; run crt-cxx-build first")
     header_dest = destination / "include" / "c++" / "v1"
     if header_dest.exists():
         shutil.rmtree(header_dest)
@@ -649,7 +649,7 @@ def install_media_relink_kit(build, destination, dependencies, target_os, media_
     if media_installed:
         crt_relink_kit.build_kit(build, crt_relink_kit.find_output(build, target_os), destination, "libcrtmedia")
     elif ffmpeg.get("relink_kit") != relative:
-        raise SystemExit("inherited media SDK has no relink declaration; rebuild crt-gfx-media-dist first")
+        raise SystemExit("inherited media SDK has no relink declaration; rebuild crt-media-dist first")
     problems = crt_relink_kit.check_kit(destination, "libcrtmedia")
     if problems:
         raise SystemExit("libcrtmedia relink kit: " + "; ".join(problems))

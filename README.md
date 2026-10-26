@@ -491,24 +491,27 @@ cmake --workflow --preset windows-host-ninja-debug
 ```
 
 Stages `01-c` through `05-ui` have `build`, `test` and `dist` targets. They are cumulative: a stage
-target builds the stages before it.
+target builds the stages before it. Public command prefixes are `c`, `cxx`,
+`gfx`, `media`, `ui` and `web`; SDK stage IDs retain their names. Existing build
+trees need a preset reconfigure after the
+[target-name migration](docs/guides/distribution.md#cmake-stage-command-names).
 
 ```sh
 cmake --build --preset <preset> --target crt-c-build
 cmake --build --preset <preset> --target crt-c-test
 cmake --build --preset <preset> --target crt-c-dist
 
-cmake --build --preset <preset> --target crt-libcxx-build
-cmake --build --preset <preset> --target crt-libcxx-test
-cmake --build --preset <preset> --target crt-libcxx-dist
+cmake --build --preset <preset> --target crt-cxx-build
+cmake --build --preset <preset> --target crt-cxx-test
+cmake --build --preset <preset> --target crt-cxx-dist
 
-cmake --build --preset <preset> --target crt-gfx-simple-build
-cmake --build --preset <preset> --target crt-gfx-simple-test
-cmake --build --preset <preset> --target crt-gfx-simple-dist
+cmake --build --preset <preset> --target crt-gfx-build
+cmake --build --preset <preset> --target crt-gfx-test
+cmake --build --preset <preset> --target crt-gfx-dist
 
-cmake --build --preset <preset> --target crt-gfx-media-build
-cmake --build --preset <preset> --target crt-gfx-media-test
-cmake --build --preset <preset> --target crt-gfx-media-dist
+cmake --build --preset <preset> --target crt-media-build
+cmake --build --preset <preset> --target crt-media-test
+cmake --build --preset <preset> --target crt-media-dist
 
 cmake --build --preset <preset> --target crt-ui-build
 cmake --build --preset <preset> --target crt-ui-test
@@ -526,9 +529,9 @@ checks the complete stage's required options without downloading or building:
 
 ```sh
 cmake --build --preset <preset> --target crt-c-config
-cmake --build --preset <preset> --target crt-libcxx-config
-cmake --build --preset <preset> --target crt-gfx-simple-config
-cmake --build --preset <preset> --target crt-gfx-media-config
+cmake --build --preset <preset> --target crt-cxx-config
+cmake --build --preset <preset> --target crt-gfx-config
+cmake --build --preset <preset> --target crt-media-config
 cmake --build --preset <preset> --target crt-ui-config
 cmake --build --preset <preset> --target crt-web-config
 ```
@@ -583,7 +586,7 @@ input hash. A step is skipped when the sources of its stage and of every earlier
 stage, the configuration, and its command line are unchanged since its last
 success, so editing `libcrtui` reruns only the `ui` steps while editing `libc`
 reruns everything after it. Compilation is incremental through Ninja as usual.
-The imported C++ runtime smoke (`crt-libcxx-test`) is currently uncached.
+The imported C++ runtime smoke (`crt-cxx-test`) is currently uncached.
 The cache also checks output inventories, executed drivers, build configuration
 and explicit predecessor/tool inputs. A missing or changed nested payload reruns
 the owning step. It is a local build optimization, not publisher authentication

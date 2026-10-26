@@ -1,4 +1,4 @@
-"""Fresh Linux Ninja graph: native Wayland outputs must exist as build rules."""
+"""Fresh Linux Ninja graph: stage scopes and generated Wayland build rules."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -74,12 +74,36 @@ class WaylandTargetScope(unittest.TestCase):
 @unittest.skipUnless(sys.platform.startswith('linux') and all(shutil.which(p) for p in
                     ('cmake', 'ninja', 'clang', 'clang++')), 'needs native Linux build tools')
 class WaylandBuildGraph(unittest.TestCase):
-    def test_clean_window_and_dist_include_generated_protocol_without_reconfigure(self):
+    def test_clean_stage_scopes_and_generated_protocol_without_reconfigure(self):
         with tempfile.TemporaryDirectory(prefix='crt-wayland-graph-') as raw:
             build = Path(raw)
             configured = subprocess.run(['cmake', '--preset', 'linux-host-ninja-debug', '-B', str(build)],
                                         cwd=ROOT, capture_output=True, text=True, timeout=60)
             self.assertEqual(configured.returncode, 0, configured.stdout + configured.stderr)
+            # Public gfx means stage 03 window/input; stage 04 owns both its
+            # GPU graphics and media runtime helpers, without namespace overlap.
+            inventory = subprocess.check_output(['ninja', '-C', str(build), '-t',
+                'targets', 'all'], text=True, timeout=30)
+            names = {line.split(':', 1)[0] for line in inventory.splitlines()}
+            public = {f'crt-{stage}-{action}' for stage in ('c', 'cxx', 'gfx', 'media', 'ui', 'web')
+                      for action in ('config', 'build', 'test', 'dist')}
+            self.assertTrue(public <= names)
+            retired = {f'crt-{stage}-{action}' for stage in ('libcxx', 'gfx-simple', 'gfx-media')
+                       for action in ('config', 'build', 'test', 'dist')}
+            self.assertTrue(retired.isdisjoint(names))
+            gfx = subprocess.check_output(['ninja', '-C', str(build), '-t', 'commands',
+                'crt-gfx-test'], text=True, timeout=30)
+            self.assertNotIn('/libcrtgfx/src/gpu.c', gfx)
+            self.assertNotIn('build_skia.py', gfx)
+            self.assertIn('^crtgfx_window_smoke_runs', gfx)
+            self.assertNotIn('^crtgfx_.*_runs', gfx)
+            media = subprocess.check_output(['ninja', '-C', str(build), '-t', 'query',
+                'crt-media-test'], text=True, timeout=30)
+            self.assertIn('crt-internal-media-gfx-test', media)
+            self.assertIn('crt-internal-media-runtime-test', media)
+            all_targets = subprocess.run(['ninja', '-C', str(build), '-n', *sorted(public)],
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(all_targets.returncode, 0, all_targets.stdout[-2000:] + all_targets.stderr)
             cache = (build / 'CMakeCache.txt').read_text()
             if any(f'{name}:FILEPATH={name}-NOTFOUND' in cache for name in
                    ('CRTGFX_LINUX_WAYLAND_CLIENT_LIB', 'CRTGFX_LINUX_VULKAN_LIB')):
@@ -91,7 +115,7 @@ class WaylandBuildGraph(unittest.TestCase):
             self.assertEqual(query.returncode, 0, query.stderr)
             self.assertIn('CUSTOM_COMMAND', query.stdout)
             commands = subprocess.check_output(['ninja', '-C', str(build), '-t', 'commands',
-                                                'crt-gfx-simple-dist'], text=True, timeout=30)
+                                                'crt-gfx-dist'], text=True, timeout=30)
             self.assertTrue('window_wayland_native.c' in commands, 'native backend absent from fresh graph')
             self.assertTrue('CRTGFX_HAVE_NATIVE_WAYLAND=1' in commands, 'native WSI disabled before build')
             self.assertTrue('--wayland-xdg-shell-install' in commands, 'publisher omits generated protocol')

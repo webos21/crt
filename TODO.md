@@ -154,7 +154,7 @@ These older reports need bounded checks against identified current artifacts;
 neither later large-consumer passes nor a stale build tree settles them.
 
 - [ ] Revalidate meaningful partial-option combinations of ordinary Linux
-  `crt-gfx-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
+  `crt-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
   dependency publication already exists; close only reproduced gaps in shared
   dependency copying/declaration and packaged example rebuilds, not the
   already-accepted isolated chain
