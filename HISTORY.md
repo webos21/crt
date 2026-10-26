@@ -9,6 +9,30 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-26
+
+### Repair Linux build-system replay blockers
+
+The Linux/amd64 replay exposed three failures beyond the Windows/macOS entry-point
+baseline. Ordinary media relink packaging now compares the exact portable ELF
+transformations performed by CRT or CMake, retains corruption/archive rejection,
+and removes build-only link dependency outputs while preserving `$ORIGIN`.
+The published SDK's kit successfully relinks libcrtmedia and runs a C consumer
+with the SDK and LLD.
+
+Shared libdl now discovers the main program's `DT_DEBUG` through its kernel
+program headers instead of the DSO's own `_DYNAMIC`; the regression rejects the
+old SDK and both imported C++ linkage modes pass their exception/string/iostream
+smokes. Linux's existing OS-loader TLS prerequisite starts at `02-cxx`, so the
+Development SDK's shared consumer passes strict import closure and all trust
+cases. The producer/verifier migration and consumer review baselines are recorded
+without changing manifest/recipe versions or approving CLI/Studio adoption.
+
+Reproduction, negative cases, native results and limits belong to the
+[repair acceptance](docs/acceptance/build_system_acceptance.md#linuxamd64-repair-replay-2026-10-26).
+B5's remaining scope and clean/tagged release qualification stay separately
+tracked in TODO.
+
 ## 2026-10-23
 
 ### Separate release qualification from build-system consolidation

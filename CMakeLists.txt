@@ -238,6 +238,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME crt_link_rpath_first_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_link_rpath_first.py"
   )
+  add_test(NAME crt_wayland_build_graph_unit_runs
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_wayland_build_graph.py"
+  )
   add_test(NAME crt_runtime_notices_unit_runs
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_crt_runtime_notices.py"
   )
@@ -251,6 +254,7 @@ if(Python3_Interpreter_FOUND)
     crt_libcxx_fetch_unit_runs
     crt_binary_dependencies_unit_runs
     crt_link_rpath_first_unit_runs
+    crt_wayland_build_graph_unit_runs
     crt_runtime_notices_unit_runs
     crtweb_stage_distribution_unit_runs
     crt_webkit_host_generators_unit_runs
@@ -1714,24 +1718,19 @@ if(Python3_Interpreter_FOUND)
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_window_smoke_runs"
     ++ "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^crtgfx_synthetic_event_runs")
   set(CRT_GFX_SIMPLE_DIST_ARGS)
+  set(CRT_GFX_SIMPLE_NATIVE_INPUTS)
   if(CRT_TARGET_OS STREQUAL "linux")
     list(APPEND CRT_GFX_SIMPLE_DIST_ARGS
       --xkbcommon-install "${CRTGFX_XKBCOMMON_INSTALL_PREFIX}"
       --xkbcommon-source "${CRTGFX_XKBCOMMON_ROOT}"
     )
-    # libxdg-shell-protocol.a: a real, confirmed packaging gap (2026-09-13,
-    # found running examples/gfx-gpu's own standalone rebuild against a
-    # real packaged SDK once CRTGFX_HAVE_NATIVE_WAYLAND was actually
-    # enabled for the first time -- see create_dist.py's own
-    # copy_wayland_xdg_shell() docstring for the full story). Only passed
-    # when crtgfx-wayland-build has actually produced it (EXISTS check,
-    # matching libcrtgfx/CMakeLists.txt's own CRTGFX_HAVE_NATIVE_WAYLAND
-    # gate) -- create_dist.py's own copy_wayland_xdg_shell() silently no-ops
-    # on a missing --wayland-xdg-shell-install, matching copy_xkbcommon()'s
-    # existing convention, so a from-scratch configure that has never run
-    # crtgfx-wayland-build still packages a (native-Wayland-less) dist
-    # exactly as before this fix.
-    if(EXISTS "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}")
+    # Match the configured backend, even before its generated archive exists.
+    # crt-gfx-simple-build builds the producer through the backend dependency.
+    if(CRTGFX_NATIVE_WAYLAND_ENABLED)
+      list(APPEND CRT_GFX_SIMPLE_NATIVE_INPUTS "${CRTGFX_WAYLAND_XDG_SHELL_LIBRARY}")
+      if(CRTGFX_WAYLAND_HOST_SCANNER)
+        list(APPEND CRT_GFX_SIMPLE_NATIVE_INPUTS "${CRTGFX_WAYLAND_HOST_SCANNER}")
+      endif()
       list(APPEND CRT_GFX_SIMPLE_DIST_ARGS
         --wayland-xdg-shell-install "${CRTGFX_WAYLAND_INSTALL_PREFIX}"
         --wayland-build-dir "${CRTGFX_WAYLAND_BUILD_DIR}"
@@ -1739,7 +1738,7 @@ if(Python3_Interpreter_FOUND)
     endif()
   endif()
   crt_add_cached_stage_target(crt-gfx-simple-dist NAME gfx-simple-dist STAGE gfx-simple
-    INPUTS "${CRT_DIST_ROOT}/02-cxx"
+    INPUTS "${CRT_DIST_ROOT}/02-cxx" ${CRT_GFX_SIMPLE_NATIVE_INPUTS}
     OUTPUTS "${CRT_DIST_ROOT}/03-gfx-simple"
     DEPENDS crt-libcxx-dist crt-gfx-simple-build crt-stage-04-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"

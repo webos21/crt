@@ -827,7 +827,8 @@ depending on another program must add it, or a change to that program is not not
 
 ## Linux/amd64 native replay (B5, 2026-10-26)
 
-**Not accepted as a complete B5 replay:** three native failures remain below.
+**Initial replay failed:** three native failures were found below. Their repair
+and subsequent replay are recorded in [the repair evidence](#linuxamd64-repair-replay-2026-10-26).
 Started from clean `6af554105a9e4aa0515d93e459410956ca8c2137`, with no existing
 `out/`, using `linux-host-ninja-debug`. Host: Linux/x86_64 kernel
 `7.0.0-38-generic`, Clang 21.1.8, CMake 4.2.3, Python 3.14.4. Logs, diagnostic
@@ -926,4 +927,104 @@ stay open until these failures are repaired and the dependent gates pass.
 Wayland/xkbcommon scope and the separate Planned clean Wayland dependency gate
 are unchanged. Clean/tagged release qualification remains separate; no tag,
 upload, public release, CLI compatibility claim or consumer lock update was made.
+
+## Linux/amd64 repair replay (2026-10-26)
+
+Following the initial evidence commit `b166bf138e0bf5b3837230f75bbd9856fe528e79`,
+the three lower-stage failures are repaired. Implementation identities and logs
+are local under `out/build-system-linux-fixes-20261026`; the initial failed
+logs and original runtime identities remain under the preceding replay root.
+These are local `development` builds with explicit dirty-source provenance,
+not clean/tagged release qualification.
+
+- **L1, relink packaging:** `installed_input_matches` retains exact comparison
+  for archives/non-ELF files, and permits only byte-for-byte results of the
+  existing CRT portable RUNPATH rewrite or CMake's install `RPATH_CHANGE` on a
+  disposable ELF copy. It does not mask byte ranges or trust basenames. The
+  native regression builds an ELF library, applies both real transformations,
+  accepts them and rejects other byte changes or a foreign RUNPATH. Source
+  inputs remain untouched. Recipe rewriting also preserves the shell-escaped
+  `$ORIGIN`, drops absolute build RUNPATHs and removes CMake's link dependency
+  output (`-Xlinker --dependency-file=...`). The actual captured media link
+  now creates a kit, relinks `libcrtmedia.so`, and runs a C frame/runtime API
+  consumer through the SDK and LLD (`actual-relink.log`,
+  `relinked-consumer-lld.log`). The published `05-ui` kit also passes actual
+  relink and SDK consumer execution (`published-relink.log`). The earlier diagnostic C++ driver invocation
+  with a persistent `-x c` was a harness error; GNU ld's separate host-libva
+  loader-import error is retained in `relinked-consumer-final.log`. LLD is
+  the project linker used for the successful consumer; no host SDK or runtime
+  library was added to its command to make it pass.
+- **L2, shared unwind:** Linux libdl locates the main executable's dynamic
+  table through `AT_PHDR`/`PT_DYNAMIC`, reads its `DT_DEBUG`, and skips that
+  exact main image in the rendezvous walk. A shared library's own `_DYNAMIC`
+  lacks the main `DT_DEBUG`; using it reported only the main program to LLVM
+  libunwind. The new CTest regression uses shared libc/libdl and requires the
+  main and shared-libdl images exactly once. It fails against the previous
+  SDK (`main=1 shared-libdl=0`) and passes against the fix
+  (`shared-dl-regression.json`). Normal `crt-libcxx-test` now passes exception,
+  string ABI and iostream tests with both static and shared linkage
+  (`fixed-entrypoints-replay.log`). No upstream source patch or public ABI
+  change was needed.
+- **L3, Development loader closure:** the canonical OS loader prerequisite
+  starts at `02-cxx` and is inherited exactly once through `06-web`. Explicit
+  x86_64/aarch64 manifests name only their own loader. Both architecture/stage
+  fixtures pass; the C-only prerequisite contract is unchanged. The normal
+  Development producer, profile verification and all eight static/shared
+  HTTPS/inflate and trust-negative cases pass
+  (`fixed-entrypoints-replay.log`,
+  `out/linux-host-ninja-debug/development-consumer/result.json`).
+
+The same normal run verifies `01-c` through `05-ui` and passes 143/143 C-stage
+tests, including the shared libdl regression. Final tooling checks pass 199 of
+204 tests with five explicit skips (`tooling-final.log`). Intermediate runs
+made while relink fixes were being completed correctly refused to cache success
+when an input changed. The subsequent `native-final.log` run compiled all 8,306
+WebKit steps and passed `crtweb_api_test`, then exposed L4 below before browser,
+network or Host ABI candidate acceptance. No successful Web publication is
+claimed for that run.
+
+- **L4, cold Wayland outputs:** the SDK-only GPU worker could not link because
+  `libxdg-shell-protocol.a` was missing from the ordinary predecessor. This is
+  the Planned configure-time `EXISTS` gate becoming a real Web blocker.
+  The native backend now depends on the Wayland producer, whose generated
+  archive/header are Ninja byproducts. The configured native-backend flag is
+  exported to the stage publisher, which passes the protocol installation
+  inputs before the archive exists. The old cycle rationale no longer applies:
+  `sysroot` installs only crt-c, so Wayland -> expat/libffi -> sysroot does not
+  depend back on graphics. Starting without Wayland outputs, an ordinary
+  `crtgfx_window_demo` build creates the archive/header and native backend
+  (`wayland-dependency.log`). A separate empty-tree configure/graph/dry-run
+  regression confirms producer rules, native activation and packaging arguments
+  before any fetch/build (`wayland-graph-test-final.log`); it is registered in
+  CTest. Explicit cross builds can pass `CRTGFX_WAYLAND_HOST_SCANNER`, forwarded
+  to the existing pinned `--host-scanner` tool interface. Full cold SDK/example
+  proof remains with the Planned gate until publication/rebuild is exercised.
+  The failed Web predecessor and source asset are retained in
+  `failed-web-predecessor-05-ui` and `failed-web-source.tar.xz`. Regenerating that
+  predecessor changes its identity and requires a fresh Web work-root; compiled
+  objects from the failed run are not silently adopted.
+
+### SDK prerequisite contract review
+
+Producer owner: CRT's `crt_dist_prerequisites.py`, ordinary/Development SDK
+publishers, `verify_dist.py` and import-closure fixtures. Review baseline:
+CRT `b166bf138e0bf5b3837230f75bbd9856fe528e79`; inspected consumer repositories:
+CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and Studio
+`27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`. Their local design/acceptance
+documents and CLI-owned `docs/compatibility.md` still claim no approved
+runtime combination. No executable consumer implementation or artifact lock
+is updated here.
+
+The implemented change moves the existing `linux-elf-loader` declaration from
+Web-only to C++/Development and later Full stages, with `required_for:
+shared-cxx-runtime-tls`. SDK manifest format 1, profile format 1, port recipe
+version 1 and isolated-stage recipe version 2 remain separate and unchanged.
+The existing OS loader boundary remains external; host libc/C++ dependencies
+are not authorized. Older candidates with missing or Web-only loader metadata
+must be regenerated using the matching producer/verifier. Strict verification
+continues rejecting missing, duplicate, wrong-architecture and contradictory
+metadata; no installed manifest was hand-edited. Producer gates L3 are exercised
+on Linux/amd64; Linux/aarch64 and other hosts are fixture-only for this change.
+CLI/Studio live integration and adoption are **Not run** and require later
+producer artifact promotion and review in the CLI-owned compatibility ledger.
 

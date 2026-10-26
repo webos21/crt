@@ -147,7 +147,16 @@ For now, Linux supports only:
 
 - `dlopen(NULL, flags)` returning a private main-program handle;
 - `dlclose` on that private handle;
+- `dladdr` for the main executable and `dl_iterate_phdr` for the main executable
+  plus the mapped shared images;
 - clear `dlerror` diagnostics for unsupported real loads/lookups.
+
+Loaded-image iteration finds the main executable's `PT_DYNAMIC` through
+`AT_PHDR`/`AT_PHNUM` and reads its `DT_DEBUG` rendezvous table. This applies
+to both static and shared libdl: a DSO's own `_DYNAMIC` does not contain the
+main program's `DT_DEBUG`. `dl_iterate_phdr_shared_test` covers enumeration
+through shared libdl; the imported C++ static/shared smoke exercises unwind
+lookup in the mapped runtime libraries.
 
 True Linux `dlopen` support should be implemented in one of two explicit future
 directions:

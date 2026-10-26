@@ -260,6 +260,18 @@ add_dependencies(dl_iterate_phdr_dladdr_test dl)
 set_tests_properties(dl_iterate_phdr_dladdr_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "dl_iterate_phdr_dladdr_test: ok"
 )
+if(CRT_TARGET_OS STREQUAL "linux")
+  add_executable(dl_iterate_phdr_shared_test ${CRT_STARTUP_OBJECTS} dl_iterate_phdr_shared_test.c)
+  target_link_libraries(dl_iterate_phdr_shared_test PRIVATE crt_build_flags c_shared dl_shared crt_compiler_rt_builtins)
+  target_link_options(dl_iterate_phdr_shared_test PRIVATE
+    -nostdlib -nostartfiles -nodefaultlibs -fuse-ld=lld -Wl,-e,_start -Wl,--gc-sections)
+  crt_link_startup_end_objects(dl_iterate_phdr_shared_test)
+  add_dependencies(dl_iterate_phdr_shared_test crt1)
+  add_test(NAME dl_iterate_phdr_shared_test_runs COMMAND dl_iterate_phdr_shared_test)
+  set_tests_properties(dl_iterate_phdr_shared_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "dl_iterate_phdr_shared_test: ok")
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS dl_iterate_phdr_shared_test_runs)
+endif()
 
 add_crt_test(printf_test printf_test.c m)
 add_dependencies(printf_test m)

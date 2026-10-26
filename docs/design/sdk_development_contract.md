@@ -239,6 +239,14 @@ Metadata-only retries must not upgrade unknown/dirty compile provenance into
 a clean build. `verify_dist.py --profile dev` checks this profile and the
 ordinary distribution gates together.
 
+Linux shared C++ consumers explicitly import the OS ELF loader for TLS.
+The canonical `linux-elf-loader` prerequisite therefore starts at `02-cxx`
+and is inherited by the Development profile and all later Full stages.
+Its component is selected by target architecture and stays outside the SDK.
+This corrects an earlier declaration limited to `06-web`, without adding
+host libc dependencies or a new schema version. Producer/verifier migration
+requires regenerating older candidates; CLI/Studio adoption remains separate.
+
 The shared networking build and dependency-record implementation is the same
 one used by `04-gfx-media`. No graphics/media/UI/Web dependency is installed.
 Windows consumers use the existing media port's POSIX/Bionic curl-header

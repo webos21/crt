@@ -543,11 +543,14 @@ class PackagingTests(unittest.TestCase):
         for target in ("linux", "macos", "windows"):
             base = external_prerequisites_for(target, "05-ui")
             current = external_prerequisites_for(target, "06-web")
-            self.assertEqual(base, [item for item in current if item["id"] != "linux-elf-loader"])
+            self.assertEqual(base, current)
             if target == "linux":
-                self.assertEqual(current[-1]["components"], ["ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1"])
+                entry = next(item for item in current if item["id"] == "linux-elf-loader")
+                self.assertEqual(entry["components"], ["ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1"])
                 for arch, loader in (("x86_64", "ld-linux-x86-64.so.2"), ("aarch64", "ld-linux-aarch64.so.1")):
-                    self.assertEqual(external_prerequisites_for("linux", "06-web", arch)[-1]["components"], [loader])
+                    entry = next(item for item in external_prerequisites_for("linux", "06-web", arch)
+                                 if item["id"] == "linux-elf-loader")
+                    self.assertEqual(entry["components"], [loader])
 
     def test_old_predecessor_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -207,6 +207,14 @@ contradictory entries; adding or removing a prerequisite therefore requires a
 reviewed change to the common producer/verifier definition rather than an
 ad-hoc manifest edit.
 
+On Linux, `02-cxx` and every later stage, including the Development profile,
+declare the architecture's OS ELF loader as `linux-elf-loader` for shared C++
+runtime TLS. It is not copied into the SDK. This is the same loader boundary
+inherited by Web; it does not permit a host libc or C++ runtime dependency.
+Older SDKs with missing or Web-only loader metadata must be regenerated with the
+matching producer/verifier; do not edit an installed manifest to bypass an
+import-closure failure. Manifest format 1 and recipe versions are unchanged.
+
 | Target/stage | External runtime contract added at that stage |
 | --- | --- |
 | Windows `01-c` | Windows kernel/API-set runtime |

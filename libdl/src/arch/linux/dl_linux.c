@@ -47,24 +47,17 @@ struct crt_r_debug {
   Elf64_Addr r_ldbase;
 };
 
-/* `_DYNAMIC` is a linker-synthesized symbol pointing at the start of this
- * executable's own .dynamic section, present in every dynamically-linked
- * ELF image (documented ABI, see /usr/include/link.h's own comment: "This
- * symbol refers to the 'dynamic structure' ... of whatever module refers
- * to `_DYNAMIC`"). Once the real system dynamic linker has finished
- * startup (always true by the time any of this project's own code runs),
- * its DT_DEBUG entry holds the address of struct r_debug -- the same
- * technique gdb itself and every from-scratch dl_iterate_phdr()
- * implementation use to find it, deliberately not the simpler-looking
- * `extern struct r_debug _r_debug` glibc's own <link.h> also documents:
- * that symbol lives inside the separate ld.so image, not something this
- * project's own link automatically resolves against. */
-extern const Elf64_Dyn _DYNAMIC[];
-
-static const struct crt_r_debug* crt_dl_linux_find_r_debug(void) {
+/* DT_DEBUG belongs to the main executable's PT_DYNAMIC. `_DYNAMIC` would
+ * name libdl.so's own table when this backend is shared, where DT_DEBUG is
+ * absent. Find the main table through the kernel's AT_PHDR instead; this
+ * also avoids importing any private symbol from the host dynamic linker. */
+static const struct crt_r_debug* crt_dl_linux_find_r_debug(const Elf64_Dyn* dynamic) {
   const Elf64_Dyn* dyn;
 
-  for (dyn = _DYNAMIC; dyn->d_tag != DT_NULL; ++dyn) {
+  if (dynamic == 0) {
+    return 0;
+  }
+  for (dyn = dynamic; dyn->d_tag != DT_NULL; ++dyn) {
     if (dyn->d_tag == DT_DEBUG) {
       return (const struct crt_r_debug*)(uintptr_t)dyn->d_un.d_ptr;
     }
@@ -129,7 +122,7 @@ static Elf64_Addr crt_dl_linux_main_bias(const Elf64_Phdr* phdr, unsigned long p
  * just the main executable's own code (see HISTORY.md's 2026-08-21 entry
  * for the crash this caused before this walk existed, root-caused via
  * gdb). The main executable's own link_map entry is skipped during the
- * walk (compared by `l_ld == _DYNAMIC`, not by list position -- the ELF
+ * walk (compared by its actual main PT_DYNAMIC address, not by list position -- the ELF
  * TIS spec places it first, but comparing the actual .dynamic section
  * pointer is a stronger check that does not depend on that ordering
  * holding) since it was already reported precisely via auxv above;
@@ -144,6 +137,8 @@ int crt_dl_backend_iterate_phdr(
   struct dl_phdr_info info;
   const struct crt_r_debug* debug;
   const struct crt_link_map* map;
+  const Elf64_Dyn* main_dynamic = 0;
+  unsigned long i;
   int result;
 
   if (phdr_addr == 0 || phnum == 0) {
@@ -152,6 +147,12 @@ int crt_dl_backend_iterate_phdr(
   phdr = (const Elf64_Phdr*)(uintptr_t)phdr_addr;
 
   info.dlpi_addr = crt_dl_linux_main_bias(phdr, phnum, (Elf64_Addr)phdr_addr);
+  for (i = 0; i < phnum; ++i) {
+    if (phdr[i].p_type == PT_DYNAMIC) {
+      main_dynamic = (const Elf64_Dyn*)(uintptr_t)(info.dlpi_addr + phdr[i].p_vaddr);
+      break;
+    }
+  }
   info.dlpi_name = ""; /* matches glibc's own convention for the main executable */
   info.dlpi_phdr = phdr;
   info.dlpi_phnum = (Elf64_Half)phnum;
@@ -160,14 +161,14 @@ int crt_dl_backend_iterate_phdr(
     return result;
   }
 
-  debug = crt_dl_linux_find_r_debug();
+  debug = crt_dl_linux_find_r_debug(main_dynamic);
   if (debug == 0) {
     return 0;
   }
   for (map = debug->r_map; map != 0; map = map->l_next) {
     const Elf64_Ehdr* ehdr;
 
-    if (map->l_ld == _DYNAMIC) {
+    if (map->l_ld == main_dynamic) {
       continue; /* the main executable's own entry, already reported above */
     }
     /* The ELF header always lives at the very start of an image's first

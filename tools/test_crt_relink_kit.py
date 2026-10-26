@@ -115,6 +115,16 @@ class Rewrite(unittest.TestCase):
         with self.assertRaises(SystemExit):
             kit.rewrite(["/sdk/tools/crt-cc", "-shared", "port-tests/install/lib/libx.a"], self.build, ["/sdk"], {}, {})
 
+    def test_ninja_link_bookkeeping_is_removed_and_origin_is_preserved(self):
+        command = (': && clang -shared -Xlinker --dependency-file=objects/link.d '
+                   '-Wl,-rpath,"\\$ORIGIN:/temporary/build/lib:" '
+                   '-o lib/libcrtmedia.so libcrtmedia/CMakeFiles/crtmedia_shared.dir/src/a.c.o && :')
+        tokens = kit.link_tokens(command, "lib/libcrtmedia.so", windows=False)
+        result = kit.rewrite(tokens, self.build, ["/sdk"], {}, {})
+        self.assertIn("-Wl,-rpath,$ORIGIN", result)
+        self.assertNotIn("-Xlinker", result)
+        self.assertFalse([item for item in result if "dependency-file" in item or "/temporary/build" in item])
+
     def test_ordinary_build_libraries_require_identical_installed_bytes(self):
         sdk = Path(self.temp.name) / "sdk"
         (sdk / "lib").mkdir(parents=True)
@@ -129,6 +139,43 @@ class Rewrite(unittest.TestCase):
         installed.write_bytes(b"wrong archive with same name")
         with self.assertRaisesRegex(SystemExit, "differs from build"):
             kit.rewrite(tokens, self.build, [str(sdk)], {}, {})
+
+    @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("clang") and shutil.which("cmake"),
+                         "requires native ELF compiler and CMake")
+    def test_cmake_installed_elf_is_accepted_but_other_byte_changes_are_not(self):
+        sdk = Path(self.temp.name) / "sdk with spaces"
+        (sdk / "lib").mkdir(parents=True)
+        source = self.build / "lib/libm.so"
+        source.parent.mkdir()
+        c_source = self.build / "input.c"
+        c_source.write_text("int crt_relink_fixture(void) { return 17; }\n")
+        runpath = "$ORIGIN:" + str(self.build / "lib") + ":"
+        subprocess.run(["clang", "-shared", "-nostdlib", "-fPIC", str(c_source),
+                        "-Wl,-rpath," + runpath, "-o", str(source)], check=True, capture_output=True)
+        original = source.read_bytes()
+        installed = sdk / "lib/libm.so"
+        shutil.copy2(source, installed)
+        import crt_elf
+        crt_elf.remove_absolute_runtime_paths(installed, require_origin=True)
+        self.assertEqual(["clang", "@SDK@/lib/libm.so"],
+                         kit.rewrite(["clang", "lib/libm.so"], self.build, [str(sdk)], {}, {}))
+        shutil.copy2(source, installed)
+        script = self.build / "install-rpath.cmake"
+        script.write_text('file(RPATH_CHANGE FILE "${INPUT}" OLD_RPATH "${OLD}" NEW_RPATH "$ORIGIN")\n')
+        subprocess.run(["cmake", "-DINPUT=" + str(installed), "-DOLD=" + runpath, "-P", str(script)],
+                       check=True, capture_output=True)
+        self.assertNotEqual(original, installed.read_bytes())
+        self.assertEqual(["clang", "@SDK@/lib/libm.so"],
+                         kit.rewrite(["clang", "lib/libm.so"], self.build, [str(sdk)], {}, {}))
+        self.assertEqual(source.read_bytes(), original, "comparison must not alter the build input")
+        data = bytearray(installed.read_bytes())
+        data[-1] ^= 1
+        installed.write_bytes(data)
+        with self.assertRaisesRegex(SystemExit, "differs from build"):
+            kit.rewrite(["clang", "lib/libm.so"], self.build, [str(sdk)], {}, {})
+        shutil.copy2(source, installed)
+        crt_elf.set_runtime_paths(installed, "$ORIGIN:/unexpected/installed/path")
+        self.assertFalse(kit.installed_input_matches(source, installed))
 
     def test_ordinary_bootstrap_import_is_retained_as_support_not_runtime(self):
         source = self.build / "lib/libc++_dll.dll.a"

@@ -25,6 +25,9 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+
+import crt_elf
 
 OBJECT_SUFFIXES = (".o", ".obj")
 SUPPORT_SUFFIXES = (".def", ".map", ".exp", ".ver", ".lds", ".txt")
@@ -123,6 +126,44 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def installed_input_matches(source: Path, installed: Path) -> bool:
+    """Require identical bytes, allowing the CRT/CMake portable ELF RPATH changes.
+
+    Compare the actual install transformation on a disposable copy. Merely
+    ignoring runtime-path bytes would also accept unrelated changes or damage
+    to suffix-shared dynamic strings. Archives and non-ELF inputs stay exact.
+    """
+    if sha256(source) == sha256(installed):
+        return True
+    try:
+        paths = crt_elf.runtime_paths(source)
+        if len(paths) != 1:
+            return False
+        portable = ":".join(entry for entry in paths[0].split(":")
+                            if entry and not crt_elf.is_absolute_runtime_entry(entry))
+        if "$ORIGIN" not in portable.split(":") or crt_elf.runtime_paths(installed) != [portable]:
+            return False
+        with tempfile.TemporaryDirectory(prefix="crt-relink-input-") as raw:
+            work = Path(raw)
+            copied = work / source.name
+            shutil.copy2(source, copied)
+            # Port copies use CRT's suffix-sharing-safe rewrite; CMake's
+            # install uses RPATH_CHANGE, which also clears unused padding.
+            crt_elf.remove_absolute_runtime_paths(copied, require_origin=True)
+            if sha256(copied) == sha256(installed):
+                return True
+            shutil.copy2(source, copied)
+            script = work / "install-rpath.cmake"
+            script.write_text('file(RPATH_CHANGE FILE "${INPUT}" OLD_RPATH "${OLD}" NEW_RPATH "${NEW}")\n',
+                              encoding="utf-8")
+            subprocess.run(["cmake", "-DINPUT=" + str(copied), "-DOLD=" + paths[0],
+                            "-DNEW=" + portable, "-P", str(script)],
+                           check=True, capture_output=True, text=True)
+            return sha256(copied) == sha256(installed)
+    except (ValueError, subprocess.CalledProcessError):
+        return False
+
+
 def link_tokens(commands: str, output: str, windows: bool | None = None) -> list:
     """The tokens of the single link command that produces `output` from ``ninja -t commands`` text."""
     windows = os.name == "nt" if windows is None else windows
@@ -169,6 +210,20 @@ def rewrite(tokens: list, build: Path, sdk_roots: list, objects: dict, support: 
         if skip:
             skip = False
             continue
+        if original == "-Xlinker" and index + 1 < len(tokens) and tokens[index + 1].startswith("--dependency-file="):
+            # CMake/Ninja's link-dependency output is build bookkeeping,
+            # not an input or a required output of a recipient's relink.
+            skip = True
+            continue
+        if original.startswith("-Wl,-rpath,"):
+            # shlex keeps the shell's quoted backslash before $ORIGIN.
+            # Do this before under_sdk's Windows separator normalization.
+            entries = original[len("-Wl,-rpath,"):].replace("\\$ORIGIN", "$ORIGIN").split(":")
+            portable = ":".join(entry for entry in entries
+                                if entry and not crt_elf.is_absolute_runtime_entry(entry))
+            if portable:
+                result.append("-Wl,-rpath," + portable)
+            continue
         token = under_sdk(original, sdk_roots)
         if value_of:
             value_of = ""
@@ -208,7 +263,7 @@ def rewrite(tokens: list, build: Path, sdk_roots: list, objects: dict, support: 
             candidates = [Path(root) / "lib" / resolved.name for root in sdk_roots]
             installed = next((path for path in candidates if path.is_file()), None)
             if installed is not None:
-                if sha256(installed) != sha256(resolved):
+                if not installed_input_matches(resolved, installed):
                     raise SystemExit(f"installed relink input differs from build: {resolved.name}")
                 result.append(f"@SDK@/lib/{resolved.name}")
             elif build in resolved.parents and token.lower().endswith(".dll.a"):

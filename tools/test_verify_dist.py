@@ -221,6 +221,18 @@ class UiStageTests(unittest.TestCase):
 
 
 class ExternalPrerequisiteTests(unittest.TestCase):
+    def test_shared_cxx_loader_is_declared_from_02_and_inherited_once(self):
+        for arch, loader in (("x86_64", "ld-linux-x86-64.so.2"), ("aarch64", "ld-linux-aarch64.so.1")):
+            for stage in ("02-cxx", "03-gfx-simple", "04-gfx-media", "05-ui", "06-web"):
+                with self.subTest(arch=arch, stage=stage):
+                    entries = external_prerequisites_for("linux", stage, arch)
+                    loaders = [entry for entry in entries if entry["id"] == "linux-elf-loader"]
+                    self.assertEqual(len(loaders), 1)
+                    self.assertEqual(loaders[0]["components"], [loader])
+                    self.assertFalse(loaders[0]["bundled"])
+            self.assertNotIn("linux-elf-loader", {entry["id"] for entry in
+                             external_prerequisites_for("linux", "01-c", arch)})
+
     def test_cumulative_contract_for_every_target_and_stage(self) -> None:
         for target_os in ("linux", "macos", "windows"):
             previous_ids: set[str] = set()
@@ -231,7 +243,7 @@ class ExternalPrerequisiteTests(unittest.TestCase):
                     manifest["target"]["os"] = target_os
                     manifest["stage"] = stage
                     manifest["external_prerequisites"] = (
-                        external_prerequisites_for(target_os, stage))
+                        external_prerequisites_for(target_os, stage, manifest["target"]["arch"]))
                     validated = validate_external_prerequisites(manifest)
                     self.assertTrue(previous_ids <= set(validated))
                     previous_ids = set(validated)

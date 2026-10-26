@@ -44,10 +44,17 @@ _BASE = {
 _CXX = {
     "windows": (),
     "macos": (),
-    # Linux: no entry. libc++.so used to record NEEDED libatomic.so.1 because its build linked
-    # the host libatomic; the recipe now sets LIBCXX_HAS_ATOMIC_LIB=OFF (Web Tranche 1C) and a fresh
-    # 02-cxx..05-ui SDK on Linux/x86_64 and aarch64 has no libatomic DT_NEEDED (the host-ABI audit).
-    "linux": (),
+    # The OS loader is the existing TLS boundary; no host libc, C++ runtime
+    # or libatomic is part of this contract.
+    "linux": ({
+        # crt-c++ records the OS interpreter for shared-runtime TLS imports
+        # starting at 02-cxx, including Development SDK consumers.
+        "id": "linux-elf-loader",
+        "kind": "os-runtime",
+        "required_for": ["shared-cxx-runtime-tls"],
+        "components": ["ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1"],
+        "bundled": False,
+    },),
 }
 
 _GFX_SIMPLE = {
@@ -252,16 +259,7 @@ _GFX_MEDIA = {
 _WEB = {
     "windows": (),
     "macos": (),
-    "linux": ({
-        # The shared-CRT browser executables explicitly record the OS ELF
-        # interpreter for TLS imports. This is the existing loader boundary,
-        # not permission to depend on glibc or a host C++ runtime.
-        "id": "linux-elf-loader",
-        "kind": "os-runtime",
-        "required_for": ["shared-web-runtime-tls"],
-        "components": ["ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1"],
-        "bundled": False,
-    },),
+    "linux": (),
 }
 
 
@@ -281,9 +279,9 @@ def external_prerequisites_for(target_os: str, stage: str, target_arch: str | No
     if STAGE_ORDER[stage] >= STAGE_ORDER["06-web"]:
         prerequisites.extend(_WEB[target_os])
     prerequisites = deepcopy(prerequisites)
-    if target_os == "linux" and STAGE_ORDER[stage] >= 6 and target_arch is not None:
+    if target_os == "linux" and STAGE_ORDER[stage] >= 2 and target_arch is not None:
         loaders = {"x86_64": "ld-linux-x86-64.so.2", "aarch64": "ld-linux-aarch64.so.1"}
         if target_arch not in loaders:
             raise ValueError(f"unsupported Linux ELF loader architecture: {target_arch}")
-        prerequisites[-1]["components"] = [loaders[target_arch]]
+        next(item for item in prerequisites if item["id"] == "linux-elf-loader")["components"] = [loaders[target_arch]]
     return prerequisites
