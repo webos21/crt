@@ -30,6 +30,14 @@ without changing manifest/recipe versions or approving CLI/Studio adoption.
 
 Reproduction, negative cases, native results and limits belong to the
 [repair acceptance](docs/acceptance/build_system_acceptance.md#linuxamd64-repair-replay-2026-10-26).
+The subsequent cold Wayland subgraph exposed the missing protocol archive in
+the ordinary SDK. Its producer now owns explicit Ninja byproducts and backend
+dependencies; ordinary publication includes it without a manual reconfigure,
+and packaged Simple Graphics/GPU examples rebuild. A fresh Web work-root then
+completes native `crt-web-build/test/dist`, its browser/network/ABI gates and
+the Development/Full runtime comparison. Original failed inputs are retained;
+the [final acceptance](docs/acceptance/build_system_acceptance.md#final-linuxamd64-entry-point-acceptance)
+owns measurements, archive identity, relocation and cache evidence.
 B5's remaining scope and clean/tagged release qualification stay separately
 tracked in TODO.
 

@@ -592,7 +592,9 @@ control worked as reasoned; two build/tooling gaps found and fixed.
 - **Caveat.** This options-default `out/linux-ui-check` dist contained no
   `libxdg-shell-protocol.a` (that tree never built Wayland), so the external
   rebuild used a scratch copy of the SDK with the archive taken from the dev
-  tree's `dist/04-gfx-media`. Logged in `TODO.md`.
+  tree's `dist/04-gfx-media`. This historical scratch-copy result remains limited;
+  the ordinary producer repair and unmodified packaged example rebuilds are in
+  the [2026-10-26 build-system acceptance](build_system_acceptance.md#final-linuxamd64-entry-point-acceptance).
 - Full in-tree `ctest` 149/150 (only `crtmedia_playback_pipeline_test_runs`:
   no sound card, pre-existing); `crtui_window_demo 30`: `presented=30
   pixel_check=pass input_check=pass`; tooling 79/79.
@@ -704,7 +706,7 @@ functional source change and closes Tranche 4 on all three hosts.
   authoritative model/layout/input path remains independent of LVGL.
 - The in-tree Wayland demo ran three times for 30 frames with
   `presented=30 pixel_check=pass input_check=pass`. After the documented clean
-  Linux sequence (`crtgfx-wayland-build`, reconfigure, then distribution),
+  then-documented Linux sequence (`crtgfx-wayland-build`, reconfigure, then distribution),
   `crt-ui-dist` generated and verified every cumulative stage through
   `dist/05-ui`; the manifest and package contain the generated
   `libxdg-shell-protocol.a` dependency.

@@ -650,7 +650,7 @@ and Full/Development inherited runtime comparison.
 **Accepted here:** Windows/x86_64 native `crt-web-build/test/dist`, including
 real isolated Web production, packaged and extracted/relocated SDK validation.
 This supersedes the pending checkpoints above, not the preserved failure evidence.
-B5 still owns Linux/macOS native replay. Clean/tagged matching Dev/Full release
+At that checkpoint B5 still owned Linux/macOS native replay. Clean/tagged matching Dev/Full release
 assembly remains unaccepted and is now tracked in the separate release
 qualification item below, not B4's implementation scope. No consumer lock,
 public upload or source tag changed.
@@ -795,7 +795,9 @@ Defects found by the native replay and fixed (each has a regression test that fa
    program that passes when linked against the shared libc. The probe is now compiled hosted and against the shared
    libc on POSIX hosts (the same class as the Tranche 3 `curl` finding).
 
-Limits and open questions: Linux native replay remains pending. Windows/arm64 is not claimed. A cascade rerun of the
+Limits at that checkpoint: Linux native replay remained pending (completed in
+[the final Linux acceptance](#final-linuxamd64-entry-point-acceptance) below).
+Windows/arm64 is not claimed. A cascade rerun of the
 upstream steps after a failed `crt-web-test` was observed once and could not be traced to a changed input (sources,
 command lines and `HEAD` were unchanged); the cache key then included the complete `PATH`, so a different launching
 shell invalidated every step (narrowed below). The Wayland/xkbcommon target scope (B5's second item) is unchanged.
@@ -934,8 +936,9 @@ Following the initial evidence commit `b166bf138e0bf5b3837230f75bbd9856fe528e79`
 the three lower-stage failures are repaired. Implementation identities and logs
 are local under `out/build-system-linux-fixes-20261026`; the initial failed
 logs and original runtime identities remain under the preceding replay root.
-These are local `development` builds with explicit dirty-source provenance,
-not clean/tagged release qualification.
+Initial repair runs retain explicit dirty-source provenance. The final replay
+uses the committed implementation identified below. All outputs are local
+`development` candidates, not clean/tagged release qualification.
 
 - **L1, relink packaging:** `installed_input_matches` retains exact comparison
   for archives/non-ELF files, and permits only byte-for-byte results of the
@@ -997,12 +1000,82 @@ claimed for that run.
   regression confirms producer rules, native activation and packaging arguments
   before any fetch/build (`wayland-graph-test-final.log`); it is registered in
   CTest. Explicit cross builds can pass `CRTGFX_WAYLAND_HOST_SCANNER`, forwarded
-  to the existing pinned `--host-scanner` tool interface. Full cold SDK/example
-  proof remains with the Planned gate until publication/rebuild is exercised.
+  to the existing pinned `--host-scanner` tool interface. Ordinary publication
+  and packaged example rebuilds pass below; a whole empty-build-root replay
+  remains explicitly Planned.
   The failed Web predecessor and source asset are retained in
   `failed-web-predecessor-05-ui` and `failed-web-source.tar.xz`. Regenerating that
   predecessor changes its identity and requires a fresh Web work-root; compiled
   objects from the failed run are not silently adopted.
+
+### Final Linux/amd64 entry-point acceptance
+
+**Native replay complete** at implementation commit
+`214a1ec87826f4d002f64fc92264e908bd2ec5b4`. The normal command in
+`native-wayland-final.log` exits 0:
+
+```sh
+cmake --build out/linux-host-ninja-debug --target crt-web-dist \
+  crt-development-sdk-test crt-c-test crt-libcxx-test \
+  crt-gfx-media-test crt-ui-test --parallel 8
+```
+
+- `01-c` through `06-web` publish and verify through their ordinary entry
+  points. Final default `cmake --workflow --preset linux-host-ninja-debug`
+  passes **144/144** C-stage tests; all six configuration preflights pass
+  (`workflow-final.log`, `configs-final.log`). The added graph regression
+  configures a genuinely empty tree and dry-runs it without fetching/building.
+- Graphics **10/10**, Media **30/30**, UI **8/8**, and the imported C++
+  static/shared exception, string ABI and iostream smokes pass. Final tooling
+  covers 226 tests with five explicit skips (`all-regressions-wayland.log`);
+  the final focused graph/catalog/backend checks pass 17 with one explicit skip
+  (`final-graph-regressions.log`).
+- The Wayland producer starts without its outputs and builds them through
+  the normal window-demo dependency. `03-gfx-simple`, `04-gfx-media` and
+  `05-ui` publish `libxdg-shell-protocol.a` with equal SHA-256
+  `b195e03fd6c89ffb43cb4a4c1fbf72ba4f9263a3c31ad4421931d06ce4566250`.
+  SDK-only `examples/gfx-simple` from `03` and `examples/gfx-gpu` from `04`
+  configure/build in fresh directories with spaces using only the installed
+  toolchain (`simple-example-rebuild.log`, `gpu-example-rebuild.log`). No
+  archive is copied into a frozen SDK to make these checks pass.
+- Fresh isolated run `isolated-web/run-hevnq7sj` recompiles all **8,306** WebKit
+  steps against the repaired predecessor and passes the API smoke, native
+  SDK-only GPU worker/browser builds and mandatory candidate validation.
+  `crt-web-test` independently replays a disposable SDK copy
+  (`isolated-web/test-0dw45x2e`). Browser load/pixels/script checks pass;
+  process observation reports 113 mapped files, one C++ runtime per role,
+  no violations and no remaining owned processes. HTTP/TLS passes all ten
+  cases; `packaged-host-abi.json` reports `ok: true`, no violations.
+- `crt-web-dist` verifies and produces
+  `crt-development-linux-x86_64-06-web.tar.xz`, **96,940,748 bytes**, SHA-256
+  `dbf697ba404719eec6dfa9a3b1dabe2984e4e284972b38403c4446fbcfef089f`.
+  Archive/runtime measurements are in `final-summary.json`. Extracting this
+  archive to `extracted Web SDK with spaces/06-web` also passes the complete
+  test phase: browser smoke/observation, all ten HTTP/TLS cases, Host ABI and
+  ordinary verification (`web-archive-replay.log`,
+  `archive replay work/test-result.json`).
+- Development production/profile validation and all eight static/shared
+  HTTPS/inflate/trust-negative cases pass. A relocated Development SDK in a
+  path with spaces also verifies and passes all eight cases
+  (`dev-relocation.log`, `dev-relocation-verify.log`). The **23** inherited
+  runtime file hashes equal plain `02-cxx`, `05-ui`, newly built Full `06-web`,
+  Dev and the tested relocated Dev; no CLI/Studio runtime adoption is inferred.
+- Cache replay at this implementation: four PATH variants of
+  `crt-libcxx-dist` each give **7 up to date / 0 running** in 1.81–1.93 s;
+  a different resolved `cmake` changes identity (`cache-result.json`).
+  Repeating `crt-web-test` gives **15 up to date / 0 running** cached steps,
+  including Web build/test (`web-cache-replay.log`). Uncached dependency
+  commands may still execute; no WebKit recompilation occurs.
+
+This completes Linux native entry-point replay, not all of B5. Remaining
+Wayland/xkbcommon target-definition scope and final consolidation review stay
+open. The dependency fix is covered by a fresh graph and cold Wayland producer,
+ordinary distribution and packaged examples; **a full empty-build-root chain
+is not newly claimed**. Windows/macOS retain their separately identified native
+baselines, without claiming a fresh replay of this Linux repair on those hosts.
+Clean/tagged release assembly and consumer adoption remain separate. The Web
+producer explicitly retains its public-release blocker (`2.54.1 -> 2.54.2`
+stable-series pin update); no tag, upload or public release was made.
 
 ### SDK prerequisite contract review
 

@@ -65,8 +65,6 @@ under an active tranche only to make its execution order legible.
 Preserve the accepted SDK recipes and default C-stage workflow. Target ownership
 is [build_targets.json](docs/guides/build_targets.json); scope and replay evidence
 live in the [build-system review](docs/acceptance/build_system_acceptance.md).
-Finish Windows implementation/replay first; collect Linux/macOS native replay
-as one follow-up batch, not interleaved with these implementation steps.
 Close this consolidation after B5 and final build-entry-point review; actual
 clean/tagged release qualification is the separate Planned item below, not a
 build-structure completion gate.
@@ -94,14 +92,13 @@ build-structure completion gate.
     Windows SDK-only static/shared HTTPS/inflate and trust-negative replay.
   - [x] Windows normal CMake producer/consumer and relocated-path replay;
     inherited runtime bytes match the current Full predecessor.
-- [ ] B5 Replay the new entry points on supported native hosts; narrow the
-  Wayland/xkbcommon target scope only after preserving explicit cross-build use
-  and the clean-build dependency gate in Planned. Windows/x64 and macOS/arm64
-  replayed ([macOS evidence](docs/acceptance/build_system_acceptance.md#macosarm64-native-replay-b5-2026-10-23));
-  Linux/amd64 lower-stage blockers are repaired; native Web replay is in progress
-  ([repair evidence](docs/acceptance/build_system_acceptance.md#linuxamd64-repair-replay-2026-10-26)).
-  The stage cache key follows the identity of the tools it resolves, not the
-  `PATH` string ([evidence](docs/acceptance/build_system_acceptance.md#stage-cache-key-tool-identity-instead-of-the-path-string-2026-10-26)).
+- [ ] B5 Finish internal target-scope review and consolidation closure.
+  - [x] Native entry-point replay: Windows/x64 and macOS/arm64 at their recorded
+    baselines; Linux/amd64 build/test/dist, Development consumer and cache replay
+    ([final Linux evidence](docs/acceptance/build_system_acceptance.md#final-linuxamd64-entry-point-acceptance)).
+  - [ ] Narrow Wayland/xkbcommon target scope while preserving explicit cross-build
+    use and the remaining whole-tree cold-build proof in Planned. Complete the
+    final build-entry-point review before closing consolidation.
 
 ### CRT SDK split: Full SDK and Development SDK
 
@@ -208,13 +205,10 @@ neither later large-consumer passes nor a stale build tree settles them.
 
 Independent hardening, not unfinished backend object-boundary acceptance.
 
-- [ ] Remove Wayland's configure-time generated-archive `EXISTS` dependency:
-  prove clean configure/build/dist/example rebuild without manual reconfigure,
-  including publication of `libxdg-shell-protocol.a`. Merge the old missing-
-  archive report into this gate; select a cycle-free dependency/prefix design,
-  considering a superbuild only if the bounded fix needs it
-  ([UI evidence](docs/acceptance/crtui_acceptance.md),
-  [distribution contract](docs/guides/distribution.md)).
+- [ ] Finish whole-tree cold Wayland configure/build/dist/example replay from an
+  empty build root. Generated-output dependencies, ordinary SDK publication and
+  packaged example rebuilds are repaired; keep the remaining whole-tree proof
+  explicit ([evidence](docs/acceptance/build_system_acceptance.md#final-linuxamd64-entry-point-acceptance)).
 - [ ] Replace libc's ELF `CRT_1.0 { global: *; };` export policy with an explicit
   Bionic-compatible public-symbol manifest and generated version map, preserving
   required runtime symbols and establishing an ABI evolution baseline
