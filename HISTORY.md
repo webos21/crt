@@ -11,6 +11,25 @@ substantive update.
 
 ## 2026-10-26
 
+### Complete build-system consolidation (B5)
+
+Finished the internal target-scope review: Wayland/xkbcommon producers are
+registered by default for Linux targets, including explicit aarch64 cross builds;
+macOS/Windows standalone port experiments use an explicit option. The smoke
+driver preserves that option in its shadow build. Production-module registration
+and scanner-forwarding regressions run in the existing CI tooling check.
+
+A genuinely empty Linux/amd64 build root now completes the ordinary C through
+UI build/test/dist chain. The actual Simple Graphics, Media and UI archives
+verify after extraction into paths with spaces, and their SDK-only examples
+build and run with bounded frame/pixel/input checks. Final public-target,
+configuration-preflight and release-negative review passes. Removed completed
+B0-B5 and the cold Wayland proof from TODO; clean/tagged release qualification
+and SDK consumer adoption retain their independent scope.
+
+Commands, source identities, measurements and native-versus-fixture limits are
+in the [B5 acceptance](docs/acceptance/build_system_acceptance.md#b5-closure-2026-10-26).
+
 ### Repair Linux build-system replay blockers
 
 The Linux/amd64 replay exposed three failures beyond the Windows/macOS entry-point
@@ -38,8 +57,8 @@ completes native `crt-web-build/test/dist`, its browser/network/ABI gates and
 the Development/Full runtime comparison. Original failed inputs are retained;
 the [final acceptance](docs/acceptance/build_system_acceptance.md#final-linuxamd64-entry-point-acceptance)
 owns measurements, archive identity, relocation and cache evidence.
-B5's remaining scope and clean/tagged release qualification stay separately
-tracked in TODO.
+The remaining B5 scope is completed in the closure above; clean/tagged release
+qualification remains separately tracked in TODO.
 
 ## 2026-10-23
 

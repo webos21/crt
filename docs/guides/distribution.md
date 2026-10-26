@@ -37,6 +37,15 @@ The presets enable LVGL (and Skia, FFmpeg, curl and the imported libc++), and `c
 they need first, so no separate fetch step or configure option is required
 ([build targets](build_targets.json), [README](../../README.md#build)).
 
+The internal `crtgfx-wayland-*` and `crtgfx-xkbcommon-*` port targets are
+registered by default for Linux targets, including Linux/x86_64 host to
+Linux/aarch64 target builds. Registration follows `CRT_TARGET_OS`, not the host
+OS. For standalone port experiments targeting macOS or Windows, configure with
+`-DCRTGFX_ENABLE_WAYLAND_PORT_TARGETS=ON`. This does not select a Wayland window
+backend on those systems. Linux cross builds still require an independently
+built native scanner through `CRTGFX_WAYLAND_HOST_SCANNER`; target binaries must
+not be executed as build-host generators.
+
 Each binary stage is cumulative and independently consumable. The repository
 build currently creates each later directory by copying the preceding
 installed stage and overlaying the new component. That proves artifact

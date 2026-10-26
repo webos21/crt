@@ -60,46 +60,6 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-### Build-system consolidation
-
-Preserve the accepted SDK recipes and default C-stage workflow. Target ownership
-is [build_targets.json](docs/guides/build_targets.json); scope and replay evidence
-live in the [build-system review](docs/acceptance/build_system_acceptance.md).
-Close this consolidation after B5 and final build-entry-point review; actual
-clean/tagged release qualification is the separate Planned item below, not a
-build-structure completion gate.
-
-- [x] B0 Audit the preset/dependency/cache/catalog changes against a fresh
-  Windows tree; record prior five-host inventory evidence separately from
-  locally replayed builds, and restore the missing completed-work history.
-- [x] B1 Add bounded `crt-<stage>-config` preflight targets: report the selected
-  stage's resolved configuration without fetching, compiling or recursively
-  reconfiguring the running Ninja tree. Test feature-off and unsupported-pair
-  rejection; keep reduced-feature diagnostic builds available.
-- [x] B2 Add `crt-web-build/test/dist` through the existing isolated Web driver;
-  complete Windows native production, packaged browser/network/ABI, ZIP and
-  extracted spaces-path replay with source/predecessor guards intact
-  ([evidence](docs/acceptance/build_system_acceptance.md#windows-b2-completion-2026-10-23)).
-- [x] B3 Close cache correctness gaps before release automation: include
-  build-affecting configuration and executed test-driver inputs, and detect
-  deleted payloads inside existing output directories and changed predecessors.
-- [x] B4 Implement the Development SDK producer and `crt-dev-release` /
-  `crt-full-release` entry points with strict local release gates and regression
-  coverage. This closes implementation and Windows replay only, not actual
-  clean/tagged release assembly acceptance
-  ([scope](docs/acceptance/build_system_acceptance.md#release-qualification-scope-split-2026-10-23)).
-  - [x] Producer/profile and strict local release-target implementations;
-    Windows SDK-only static/shared HTTPS/inflate and trust-negative replay.
-  - [x] Windows normal CMake producer/consumer and relocated-path replay;
-    inherited runtime bytes match the current Full predecessor.
-- [ ] B5 Finish internal target-scope review and consolidation closure.
-  - [x] Native entry-point replay: Windows/x64 and macOS/arm64 at their recorded
-    baselines; Linux/amd64 build/test/dist, Development consumer and cache replay
-    ([final Linux evidence](docs/acceptance/build_system_acceptance.md#final-linuxamd64-entry-point-acceptance)).
-  - [ ] Narrow Wayland/xkbcommon target scope while preserving explicit cross-build
-    use and the remaining whole-tree cold-build proof in Planned. Complete the
-    final build-entry-point review before closing consolidation.
-
 ### CRT SDK split: Full SDK and Development SDK
 
 CRT produces two kinds of SDK per native pair from the same sources, stage outputs and port
@@ -205,10 +165,6 @@ neither later large-consumer passes nor a stale build tree settles them.
 
 Independent hardening, not unfinished backend object-boundary acceptance.
 
-- [ ] Finish whole-tree cold Wayland configure/build/dist/example replay from an
-  empty build root. Generated-output dependencies, ordinary SDK publication and
-  packaged example rebuilds are repaired; keep the remaining whole-tree proof
-  explicit ([evidence](docs/acceptance/build_system_acceptance.md#final-linuxamd64-entry-point-acceptance)).
 - [ ] Replace libc's ELF `CRT_1.0 { global: *; };` export policy with an explicit
   Bionic-compatible public-symbol manifest and generated version map, preserving
   required runtime symbols and establishing an ABI evolution baseline

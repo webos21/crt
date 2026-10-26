@@ -142,8 +142,8 @@
     "crt-media-test": "media half of crt-gfx-media-test"
   },
   "internal_os_scope": {
-    "comment": "Internal targets whose function is specific to one operating system but which CMake currently defines on every host (measured on the five CI hosts, 2026-10-22). They are not user-facing; do not run them on the other hosts. Narrowing their definition is tracked in TODO.md.",
-    "linux_only_function": [
+    "comment": "Wayland/xkbcommon port targets are defined by default for Linux targets, including cross builds, independently of the build host. Other target OSes require CRTGFX_ENABLE_WAYLAND_PORT_TARGETS=ON for standalone port experiments. The historical five-host inventory predates this narrowing; registration fixtures do not imply foreign native build acceptance.",
+    "linux_default_explicit_elsewhere": [
       "crtgfx-xkbcommon-configure",
       "crtgfx-xkbcommon-build",
       "crtgfx-wayland-configure",

@@ -7,10 +7,10 @@ a target a user can build directly (`cmake --build <dir> --target
 crtgfx-wayland-smoke`) without first hand-running the multi-step chain
 (sysroot/rootfs, port-build-expat, port-build-libffi, crtgfx-wayland-
 configure, crtgfx-wayland-build) that would otherwise be required. Unlike
-that script, there is no CRTGFX_ENABLE_*-style outer-project flag to flip
-here at all -- wayland-client is plain C with no equivalent to Skia's own
-CRT_USE_IMPORTED_LIBCXX requirement -- so this drives a *simpler* two-
-phase flow: configure once with default flags, build the one CRT
+that script, wayland-client is plain C with no equivalent to Skia's own
+CRT_USE_IMPORTED_LIBCXX requirement. This explicitly enables the standalone
+Wayland port targets in its shadow tree (also required for non-Linux targets),
+then builds the one CRT
 prerequisite (rootfs on Windows, sysroot elsewhere -- matching
 tools/crt-port-build.py's own --skip-sysroot-build/--use-crt-shell
 target-selection logic exactly, since crtgfx-wayland-build's own
@@ -87,6 +87,7 @@ def main():
 
     configure_command = [
         "cmake", "-G", "Ninja",
+        "-DCRTGFX_ENABLE_WAYLAND_PORT_TARGETS=ON",
         "-S", str(root),
         "-B", str(build_dir),
         "-DCMAKE_BUILD_TYPE=Debug",
@@ -120,8 +121,8 @@ def main():
 
     # This one target's own CMake DEPENDS graph (libcrtgfx/CMakeLists.txt)
     # handles everything else: port-build-expat, port-build-libffi,
-    # crtgfx-wayland-configure (fetch + meson setup), then the real Meson
-    # build + install.
+    # crtgfx-wayland-configure (fetch + configuration), then the direct
+    # CRT toolchain build + install.
     run(["cmake", "--build", str(build_dir), "--target", "crtgfx-wayland-build"])
 
     install_prefix = build_dir / "external" / "wayland" / "install"
