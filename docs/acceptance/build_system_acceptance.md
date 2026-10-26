@@ -825,3 +825,105 @@ Cost: the key format changed, so every step reruns once after this commit (a ful
 on this host). The program list is a hand-kept inventory of what the build resolves through `PATH`; a step that starts
 depending on another program must add it, or a change to that program is not noticed.
 
+## Linux/amd64 native replay (B5, 2026-10-26)
+
+**Not accepted as a complete B5 replay:** three native failures remain below.
+Started from clean `6af554105a9e4aa0515d93e459410956ca8c2137`, with no existing
+`out/`, using `linux-host-ninja-debug`. Host: Linux/x86_64 kernel
+`7.0.0-38-generic`, Clang 21.1.8, CMake 4.2.3, Python 3.14.4. Logs, diagnostic
+helpers and JSON measurements are local under `out/build-system-linux-20261026`;
+the build is `out/linux-host-ninja-debug`. No implementation or SDK contract was
+changed to pass this replay.
+
+Passing checks:
+
+- Fresh default configuration and all six `crt-<stage>-config` targets pass.
+  The catalog has 28 public and 378 internal targets, no missing or unlisted
+  stage targets (`targets.json`). A second configuration in `offline tree with
+  spaces` passes all six without creating dependency/build payload directories.
+  With LVGL disabled, C/media preflights still pass; UI preflight rejects the
+  missing option and removes its old success report. Reapplying the preset
+  restores all six. Both release targets independently reject `development`
+  before any SDK producer runs (`preflight-result.json`, `offline-*.log`).
+- `crt-c-build` and `crt-c-test`: 142/142 pass (`c-build.log`, `c-test.log`).
+  The ordinary `cmake --workflow --preset linux-host-ninja-debug` also passes
+  its configure/build/test sequence and all 142 tests (`workflow.log`).
+  `crt-gfx-simple-test`: both window/input tests pass. `crt-gfx-media-test`:
+  Graphics 10/10 and Media 30/30 pass, including capture/encode lifecycle,
+  VA-API and network tests. `crt-ui-test`: 8/8 pass. No selected executable is
+  missing (`upper-entrypoints.log`, `upper-tests.log`).
+- `crt-c-dist`, `crt-libcxx-dist`, `crt-gfx-simple-dist` produce and verify
+  `01-c`, `02-cxx`, `03-gfx-simple` and their archives. Imported C++ compilation
+  succeeds; its runtime smoke is only partially passing, as recorded below.
+- `crt-development-sdk` produces `dist/dev`, and ordinary plus `--profile dev`
+  verification passes. All 23 inherited runtime file digests equal both the
+  plain `02-cxx` and `03-gfx-simple` SDKs (`runtime-identity.json`). This does
+  not establish equality with a newly built Full `06-web` SDK.
+- The Development reference consumer's **static** link passes verified HTTPS
+  with inflate, wrong CA, missing CA despite ambient CA variables, and malformed
+  CA. A diagnostic rerun logs each actual subprocess result without changing
+  validation (`dev-consumer-cases.json`). The complete consumer gate fails on
+  shared linkage below; no successful overall `result.json` is claimed.
+- Actual `crt-libcxx-dist` cache replay: unchanged PATH, unrelated prefix,
+  unrelated/nonexistent suffix, and a PATH containing only symlinks to the same
+  selected tools each report **7 up to date, 0 running**, in 1.68–1.70 s.
+  Putting a different `cmake` file first changes the tool identity. No alternate
+  tool build is claimed (`cache-result.json`, `cache-*.log`, `cache_replay.py`).
+- Tooling regressions: 249 tests total, 242 pass and 7 explicit skips, across
+  `tooling.log`, `distribution-tooling-replay.log`, and
+  `macos-fix-regressions.log`. Modules with script-relative imports are run with
+  `PYTHONPATH=tools`; the earlier invocation without it is retained as a harness
+  error in `distribution-tooling.log`, not a product failure.
+
+Blocking failures:
+
+1. **Ordinary media packaging rejects an installed ELF input.**
+   `crt-ui-dist` reaches `crt-gfx-media-dist`, where
+   `crt_relink_kit.rewrite()` rejects `libm.so` as different from the build.
+   Build SHA-256 is `4609cebae46efc924ddec9968c331dbc77e9edb80ab26f339cc3948c6319ff7d`;
+   installed SHA-256 is `8497286e384e59c4a91f3b6f1bd4bff0796c13874fae74795bf3404a3e8a0822`.
+   CMake installation changes RUNPATH from `$ORIGIN:<build>/lib:` to `$ORIGIN`.
+   Applying CMake's exact `file(RPATH_CHANGE)` to a disposable copy of the
+   build input yields byte-for-byte equality with the installed input
+   (`relink-mismatch.json`). Thus the first rejection is an expected install
+   transformation, not evidence of a foreign `libm`. The fix must preserve
+   rejection of unrelated libraries and archive corruption; matching a basename
+   alone remains insufficient. The failed `dist/04-gfx-media` directory is a
+   partial candidate, not an accepted SDK.
+2. **Shared imported C++ exceptions fail.** `crt-libcxx-test` passes the static
+   exception/vector, string ABI and iostream smokes, then its shared
+   `imported_libcxx_test` terminates with exit 134 and
+   `uncaught exception of type std::runtime_error: caught`. Direct rerun
+   reproduces static success/shared failure (`cxx-reproduce.json`). GDB shows
+   SDK-owned libc++, libc++abi, libunwind, libc, libm and libdl loaded;
+   `_Unwind_RaiseException` returns `_URC_END_OF_STACK` (5) to `__cxa_throw`
+   (`cxx-shared-throw.log`, `cxx-shared-unwind.log`). Root cause and whether
+   this is a regression from the consolidation are not established. Later
+   shared string/iostream checks are not reached by the driver.
+3. **Development shared consumer's loader is undeclared.** The producer and
+   static trust cases pass, but `crt-development-sdk-test` rejects
+   `ld-linux-x86-64.so.2` in the shared consumer's import closure before its
+   HTTPS cases run (`development-sdk.log`, `dev-consumer-trace.log`).
+   `crt-c++` explicitly records the OS loader for shared-runtime TLS, while
+   `crt_dist_prerequisites.py` currently declares it only at `06-web`.
+   Aligning the earlier-stage producer/consumer contract requires the owning
+   SDK contract review; this replay does not edit a manifest, relax the closure
+   check or authorize consumer adoption.
+
+Reproduce the failing gates with:
+
+```sh
+cmake --preset linux-host-ninja-debug
+cmake --build out/linux-host-ninja-debug --target crt-ui-dist --parallel 8
+cmake --build out/linux-host-ninja-debug --target crt-libcxx-test --parallel 8
+cmake --build out/linux-host-ninja-debug --target crt-development-sdk-test --parallel 8
+```
+
+`crt-ui-dist` cannot publish `05-ui`, so native `crt-web-build/test/dist` has
+**not run** in this replay. Relocated Development shared-consumer replay and
+the Full `06-web` runtime comparison also remain open. B5 and final closure
+stay open until these failures are repaired and the dependent gates pass.
+Wayland/xkbcommon scope and the separate Planned clean Wayland dependency gate
+are unchanged. Clean/tagged release qualification remains separate; no tag,
+upload, public release, CLI compatibility claim or consumer lock update was made.
+
