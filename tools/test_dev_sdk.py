@@ -21,17 +21,25 @@ class ExternalConsumerBoundary(unittest.TestCase):
             output.mkdir()
             result = output / 'result.json'
             result.write_text('{"passed": true}')
-            with self.assertRaisesRegex(ValueError, 'native Linux SDK'):
+            with self.assertRaisesRegex(ValueError, 'native Linux/macOS SDK'):
                 external.main(['--sdk-root', str(sdk), '--output', str(output)])
             self.assertFalse(result.exists())
 
     def test_foreign_target_cannot_be_executed_as_native_acceptance(self):
         from unittest.mock import patch
         with patch.object(external.sys, 'platform', 'linux'), patch.object(external.platform, 'machine', return_value='x86_64'):
-            external.native_linux({'target': {'os': 'linux', 'arch': 'x86_64'}})
+            external.native_target({'target': {'os': 'linux', 'arch': 'x86_64'}})
             for target in ({'os': 'linux', 'arch': 'aarch64'}, {'os': 'windows', 'arch': 'x86_64'}):
                 with self.assertRaisesRegex(ValueError, 'cross targets are compile-only'):
-                    external.native_linux({'target': target})
+                    external.native_target({'target': target})
+
+    def test_macos_only_accepts_the_native_architecture(self):
+        from unittest.mock import patch
+        with patch.object(external.sys, 'platform', 'darwin'), patch.object(external.platform, 'machine', return_value='arm64'):
+            self.assertEqual('macos', external.native_target({'target': {'os': 'macos', 'arch': 'aarch64'}}))
+            for target in ({'os': 'macos', 'arch': 'x86_64'}, {'os': 'linux', 'arch': 'aarch64'}):
+                with self.assertRaisesRegex(ValueError, 'cross targets are compile-only'):
+                    external.native_target({'target': target})
 
     def test_hidden_tree_cannot_contain_or_be_contained_in_the_external_work(self):
         root = Path(tempfile.gettempdir()).resolve() / 'crt-external-boundary-fixture'
@@ -43,9 +51,63 @@ class ExternalConsumerBoundary(unittest.TestCase):
         names = {p.name for p in external.validation_scripts()}
         self.assertIn('test_dev_sdk_consumer.py', names)
         self.assertIn('crt_elf.py', names)
+        self.assertIn('audit_macos_bindings.py', names)
         self.assertNotIn('build_dev_sdk.py', names)
         self.assertNotIn('crt-libcxx-build.py', names)
         self.assertTrue(all(p.parent == external.ROOT / 'tools' for p in external.validation_scripts()))
+
+    def test_macos_sandbox_denies_reads_and_writes_with_quoted_paths(self):
+        root = Path(tempfile.gettempdir()).resolve()
+        hidden = [root / 'producer "quoted" path']
+        work = root / 'separate work'
+        command = external.macos_sandbox_command('sandbox-exec', work, hidden, 'python', ['probe.py'])
+        self.assertEqual(['sandbox-exec', '-p'], command[:2])
+        self.assertIn('(deny file-read* file-write* (subpath ' + json.dumps(str(hidden[0])) + '))', command[2])
+        self.assertEqual(['python', 'probe.py'], command[3:])
+        with self.assertRaisesRegex(ValueError, 'disjoint'):
+            external.macos_sandbox_command('sandbox-exec', hidden[0] / 'work', hidden, 'python', [])
+
+    def test_missing_macos_sandbox_has_no_unisolated_fallback(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            sdk, output = root / 'sdk', root / 'evidence'
+            sdk.mkdir()
+            (sdk / 'manifest.json').write_text('{"target":{"os":"macos","arch":"aarch64"}}')
+            with patch.object(external, 'native_target', return_value='macos'), patch.object(external.shutil, 'which', return_value=None):
+                with self.assertRaisesRegex(ValueError, 'requires sandbox-exec; no unisolated fallback'):
+                    external.main(['--sdk-root', str(sdk), '--output', str(output)])
+            self.assertFalse((output / 'result.json').exists())
+
+    def test_failed_macos_sandbox_removes_receipt_without_retrying_unisolated(self):
+        import subprocess
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            sdk, output = root / 'sdk', root / 'evidence'
+            sdk.mkdir()
+            output.mkdir()
+            (sdk / 'manifest.json').write_text('{"target":{"os":"macos","arch":"aarch64"}}')
+            (output / 'result.json').write_text('{"passed":true}')
+            with patch.object(external, 'native_target', return_value='macos'), \
+                    patch.object(external.shutil, 'which', return_value='/usr/bin/sandbox-exec'), \
+                    patch.object(external.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, ['sandbox-exec'])) as run:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    external.main(['--sdk-root', str(sdk), '--output', str(output), '--work-root', str(root / 'work')])
+            self.assertEqual(1, run.call_count)
+            self.assertFalse((output / 'result.json').exists())
+
+    def test_macos_environment_rejects_a_hidden_compiler_and_drops_ambient_settings(self):
+        from unittest.mock import patch
+        root = Path(tempfile.gettempdir()).resolve()
+        with patch.object(external.shutil, 'which', return_value=str(root / 'producer/clang')):
+            with self.assertRaisesRegex(ValueError, 'inside a hidden producer tree'):
+                external.macos_environment(root / 'work', [root / 'producer'])
+        with patch.dict(external.os.environ, {'DYLD_LIBRARY_PATH': '/ambient', 'PYTHONPATH': '/ambient'}), \
+                patch.object(external.shutil, 'which', return_value=str(root / 'host/clang')):
+            env = external.macos_environment(root / 'work', [root / 'producer'])
+            self.assertNotIn('DYLD_LIBRARY_PATH', env)
+            self.assertNotIn('PYTHONPATH', env)
 
 
 class DevelopmentProfile(unittest.TestCase):

@@ -99,7 +99,10 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
     inaccessible; [evidence](docs/acceptance/sdk_split_acceptance.md#linux-source-hidden-replay-2026-10-27).
   - [x] Linux/aarch64 packaged, relocated static/shared consumer with producer/source SDK
     inaccessible; [evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
-  - [ ] macOS shared-consumer and macOS/Windows producer-tree-hidden replay.
+  - [x] macOS/arm64 packaged, relocated static/shared consumer, shared-consumer
+    binding audit and producer-tree-hidden replay;
+    [evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-source-hidden-and-shared-consumer-replay-2026-10-27).
+  - [ ] Windows/x64 and Windows/aarch64 producer-tree-hidden replay.
 - [x] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
   (`crt_sdk_release.py`) for both kinds (checksums, release manifest, recipes
   pointing at the release, `VERSION` equal to the tag) and checks that the two share the source commit and the

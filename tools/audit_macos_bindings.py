@@ -55,8 +55,8 @@ SKIP_SUFFIXES = (".a", ".o", ".h", ".txt", ".json", ".py", ".md", ".cmake", ".c"
 UNDEFINED = re.compile(r"\s*\(undefined\) (?:weak )?external (\S+)(?: \(from (.+)\))?$")
 
 
-def run(*command: str) -> str:
-    return subprocess.run(command, capture_output=True, text=True, check=False).stdout
+def run(*command: str, check: bool = False) -> str:
+    return subprocess.run(command, capture_output=True, text=True, check=check).stdout
 
 
 def is_macho(path: Path) -> bool:
@@ -97,6 +97,24 @@ def owned_symbols(sdk: Path) -> dict:
     return owned
 
 
+def collect_image(path: Path, name: str, owned: dict) -> dict:
+    """Inspect an SDK image or an external consumer against the SDK's symbols."""
+    if not is_macho(path):
+        raise ValueError(f"not a Mach-O image: {path}")
+    dependencies = [line.split()[0] for line in run("otool", "-L", str(path), check=True).splitlines()[1:] if line.strip()]
+    header = run("file", "-b", str(path), check=True)
+    kind = "dylib" if "shared library" in header else "exe" if "executable" in header else "other"
+    bound, owners = {}, {}
+    for symbol, provider in undefined_bindings(run("nm", "-m", "-u", str(path), check=True)):
+        if symbol in owned:
+            bound.setdefault(provider or "flat", set()).add(symbol)
+            owners.setdefault(symbol, owned[symbol])
+    return {
+        "image": name, "kind": kind, "dependencies": dependencies,
+        "owns_malloc": "_malloc" in defined_symbols(run("nm", "-gU", str(path), check=True)),
+        "bound": bound, "math_only": {symbol for symbol, owner in owners.items() if owner == "libm"}}
+
+
 def collect(sdk: Path) -> list:
     owned = owned_symbols(sdk)
     if not owned:
@@ -110,18 +128,7 @@ def collect(sdk: Path) -> list:
             path = Path(root) / name
             if path.is_symlink() or not path.is_file() or path.suffix in SKIP_SUFFIXES or not is_macho(path):
                 continue
-            dependencies = [line.split()[0] for line in run("otool", "-L", str(path)).splitlines()[1:] if line.strip()]
-            header = run("file", "-b", str(path))
-            kind = "dylib" if "shared library" in header else "exe" if "executable" in header else "other"
-            bound, owners = {}, {}
-            for symbol, provider in undefined_bindings(run("nm", "-m", "-u", str(path))):
-                if symbol in owned:
-                    bound.setdefault(provider or "flat", set()).add(symbol)
-                    owners.setdefault(symbol, owned[symbol])
-            images.append({
-                "image": path.relative_to(sdk).as_posix(), "kind": kind, "dependencies": dependencies,
-                "owns_malloc": "_malloc" in defined_symbols(run("nm", "-gU", str(path))),
-                "bound": bound, "math_only": {symbol for symbol, owner in owners.items() if owner == "libm"}})
+            images.append(collect_image(path, path.relative_to(sdk).as_posix(), owned))
     return sorted(images, key=lambda item: item["image"])
 
 

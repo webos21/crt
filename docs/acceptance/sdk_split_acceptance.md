@@ -11,7 +11,7 @@ Original B4/B5 results remain in [build-system acceptance](build_system_acceptan
 | Pair | Development producer / ordinary consumer | Producer-tree-hidden consumer |
 | --- | --- | --- |
 | Linux/x86_64 | Current producer and static/shared eight-case replay pass below | Pass below |
-| macOS/arm64 | Recorded producer/profile and static four-case replay at the [macOS baseline](build_system_acceptance.md#macosarm64-native-replay-b5-2026-10-23); no new shared-consumer acceptance inferred | Not run |
+| macOS/arm64 | Current producer, archive/extraction, static/shared eight-case replay and shared-consumer binding audit pass below | Pass below, using the extracted archive |
 | Windows/x64 | Recorded producer/profile, static/shared eight cases, app-local imports and relocation at the [Windows baseline](build_system_acceptance.md#development-sdk-windows-replay) | Not run |
 | Linux/aarch64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Pass below, using the extracted archive |
 | Windows/arm64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Not run: the relocated consumer below is not producer-tree-hidden |
@@ -20,6 +20,121 @@ S4's local collector implementation and negative/atomic fixtures are complete.
 Actual clean/tagged positive collection remains the independent
 [release qualification](../../TODO.md#release-qualification-and-assembly-rehearsal)
 gate. No tag, upload, consumer lock or runtime adoption is part of this record.
+
+## macOS/arm64 source-hidden and shared-consumer replay (2026-10-27)
+
+Host: macOS 27.0.1 (26A434), native arm64, Apple Clang 21 and host Python 3.15.
+Reviewed CRT `22cb03ead8ea73d3c78ea846088a458bf7f0356b` plus the local acceptance-tool
+changes described here. First replayed the existing Development SDK successfully,
+then regenerated the C/C++ predecessor and Development SDK through the ordinary
+entry point:
+
+```sh
+cmake --fresh --preset macos-host-ninja-debug
+cmake --build --preset macos-host-ninja-debug \
+  --target crt-development-sdk-test --parallel 4
+```
+
+The old generated Ninja tree initially referenced the renamed `crt-cxx-dist`
+without defining it; explicit fresh configuration resolved that stale build
+graph. No CMake target definition, runtime implementation or upstream source
+was changed for this replay. Fresh static/shared zlib 1.3.1, Mbed TLS 3.6.7 and
+curl 8.21.0 were built through the existing shared producer. Profile verification
+passes, with dependency/notice records and no graphics/media/UI/Web payload.
+All **18** inherited runtime-file digests equal the newly generated plain
+`02-cxx`. Ordinary static/shared HTTPS+inflate and explicit-CA negatives pass
+all **eight** cases.
+
+The existing `prepare_release_assets.archive_directory` helper created a local
+`development` archive, without running a release collector. Extraction into
+`out/dev-sdk-macos-20261027/extracted SDK with spaces/dev` passes
+`verify_dist.py --stage 02-cxx --profile dev`. Original and extracted inventories
+are identical:
+
+- File: `archives/crt-development-macos-aarch64-dev.tar.xz` under the evidence root below.
+- Size: **6,357,740 bytes**.
+- SHA-256: `88dcfb1a67931f0c15d4a1273ea54f2e85fc7e91f7846732c95bc01cad3b4b35`.
+- **2,570** file/symlink entries; inventory SHA-256
+  `e634f3ac28dcb7e3a9c4b1d589d2ada29f09637f5f8fa6d11339d852dc438d74`.
+
+### OS-enforced producer isolation
+
+`test_dev_sdk_external.py` now supports native macOS as well as Linux. On macOS
+it copies the package outside the checkout and invokes the validation capsule
+through OS `sandbox-exec`. The inherited policy denies reads and writes below
+the original SDK/producer roots, including this entire checkout and its `out/`.
+It does not rename or chmod the shared checkout. The child probe verifies that
+directory enumeration and direct reads of a known source file and the original
+SDK manifest fail with `PermissionError` before building the consumer. Linux
+retains its empty-mount bubblewrap policy. Missing tools or failed isolation
+abort the gate; there is no unisolated retry.
+
+```sh
+python3 tools/test_dev_sdk_external.py \
+  --sdk-root 'out/dev-sdk-macos-20261027/extracted SDK with spaces/dev' \
+  --output out/dev-sdk-macos-20261027/external
+```
+
+The extracted package is relocated again into a fresh external directory with
+spaces. Only the reference C++ source and a hashed **12-script** build-host
+validation capsule accompany it; no producer headers, runtime objects or runtime
+builder are supplied. Host Clang/Python/OpenSSL and OS tools remain available;
+ambient Python and dynamic-library search settings are not inherited. With the
+original trees inaccessible, both SDK-only C++17 linkage modes compile and pass
+verified HTTPS+inflate, wrong CA, missing explicit CA despite ambient valid-CA
+variables, and malformed CA: **eight cases**. Original, extracted and externally
+relocated SDK inventories remain unchanged.
+
+### Shared-consumer binding evidence
+
+The existing SDK binding audit examines **101 Mach-O images** (10 dylibs and
+91 executables) with no new violation under its documented boundary policy.
+The reference consumer now additionally audits each external executable against
+the SDK-owned symbols and retains the result in its receipt. The shared consumer
+does not define its own `malloc`; its CRT-owned undefined references bind to
+CRT `libc`, not Darwin `libSystem`. Its recursive import closure contains
+**10 SDK images**, with only `libSystem.B.dylib` as the declared direct OS
+boundary. The static consumer carries its own libc and imports no SDK dylibs.
+No consumer-specific audit exception was added. Image-tool failures abort rather
+than silently returning empty audit evidence.
+
+A separate startup-only dyld trace, under the same producer-denying sandbox,
+confirms all ten runtime images are actually mapped from the external relocated
+SDK, including imported libc++/libc++abi; no second copy of those SDK runtimes
+is loaded elsewhere. The trace also records Apple's transitive system images,
+which are not CRT payloads. This probe exits at argument validation (exit 2);
+the eight-case consumer receipt, not the trace, supplies HTTPS behavior evidence.
+Because the protected `sandbox-exec` launcher strips `DYLD_*`, tracing is enabled
+inside its policy by the unprotected host-Python launcher, without weakening the
+file-denial policy.
+
+### Negatives, evidence and scope
+
+Seven private-copy verifier negatives are rejected: missing static curl, missing
+shared curl, a changed inherited libc byte, upper-stage content, a missing curl
+notice, a removed dependency declaration and bundled/ambient trust policy.
+The producer SDK is untouched. The focused Development/binding unit suite passes
+**32/32**; the existing CI tooling selection passes **129/134**, with five
+host-conditional skips. It includes these small fixtures, not another native
+SDK build. Native Linux/Windows execution of the changed tooling
+and hosted GitHub CI are **Not run** here.
+
+Evidence root: `out/dev-sdk-macos-20261027/`, including
+`configure-fresh.log`, `producer-entry-fresh.log`, `package{.log,-result.json}`,
+`extracted-profile.log`, `external-driver-final.log`,
+`external/{command.json,consumer.log,result.json}`, `sdk-binding-audit{.log,.json}`,
+`shared-dyld{.log,-result.json}`, `negative-profile{.log,-result.json}`, `unit.log`
+and `ci-tooling-unit-final.log`. The external work path and script digests are
+retained in the external receipt. The ordinary receipt is
+`out/macos-host-ninja-debug/development-consumer/result.json`.
+
+Producer/base/compile provenance honestly records `22cb03e` plus a dirty working
+tree: these are local acceptance candidates, not clean/tagged release artifacts.
+Older Full `05-ui`/`06-web` SDKs were not regenerated or promoted as a matching
+release pair. This closes the macOS S3 sub-gate only; Windows/x64 and
+Windows/aarch64 producer-tree-hidden replay remain open. No public ABI, SDK/profile
+schema, CLI lock or Studio adoption changed. The consumer review baselines below
+remain unchanged; this work extends the producer-owned acceptance procedure.
 
 ## Linux/aarch64 native producer and package replay (2026-10-27)
 

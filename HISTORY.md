@@ -11,6 +11,25 @@ substantive update.
 
 ## 2026-10-27
 
+### Complete macOS Development SDK isolated-consumer verification
+
+Regenerated the native macOS/arm64 Development SDK through the ordinary CMake
+entry point after fresh configuration. The package verifies, retains all 18
+predecessor runtime digests and extracts with an identical 2,570-entry inventory.
+Static/shared SDK-only HTTPS/inflate consumers pass all eight trust cases with
+the producer checkout, build tree and original SDK inaccessible under an
+inherited macOS sandbox policy. The external driver retains Linux bubblewrap
+and fails closed when isolation is unavailable.
+
+Extended the existing Mach-O audit to external consumers; the shared executable
+has no static allocator and binds CRT-owned references to CRT libc. An isolated
+dyld trace confirms all ten SDK images load from the relocated package. Seven
+private-copy profile negatives and the focused unit regressions pass. No runtime
+ABI or packaging schema changed. Marked the macOS S3 sub-gate complete, keeping
+Windows producer-tree-hidden replay and clean release qualification open.
+Commands, package identity, native receipts and limits belong to
+[SDK split acceptance](docs/acceptance/sdk_split_acceptance.md#macosarm64-source-hidden-and-shared-consumer-replay-2026-10-27).
+
 ### Complete the Windows/arm64 Development SDK producer replay
 
 Ran the ordinary `crt-development-sdk-test` entry point natively on the Windows/arm64 VM from a clean tree (`376f06d`). Fresh static/shared

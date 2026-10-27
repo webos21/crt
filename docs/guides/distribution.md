@@ -64,23 +64,31 @@ verifies the profile and runs the static/shared HTTPS+inflate reference consumer
 cmake --build --preset <preset> --target crt-development-sdk-test
 ```
 
-On a native Linux host with bubblewrap and OpenSSL installed, additionally run:
+For producer-tree-hidden acceptance, additionally run on native Linux with
+bubblewrap, or native macOS with the OS-provided `sandbox-exec`. Both need
+OpenSSL as a build-host test tool:
 
 ```sh
 python3 tools/test_dev_sdk_external.py \
   --sdk-root out/<preset>/dist/dev --output out/dev-sdk-external
 ```
 
-This copies the SDK to a fresh external directory with spaces, hides the original
-SDK and producer checkout (including its build outputs) in a mount namespace,
-validates the relocated profile, then builds and runs both linkage modes and
-certificate negatives. OS/compiler/Python tools remain available. Use repeated
+This copies the SDK to a fresh external directory with spaces and makes the
+original SDK and producer checkout (including build outputs) inaccessible.
+Linux masks them with empty mounts; macOS denies their file reads and writes
+using an inherited OS sandbox policy, without renaming or changing permissions
+on the checkout. A child visibility probe must pass before validating the
+relocated profile and building/running both linkage modes and certificate
+negatives. The macOS consumer receipt also records each executable's Mach-O
+binding audit against the SDK-owned symbols, including the mixed-runtime check.
+OS/compiler/Python tools remain available. Use repeated
 `--hide-root <path>` arguments for producer build roots outside the checkout.
 Optional `--work-root <fresh-path>` must be outside all hidden roots; the work
-directory is retained and recorded in `result.json`. Namespace/setup or consumer
-failure produces no success receipt; there is no unisolated fallback. This
-driver rejects foreign-target execution and does not claim equivalent native
-macOS/Windows isolation. See the [split matrix](../acceptance/sdk_split_acceptance.md).
+directory is retained and recorded in `result.json`. Missing isolation tools,
+namespace/sandbox setup or consumer failures produce no success receipt; there
+is no unisolated fallback. This driver rejects foreign-target execution.
+Windows producer-tree-hidden acceptance remains a separate, unimplemented
+procedure. See the [split matrix](../acceptance/sdk_split_acceptance.md).
 
 These targets produce local SDK candidates. A `development` VERSION, equal
 runtime hashes or an older predecessor's known source commit do not qualify a

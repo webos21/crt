@@ -2,8 +2,10 @@
 """Tests for tools/audit_macos_bindings.py (the pure decision logic; the real nm/otool run is done by verify_dist)."""
 
 import sys
+import subprocess
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import audit_macos_bindings as audit
@@ -15,6 +17,29 @@ def image(name, kind="dylib", bound=None, math=(), owns_malloc=False, deps=()):
 
 
 class Parse(unittest.TestCase):
+    def test_external_consumer_is_audited_against_sdk_symbols(self) -> None:
+        def output(*command, **kwargs):
+            self.assertTrue(kwargs.get('check'))
+            if command[0] == 'otool':
+                return 'consumer:\n\t@rpath/libc.dylib (compatibility version 0.0.0)\n'
+            if command[0] == 'file':
+                return 'Mach-O 64-bit executable arm64'
+            if '-u' in command:
+                return '                 (undefined) external _strlen (from libc)\n'
+            return ''
+        with patch.object(audit, 'is_macho', return_value=True), patch.object(audit, 'run', side_effect=output):
+            item = audit.collect_image(Path('/external/consumer'), 'consumer-shared', {'_strlen': 'libc'})
+        self.assertEqual('exe', item['kind'])
+        self.assertEqual({'libc': {'_strlen'}}, item['bound'])
+        self.assertFalse(item['owns_malloc'])
+        self.assertEqual([], audit.problems([item]))
+
+    def test_failed_image_tool_does_not_produce_empty_success(self) -> None:
+        with patch.object(audit, 'is_macho', return_value=True), \
+                patch.object(audit, 'run', side_effect=subprocess.CalledProcessError(1, ['otool'])):
+            with self.assertRaises(subprocess.CalledProcessError):
+                audit.collect_image(Path('/external/consumer'), 'consumer-shared', {'_strlen': 'libc'})
+
     def test_nm_undefined_lines(self) -> None:
         text = ("                 (undefined) external _malloc (from libc)\n"
                 "                 (undefined) external _pthread_mutex_lock (from libSystem)\n"

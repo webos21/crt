@@ -13,6 +13,7 @@ import tempfile
 import threading
 import zlib
 
+import audit_macos_bindings as macos_bindings
 import crt_binary_dependencies as binaries
 from crt_dev_profile import digest
 from build_stage_05_ui import runtime_env
@@ -66,6 +67,8 @@ def main():
     profile = json.loads((sdk / SIDECAR).read_text())
     env = runtime_env(sdk, manifest)
     windows = manifest["target"]["os"] == "windows"
+    macos = manifest["target"]["os"] == "macos"
+    owned = macos_bindings.owned_symbols(sdk) if macos else {}
     flags = subprocess.CREATE_NO_WINDOW if windows else 0
     openssl = shutil.which("openssl")
     if not openssl:
@@ -107,6 +110,17 @@ def main():
             if compiled.returncode:
                 raise ValueError(f"{mode} consumer compile failed: {compiled.stdout} {compiled.stderr}")
             imports = closure(program, sdk, manifest)
+            binding_evidence = None
+            if macos:
+                image = macos_bindings.collect_image(program, program.name, owned)
+                if image["kind"] != "exe" or not owned:
+                    raise ValueError("macOS consumer audit requires an executable and SDK-owned symbols")
+                notes = []
+                failures = macos_bindings.problems([image], notes=notes)
+                if failures:
+                    raise ValueError("macOS consumer binding audit: " + "; ".join(failures))
+                binding_evidence = {**image, "bound": {key: sorted(value) for key, value in image["bound"].items()},
+                                    "math_only": sorted(image["math_only"]), "notes": notes, "passed": True}
             if windows:
                 for relative in imports["packaged"]:
                     shutil.copy2(sdk / relative, work / Path(relative).name)
@@ -133,6 +147,8 @@ def main():
                     raise ValueError(f"{mode}/{name}: exit {completed.returncode}; {completed.stdout} {completed.stderr}")
                 cases[name] = True
             results[mode] = {"cases": cases, "imports": imports}
+            if binding_evidence is not None:
+                results[mode]["macos_binding_audit"] = binding_evidence
     finally:
         server.shutdown()
         server.server_close()

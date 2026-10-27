@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux Dev SDK acceptance with the original SDK and producer trees hidden.
+"""Native Dev SDK acceptance with the original SDK and producer trees inaccessible.
 
 The host compiler/Python/OpenSSL remain available. Target headers, libraries
 and wrappers come from a relocated SDK; the only source supplied separately is
@@ -49,10 +49,12 @@ def inventory_digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def native_linux(manifest):
+def native_target(manifest):
     arch = {'amd64': 'x86_64', 'arm64': 'aarch64'}.get(platform.machine().lower(), platform.machine().lower())
-    if sys.platform != 'linux' or manifest.get('target') != {'os': 'linux', 'arch': arch}:
-        raise ValueError('external execution requires a native Linux SDK; cross targets are compile-only')
+    target_os = {'linux': 'linux', 'darwin': 'macos'}.get(sys.platform)
+    if target_os is None or manifest.get('target') != {'os': target_os, 'arch': arch}:
+        raise ValueError('external execution requires a native Linux/macOS SDK; cross targets are compile-only')
+    return target_os
 
 
 def hidden_roots(sdk, extra=()):
@@ -66,9 +68,13 @@ def hidden_roots(sdk, extra=()):
     return result
 
 
-def sandbox_command(bwrap, work, hidden, program, args):
+def require_disjoint(work, hidden):
     if any(work == path or work.is_relative_to(path) or path.is_relative_to(work) for path in hidden):
         raise ValueError('external work directory must be disjoint from every hidden producer/SDK root')
+
+
+def sandbox_command(bwrap, work, hidden, program, args):
+    require_disjoint(work, hidden)
     command = [bwrap, '--die-with-parent', '--unshare-user', '--unshare-pid',
                '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev',
                '--tmpfs', '/tmp', '--bind', str(work), str(work), '--chdir', str(work),
@@ -93,6 +99,33 @@ def sandbox_command(bwrap, work, hidden, program, args):
     return command + ['--', program, *args]
 
 
+def macos_sandbox_command(sandbox, work, hidden, program, args):
+    require_disjoint(work, hidden)
+    # Use OS-enforced denial, not renaming/chmod of the shared checkout. Children
+    # (compiler, linker, dyld and consumers) inherit the same file restrictions.
+    profile = '(version 1)\n(allow default)\n' + ''.join(
+        f'(deny file-read* file-write* (subpath {json.dumps(str(path))}))\n' for path in hidden)
+    return [sandbox, '-p', profile, program, *args]
+
+
+def macos_environment(work, hidden):
+    env = {'HOME': str(work / 'home'), 'TMPDIR': str(work / 'tmp'), 'LC_ALL': 'C',
+           'PYTHONDONTWRITEBYTECODE': '1', 'CRT_TEST_HIDDEN_ROOTS': json.dumps([str(p) for p in hidden]),
+           'CRT_TEST_ISOLATION': 'macos-seatbelt'}
+    search = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin', '/opt/homebrew/bin']
+    for variable, default in [('CRT_CC', 'clang'), ('CRT_CXX', 'clang++'), ('CRT_AR', 'ar')]:
+        tool = shutil.which(os.environ.get(variable, default))
+        if not tool:
+            raise ValueError(f'build-host tool missing: {default}')
+        tool = str(Path(tool).absolute())
+        if any(Path(tool).resolve().is_relative_to(path) for path in hidden):
+            raise ValueError(f'build-host tool is inside a hidden producer tree: {tool}')
+        env[variable] = tool
+        search.insert(0, str(Path(tool).parent))
+    env['PATH'] = os.pathsep.join(dict.fromkeys(search))
+    return env
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sdk-root', required=True, type=Path)
@@ -107,17 +140,21 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=True)
     (output / 'result.json').unlink(missing_ok=True)
     manifest = json.loads((sdk / 'manifest.json').read_text())
-    native_linux(manifest)
-    bwrap = shutil.which('bwrap')
-    if not bwrap:
-        raise ValueError('source-hidden Linux acceptance requires bubblewrap (bwrap); no unisolated fallback')
+    target_os = native_target(manifest)
+    tool_name = 'bwrap' if target_os == 'linux' else 'sandbox-exec'
+    sandbox = shutil.which(tool_name)
+    if not sandbox:
+        raise ValueError(f'source-hidden {target_os} acceptance requires {tool_name}; no unisolated fallback')
+    make_command = sandbox_command if target_os == 'linux' else macos_sandbox_command
     hidden = hidden_roots(sdk, args.hide_root)
+    protected_files = [ROOT / 'AGENTS.md', sdk / 'manifest.json']
     work = args.work_root.resolve() if args.work_root else Path(tempfile.mkdtemp(prefix='crt dev external '))
     if args.work_root:
         work.mkdir(parents=True, exist_ok=False)
     # Validate disjoint paths before copying the SDK.
-    sandbox_command(bwrap, work, hidden, sys.executable, [])
+    make_command(sandbox, work, hidden, sys.executable, [])
     (work / 'home').mkdir()
+    (work / 'tmp').mkdir()
     relocated = work / 'relocated Development SDK'
     before = inventory(sdk)
     shutil.copytree(sdk, relocated, symlinks=True)
@@ -137,10 +174,30 @@ def main(argv=None):
     probe.write_text('''import json, os, pathlib, runpy, sys
 import crt_dev_profile
 hidden = json.loads(os.environ['CRT_TEST_HIDDEN_ROOTS'])
+isolation = os.environ.get('CRT_TEST_ISOLATION', 'linux-bubblewrap')
 for path in hidden:
-    if list(pathlib.Path(path).iterdir()):
-        raise RuntimeError('producer/SDK root remains visible: ' + path)
-pathlib.Path('visibility.json').write_text(json.dumps({'hidden_roots': hidden, 'all_empty': True}))
+    try:
+        entries = list(pathlib.Path(path).iterdir())
+    except PermissionError:
+        if isolation != 'macos-seatbelt':
+            raise
+    else:
+        if isolation == 'macos-seatbelt' or entries:
+            raise RuntimeError('producer/SDK root remains visible: ' + path)
+for path in json.loads(os.environ['CRT_TEST_HIDDEN_FILES']):
+    try:
+        with open(path, 'rb') as stream:
+            stream.read(1)
+    except PermissionError:
+        if isolation != 'macos-seatbelt':
+            raise
+    except FileNotFoundError:
+        if isolation != 'linux-bubblewrap':
+            raise
+    else:
+        raise RuntimeError('producer/SDK file remains readable: ' + path)
+pathlib.Path('visibility.json').write_text(json.dumps({'hidden_roots': hidden, 'all_inaccessible': True,
+    'all_empty': isolation == 'linux-bubblewrap', 'files_unreadable': True}))
 sdk = pathlib.Path(sys.argv[1])
 problems = crt_dev_profile.check(sdk, json.loads((sdk / 'manifest.json').read_text()))
 if problems:
@@ -148,22 +205,29 @@ if problems:
 sys.argv = ['test_dev_sdk_consumer.py', '--sdk-root', sys.argv[1], '--output', sys.argv[2]]
 runpy.run_path(str(pathlib.Path(__file__).with_name('test_dev_sdk_consumer.py')), run_name='__main__')
 ''')
-    command = sandbox_command(bwrap, work, hidden, sys.executable,
+    command = make_command(sandbox, work, hidden, sys.executable,
                               [str(probe), str(relocated), str(work / 'consumer build with spaces')])
-    command[command.index('--'):command.index('--')] = [
-        '--setenv', 'CRT_TEST_HIDDEN_ROOTS', json.dumps([str(p) for p in hidden])]
+    env = None
+    if target_os == 'linux':
+        command[command.index('--'):command.index('--')] = [
+            '--setenv', 'CRT_TEST_HIDDEN_ROOTS', json.dumps([str(p) for p in hidden]),
+            '--setenv', 'CRT_TEST_HIDDEN_FILES', json.dumps([str(p) for p in protected_files])]
+    else:
+        env = macos_environment(work, hidden)
+        env['CRT_TEST_HIDDEN_FILES'] = json.dumps([str(p) for p in protected_files])
     (output / 'command.json').write_text(json.dumps(command, indent=2) + '\n')
     with (output / 'consumer.log').open('w') as log:
-        subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=600)
+        subprocess.run(command, cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=600)
     visibility = json.loads((work / 'visibility.json').read_text())
     consumer = json.loads((work / 'consumer build with spaces/result.json').read_text())
-    if not visibility.get('all_empty') or not consumer.get('passed'):
+    if not visibility.get('all_inaccessible') or not visibility.get('files_unreadable') or not consumer.get('passed'):
         raise ValueError('hidden-tree consumer validation did not complete')
     if inventory(sdk) != before or inventory(relocated) != before:
         raise ValueError('consumer replay changed original or relocated SDK payload')
-    result = {'passed': True, 'isolation': 'linux-bubblewrap', 'target': manifest['target'],
+    result = {'passed': True, 'isolation': 'linux-bubblewrap' if target_os == 'linux' else 'macos-seatbelt',
+              'target': manifest['target'],
               'producer_source_and_build_hidden': True, 'original_sdk_hidden': True,
-              'hidden_roots': visibility['hidden_roots'], 'work_root': str(work),
+              'hidden_roots': visibility['hidden_roots'], 'visibility_probe': visibility, 'work_root': str(work),
               'sdk_inventory_sha256': inventory_digest(before), 'sdk_inventory_entries': len(before),
               'sdk_payload_unchanged': True, 'runtime_sha256': runtime_digests(sdk),
               'fixture_scripts': {p.name: digest(p) for p in scripts},
