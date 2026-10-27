@@ -65,10 +65,13 @@ class ExternalConsumerBoundary(unittest.TestCase):
                 self.assertNotIn('PYTHONPATH', env)
                 self.assertNotIn('CURL_CA_BUNDLE', env)
                 self.assertEqual('windows-restricted-token', env['CRT_TEST_ISOLATION'])
+                # hidden_roots() hands the environment builders resolved directories; the fixture must do the
+                # same, or a temporary directory behind a link or a short name (/var -> /private/var on macOS,
+                # RUNNER~1 on Windows) never compares equal to the resolved tool path.
                 with self.assertRaisesRegex(ValueError, 'inside a hidden producer tree'):
-                    external.windows_environment(root / 'work', [root / 'host'])
+                    external.windows_environment(root / 'work', [(root / 'host').resolve()])
                 with self.assertRaisesRegex(ValueError, 'external native Windows SDK'):
-                    external.windows_environment(root / 'work', [libraries])
+                    external.windows_environment(root / 'work', [libraries.resolve()])
 
     @unittest.skipUnless(sys.platform == 'win32', 'native Windows ACL/token fixture')
     def test_windows_acl_setup_refuses_existing_directory(self):

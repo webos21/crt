@@ -174,7 +174,11 @@ class SparseFetchRecoveryTests(unittest.TestCase):
         DRIVER.fetch_recipe(self.recipe, self.source_root)
         for name in ('libunwind', 'cmake', 'runtimes/cmake'):
             target = self.source_root / name / relative
-            self.assertGreater(len(str(target)), 350)
+            # The depth under test is the relative part, which alone exceeds Windows' 260-character MAX_PATH
+            # whatever the temporary directory is called; the full length depends on the host (337 on the Linux
+            # CI runners), so it is not asserted.
+            self.assertGreater(len(str(relative)), 260)
+            self.assertGreater(len(str(target)), 260)
             self.assertEqual(name.encode(), Path(DRIVER.filesystem_path(target)).read_bytes())
         self.assertFalse((self.source_root / 'libunwind/.git').exists())
 
