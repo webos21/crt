@@ -1,7 +1,7 @@
 # Full / Development SDK split acceptance
 
-This record owns the current S2-S5 producer/consumer gates in
-[TODO](../../TODO.md#crt-sdk-split-full-sdk-and-development-sdk). Content and
+This record owns the S2-S5 producer/consumer gates of the Full / Development SDK split (complete
+2026-10-27; the TODO tranche was closed and summarized in [HISTORY](../../HISTORY.md)). Content and
 identity policy belong to the [SDK contract](../design/sdk_development_contract.md#full-sdk-and-development-sdk-adopted-direction-2026-10-22);
 commands belong to the [distribution guide](../guides/distribution.md#development-sdk-producer-and-external-validation).
 Original B4/B5 results remain in [build-system acceptance](build_system_acceptance.md#development-sdk-windows-replay).
@@ -34,7 +34,7 @@ or grant release qualification. The current remaining scope is:
 | Linux/aarch64 | Missing static/shared curl, changed inherited runtime and stale Full rejection already passed in the [native replay](#linuxaarch64-native-producer-and-package-replay-2026-10-27) | Existing native archive/source identity retained there |
 | macOS/arm64 | Eight S5 negatives and packaged isolated consumer pass [below](#macosarm64-s5-replay-2026-10-27) | New `handoff.json` below |
 | Windows/x64 | Eight S5 negatives and packaged isolated consumer pass [below](#windowsx64-clean-production-and-s5-replay-2026-10-27) | New `handoff.json` from clean frozen Full/Dev inputs below |
-| Windows/arm64 | Seven profile negatives passed; stale Full pairing explicitly not run | Run the S5 driver and retain candidate handoff |
+| Windows/arm64 | Eight S5 negatives (including stale Full) and packaged isolated consumer pass [below](#windowsarm64-clean-production-and-s5-replay-2026-10-27) | New `handoff.json` from a clean Dev + Full `05-ui` pair below |
 
 ### Linux/x86_64 S5 replay (2026-10-27)
 
@@ -132,7 +132,7 @@ Windows/x64 and Windows/arm64 rows, and any release collection.
 
 ### Windows/x64 clean production and S5 replay (2026-10-27)
 
-**Windows/x64 S5 accepted; Windows/arm64 S5 remains open.** Started with no `out/` directory and a
+**Windows/x64 S5 accepted** (Windows/arm64 follows in its own section below). Started with no `out/` directory and a
 clean checkout at CRT `b99ac7462a3b5c3230f55f7059320d01ceb2a9dc`. The native
 Windows/x64 preset keeps imported libc++, Skia, FFmpeg, curl and LVGL enabled;
 no external predecessor or old source/build cache is supplied. Build-host
@@ -285,11 +285,63 @@ is `C:/Users/Lee/AppData/Local/Temp/crt dev external yljokfkf`, retained in the
 receipt; logs return under `out/`. CMake's temporary retry-run setting is cleared
 after success; test/dist replay explicitly selects this newly built `06-web`.
 
-Windows/arm64 S5, artifact promotion, CLI adoption and tagged release collection
-remain separate. In particular `dist/06-web/share/crt/web-security.json` and the
+Artifact promotion, CLI adoption and tagged release collection remain separate. In particular `dist/06-web/share/crt/web-security.json` and the
 manifest's release decision keep `public_release_allowed: false`: the stable
 WebKit micro pin must move **2.54.1 -> 2.54.2** before release qualification.
 That report is preserved, not bypassed or treated as an S5 runtime failure.
+
+### Windows/arm64 clean production and S5 replay (2026-10-27)
+
+Host: the Windows 11 arm64 VM of the earlier Windows/arm64 records (4 vCPUs, no GPU), native arm64 shell and Python 3.11.9, Clang 22.1.8,
+CMake 4.4.4, Windows SDK 10.0.28000 (`um/arm64`). Validation baseline: CRT `3810c7c3ef0576c70da09613d578ac17106916c8`, clean working tree
+before and after production. **The Full reference is `05-ui`, not `06-web`:** `tools/build_stage_06_web.py` does not support Windows/arm64 by design,
+so `05-ui` is the highest Full stage this pair has. The driver accepts any cumulative stage from `02-cxx` to `06-web` as the Full
+reference and the collector's pair check only inspects the Web overlay recipe when the stage is `06-web`; the clean-source asset check
+(`check_full_source`) is Web-only and is therefore not applicable here.
+
+Both SDKs were produced from that one commit (the earlier in-tree SDKs predated `source_commit` in the `03`-`05` manifests and could
+not form a pair):
+
+```powershell
+cmake --build out/windows-host-ninja-debug --target crt-c-build crt-ui-dist --parallel 4
+cmake --build out/windows-host-ninja-debug --target crt-development-sdk-test --parallel 4
+```
+
+The Development sidecar records producer, base and compile commit `3810c7c`, `producer_working_tree_dirty: false` and **27** inherited runtime
+digests; the Full `01-c`, `02-cxx` and `05-ui` manifests carry the same commit. Ordinary and `--profile dev` verification pass and the ordinary
+consumer passes its eight cases. The new ports were rebuilt, so the archive hashes differ from the earlier Windows/arm64 package while the 27
+runtime digests are identical to it (deterministic runtime bytes).
+
+```powershell
+python tools/test_sdk_split_s5.py `
+  --sdk-root out/windows-host-ninja-debug/dist/dev `
+  --full-sdk out/windows-host-ninja-debug/dist/05-ui `
+  --output out/s5-windows-arm64-20261027/replay
+```
+
+The driver exits 0. Package: `archives/crt-development-windows-aarch64-dev.zip`, **138,495,124 bytes**, SHA-256
+`1d961c8ce159177d239bafd2d4beed34a0cce13b3d763f970e32176768a479c0`; **2,695** payload paths, with the two declared internal zlib aliases
+(`lib/libz.so`, `lib/libz.so.1`) materialized as files by the ZIP helper, as on Windows/x64. The restricted token (`windows-restricted-token`)
+denies the whole checkout, its `out/` and fresh descendants' reads (`descendant_denial_checked: true`); static and shared consumers pass
+**eight cases** (verified HTTPS+inflate, wrong, missing and malformed explicit CA). Static linkage has no packaged imports; the shared closure is
+**ten SDK images** run app-local with a System32-only PATH; both modes import only `kernel32.dll` and `api-ms-win-core-synch-l1-2-0.dll`
+outside the package.
+
+Eight negatives fail with their expected diagnostics: missing static curl, missing shared curl, changed inherited runtime digest, upper-stage
+content, missing curl notice, missing curl declaration, bundled/ambient trust policy, and a Full reference whose source commit alone is changed
+(`Development/Full SDK need the same known clean source commit; rebuild stale predecessors`). The collector's read-only `check_pair` also
+accepts the real, unmutated Dev + Full `05-ui` pair. Original Dev and Full payloads are unchanged afterwards (`original_payloads_unchanged: true`).
+`replay/handoff.json` records `promotion: not-promoted`, `release_qualified: false` and `cli_adoption: not-run`; `full_reference` is
+`05-ui` at `3810c7c` with `runtime_bytes_equal: true`.
+
+Limits. This is a local `development`-versioned candidate, not a tagged release pair; no `06-web` Full SDK exists for Windows/arm64, so
+the Web security snapshot, source-offer-for-WebKit and clean Web source asset checks do not apply to this pair. The existing CI
+tooling selection and a full ctest were not re-run for this production (the earlier ctest of this host is 220/220). Build-host inputs outside
+the repository are those of the earlier Windows/arm64 records: a native arm64 shell, `CRT_WINDOWS_SDK_LIBPATH` in 8.3 form,
+`CRT_CC/CXX/AR/RANLIB`, and Strawberry Perl's emulated x64 `openssl.exe` for the fixture PKI.
+
+Evidence root: `out/s5-windows-arm64-20261027/`, retaining `logs/{full-05-ui,dev-producer,s5-driver}.log` and `replay/` (verifier logs, eight negative
+logs, `external/result.json`, the archive and `handoff.json`).
 
 ### Handoff and CI boundary
 
@@ -310,9 +362,9 @@ comparison permits only the two already documented internal zlib aliases to
 become byte-identical files; other path, type or byte differences fail. POSIX
 archives retain exact link-aware identity. Hosted CI and native macOS/Windows
 execution of the S5 driver were **Not run** at the original Linux checkpoint.
-The later native macOS/Windows/x64 records above supersede that pending scope;
-Windows/arm64 S5 remains open. Actual tagged collection remains in release
-qualification.
+The later native macOS/Windows records above supersede that pending scope,
+including Windows/arm64 (Full reference `05-ui`, since `06-web` is not built
+there). Actual tagged collection remains in release qualification.
 
 ## Windows libc++ long-path fetch recovery (2026-10-27)
 

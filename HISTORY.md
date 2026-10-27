@@ -11,6 +11,25 @@ substantive update.
 
 ## 2026-10-27
 
+### Complete the Windows/arm64 S5 replay and close the Full / Development SDK split
+
+Produced the Development SDK and the Full `01-c`..`05-ui` SDKs on the Windows/arm64 VM from one clean commit (`3810c7c`; the earlier in-tree
+SDKs predated `source_commit` in the `03`-`05` manifests and could not pair). The S5 driver passes natively: restricted-token isolation with
+the checkout and `out/` denied, static and shared HTTPS+inflate and explicit-CA cases (eight), ten-image app-local closure with a System32-only PATH,
+and eight negatives including a stale Full source identity; the collector's `check_pair` accepts the real pair, all 27 inherited runtime digests
+match, and `handoff.json` records not-promoted / not release-qualified / CLI adoption not run. The Full reference is `05-ui`, because the
+06-web stage is not supported on Windows/arm64. Evidence:
+[SDK split acceptance](docs/acceptance/sdk_split_acceptance.md#windowsarm64-clean-production-and-s5-replay-2026-10-27).
+
+With this the S5 sub-gates of all five native pairs are checked and **the SDK split tranche (S0-S5) is complete**, so it left `TODO.md`
+`In Progress`. Summary of what it delivered: the Full SDK (cumulative `01-c`..`06-web`) is unchanged; the Development SDK is `02-cxx` plus
+zlib, Mbed TLS and libcurl (static and shared) with no graphics, media, UI or Web content, expressed as a `dev` profile (manifest stays
+`02-cxx`, identity in `share/crt/contracts/development.json`), built by the shared media-stage port implementation (`tools/build_dev_sdk.py`),
+verified by `verify_dist.py --profile dev`, and proven with a CLI-shaped C++17 consumer (HTTPS GET with explicit-CA verification plus zlib
+inflate) outside the producer tree on each pair. The release collector (`crt_sdk_release.py`) exists with local fixtures; actual clean/tagged
+collection is release qualification. CI cost stays bounded (one host smoke in CI, the full matrix at release time). Not goals: signing and
+publisher authentication, a static CLI, and any change to the Full SDK stages.
+
 ### Complete the Windows/x64 clean Full/Development SDK build and S5 replay
 
 Started from an absent `out/` and clean `b99ac74`; built C/C++, graphics,

@@ -60,75 +60,14 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-### CRT SDK split: Full SDK and Development SDK
-
-CRT produces two kinds of SDK per native pair from the same sources, stage outputs and port
-recipes (no second build system, ABI or recipe set); the contract is
-[Full SDK and Development SDK](docs/design/sdk_development_contract.md#full-sdk-and-development-sdk-adopted-direction-2026-10-22).
-The **Full SDK** is the existing cumulative `01-c` .. `06-web` archives, unchanged. The **Development
-SDK** is `02-cxx` plus zlib, Mbed TLS and libcurl (static and shared), with no graphics, media, UI or
-Web content; it exists so `crt-cli` can be built without CRT's source or build tree, and its
-shared runtime files are byte-identical to the Full SDK of the same release. The CLI runtime bundle
-is assembled by `crt-cli` from its own link result. The `crt-cli` repository is laid out as
-`crt new` generates it and must build and run with its own `crt build`/`crt run`
-([layout and self-test](docs/design/crt_cli.md#9-joint-development-sequence)); its adoption evidence
-stays in the CLI repository. Residual-defect triage finished 2026-10-22
-([record](docs/bringup/crt_pal_residual_triage.md)).
-
-- [x] S0 Freeze the split in the design docs: Development SDK content rule, archive and release asset
-  names, how the `dev` profile is expressed (manifest stays `02-cxx`; identity in the development-contract
-  sidecar), notice/SBOM scope (no FFmpeg, so no LGPL source offer), and who supplies the CLI's TLS trust
-  material (the curl port bakes in no CA bundle).
-- [x] S1 Add a CLI-shaped reference consumer to this repository's tests (C++17: HTTPS GET with
-  certificate verification plus zlib inflate) linked only through the Development SDK wrappers; its
-  ELF/Mach-O/PE imports, via `crt_binary_dependencies.py`, define the runtime closure instead of a guessed list.
-- [x] S2 Producer: build zlib, Mbed TLS and libcurl through one shared implementation with the
-  `04-gfx-media` stage builder, then assemble the Development SDK on top of
-  `02-cxx` for Linux x86_64/aarch64, macOS arm64 and Windows x64/arm64.
-  - [x] Shared producer/profile implementation and recorded Linux/x86_64,
-    macOS/arm64 and Windows/x64 production; [remaining matrix](docs/acceptance/sdk_split_acceptance.md#remaining-matrix).
-  - [x] Linux/aarch64 native Development producer compile/package replay;
-    [evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
-  - [x] Windows/arm64 native Development producer compile/package replay;
-    [evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-native-producer-and-package-replay-2026-10-27).
-- [x] S3 Verification: `verify_dist.py` profile checks (no `03+` content, ports present static and shared,
-  declared dependencies and notices, relocation, the macOS binding audit with a shared consumer, Windows
-  imports resolving at load); an external build and run from the Development SDK alone, with CRT's source
-  and build tree hidden.
-  - [x] Linux/x86_64 relocated static/shared consumer with producer/source SDK
-    inaccessible; [evidence](docs/acceptance/sdk_split_acceptance.md#linux-source-hidden-replay-2026-10-27).
-  - [x] Linux/aarch64 packaged, relocated static/shared consumer with producer/source SDK
-    inaccessible; [evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
-  - [x] macOS/arm64 packaged, relocated static/shared consumer, shared-consumer
-    binding audit and producer-tree-hidden replay;
-    [evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-source-hidden-and-shared-consumer-replay-2026-10-27).
-  - [x] Windows/x64 packaged, relocated static/shared consumer with producer trees
-    inaccessible under a restricted token; [evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-source-hidden-and-package-replay-2026-10-27).
-  - [x] Windows/arm64 native producer-tree-hidden replay under a restricted token;
-    [evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-source-hidden-replay-2026-10-27).
-- [x] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
-  (`crt_sdk_release.py`) for both kinds (checksums, release manifest, recipes
-  pointing at the release, `VERSION` equal to the tag) and checks that the two share the source commit and the
-  runtime-file digests. Local implementation/fixtures are B4 evidence; actual positive collection belongs to
-  [release qualification](#release-qualification-and-assembly-rehearsal), not a second rehearsal here.
-- [ ] S5 Native replay on Linux x86_64, macOS arm64 and Windows x64 (aarch64 targets compile-only unless
-  run natively), including negative cases (missing port, mismatched digest, stale Full SDK). Hand the
-  identity to `crt-cli`, whose lock owns adoption.
-  - [x] Linux/x86_64 packaged S5 replay and candidate handoff; Linux/aarch64
-    required negatives are already recorded natively; [S5 evidence](docs/acceptance/sdk_split_acceptance.md#s5-native-negative-and-candidate-handoff-gate).
-  - [x] macOS/arm64 packaged S5 replay, stale-Full rejection and candidate handoff from one clean commit;
-    [evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-s5-replay-2026-10-27).
-  - [x] Windows/x64 clean Full/Development production and packaged S5 replay;
-    [evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-clean-production-and-s5-replay-2026-10-27).
-  - [ ] Windows/arm64 stale-Full-source replay and candidate handoff;
-    promotion/CLI adoption stay separate.
-
-CI cost stays bounded: one host smoke in CI, the full matrix at release time. Not goals here: signing and
-publisher authentication, a static CLI, and any change to the Full SDK stages.
+No active tranche. The Full SDK / Development SDK split (S0-S5) is complete on all five native pairs and is
+recorded in [`HISTORY.md`](HISTORY.md) and [SDK split acceptance](docs/acceptance/sdk_split_acceptance.md).
+Promotion of the candidates, `crt-cli` adoption and tagged release collection are separate gates and start in
+Planned, beginning with release qualification.
 
 ## Planned
 
-SDK Producer Contract Gate P0 below continues after, and partly through, the SDK split in progress above.
+SDK Producer Contract Gate P0 below continues after the completed SDK split.
 The remaining sections are independent follow-ups, not a prerequisite chain for
 CLI/Studio or a reopening of accepted SDK stages; long-term extensions stay
 conditional on a real consumer.
