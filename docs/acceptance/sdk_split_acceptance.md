@@ -21,6 +21,96 @@ Actual clean/tagged positive collection remains the independent
 [release qualification](../../TODO.md#release-qualification-and-assembly-rehearsal)
 gate. No tag, upload, consumer lock or runtime adoption is part of this record.
 
+## S5 native negative and candidate handoff gate
+
+S2/S3's five native producer and isolated-consumer results remain accepted at
+their recorded baselines. S5 adds required negative/pairing evidence and hands
+off identified producer candidates; it does not wait for a CLI implementation
+or grant release qualification. The current remaining scope is:
+
+| Pair | Required native negative evidence | Candidate identity / remaining work |
+| --- | --- | --- |
+| Linux/x86_64 | Eight S5 negatives and packaged isolated consumer pass below | New `handoff.json` below |
+| Linux/aarch64 | Missing static/shared curl, changed inherited runtime and stale Full rejection already passed in the [native replay](#linuxaarch64-native-producer-and-package-replay-2026-10-27) | Existing native archive/source identity retained there |
+| macOS/arm64 | Seven profile negatives passed; stale Full pairing not yet run | Run the S5 driver with an identified matching-runtime Full reference |
+| Windows/x64 | Seven profile negatives passed; stale Full pairing not yet run | Run the S5 driver and retain candidate handoff |
+| Windows/arm64 | Seven profile negatives passed; stale Full pairing explicitly not run | Run the S5 driver and retain candidate handoff |
+
+### Linux/x86_64 S5 replay (2026-10-27)
+
+Validation baseline: CRT `4a79120` plus the S5 driver/tests/CI changes. This
+replays the existing identified Dev candidate compiled at clean `181f74b`,
+based on plain `02-cxx` at `857f831`; it does not relabel or rebuild those
+artifacts as current clean source. The Full reference is the existing `06-web`
+at `857f831`. All **23** inherited runtime digests actually match. Full reference
+target and runtime bytes are checked before a success receipt is possible.
+
+```sh
+python3 tools/test_sdk_split_s5.py \
+  --sdk-root out/dev-full-sdk-20261027/dev \
+  --full-sdk out/linux-host-ninja-debug/dist/06-web \
+  --output out/sdk-s5-linux-20261027/replay-verified
+```
+
+The ordinary verifier accepts both inputs. The existing archive helper packages
+the Dev SDK as `dev/`, without invoking a release collector. Extraction into a
+space-containing path passes ordinary/profile verification and exact payload
+inventory comparison. The relocated SDK then passes the current source-hidden
+driver: static/shared verified HTTPS+inflate and wrong/missing/malformed explicit
+CA, **eight cases**. The shared closure contains **11 SDK images** and the
+declared `ld-linux-x86-64.so.2` boundary; static linkage has no dynamic imports.
+
+Archive: `archives/crt-development-linux-x86_64-dev.tar.xz` under the evidence
+root above, **8,938,536 bytes**, SHA-256
+`824b9f28df025e80c935aad80f177131d3160b4979db32926d8b7172ef2fb619`.
+Original/extracted payloads have **2,579** identical file/symlink entries.
+Both original Dev and Full inventories remain unchanged after replay.
+
+Seven separate private Dev copies are mutated and rejected by
+`verify_dist.py --profile dev`: missing static curl, missing shared curl, changed
+inherited libc, upper-stage content, missing curl notice, missing curl
+declaration and bundled/ambient trust. Each must fail with its expected
+diagnostic, not merely any process error. A private Full copy changes only its
+source identity (and the corresponding Web overlay source identity so that the
+unrelated overlay-binding gate still holds). The collector's unchanged
+`check_pair` rejects that stale source. A unit fixture starts from an accepted
+clean matching pair before applying the same stale-Full mutation; actual
+release artifacts are never relabeled. These are **eight** negative cases.
+
+Evidence is retained in `out/sdk-s5-linux-20261027/replay-verified/`: input and
+extracted verifier logs, seven negative logs, `external/{command.json,
+consumer.log,result.json}`, archive and `handoff.json`. The receipt records the
+archive size/hash, exact Dev manifest/profile hashes, original producer/base/
+compile identities, runtime correspondence, native import closure, negative
+results and validation source revision. `source-identity.json` in its parent
+identifies the validation working-tree files. Earlier local attempts remain
+separate; the final run uses the existing long-path-safe copy helper.
+The focused Development/S5 unit suite passes **29/31** with two native-Windows
+skips (`unit.log`). The exact existing CI tooling selection passes **144/150**
+with six host-conditional skips (`ci-tooling.log`), both under
+`out/sdk-s5-linux-20261027/`.
+
+### Handoff and CI boundary
+
+`handoff.json` is producer-owned **local S5 evidence** (`kind:
+crt-sdk-s5-evidence`, its own `format: 1`), not the proposed SDK development
+contract v1 or a CLI lock format. It explicitly records `promotion:
+not-promoted`, `release_qualified: false` and `cli_adoption: not-run`. This
+candidate has equal runtime bytes but different Dev producer and Full/base
+source commits, so it is not a matching clean release pair. CLI may review its
+identity; adoption still requires producer artifact promotion and the CLI-owned
+compatibility/lock gate. CLI/Studio repositories are untouched.
+
+The bounded Linux/amd64 PR step now runs this S5 driver after the ordinary Dev
+producer/consumer target. It adds package/negative/handoff checks to the same
+host smoke rather than another native matrix or WebKit rebuild. Windows ZIP
+comparison permits only the two already documented internal zlib aliases to
+become byte-identical files; other path, type or byte differences fail. POSIX
+archives retain exact link-aware identity. Hosted CI and native macOS/Windows
+execution of the S5 driver are **Not run** here. S5 therefore remains open for
+the three host rows above; actual tagged collection remains in release
+qualification.
+
 ## Windows libc++ long-path fetch recovery (2026-10-27)
 
 The follow-up to the S3 failure below is resolved in CRT's host fetch driver,
@@ -588,7 +678,7 @@ The CI step is implemented; a hosted GitHub run is **Not run** in this replay.
 ## Producer/consumer review
 
 The producer owner is CRT's `build_dev_sdk.py`, profile verifier, reference
-consumer and external acceptance driver. Initial review baseline: CRT `181f74b`;
+consumer, external acceptance driver and S5 package/handoff driver. Initial review baseline: CRT `181f74b`;
 later host extensions retain their exact baselines in the host sections above.
 Consumer baselines remain CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and
 Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`, with no approved runtime

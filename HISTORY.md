@@ -11,6 +11,25 @@ substantive update.
 
 ## 2026-10-27
 
+### Add the S5 native SDK package/negative/handoff replay
+
+Added one reproducible native S5 driver that verifies identified Dev/Full
+inputs, requires matching target/runtime bytes, packages and extracts Dev,
+checks payload identity and runs the existing producer-denying consumer. It
+requires the intended verifier diagnostics for seven disposable Dev mutations
+and rejects stale Full source identity through the unchanged collector pair
+gate. Source/Full metadata is mutated only in private negative fixtures;
+original SDKs remain unchanged. The local handoff receipt retains archive,
+producer and consumer identities without promoting artifacts or approving CLI
+adoption. The existing Linux/amd64 PR smoke now runs this gate.
+
+Linux/x86_64 package, eight consumer cases and eight negatives pass using the
+existing identified Dev/Full candidates; no new runtime or clean release claim
+is made. Recorded Linux/aarch64 evidence already covers S5's required native
+negatives. macOS/Windows stale-Full replay and candidate receipts remain in
+TODO. Exact commands, identities, counts and limits belong to
+[S5 acceptance](docs/acceptance/sdk_split_acceptance.md#s5-native-negative-and-candidate-handoff-gate).
+
 ### Fix Windows libc++ long-path source copying and close the fetch follow-up
 
 Imported-runtime fetch now reuses the existing extended-path filesystem helper

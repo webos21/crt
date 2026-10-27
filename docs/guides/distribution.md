@@ -122,6 +122,32 @@ runtime hashes or an older predecessor's known source commit do not qualify a
 matching clean/tagged release pair. The strict release collectors and their
 independent positive rehearsal remain the release gate.
 
+#### S5 package, negative and identity replay
+
+After the native producer is accepted, use a fresh evidence directory and an
+identified plain Full SDK of the same native target with matching inherited
+runtime bytes. A plain `02-cxx` predecessor is a valid Full reference for this
+producer gate; using it does not claim `06-web` release qualification.
+
+```sh
+python3 tools/test_sdk_split_s5.py \
+  --sdk-root out/<preset>/dist/dev \
+  --full-sdk out/<preset>/dist/02-cxx --output out/dev-sdk-s5
+```
+
+The driver verifies inputs, packages/extracts the candidate, runs the same
+producer-denying consumer and requires expected rejection diagnostics for seven
+Dev mutations plus a stale Full source identity. Mutations affect private
+copies only. The original payloads must remain unchanged. It uses the existing
+Linux/macOS/Windows native isolation prerequisites above and rejects foreign
+target execution. Choose a new `--output` path for each replay; existing evidence
+is not replaced.
+
+The resulting `handoff.json` retains artifact/profile/manifest hashes, producer
+identity, actual native import closure and case results for CLI review. It is
+local test evidence, not an artifact promotion, CLI lock/adoption record or
+release approval. See [S5 scope and remaining hosts](../acceptance/sdk_split_acceptance.md#s5-native-negative-and-candidate-handoff-gate).
+
 ### Stage production
 
 `05-ui` is accepted: the repository builds it in-tree (`crt-ui-dist`) and as an

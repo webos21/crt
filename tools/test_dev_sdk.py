@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crt_dev_profile as profile
 import crt_sdk_release as release
 import test_dev_sdk_external as external
+import test_sdk_split_s5 as s5
 
 
 class ExternalConsumerBoundary(unittest.TestCase):
@@ -267,6 +268,37 @@ class DevelopmentProfile(unittest.TestCase):
     def test_valid_profile_and_same_runtime_pair(self):
         self.assertEqual([], profile.check(self.dev, self.manifest))
         release.check_pair(self.dev, self.full, "v1.0.0")
+
+    def test_s5_stale_full_negative_starts_from_a_valid_pair(self):
+        release.check_pair(self.dev, self.full, 'v1.0.0')
+        result = s5.stale_full_negative(self.dev, self.full, 'v1.0.0')
+        self.assertTrue(result['rejected'])
+        self.assertEqual('a' * 40, self.data['producer_source_commit'])
+
+    def test_s5_full_reference_requires_real_runtime_bytes_not_only_metadata(self):
+        self.assertGreater(s5.require_runtime_correspondence(self.dev, self.full), 0)
+        (self.full / 'bin/libc.dll').write_text('different bytes with unchanged source metadata')
+        with self.assertRaisesRegex(ValueError, 'runtime bytes differ'):
+            s5.require_runtime_correspondence(self.dev, self.full)
+
+    def test_s5_windows_zip_allows_only_the_two_declared_zlib_aliases(self):
+        import shutil
+        source, extracted = self.root / 'source', self.root / 'extracted'
+        (source / 'lib').mkdir(parents=True)
+        (source / 'lib/libz.so.1.3.1').write_bytes(b'zlib fixture')
+        try:
+            for name in ('libz.so', 'libz.so.1'):
+                (source / 'lib' / name).symlink_to('libz.so.1.3.1')
+        except OSError as error:
+            self.skipTest(f'symlink fixture unavailable: {error}')
+        shutil.copytree(source, extracted, symlinks=False)
+        result = s5.package_equivalence(source, extracted, 'windows')
+        self.assertEqual(['lib/libz.so', 'lib/libz.so.1'], result['materialized_zip_aliases'])
+        with self.assertRaisesRegex(ValueError, 'payload type/content'):
+            s5.package_equivalence(source, extracted, 'linux')
+        (extracted / 'lib/libz.so.1.3.1').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'payload type/content'):
+            s5.package_equivalence(source, extracted, 'windows')
 
     def test_development_fetch_can_keep_downloads_in_its_own_work_root(self):
         import build_stage_04_gfx_media as media
