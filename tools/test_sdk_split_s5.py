@@ -17,6 +17,12 @@ import test_dev_sdk_external as external
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def diagnostic_matches(output, expected):
+    # Verifier messages use native paths; manifest notice paths use '/'. Keep
+    # every other part of the required diagnostic exact, including its case.
+    return expected.replace('\\', '/') in output.replace('\\', '/')
+
+
 def require_runtime_correspondence(dev, full):
     observed = profile.runtime_digests(dev)
     if not observed or observed != profile.runtime_digests(full):
@@ -138,7 +144,7 @@ def main(argv=None):
             result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=300)
         if (result.returncode == 0) == (expected_rejection is not None):
             raise ValueError(f'expected {"rejection" if expected_rejection else "verification"}: {log_name}')
-        if expected_rejection and expected_rejection not in (output / log_name).read_text():
+        if expected_rejection and not diagnostic_matches((output / log_name).read_text(), expected_rejection):
             raise ValueError(f'negative failed at an unrelated gate: {log_name}')
         return {'exit_code': result.returncode, 'log': log_name, 'expected_diagnostic': expected_rejection}
 

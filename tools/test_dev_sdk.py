@@ -136,7 +136,10 @@ class ExternalConsumerBoundary(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('fixture')
             (output / 'result.json').write_text('{"passed":true}')
+            # This launcher-failure fixture has its own producer boundary, even
+            # when the caller puts TEMP inside the real checkout's out/ tree.
             with patch.object(external, 'native_target', return_value='windows'), \
+                    patch.object(external, 'hidden_roots', return_value=[sdk]), \
                     patch.object(windows, 'create_work', return_value=(work, 'fixture-sid')), \
                     patch.object(external, 'windows_environment', return_value={}), \
                     patch.object(external, 'windows_python', return_value=Path(sys.executable)), \
@@ -196,7 +199,9 @@ class ExternalConsumerBoundary(unittest.TestCase):
             output.mkdir()
             (sdk / 'manifest.json').write_text('{"target":{"os":"macos","arch":"aarch64"}}')
             (output / 'result.json').write_text('{"passed":true}')
+            # Keep the synthetic producer separate from work under any TEMP.
             with patch.object(external, 'native_target', return_value='macos'), \
+                    patch.object(external, 'hidden_roots', return_value=[sdk]), \
                     patch.object(external.shutil, 'which', return_value='/usr/bin/sandbox-exec'), \
                     patch.object(external.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, ['sandbox-exec'])) as run:
                 with self.assertRaises(subprocess.CalledProcessError):
@@ -274,6 +279,16 @@ class DevelopmentProfile(unittest.TestCase):
         result = s5.stale_full_negative(self.dev, self.full, 'v1.0.0')
         self.assertTrue(result['rejected'])
         self.assertEqual('a' * 40, self.data['producer_source_commit'])
+
+    def test_s5_notice_diagnostic_normalizes_only_path_separators(self):
+        expected = 'share/licenses/curl/COPYING'
+        for path in (r'C:\SDK with spaces\share\licenses\curl\COPYING',
+                     '/sdk/share/licenses/curl/COPYING'):
+            self.assertTrue(s5.diagnostic_matches('distribution is missing: ' + path, expected))
+        for unrelated in ('distribution is missing: /sdk/share/licenses/mbedtls/LICENSE',
+                          'Development SDK missing curl static archive',
+                          'distribution is missing: /sdk/share/licenses/curl/copying'):
+            self.assertFalse(s5.diagnostic_matches(unrelated, expected))
 
     def test_s5_full_reference_requires_real_runtime_bytes_not_only_metadata(self):
         self.assertGreater(s5.require_runtime_correspondence(self.dev, self.full), 0)

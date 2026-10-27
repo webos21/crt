@@ -11,6 +11,54 @@ substantive update.
 
 ## 2026-10-27
 
+### Complete the Windows/x64 clean Full/Development SDK build and S5 replay
+
+Started from an absent `out/` and clean `b99ac74`; built C/C++, graphics,
+Skia/media, UI and isolated Web with the default features enabled, plus the
+Development SDK through its ordinary producer. Preserved failed attempts and
+recovered the original frozen source/predecessor identities. New Full/Dev
+packages pass relocation, payload comparison and native checks; all 27 inherited
+runtime digests match. The restricted-token consumer proves producer/source
+and descendant read denial before static/shared HTTPS/inflate/trust execution.
+
+All eight S5 negatives and the local candidate handoff pass after normalizing
+native diagnostic path separators; unrelated diagnostics still fail. The
+existing CI tooling selection passes 148/152, four host-conditional skips, with
+the new count/path tests in the same job. Marked only Windows/x64 S5 complete;
+Windows/arm64 remains open. Build work and receipts stay under `out/`, except
+the required source-hidden consumer copy. The security report keeps public
+release blocked pending the WebKit stable micro pin update. Artifact hashes,
+commands, preserved failures and source/tooling provenance limits belong to
+[SDK split acceptance](docs/acceptance/sdk_split_acceptance.md#windowsx64-clean-production-and-s5-replay-2026-10-27).
+
+### Fix WebKit checkout file counting on deep Windows paths
+
+Git's pinned WebKit checkout completed, but its Python file-count diagnostic
+failed with `WinError 3` while traversing a deep directory. The count now uses
+the existing extended-path filesystem helper, leaving Git/build-tool arguments,
+pin checks and source selection unchanged. A 350+ character fixture reproduces
+the failure before the fix and passes afterwards; it runs in the already
+selected CI `ExecutedRecipeTests` class without a workflow change.
+
+The repaired helper also verifies the actual failed checkout: 69,576 files,
+the pinned commit/tree/listing and pristine state before and after. Existing CI
+tooling passes 147/151 with four host-conditional skips. The frozen clean Web
+source asset is preserved; the full build resumes through its normal verified
+checkout-cache path, not a relabeled asset. Full/S5 completion is recorded
+in [Windows clean replay](docs/acceptance/sdk_split_acceptance.md#windowsx64-clean-production-and-s5-replay-2026-10-27).
+
+### Keep external-consumer failure fixtures independent of the TEMP location
+
+Two mocked launcher-failure fixtures now supply their own synthetic producer
+boundary instead of assuming the host temporary directory is outside the CRT
+checkout. This preserves the failed-token/sandbox no-fallback and stale-receipt
+assertions when ordinary test work is placed under `out/`; actual native
+visibility/disjointness checks are unchanged. The existing CI tooling selection
+passes 146/150 with four host-conditional skips using TEMP under `out/`.
+The initial failures and successful rerun are retained with the
+[Windows clean replay](docs/acceptance/sdk_split_acceptance.md#windowsx64-clean-production-and-s5-replay-2026-10-27),
+which also records the completed Full/S5 replay.
+
 ### Add the S5 native SDK package/negative/handoff replay
 
 Added one reproducible native S5 driver that verifies identified Dev/Full

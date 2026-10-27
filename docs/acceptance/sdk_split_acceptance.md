@@ -12,7 +12,7 @@ Original B4/B5 results remain in [build-system acceptance](build_system_acceptan
 | --- | --- | --- |
 | Linux/x86_64 | Current producer and static/shared eight-case replay pass below | Pass below |
 | macOS/arm64 | Current producer, archive/extraction, static/shared eight-case replay and shared-consumer binding audit pass below | Pass below, using the extracted archive |
-| Windows/x64 | Current ports/package and static/shared eight-case replay pass below using an identified external `02-cxx`; earlier [Windows baseline](build_system_acceptance.md#development-sdk-windows-replay) retained | Pass below, using the extracted archive |
+| Windows/x64 | Clean default C/C++/Dev and cumulative Full production plus packaged S5 pass below; earlier external-predecessor evidence is retained | Pass below, using the extracted archive |
 | Linux/aarch64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Pass below, using the extracted archive |
 | Windows/arm64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Pass below under a restricted token, using the extracted archive |
 
@@ -33,7 +33,7 @@ or grant release qualification. The current remaining scope is:
 | Linux/x86_64 | Eight S5 negatives and packaged isolated consumer pass below | New `handoff.json` below |
 | Linux/aarch64 | Missing static/shared curl, changed inherited runtime and stale Full rejection already passed in the [native replay](#linuxaarch64-native-producer-and-package-replay-2026-10-27) | Existing native archive/source identity retained there |
 | macOS/arm64 | Eight S5 negatives and packaged isolated consumer pass [below](#macosarm64-s5-replay-2026-10-27) | New `handoff.json` below |
-| Windows/x64 | Seven profile negatives passed; stale Full pairing not yet run | Run the S5 driver and retain candidate handoff |
+| Windows/x64 | Eight S5 negatives and packaged isolated consumer pass [below](#windowsx64-clean-production-and-s5-replay-2026-10-27) | New `handoff.json` from clean frozen Full/Dev inputs below |
 | Windows/arm64 | Seven profile negatives passed; stale Full pairing explicitly not run | Run the S5 driver and retain candidate handoff |
 
 ### Linux/x86_64 S5 replay (2026-10-27)
@@ -130,15 +130,177 @@ Evidence is under `out/sdk-s5-macos-20261027/`: the build logs, `driver.log`, an
 negative logs, `external/`, the archive and `handoff.json`). Not run here: hosted CI execution of this driver on macOS,
 Windows/x64 and Windows/arm64 rows, and any release collection.
 
+### Windows/x64 clean production and S5 replay (2026-10-27)
+
+**Windows/x64 S5 accepted; Windows/arm64 S5 remains open.** Started with no `out/` directory and a
+clean checkout at CRT `b99ac7462a3b5c3230f55f7059320d01ceb2a9dc`. The native
+Windows/x64 preset keeps imported libc++, Skia, FFmpeg, curl and LVGL enabled;
+no external predecessor or old source/build cache is supplied. Build-host
+Clang is 22.1.8, CMake 3.29.2 and Python 3.11.9. The installed Windows SDK is
+10.0.28000.0 (`um/x64`).
+
+The one-shot driver `out/s5-windows-x64-20261027/run_clean.py` records commands,
+exit codes and phase logs in `status.json` and `logs/`. Build trees, downloads,
+host tools, port work, ordinary temporary files and SDKs stay under `out/`.
+Git POSIX Perl's missing pure modules are copied from the installed Strawberry
+distribution to `host-perl-modules/` within that evidence root, with original
+paths and SHA-256 values in `host-perl-inputs.json`. The native Perl requirement
+probe passes; there is no global module installation.
+
+The C stage completes 164 tests with no failures (one conditional skip), C++
+static/shared/string-ABI/iostream smokes pass, and the new Development SDK
+passes its profile and eight ordinary static/shared HTTPS/inflate/trust cases.
+Window/input passes 2/2, GPU/Skia 10/10, media 27/28 (one conditional skip),
+and UI 8/8. The Media Foundation capture test is conditionally skipped;
+no physical camera observation is claimed.
+
+All `01-c` through `05-ui` manifests and the Development producer/base/compile
+identities name this same commit. `producer-source-checkpoint.json` records
+the clean checkpoint and five stage-source recipes. The frozen `06-web` source
+archive is 19,535,080 bytes with SHA-256
+`834605caf2eaec3959f22400aadfb6cb2aa1c516b0c6983816508f4f87125ba5`;
+its `stage.json` records `working_tree_dirty: false`. The isolated Web producer
+is `out/windows-host-ninja-debug/isolated-web/run-vuwgyp5y`. Its producer gates,
+publication and the official adapter's disposable packaged test and archive
+phases complete successfully. Browser observation, HTTP/TLS positive/negative
+cases, source-offer checks, host ABI and ordinary verification are required
+without bypasses. The published Full SDK is `out/windows-host-ninja-debug/dist/06-web`.
+
+The first Web attempt stops at OpenSSL `configdata.pm`: Git POSIX Perl also
+needs `Pod::Usage`. Seven additional pure modules from the installed host Perl
+are recorded in `host-perl-repair.json`; actual `configdata.pm` syntax and help
+probes then pass. The failure is retained in `logs/full-web-dist.log`.
+
+Adding a retry option to CMake re-enters earlier packaging because the complete
+`CMakeCache.txt` is fingerprinted. That owned recovery is explicitly stopped
+before `05-ui` changes. Its log and intermediate source/packages are retained.
+Task documentation/unit edits are temporarily saved as
+`pending-validation-docs.patch` and reversed to return to the clean commit.
+The four upper source assets reproduce exactly. Recreating initial `02-cxx`
+requires the pristine pinned Git checkouts: the configured working copies
+already contain the existing recipe patches/shims. All five initial source
+SHA-256 values are recovered and checked in `source-restore-status.json`
+(`passed: true`). Official `create_dist.py`/`verify_dist.py` repackage `01`-`03`
+without compilation/relinking; inherited runtime bytes still match Dev and the
+old intermediate packages remain under explicit backup names.
+
+The Web recovery now calls the official adapter's build/test/dist phases
+directly, avoiding another CMake dependency traversal. Both original source
+SHA-256 and `05-ui` predecessor inventory are checked, then the existing
+isolated reuse guard runs unchanged. `direct-status.json` and
+`logs/web-direct-*.log` own this attempt. The saved validation/documentation
+patch is restored after clean source/package recovery; compiled Web inputs
+remain the original frozen clean asset.
+
+After all target dependency builds/tests, the next failure is the checkout file
+count in `fetch_webkit_commit.py`: plain `Path.rglob()` cannot traverse a
+258-character directory whose child paths exceed the Win32 limit. Git has
+already completed checkout. The current host helper now uses
+`crt_file_ops.filesystem_path` for this diagnostic's IO only. A 350+ character
+fixture fails before the fix and passes afterwards, preserving normal Git
+arguments and the HEAD check. It is added to the existing CI-selected
+`ExecutedRecipeTests`, not another workflow. The updated CI selection passes
+**147/151**, four conditional skips (`logs/ci-tooling-after-count-fix.log`).
+
+`actual-webkit-count.json` verifies the real failed checkout with the repaired
+helper: **69,576 files**, commit
+`537776966344c4982751692dd475c94124504271`, tree
+`60295deedb6abea300bfae633223baed8c8f6258` and the pinned **462,083-entry**
+listing. Its working tree remains pristine before and after. The original
+frozen source archive still carries the earlier helper; it is not replaced or
+claimed to include the local fix. Normal composition sees the already-complete
+verified checkout and reuses it. Both source/predecessor guards remain in force.
+The latest build attempt is `direct-cached-status.json` and
+`logs/web-direct-*-cached.log`; the prior failure is retained separately.
+
+After freezing these source inputs, two unit fixtures were adjusted to model
+their own synthetic hidden producer rather than assume TEMP lies outside the
+checkout. This lets their launcher-failure/no-fallback assertions run with
+TEMP under `out/`; production visibility/disjointness checks are unchanged.
+The first CI-tooling log retains those two failures and a transient release
+fixture rename `WinError 5`; the latter passes an independent same-root rerun.
+These validation-only edits do not relabel the frozen clean SDK inputs.
+The first corrected CI tooling selection passes **146/150**, with four
+host-conditional skips (`logs/ci-tooling-final.log`), using TEMP under `out/`.
+
+The initial S5 replay passes its isolated consumer but stops at a notice
+negative: the verifier prints a native Windows path, while the expected notice
+path uses `/`. The driver now normalizes only path separators for diagnostic
+comparison. Wrong filenames, unrelated diagnostics and case mismatches still
+fail. `logs/s5-replay-cached.log` and `replay/` preserve that failed attempt.
+The final CI tooling selection passes **148/152**, four host-conditional skips
+(`logs/ci-tooling-path-diagnostic.log`); there is no workflow/skip-policy change.
+
+Final native S5 command (external Clang/AR/RANLIB/OpenSSL and Windows SDK import
+libraries, as in the source-hidden guide):
+
+```powershell
+python tools/test_sdk_split_s5.py `
+  --sdk-root out/windows-host-ninja-debug/dist/dev `
+  --full-sdk out/windows-host-ninja-debug/dist/06-web `
+  --output out/s5-windows-x64-20261027/replay-portable
+```
+
+The driver exits 0. Its package has **2,695** payload paths. The restricted token
+denies the whole checkout, its `out/`, original SDK headers/runtime and fresh
+descendants' reads. Static/shared verified HTTPS+inflate and wrong, missing and
+malformed explicit CA pass: **eight cases**. The shared app-local closure is
+**ten SDK images** with System32-only PATH; static linkage has no packaged DLL
+imports. Both modes import only `kernel32.dll` and
+`api-ms-win-core-synch-l1-2-0.dll` outside the package. Seven private profile
+mutations fail with their expected diagnostics, and the unchanged collector
+pair check rejects stale Full source identity: **eight negatives**.
+
+All **27** inherited runtime digests match plain `02-cxx`, Full `05-ui`/`06-web`
+and Dev. Producer/base/compile identities are the same clean `b99ac74` above;
+Full uses its original frozen clean source archive, not the local host-tool
+count repair. The validation checkout retains the separate tool/test/doc edits.
+The collector's read-only `check_pair` and clean `check_full_source` checks
+also pass on the real candidates/source archive; no release assembly is run.
+Original Full/Dev payloads remain unchanged. `replay-portable/handoff.json`
+records `promotion: not-promoted`, `release_qualified: false` and
+`cli_adoption: not-run`.
+
+| Archive | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-development-windows-x86_64-dev.zip` | 144,972,586 | `700145a7b2229b4bef85f066bbb000cf6ae795dc87675399f8793b1379e2b5b9` |
+| `crt-development-windows-x86_64-06-web.zip` | 380,413,782 | `07b73a9d6db51b933f0a49ceca013d2341694a42be3094051f84a2d6aed0654d` |
+
+Full ZIP extraction into `Full SDK extracted with spaces/06-web` checks every
+CRC, matches all **3,673** payload bytes/paths and passes `verify_dist.py`.
+Full/Dev ZIPs materialize the two declared internal zlib file aliases; link
+types are recorded separately from unchanged bytes. `full-archive-result.json`
+retains those details. No relocated Full browser run is claimed by that archive
+check; the disposable packaged browser/network run is the adapter test above.
+
+Evidence root: `out/s5-windows-x64-20261027/`, notably
+`replay-portable/{handoff.json,external/result.json}`, the eight negative
+receipts/logs, `logs/s5-replay-portable.log`, `full-archive-result.json`,
+`source-restore-status.json` and the failure/recovery logs described above.
+`final-result.json` consolidates the successful gates and validation-file hashes;
+earlier failure/interruption status files remain intact.
+Only the restricted-token consumer's disposable copy must live outside the
+checkout: hiding the whole producer tree also hides its `out/`. The final work
+is `C:/Users/Lee/AppData/Local/Temp/crt dev external yljokfkf`, retained in the
+receipt; logs return under `out/`. CMake's temporary retry-run setting is cleared
+after success; test/dist replay explicitly selects this newly built `06-web`.
+
+Windows/arm64 S5, artifact promotion, CLI adoption and tagged release collection
+remain separate. In particular `dist/06-web/share/crt/web-security.json` and the
+manifest's release decision keep `public_release_allowed: false`: the stable
+WebKit micro pin must move **2.54.1 -> 2.54.2** before release qualification.
+That report is preserved, not bypassed or treated as an S5 runtime failure.
+
 ### Handoff and CI boundary
 
 `handoff.json` is producer-owned **local S5 evidence** (`kind:
 crt-sdk-s5-evidence`, its own `format: 1`), not the proposed SDK development
 contract v1 or a CLI lock format. It explicitly records `promotion:
-not-promoted`, `release_qualified: false` and `cli_adoption: not-run`. This
-candidate has equal runtime bytes but different Dev producer and Full/base
-source commits, so it is not a matching clean release pair. CLI may review its
-identity; adoption still requires producer artifact promotion and the CLI-owned
+not-promoted`, `release_qualified: false` and `cli_adoption: not-run`. The
+Linux/x86_64 candidate has equal runtime bytes but different Dev producer and
+Full/base source commits. The macOS and Windows/x64 records above instead use
+matching clean source identities; none is a tagged, release-qualified pair. CLI
+may review each identity; adoption still requires producer artifact promotion and the CLI-owned
 compatibility/lock gate. CLI/Studio repositories are untouched.
 
 The bounded Linux/amd64 PR step now runs this S5 driver after the ordinary Dev
@@ -147,8 +309,9 @@ host smoke rather than another native matrix or WebKit rebuild. Windows ZIP
 comparison permits only the two already documented internal zlib aliases to
 become byte-identical files; other path, type or byte differences fail. POSIX
 archives retain exact link-aware identity. Hosted CI and native macOS/Windows
-execution of the S5 driver are **Not run** here. S5 therefore remains open for
-the three host rows above; actual tagged collection remains in release
+execution of the S5 driver were **Not run** at the original Linux checkpoint.
+The later native macOS/Windows/x64 records above supersede that pending scope;
+Windows/arm64 S5 remains open. Actual tagged collection remains in release
 qualification.
 
 ## Windows libc++ long-path fetch recovery (2026-10-27)

@@ -444,7 +444,11 @@ still use native Windows Perl. A trimmed Git Perl can use a prepared host-only
 module root through `CRT_WEB_HOST_PERL_LIB`; the entrypoint probes
 `IPC::Cmd`/`ExtUtils::MakeMaker` and records its files' hashes. No global module
 installation is changed and neither these modules nor host compiler runtime
-DLLs are shipped in the target SDK. Git shell/Perl commands need working 8.3
+DLLs are shipped in the target SDK. OpenSSL's generated `configdata.pm` also
+requires `Pod::Usage` and its dependencies (`Pod::Text`/`Pod::Simple`); prepare
+them in that same host-only module root before a clean Web build
+([native replay](../acceptance/sdk_split_acceptance.md#windowsx64-clean-production-and-s5-replay-2026-10-27)).
+Git shell/Perl commands need working 8.3
 aliases because their generated Make command lines do not quote tool paths;
 this does not substitute a short alias for the SDK path under replay.
 Host/cross-target configurations

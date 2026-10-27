@@ -29,6 +29,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+from crt_file_ops import filesystem_path
+
 ROOT = Path(__file__).resolve().parent.parent
 RECIPE = ROOT / "libcrtweb" / "third_party" / "webkit" / "recipe.json"
 HEX40 = set("0123456789abcdef")
@@ -125,7 +127,10 @@ def checkout(source: dict, destination: Path) -> int:
     head = git(destination, "rev-parse", "HEAD").strip()
     if head != source["commit"]:
         raise SystemExit("checkout is not at the pinned commit")
-    return sum(1 for path in destination.rglob("*") if path.is_file() and ".git" not in path.parts)
+    # Git already opts into long paths. Keep the diagnostic's Python IO on the
+    # same complete tree without changing paths passed to Git or build tools.
+    files = Path(filesystem_path(destination))
+    return sum(1 for path in files.rglob("*") if path.is_file() and ".git" not in path.parts)
 
 
 def blob_sha1(data: bytes) -> str:

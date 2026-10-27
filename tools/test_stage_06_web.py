@@ -831,6 +831,29 @@ class PackagingTests(unittest.TestCase):
 
 
 class ExecutedRecipeTests(unittest.TestCase):
+    def test_product_checkout_counts_deep_sources_without_changing_git_paths(self):
+        import fetch_webkit_commit as fetch
+        from crt_file_ops import filesystem_path
+        root = Path(tempfile.mkdtemp(prefix="webkit checkout count spaces "))
+        self.addCleanup(lambda: shutil.rmtree(filesystem_path(root)))
+        checkout = root / "checkout"
+        (checkout / ".git/objects").mkdir(parents=True)
+        (checkout / ".git/objects/not-source").write_text("metadata")
+        (checkout / "shallow.cpp").write_text("source")
+        deep = checkout.joinpath(*["upstream directory " + "x" * 45 for _ in range(5)], "pinned.cpp")
+        self.assertGreater(len(str(deep)), 350)
+        file = Path(filesystem_path(deep))
+        file.parent.mkdir(parents=True)
+        file.write_bytes(b"pinned upstream bytes")
+        source = {"repository": "unused", "commit": "c" * 40, "checkout_paths": ["Source"]}
+        def git(repo, *args, **kwargs):
+            self.assertEqual(checkout, repo)
+            return source["commit"] if args == ("rev-parse", "HEAD") else ""
+        with mock.patch.object(fetch, "git", side_effect=git) as commands:
+            self.assertEqual(2, fetch.checkout(source, checkout))
+        self.assertIn(mock.call(checkout, "rev-parse", "HEAD"), commands.call_args_list)
+        self.assertEqual(b"pinned upstream bytes", file.read_bytes())
+
     def test_override_is_installed_and_stale_predecessor_is_not_published(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

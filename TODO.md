@@ -118,8 +118,10 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
     required negatives are already recorded natively; [S5 evidence](docs/acceptance/sdk_split_acceptance.md#s5-native-negative-and-candidate-handoff-gate).
   - [x] macOS/arm64 packaged S5 replay, stale-Full rejection and candidate handoff from one clean commit;
     [evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-s5-replay-2026-10-27).
-  - [ ] Windows/x64 and Windows/arm64 stale-Full-source replay and
-    remaining candidate handoff receipts; promotion/CLI adoption stay separate.
+  - [x] Windows/x64 clean Full/Development production and packaged S5 replay;
+    [evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-clean-production-and-s5-replay-2026-10-27).
+  - [ ] Windows/arm64 stale-Full-source replay and candidate handoff;
+    promotion/CLI adoption stay separate.
 
 CI cost stays bounded: one host smoke in CI, the full matrix at release time. Not goals here: signing and
 publisher authentication, a static CLI, and any change to the Full SDK stages.
@@ -138,6 +140,8 @@ verification gates. B4 supplied the local tools, not release-qualified artifacts
 the [acceptance contract](docs/acceptance/build_system_acceptance.md#release-qualification-scope-split-2026-10-23)
 owns the checks and existing provenance limitations.
 
+- [ ] Resolve the reported WebKit stable-series pin blocker (`2.54.1 -> 2.54.2`)
+  before tagged collection; [candidate report](docs/acceptance/sdk_split_acceptance.md#windowsx64-clean-production-and-s5-replay-2026-10-27).
 - [ ] Select a clean fixed source commit and release/rehearsal version; generate
   matching Development/Full SDKs and source assets without relabeling old builds.
 - [ ] Run real `crt-dev-release` and `crt-full-release` positive collection;
