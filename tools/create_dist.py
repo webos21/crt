@@ -717,6 +717,11 @@ def main() -> None:
         install_component(args.cmake, build_dir, destination, component, args.target_os, args.ranlib or "ranlib")
     if args.libcxx_install:
         copy_libcxx(args.libcxx_install.resolve(), destination, args.target_os)
+        if args.target_os == "macos":
+            # copy2 kept the libc++ archives' build-time member dates and owner; every later stage rewrites them
+            # deterministically, so an unnormalized 02-cxx (and a Development SDK built on it) never matched the
+            # Full SDK byte for byte although every member was identical.
+            normalize_macos_archives(destination, args.ranlib or "ranlib")
     copy_port_tools(args.port_prefix.resolve() if args.port_prefix else None, destination)
     redistributed_dependencies = list(inherited_dependencies)
     if (destination / "share/crt/dependencies/lvgl/recipe.json").is_file():

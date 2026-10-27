@@ -122,6 +122,56 @@ class MachoPortableRpath(unittest.TestCase):
                              "the build-tree rpath goes; relative and operating-system entries stay")
 
 
+@unittest.skipUnless(sys.platform == "darwin", "needs Apple ar/ranlib")
+class LibcxxArchiveNormalization(unittest.TestCase):
+    """copy_libcxx keeps the build-time member dates and owner; the macOS SDK must not."""
+
+    def build_archive(self, path: Path) -> None:
+        source = path.parent / "member.c"
+        source.write_text("int crt_member(void) { return 3; }\n", encoding="utf-8")
+        subprocess.run(["clang", "-c", str(source), "-o", str(path.parent / "member.o")], check=True, capture_output=True)
+        subprocess.run(["ar", "rcs", str(path), str(path.parent / "member.o")], check=True, capture_output=True)
+        # Distinct, non-default metadata, as an archive built by a user at some build time has.
+        os.utime(path.parent / "member.o", (1_700_000_000, 1_700_000_000))
+
+    def listing(self, archive: Path) -> str:
+        return subprocess.run(["ar", "tv", str(archive)], check=True, capture_output=True, text=True).stdout
+
+    def test_normalizing_makes_the_archive_independent_of_when_and_by_whom_it_was_built(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            copies = []
+            for index in range(2):
+                install = root / f"install{index}"
+                (install / "include/c++/v1").mkdir(parents=True)
+                (install / "lib").mkdir()
+                self.build_archive(install / "lib/libc++.a")
+                time.sleep(1.1)  # a different build time for the second archive
+                destination = root / f"sdk{index}"
+                create_dist.copy_libcxx(install, destination, "macos")
+                create_dist.normalize_macos_archives(destination, "ranlib")
+                copies.append(destination / "lib/libc++.a")
+            self.assertEqual(copies[0].read_bytes(), copies[1].read_bytes(),
+                             "two builds of the same members must package to the same bytes")
+            self.assertIn("1970", self.listing(copies[0]), "dates are normalized, not left as build times")
+
+    def test_without_the_step_two_builds_differ(self) -> None:
+        """Control: the archives really do differ before normalization (so the test above can fail)."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            copies = []
+            for index in range(2):
+                install = root / f"install{index}"
+                (install / "include/c++/v1").mkdir(parents=True)
+                (install / "lib").mkdir()
+                self.build_archive(install / "lib/libc++.a")
+                time.sleep(1.1)
+                destination = root / f"sdk{index}"
+                create_dist.copy_libcxx(install, destination, "macos")
+                copies.append(destination / "lib/libc++.a")
+            self.assertNotEqual(copies[0].read_bytes(), copies[1].read_bytes())
+
+
 class ActivationScripts(unittest.TestCase):
     def _sdk(self, *args, **kwargs) -> Path:
         dest = write_sdk(*args, **kwargs)
