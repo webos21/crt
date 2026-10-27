@@ -32,7 +32,7 @@ or grant release qualification. The current remaining scope is:
 | --- | --- | --- |
 | Linux/x86_64 | Eight S5 negatives and packaged isolated consumer pass below | New `handoff.json` below |
 | Linux/aarch64 | Missing static/shared curl, changed inherited runtime and stale Full rejection already passed in the [native replay](#linuxaarch64-native-producer-and-package-replay-2026-10-27) | Existing native archive/source identity retained there |
-| macOS/arm64 | Seven profile negatives passed; stale Full pairing not yet run | Run the S5 driver with an identified matching-runtime Full reference |
+| macOS/arm64 | Eight S5 negatives and packaged isolated consumer pass [below](#macosarm64-s5-replay-2026-10-27) | New `handoff.json` below |
 | Windows/x64 | Seven profile negatives passed; stale Full pairing not yet run | Run the S5 driver and retain candidate handoff |
 | Windows/arm64 | Seven profile negatives passed; stale Full pairing explicitly not run | Run the S5 driver and retain candidate handoff |
 
@@ -89,6 +89,46 @@ The focused Development/S5 unit suite passes **29/31** with two native-Windows
 skips (`unit.log`). The exact existing CI tooling selection passes **144/150**
 with six host-conditional skips (`ci-tooling.log`), both under
 `out/sdk-s5-linux-20261027/`.
+
+### macOS/arm64 S5 replay (2026-10-27)
+
+Validation baseline: CRT `a79a06b`, a clean working tree. Unlike the Linux/x86_64 candidate above, the Development SDK
+and the Full reference were both produced here from that one commit: Dev `producer`, `base` and `compile` commits are
+`a79a06b585a7da2322c6acadb3da963c9208d128` with no dirty tree, the Full `06-web` and the plain `02-cxx` carry the same
+commit, and all **18** inherited runtime digests match. The candidate is therefore a matching clean pair by source
+identity; it is still local `development`-versioned evidence, not a tagged release.
+
+```sh
+python3 tools/test_sdk_split_s5.py \
+  --sdk-root out/macos-host-ninja-debug/dist/dev \
+  --full-sdk out/macos-host-ninja-debug/dist/06-web \
+  --output out/sdk-s5-macos-20261027/replay
+```
+
+The driver exits 0 in 61 s. The archive `archives/crt-development-macos-aarch64-dev.tar.xz` is **6,358,972 bytes**,
+SHA-256 `c8689bba4ec3d352e43f54e3b6233e3290d5f08197108a501c74d2b87ae9b75b`; the extraction into a path with spaces has the
+same **2,570** payload entries and inventory digest (`4b35271568c0e66a...`) as the original. The relocated SDK passes
+the producer-tree-hidden consumer in both link modes with verified HTTPS plus inflate and the wrong, missing and
+malformed explicit CA cases (four each); the static consumer imports only `libSystem` and owns its own `malloc`, the
+shared consumer has no `malloc` of its own and binds every libc symbol to `libc.dylib`. `tools/audit_macos_bindings.py`
+over the extracted SDK reports no violation (101 images).
+
+The eight negatives each fail with their expected diagnostic: missing static curl, missing shared curl, changed inherited
+libc digest, upper-stage content, missing curl notice, missing curl declaration, ambient/bundled trust, and a Full
+reference whose source commit alone is changed (`Development/Full SDK need the same known clean source commit; rebuild
+stale predecessors`). `handoff.json` records `promotion: not-promoted`, `release_qualified: false` and
+`cli_adoption: not-run`; the original Dev and Full payloads are unchanged afterwards.
+
+A defect found on the way: the first Dev SDK built here did **not** match the Full SDK, although both came from the same
+commit. `copy_libcxx` copied `libc++.a` and `libc++abi.a` with their build-time member dates and owner (`501/20`), while
+every later stage rewrites its archives deterministically (`0/0`, 1970). All 74 members were identical (55 and 19), only
+the archive headers differed, and `ranlib -D` on a copy reproduced the Full bytes exactly. The macOS packaging now runs
+`normalize_macos_archives` after `copy_libcxx` (`a79a06b`, with a regression test that fails without it); Linux was not
+affected (23 digests matched there). The SDKs in this record were rebuilt from the clean fix commit.
+
+Evidence is under `out/sdk-s5-macos-20261027/`: the build logs, `driver.log`, and `replay/` (verifier logs, eight
+negative logs, `external/`, the archive and `handoff.json`). Not run here: hosted CI execution of this driver on macOS,
+Windows/x64 and Windows/arm64 rows, and any release collection.
 
 ### Handoff and CI boundary
 

@@ -116,7 +116,9 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
   identity to `crt-cli`, whose lock owns adoption.
   - [x] Linux/x86_64 packaged S5 replay and candidate handoff; Linux/aarch64
     required negatives are already recorded natively; [S5 evidence](docs/acceptance/sdk_split_acceptance.md#s5-native-negative-and-candidate-handoff-gate).
-  - [ ] macOS/arm64, Windows/x64 and Windows/arm64 stale-Full-source replay and
+  - [x] macOS/arm64 packaged S5 replay, stale-Full rejection and candidate handoff from one clean commit;
+    [evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-s5-replay-2026-10-27).
+  - [ ] Windows/x64 and Windows/arm64 stale-Full-source replay and
     remaining candidate handoff receipts; promotion/CLI adoption stay separate.
 
 CI cost stays bounded: one host smoke in CI, the full matrix at release time. Not goals here: signing and
