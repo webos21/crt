@@ -87,13 +87,17 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
   `02-cxx` for Linux x86_64/aarch64, macOS arm64 and Windows x64/arm64.
   - [x] Shared producer/profile implementation and recorded Linux/x86_64,
     macOS/arm64 and Windows/x64 production; [remaining matrix](docs/acceptance/sdk_split_acceptance.md#remaining-matrix).
-  - [ ] Linux/aarch64 and Windows/arm64 Development producer compile/package replay.
+  - [x] Linux/aarch64 native Development producer compile/package replay;
+    [evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
+  - [ ] Windows/arm64 Development producer compile/package replay.
 - [ ] S3 Verification: `verify_dist.py` profile checks (no `03+` content, ports present static and shared,
   declared dependencies and notices, relocation, the macOS binding audit with a shared consumer, Windows
   imports resolving at load); an external build and run from the Development SDK alone, with CRT's source
   and build tree hidden.
   - [x] Linux/x86_64 relocated static/shared consumer with producer/source SDK
     inaccessible; [evidence](docs/acceptance/sdk_split_acceptance.md#linux-source-hidden-replay-2026-10-27).
+  - [x] Linux/aarch64 packaged, relocated static/shared consumer with producer/source SDK
+    inaccessible; [evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
   - [ ] macOS shared-consumer and macOS/Windows producer-tree-hidden replay.
 - [x] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
   (`crt_sdk_release.py`) for both kinds (checksums, release manifest, recipes

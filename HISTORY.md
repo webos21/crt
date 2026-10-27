@@ -11,6 +11,23 @@ substantive update.
 
 ## 2026-10-27
 
+### Complete the Linux/aarch64 Development SDK producer replay
+
+Updated the native C/C++ predecessor incrementally and built fresh static/shared
+zlib, Mbed TLS and curl through the shared Development/media producer. The
+Development SDK verifies, archives and verifies again after extraction into a
+spaced path. Recipe tests and SDK-only HTTPS/inflate consumers pass on this
+device, including explicit-CA rejection cases and a replay with the producer
+checkout, build outputs and original SDK hidden. Runtime inheritance and
+package inventories match; private-copy corruption/missing-port checks and
+stale Full SDK pairing reject their invalid inputs.
+
+Marked Linux/aarch64 S2 and its source-hidden S3 sub-gates complete, retaining
+Windows/arm64 production, the other native isolation gates and clean release
+qualification as open work. Artifact identities, commands, local receipts and
+the distinction from release/CLI adoption belong to
+[SDK split acceptance](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
+
 ### Prove the Linux Development SDK with producer trees hidden
 
 Built fresh zlib/Mbed TLS/curl ports through the existing Development/media

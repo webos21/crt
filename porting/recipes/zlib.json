@@ -89,6 +89,7 @@
     "windows": "shared-pass"
   },
   "notes": [
+    "2026-10-27 Linux/aarch64 native Development SDK replay: fresh static/shared production and both roundtrip recipe tests pass. SDK-only C++17 HTTPS/inflate consumers pass before packaging and from the extracted/relocated package with producer trees hidden. Linux remains shared-pass; evidence: docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27.",
     "2026-10-22 Windows/x64 Development SDK replay builds the original static archive and PE shared object, then runs both through a relocated SDK-only C++17 HTTPS/inflate consumer. The POSIX libz.so SONAME spelling is preserved; shared-runtime validation reads PE DLL characteristics, not the extension. Evidence: docs/acceptance/build_system_acceptance.md (Development SDK Windows replay). Linux/macOS batch replay is pending.",
     "No runtime network dependency.",
     "2026-10-20 Linux/aarch64 cross bring-up: LLD rejects zlib's shared probe because its full version script names functions absent from the tiny probe object. Preserve the upstream SONAME/version script but pass --undefined-version through the recipe's LDSHARED (also accepted by GNU ld); this does not allow unresolved C imports. Compile the static archive with -fPIC too, because HarfBuzz and WebKit can consume it in a DSO. No upstream source patch or guessed configure cache result is used.",

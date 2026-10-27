@@ -193,6 +193,9 @@ Key issues already resolved include MinGW version macro assumptions,
 
 ## zlib
 
+Linux/aarch64 native static/shared production, recipe and source-hidden package replay:
+[Development SDK evidence](../acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
+
 Additional Windows SDK-only static/shared C++ consumer and PE-SONAME evidence:
 [Development SDK replay](../acceptance/build_system_acceptance.md#development-sdk-windows-replay).
 
@@ -333,6 +336,9 @@ surface.
 
 ## mbedTLS
 
+Linux/aarch64 native static/shared production, recipe and source-hidden package replay:
+[Development SDK evidence](../acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
+
 Additional Windows static/shared TLS/trust and runtime-closure evidence:
 [Development SDK replay](../acceptance/build_system_acceptance.md#development-sdk-windows-replay).
 
@@ -394,6 +400,9 @@ Important follow-ups:
   exposed the missing surface.
 
 ## curl
+
+Linux/aarch64 native static/shared production, recipe and source-hidden package replay:
+[Development SDK evidence](../acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
 
 Additional Windows SDK-only C++17 HTTPS and Bionic-header-persona evidence:
 [Development SDK replay](../acceptance/build_system_acceptance.md#development-sdk-windows-replay).
