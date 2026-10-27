@@ -14,7 +14,7 @@ Original B4/B5 results remain in [build-system acceptance](build_system_acceptan
 | macOS/arm64 | Recorded producer/profile and static four-case replay at the [macOS baseline](build_system_acceptance.md#macosarm64-native-replay-b5-2026-10-23); no new shared-consumer acceptance inferred | Not run |
 | Windows/x64 | Recorded producer/profile, static/shared eight cases, app-local imports and relocation at the [Windows baseline](build_system_acceptance.md#development-sdk-windows-replay) | Not run |
 | Linux/aarch64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Pass below, using the extracted archive |
-| Windows/arm64 | Development producer compile/package replay not run | Compile-only until exercised natively |
+| Windows/arm64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Not run: the relocated consumer below is not producer-tree-hidden |
 
 S4's local collector implementation and negative/atomic fixtures are complete.
 Actual clean/tagged positive collection remains the independent
@@ -94,6 +94,55 @@ external work directory is retained in its receipt. The initial sandbox attempts
 failed at download DNS and user-namespace creation respectively; their logs
 remain alongside the successful permission-enabled retries. Isolation was not
 bypassed and there was no unisolated fallback.
+
+## Windows/arm64 native producer and package replay (2026-10-27)
+
+Host: Windows 11 arm64 VM (4 vCPUs), Clang 22.1.8, CMake 4.4.4, Windows SDK 10.0.28000 (newest installed, chosen
+automatically). The ordinary Development producer entry point ran from a native arm64 shell on a clean tree (CRT
+`376f06da5a463cfb3e2b8c781842a043a7b9d8b0`), reusing the existing C/C++ build:
+
+```sh
+cmake --build out/windows-host-ninja-debug --target crt-development-sdk-test --parallel 4
+```
+
+It built the plain `02-cxx` predecessor, compiled zlib 1.3.1, Mbed TLS 3.6.7 and curl 8.21.0 static and shared through the shared
+media producer functions, and passed ordinary and `--profile dev` verification with no graphics/media/UI/Web payload. The sidecar
+`share/crt/contracts/development.json` records producer and base commit `376f06d`, `producer_working_tree_dirty: false`, target
+`windows`/`aarch64` and **27** inherited runtime digests. The ordinary consumer receipt
+(`out/windows-host-ninja-debug/development-consumer/result.json`) shows static and shared linkage each passing verified HTTPS+inflate and
+the wrong, missing and malformed explicit-CA cases; the static consumer imports only `kernel32.dll` and
+`api-ms-win-core-synch-l1-2-0.dll`, the shared one adds ten packaged SDK images.
+
+All **six** recipe tests pass on a private copy of the produced SDK (`crt-port-build.py --sdk-root … --port zlib --port mbedtls --port curl
+--test`): static/shared zlib round trips, Mbed TLS SHA-256/AES-128-CBC checks, and curl round trips against the local fixture
+(`http=200 https=200`, both linkages).
+
+The existing `prepare_release_assets.archive_directory` helper archived the `development` candidate without invoking the release
+collector. Extraction with `shutil.unpack_archive` (the release tool's own call) into `extracted SDK with spaces/dev` passes
+`verify_dist.py --stage 02-cxx --profile dev`:
+
+- File: `archives/crt-development-windows-aarch64-dev.zip` under the evidence root below.
+- Size: **138,495,124 bytes**.
+- SHA-256: `32e4d9ef3fc5352f60de1908e099817c9ab539a1dd831f2278e9359576059f3f`.
+- Original and extracted inventory: **2,695** files with identical sizes and SHA-256 values; inventory SHA-256
+  `b2c129f6737fe71b34ea312c6039c760efd99c59b1a2150038331ceaaa836466`.
+
+`tools/test_dev_sdk_consumer.py` against the extracted SDK, compiling under `consumer path space`, again passes all eight cases. The shared
+closure is **ten SDK images** plus the two declared Windows system imports; static linkage has no packaged imports.
+
+Private-copy negatives are rejected by `verify_dist.py --profile dev`: missing static curl (`lib/libcurl.a`), missing shared curl
+(`bin/libcurl-4.dll`) and one flipped byte in the inherited `bin/libc.dll` (inherited runtime digest mismatch). The Development unit
+suite (`tools/test_dev_sdk.py`) passes **17/17**. No producer code or contract/schema change was required.
+
+*Not claimed.* There is no Windows equivalent of the bubblewrap driver, so this is **not** a producer-tree-hidden replay: the extracted
+SDK sits inside the checkout's `out/` and was not hidden from the build. The stale-Full-SDK pairing negative (collector) and a clean/tagged
+release pair are not part of this replay. The VM has no GPU, which does not matter for this profile.
+
+Build-host inputs, all outside the repository: a native arm64 shell (an x64 Git Bash configures the x86_64 sources),
+`CRT_WINDOWS_SDK_LIBPATH` in 8.3 form and `CRT_CC/CXX/AR/RANLIB` for the consumer driver. Evidence root:
+`out/dev-sdk-windows-arm64-20261027/`, retaining `producer-entry.log`, `recipe-tests.log`, `package.log`, `consumer-extracted.log`,
+`consumer path space/result.json`, `negative-profile.log` and the archive. A first run of `recipe-tests` without `--install-prefix` wrote a
+`crt-port-work/` directory into the checkout; it was deleted, so pass an explicit prefix.
 
 ## Linux source-hidden replay (2026-10-27)
 

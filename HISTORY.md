@@ -11,6 +11,17 @@ substantive update.
 
 ## 2026-10-27
 
+### Complete the Windows/arm64 Development SDK producer replay
+
+Ran the ordinary `crt-development-sdk-test` entry point natively on the Windows/arm64 VM from a clean tree (`376f06d`). Fresh static/shared
+zlib, Mbed TLS and curl built through the shared producer; the Development SDK verifies, passes the static/shared HTTPS+inflate consumer (eight
+cases) and its six recipe tests, archives (138,495,124-byte zip) and verifies again after extraction into a spaced path with an identical
+2,695-file inventory. The extracted SDK passes the consumer again; missing static/shared curl and a changed inherited libc byte are rejected;
+the 17 Development unit tests pass. No producer or contract change was needed. Not claimed: producer-tree-hidden isolation (the Linux driver
+needs bubblewrap, and there is no Windows equivalent) and the stale-Full-SDK pairing negative. A recipe-test run without `--install-prefix`
+left a `crt-port-work/` directory in the checkout (deleted). Evidence:
+[acceptance](docs/acceptance/sdk_split_acceptance.md#windowsarm64-native-producer-and-package-replay-2026-10-27).
+
 ### Complete the Linux/aarch64 Development SDK producer replay
 
 Updated the native C/C++ predecessor incrementally and built fresh static/shared

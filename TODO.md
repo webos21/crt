@@ -89,7 +89,8 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
     macOS/arm64 and Windows/x64 production; [remaining matrix](docs/acceptance/sdk_split_acceptance.md#remaining-matrix).
   - [x] Linux/aarch64 native Development producer compile/package replay;
     [evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
-  - [ ] Windows/arm64 Development producer compile/package replay.
+  - [x] Windows/arm64 native Development producer compile/package replay;
+    [evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-native-producer-and-package-replay-2026-10-27).
 - [ ] S3 Verification: `verify_dist.py` profile checks (no `03+` content, ports present static and shared,
   declared dependencies and notices, relocation, the macOS binding audit with a shared consumer, Windows
   imports resolving at load); an external build and run from the Development SDK alone, with CRT's source
