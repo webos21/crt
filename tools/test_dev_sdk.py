@@ -8,6 +8,44 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crt_dev_profile as profile
 import crt_sdk_release as release
+import test_dev_sdk_external as external
+
+
+class ExternalConsumerBoundary(unittest.TestCase):
+    def test_failed_native_preflight_removes_a_stale_success_receipt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            sdk, output = root / 'sdk', root / 'evidence'
+            sdk.mkdir()
+            (sdk / 'manifest.json').write_text(json.dumps({'target': {'os': 'unsupported', 'arch': 'foreign'}}))
+            output.mkdir()
+            result = output / 'result.json'
+            result.write_text('{"passed": true}')
+            with self.assertRaisesRegex(ValueError, 'native Linux SDK'):
+                external.main(['--sdk-root', str(sdk), '--output', str(output)])
+            self.assertFalse(result.exists())
+
+    def test_foreign_target_cannot_be_executed_as_native_acceptance(self):
+        from unittest.mock import patch
+        with patch.object(external.sys, 'platform', 'linux'), patch.object(external.platform, 'machine', return_value='x86_64'):
+            external.native_linux({'target': {'os': 'linux', 'arch': 'x86_64'}})
+            for target in ({'os': 'linux', 'arch': 'aarch64'}, {'os': 'windows', 'arch': 'x86_64'}):
+                with self.assertRaisesRegex(ValueError, 'cross targets are compile-only'):
+                    external.native_linux({'target': target})
+
+    def test_hidden_tree_cannot_contain_or_be_contained_in_the_external_work(self):
+        root = Path(tempfile.gettempdir()).resolve() / 'crt-external-boundary-fixture'
+        for work, hidden in ((root, root), (root / 'work', root), (root, root / 'producer')):
+            with self.assertRaisesRegex(ValueError, 'disjoint'):
+                external.sandbox_command('bwrap', work, [hidden], sys.executable, [])
+
+    def test_validation_capsule_excludes_dev_producer_and_runtime_build_sources(self):
+        names = {p.name for p in external.validation_scripts()}
+        self.assertIn('test_dev_sdk_consumer.py', names)
+        self.assertIn('crt_elf.py', names)
+        self.assertNotIn('build_dev_sdk.py', names)
+        self.assertNotIn('crt-libcxx-build.py', names)
+        self.assertTrue(all(p.parent == external.ROOT / 'tools' for p in external.validation_scripts()))
 
 
 class DevelopmentProfile(unittest.TestCase):

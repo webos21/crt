@@ -11,6 +11,26 @@ substantive update.
 
 ## 2026-10-27
 
+### Prove the Linux Development SDK with producer trees hidden
+
+Built fresh zlib/Mbed TLS/curl ports through the existing Development/media
+producer and verified the reduced profile. Added a native Linux external
+acceptance driver that relocates the SDK into a fresh spaced path and masks the
+producer checkout, build outputs and original SDK with bubblewrap. An external
+probe verifies invisibility before profile checks and compilation; the bounded
+fixture capsule supplies no CRT headers/runtime objects or Dev/runtime build drivers.
+Static/shared C++17 consumers pass HTTPS+inflate and explicit-trust negatives,
+with unchanged original and relocated SDK inventories. Runtime bytes match the
+existing Full stages; missing static/shared ports, changed runtime bytes and
+different producer/Full source identities are rejected by their owning checks.
+
+Added boundary regressions and one Linux/amd64 PR CI producer/external smoke.
+Marked the already implemented S4 collector complete, keeping positive tagged
+assembly in release qualification; ARM producer and macOS/Windows hidden-tree
+gates remain explicit. Artifact identities, import closure, source provenance,
+prior native baselines and CI execution limits belong to
+[SDK split acceptance](docs/acceptance/sdk_split_acceptance.md).
+
 ### Unify public CMake stage target names
 
 Renamed stage 02, 03 and 04 public command prefixes to `crt-cxx`, `crt-gfx` and

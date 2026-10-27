@@ -52,6 +52,41 @@ the internal stage IDs (`stage-config/libcxx.json`, `gfx-simple.json` and
 `gfx-media.json`). Older acceptance logs retain the commands used at their
 recorded source commits; apply this mapping when reproducing them in a newer tree.
 
+### Development SDK producer and external validation
+
+The reduced Development SDK is produced from plain `02-cxx` and the media
+stage's shared zlib/Mbed TLS/curl build implementation. It retains the
+`02-cxx` manifest stage and adds the `dev` profile sidecar; no graphics/media/UI
+or Web payload is installed. The ordinary entry point builds its predecessor,
+verifies the profile and runs the static/shared HTTPS+inflate reference consumer:
+
+```sh
+cmake --build --preset <preset> --target crt-development-sdk-test
+```
+
+On a native Linux host with bubblewrap and OpenSSL installed, additionally run:
+
+```sh
+python3 tools/test_dev_sdk_external.py \
+  --sdk-root out/<preset>/dist/dev --output out/dev-sdk-external
+```
+
+This copies the SDK to a fresh external directory with spaces, hides the original
+SDK and producer checkout (including its build outputs) in a mount namespace,
+validates the relocated profile, then builds and runs both linkage modes and
+certificate negatives. OS/compiler/Python tools remain available. Use repeated
+`--hide-root <path>` arguments for producer build roots outside the checkout.
+Optional `--work-root <fresh-path>` must be outside all hidden roots; the work
+directory is retained and recorded in `result.json`. Namespace/setup or consumer
+failure produces no success receipt; there is no unisolated fallback. This
+driver rejects foreign-target execution and does not claim equivalent native
+macOS/Windows isolation. See the [split matrix](../acceptance/sdk_split_acceptance.md).
+
+These targets produce local SDK candidates. A `development` VERSION, equal
+runtime hashes or an older predecessor's known source commit do not qualify a
+matching clean/tagged release pair. The strict release collectors and their
+independent positive rehearsal remain the release gate.
+
 ### Stage production
 
 `05-ui` is accepted: the repository builds it in-tree (`crt-ui-dist`) and as an

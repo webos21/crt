@@ -259,6 +259,15 @@ jobs:
       - name: Preflight the C and C++ stage configurations without building dependencies
         run: cmake --build --preset ${{ matrix.preset }} --target crt-c-config crt-cxx-config
 
+      # One native host exercises the reduced SDK and actual source-hidden
+      # consumer. The other hosts keep their bounded offline profile fixtures.
+      - name: Development SDK producer and external consumer (Linux amd64)
+        if: github.event_name == 'pull_request' && matrix.name == 'linux-amd64'
+        run: |
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          cmake --build --preset ${{ matrix.preset }} --target crt-development-sdk-test --parallel 4
+          python tools/test_dev_sdk_external.py --sdk-root out/${{ matrix.preset }}/dist/dev --output out/dev-sdk-external
+
       - name: Keep the target list
         uses: actions/upload-artifact@v4
         with:

@@ -85,11 +85,17 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
 - [ ] S2 Producer: build zlib, Mbed TLS and libcurl through one shared implementation with the
   `04-gfx-media` stage builder, then assemble the Development SDK on top of
   `02-cxx` for Linux x86_64/aarch64, macOS arm64 and Windows x64/arm64.
+  - [x] Shared producer/profile implementation and recorded Linux/x86_64,
+    macOS/arm64 and Windows/x64 production; [remaining matrix](docs/acceptance/sdk_split_acceptance.md#remaining-matrix).
+  - [ ] Linux/aarch64 and Windows/arm64 Development producer compile/package replay.
 - [ ] S3 Verification: `verify_dist.py` profile checks (no `03+` content, ports present static and shared,
   declared dependencies and notices, relocation, the macOS binding audit with a shared consumer, Windows
   imports resolving at load); an external build and run from the Development SDK alone, with CRT's source
   and build tree hidden.
-- [ ] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
+  - [x] Linux/x86_64 relocated static/shared consumer with producer/source SDK
+    inaccessible; [evidence](docs/acceptance/sdk_split_acceptance.md#linux-source-hidden-replay-2026-10-27).
+  - [ ] macOS shared-consumer and macOS/Windows producer-tree-hidden replay.
+- [x] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
   (`crt_sdk_release.py`) for both kinds (checksums, release manifest, recipes
   pointing at the release, `VERSION` equal to the tag) and checks that the two share the source commit and the
   runtime-file digests. Local implementation/fixtures are B4 evidence; actual positive collection belongs to

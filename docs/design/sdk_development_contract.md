@@ -281,6 +281,8 @@ CLI must adopt the promoted producer artifact in its own ledger, after the
 remaining native gates, not label this working-tree candidate compatible.
 Evidence and pending Windows/other-host gates are in the
 [build-system acceptance record](../acceptance/build_system_acceptance.md).
+The current split matrix and source/build-tree-hidden consumer gate are owned
+by [SDK split acceptance](../acceptance/sdk_split_acceptance.md).
 
 Do not introduce a cycle in which CRT runtime/SDK builds require the CLI.
 If CRT product assembly includes the CLI, explicitly supply the external source
