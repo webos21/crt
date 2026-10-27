@@ -14,7 +14,7 @@ Original B4/B5 results remain in [build-system acceptance](build_system_acceptan
 | macOS/arm64 | Current producer, archive/extraction, static/shared eight-case replay and shared-consumer binding audit pass below | Pass below, using the extracted archive |
 | Windows/x64 | Current ports/package and static/shared eight-case replay pass below using an identified external `02-cxx`; earlier [Windows baseline](build_system_acceptance.md#development-sdk-windows-replay) retained | Pass below, using the extracted archive |
 | Linux/aarch64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Pass below, using the extracted archive |
-| Windows/arm64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Not run: the relocated consumer below is not producer-tree-hidden |
+| Windows/arm64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Pass below under a restricted token, using the extracted archive |
 
 S4's local collector implementation and negative/atomic fixtures are complete.
 Actual clean/tagged positive collection remains the independent
@@ -220,7 +220,8 @@ Evidence root: `out/dev-sdk-windows-x64-20261027/`, retaining
 `negative-*.log`, `unit-final.log` and `ci-tooling-final.log`. The successful
 external work directory and launcher/host-Python/fixture hashes are in its
 receipt. No native Windows/aarch64 replay environment was supplied for this run;
-that S3 sub-gate stays open. Run the same driver there with native arm64 Python
+that S3 sub-gate stays open (closed later the same day by the
+[Windows/arm64 replay](#windowsarm64-source-hidden-replay-2026-10-27)). Run the same driver there with native arm64 Python
 and the matching `um/arm64` external import libraries; do not count x64 execution
 or cross-compilation as arm64 acceptance.
 
@@ -459,8 +460,9 @@ suite (`tools/test_dev_sdk.py`) passes **17/17**. No producer code or contract/s
 
 *Not claimed.* That replay predates the Windows restricted-token driver above,
 so it is **not** a producer-tree-hidden replay: the extracted SDK sits inside the
-checkout's `out/` and was not hidden from the build. The new driver still needs
-native arm64 replay. The stale-Full-SDK pairing negative (collector) and a clean/tagged
+checkout's `out/` and was not hidden from the build. The restricted-token driver
+was then run natively on the same SDK: [source-hidden replay](#windowsarm64-source-hidden-replay-2026-10-27).
+The stale-Full-SDK pairing negative (collector) and a clean/tagged
 release pair are not part of this replay. The VM has no GPU, which does not matter for this profile.
 
 Build-host inputs, all outside the repository: a native arm64 shell (an x64 Git Bash configures the x86_64 sources),
@@ -468,6 +470,54 @@ Build-host inputs, all outside the repository: a native arm64 shell (an x64 Git 
 `out/dev-sdk-windows-arm64-20261027/`, retaining `producer-entry.log`, `recipe-tests.log`, `package.log`, `consumer-extracted.log`,
 `consumer path space/result.json`, `negative-profile.log` and the archive. A first run of `recipe-tests` without `--install-prefix` wrote a
 `crt-port-work/` directory into the checkout; it was deleted, so pass an explicit prefix.
+
+## Windows/arm64 source-hidden replay (2026-10-27)
+
+Host: the Windows 11 arm64 VM of the producer replay above (4 vCPUs, no GPU), native arm64 Python 3.11.9, Clang 22.1.8, Windows SDK
+10.0.28000 (`um/arm64`). Reviewed CRT `a26fe6b` plus one local test-tool change (below). The SDK under test is the one the producer replay
+built at clean `376f06d` and extracted to `extracted SDK with spaces/dev`; it still verifies with the current `verify_dist.py --profile dev`.
+The commits between `376f06d` and `a26fe6b` change acceptance tools only (`crt_windows_external.py`, `test_dev_sdk*.py`,
+`audit_macos_bindings.py`, `crt-libcxx-build.py` and their tests); none of them is shipped in the SDK and no libc, header or runtime file changed,
+so the SDK was not rebuilt. No x64 execution or cross-compilation is counted.
+
+```powershell
+python tools/test_dev_sdk_external.py `
+  --sdk-root 'out/dev-sdk-windows-arm64-20261027/extracted SDK with spaces/dev' `
+  --output out/dev-sdk-windows-arm64-20261027/external-final
+```
+
+The receipt reports `isolation: windows-restricted-token`, target `windows`/`aarch64`, the whole checkout (including its `out/`) as the hidden
+root, `all_inaccessible: true`, `files_unreadable: true` and `descendant_denial_checked: true`; the checkout ACL was not modified
+(`producer_acl_modified: false`). The restricted process runs a private copy of host Python, the relocated SDK, the reference C++ source and
+the hashed **12-script** validation capsule in a new external directory. SDK-only C++17 static and shared consumers pass **eight** cases:
+verified HTTPS+inflate, wrong CA, missing explicit CA despite ambient valid trust variables, and malformed CA. The built executables and
+the packaged `libc.dll`, `libcurl-4.dll` and PE zlib image are `AA64` (checked in the retained work directory). Static linkage has no packaged
+imports; the shared closure is **ten SDK images** run app-local with a System32-only PATH, and only `kernel32.dll` and
+`api-ms-win-core-synch-l1-2-0.dll` are external imports, so imports resolve at load. The SDK payload stays unchanged: **2,695** entries,
+inventory SHA-256 `7f8374cc5c2579e4c3f2849377caf74f2bf83b121322a48b318803c03938077e`, and the 27 inherited runtime digests in the receipt
+equal the sidecar.
+
+Build-host tools outside the SDK: `CRT_CC/CXX/AR/RANLIB` (LLVM, 8.3 paths), `CRT_WINDOWS_SDK_LIBPATH` (arm64 import libraries) and the
+fixture's OpenSSL, which here is Strawberry Perl's **x64** `openssl.exe` running under emulation. It only creates the local PKI for the
+fixture and is not part of any SDK or target binary.
+
+**Verifier negatives.** Seven private-copy mutations of the extracted SDK are each rejected by `verify_dist.py --profile dev`: missing static curl
+(`lib/libcurl.a`), missing shared curl (`bin/libcurl-4.dll`), one flipped byte in the inherited `bin/libc.dll`, upper-stage content
+(`include/crtgfx`), missing curl notice (`share/licenses/curl/COPYING`), curl dropped from the manifest's dependency declarations, and a sidecar
+that declares bundled CA trust. The copies were deleted afterwards; the SDK under test was not touched.
+
+**Unit suite and a test fix.** `tools/test_dev_sdk.py` passes **28/28**. On this host it first failed once:
+`test_windows_token_denies_private_files_and_inherits_to_cmd_children` ran `cmd /d /c probe.cmd`, and the session environment had
+`NODEFAULTCURRENTDIRECTORYINEXEPATH=1` (set by the tool launcher), under which `cmd.exe` does not look for a bare name in the current
+directory, so the probe never started. The real driver was unaffected because it builds a clean environment. The test now invokes
+`.\probe.cmd`; it passes with and without the variable. This is a test-robustness change; no product code changed.
+
+*Not run.* The exact CI tooling selection of the x64 record, the stale-Full-SDK pairing negative and any clean/tagged release pair. The SDK
+and its sidecar record the clean producer commit `376f06d`; this is a local acceptance candidate, not a release artifact.
+
+Evidence root: `out/dev-sdk-windows-arm64-20261027/`, retaining `external-driver.log`, `external-final/{command.json,consumer.log,result.json}`
+and `negative-profile-7.log`, next to the producer-replay files. The retained external work directory and the launcher, host Python and
+fixture hashes are in the receipt.
 
 ## Linux source-hidden replay (2026-10-27)
 

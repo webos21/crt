@@ -86,6 +86,17 @@ Windows producer-tree-hidden replay and clean release qualification open.
 Commands, package identity, native receipts and limits belong to
 [SDK split acceptance](docs/acceptance/sdk_split_acceptance.md#macosarm64-source-hidden-and-shared-consumer-replay-2026-10-27).
 
+### Complete the Windows/arm64 Development SDK source-hidden replay and close S3
+
+Ran `tools/test_dev_sdk_external.py` natively on the Windows/arm64 VM against the extracted Development SDK of the producer replay below
+(restricted token, whole checkout hidden, descendant denial probed, 2,695-entry inventory unchanged, `AA64` binaries): static and shared
+HTTPS+inflate and trust negatives pass (eight cases), and the shared closure of ten SDK images resolves at load with a System32-only PATH.
+Seven private-copy verifier negatives are rejected. The focused suite is 28/28 after a test fix: one Windows test launched `cmd /c probe.cmd`
+by bare name and failed whenever `NODEFAULTCURRENTDIRECTORYINEXEPATH=1` is in the environment; it now uses `.\probe.cmd`. The fixture's
+OpenSSL on this host is an emulated x64 binary (build-host only). With this every S3 sub-gate is checked and S3 is complete. Not claimed:
+the x64 record's CI tooling selection, the stale-Full-SDK pairing negative, clean/tagged release qualification. Evidence:
+[acceptance](docs/acceptance/sdk_split_acceptance.md#windowsarm64-source-hidden-replay-2026-10-27).
+
 ### Complete the Windows/arm64 Development SDK producer replay
 
 Ran the ordinary `crt-development-sdk-test` entry point natively on the Windows/arm64 VM from a clean tree (`376f06d`). Fresh static/shared

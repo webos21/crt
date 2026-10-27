@@ -91,7 +91,7 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
     [evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-native-producer-and-package-replay-2026-10-27).
   - [x] Windows/arm64 native Development producer compile/package replay;
     [evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-native-producer-and-package-replay-2026-10-27).
-- [ ] S3 Verification: `verify_dist.py` profile checks (no `03+` content, ports present static and shared,
+- [x] S3 Verification: `verify_dist.py` profile checks (no `03+` content, ports present static and shared,
   declared dependencies and notices, relocation, the macOS binding audit with a shared consumer, Windows
   imports resolving at load); an external build and run from the Development SDK alone, with CRT's source
   and build tree hidden.
@@ -104,7 +104,8 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
     [evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-source-hidden-and-shared-consumer-replay-2026-10-27).
   - [x] Windows/x64 packaged, relocated static/shared consumer with producer trees
     inaccessible under a restricted token; [evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-source-hidden-and-package-replay-2026-10-27).
-  - [ ] Windows/aarch64 native producer-tree-hidden replay after the Windows fixture.
+  - [x] Windows/arm64 native producer-tree-hidden replay under a restricted token;
+    [evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-source-hidden-replay-2026-10-27).
 - [x] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
   (`crt_sdk_release.py`) for both kinds (checksums, release manifest, recipes
   pointing at the release, `VERSION` equal to the tag) and checks that the two share the source commit and the

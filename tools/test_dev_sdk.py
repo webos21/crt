@@ -101,7 +101,9 @@ class ExternalConsumerBoundary(unittest.TestCase):
                           f'"%COMSPEC%" /d /c type "{source}" >child-denied.txt 2>&1\n'
                           'if not errorlevel 1 exit /b 12\n'
                           'exit /b 0\n')
-        windows.run([os.environ['COMSPEC'], '/d', '/c', 'probe.cmd'], work=work,
+        # Explicit '.\': with NODEFAULTCURRENTDIRECTORYINEXEPATH=1 in the environment (set by
+        # some tool launchers) cmd.exe does not look for a bare name in the current directory.
+        windows.run([os.environ['COMSPEC'], '/d', '/c', r'.\probe.cmd'], work=work,
                     sid=sid, env=dict(os.environ), timeout=15)
         self.assertEqual('allowed', (work / 'allowed.txt').read_text().strip())
         self.assertNotIn('not accessible', (work / 'denied.txt').read_text(errors='replace'))
