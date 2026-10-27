@@ -11,6 +11,20 @@ substantive update.
 
 ## 2026-10-27
 
+### Prepare the WebKit 2.54.2 source pin for release qualification
+
+Moved release qualification into `TODO.md` In Progress after the five-pair SDK
+split closure. Replaced the stale WebKit micro pin with the official 2.54.2
+archive and signature-verified annotated tag, regenerated complete source
+correspondence and license inventories, and reviewed the seven changed files
+covered by carried patches. The 23 patch definitions remain unchanged; refreshed
+their 16 affected before/after hashes and verified all three host selections
+with zero fuzz and exact output hashes. Focused fetch, licensing, JSC helper
+and Web stage tests pass (81 passed, two conditional skips). Native new-pin
+build/replay and actual release collection remain active work, not completed
+release acceptance. Identities, receipts and local rehearsal scope are in
+[release qualification](docs/acceptance/release_qualification.md).
+
 ### Complete the Windows/arm64 S5 replay and close the Full / Development SDK split
 
 Produced the Development SDK and the Full `01-c`..`05-ui` SDKs on the Windows/arm64 VM from one clean commit (`3810c7c`; the earlier in-tree

@@ -64,7 +64,7 @@ Policy and recovery ordering: [owned GPU lifecycle](../docs/design/libcrtweb_api
   `tools/build_webkit_jsc.py --port CRT`. Declared under `new_files` in the patch manifest.
 - `patches/` -- carried WebKit patches and `manifest.json` (schema 2: per-file license class,
   `new_files`), checked by `tools/check_webkit_patch_manifest.py`.
-- `third_party/webkit/` -- the pinned WPE WebKit 2.54.1 reference: `recipe.json`
+- `third_party/webkit/` -- the pinned WPE WebKit 2.54.2 reference: `recipe.json`
   (URL, size, SHA-256, signed tag and commit, license and security policy),
   `license-inventory.json` (the archive's 64 license/notice files and bundled
   third-party trees), `license-scan.json` (per-file header classes of the product source) and

@@ -60,10 +60,22 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-No active tranche. The Full SDK / Development SDK split (S0-S5) is complete on all five native pairs and is
-recorded in [`HISTORY.md`](HISTORY.md) and [SDK split acceptance](docs/acceptance/sdk_split_acceptance.md).
-Promotion of the candidates, `crt-cli` adoption and tagged release collection are separate gates and start in
-Planned, beginning with release qualification.
+### Release qualification and assembly rehearsal
+
+Start after build-system consolidation and the required native SDK producer /
+verification gates. B4 supplied the local tools, not release-qualified artifacts;
+the [acceptance contract](docs/acceptance/build_system_acceptance.md#release-qualification-scope-split-2026-10-23)
+owns the checks and existing provenance limitations.
+Current execution and evidence: [release qualification](docs/acceptance/release_qualification.md).
+
+- [x] Update the WebKit micro pin (`2.54.1 -> 2.54.2`) with verified source,
+  licensing and carried-patch evidence; native SDK replay follows below.
+- [ ] Select a clean fixed source commit and release/rehearsal version; generate
+  matching Development/Full SDKs and source assets without relabeling old builds.
+- [ ] Run real `crt-dev-release` and `crt-full-release` positive collection;
+  verify archives, checksums, manifests, source identity and runtime equality.
+- [ ] Complete final evidence review before accepting release assembly. Tag
+  creation, upload and public release require separate authorization.
 
 ## Planned
 
@@ -71,22 +83,6 @@ SDK Producer Contract Gate P0 below continues after the completed SDK split.
 The remaining sections are independent follow-ups, not a prerequisite chain for
 CLI/Studio or a reopening of accepted SDK stages; long-term extensions stay
 conditional on a real consumer.
-
-### Release qualification and assembly rehearsal
-
-Start after build-system consolidation and the required native SDK producer /
-verification gates. B4 supplied the local tools, not release-qualified artifacts;
-the [acceptance contract](docs/acceptance/build_system_acceptance.md#release-qualification-scope-split-2026-10-23)
-owns the checks and existing provenance limitations.
-
-- [ ] Resolve the reported WebKit stable-series pin blocker (`2.54.1 -> 2.54.2`)
-  before tagged collection; [candidate report](docs/acceptance/sdk_split_acceptance.md#windowsx64-clean-production-and-s5-replay-2026-10-27).
-- [ ] Select a clean fixed source commit and release/rehearsal version; generate
-  matching Development/Full SDKs and source assets without relabeling old builds.
-- [ ] Run real `crt-dev-release` and `crt-full-release` positive collection;
-  verify archives, checksums, manifests, source identity and runtime equality.
-- [ ] Complete final evidence review before accepting release assembly. Tag
-  creation, upload and public release require separate authorization.
 
 ### CRT developer experience: SDK -> CLI -> Studio
 

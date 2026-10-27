@@ -9,6 +9,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 
 - [Build-system Consolidation](acceptance/build_system_acceptance.md)
 - [Full / Development SDK Split](acceptance/sdk_split_acceptance.md)
+- [Release Qualification and Assembly Rehearsal](acceptance/release_qualification.md)
 - [Allocator Baseline Decision Record](acceptance/allocator_baseline.md)
 - [Encode & Capture Acceptance](acceptance/crtmedia_encode_capture_acceptance.md)
 - [crtmedia Hardware Decode (Phase A) Acceptance Contract](acceptance/crtmedia_hardware_decode_acceptance.md)

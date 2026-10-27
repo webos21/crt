@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "upstream": "WPE WebKit 2.54.1 (libcrtweb/third_party/webkit/recipe.json)",
+  "upstream": "WPE WebKit 2.54.2 (libcrtweb/third_party/webkit/recipe.json)",
   "policy": "Nothing here is applied silently: tools/build_webkit_jsc.py verifies the SHA-256 of each file before the patch (or accepts the recorded result), applies it, verifies the result, and records it in the configure fingerprint. Add an entry only with a reason and a removal condition (docs/porting/crtweb_porting.md).",
   "patches": [
     {
@@ -124,8 +124,8 @@
         },
         {
           "file": "Source/JavaScriptCore/CMakeLists.txt",
-          "sha256_before": "60ea0825f56f7e8e7634ca3536935d9a157de46f3b0d1a6354dceb70a3373b25",
-          "sha256_after": "2612cfda0b0a238a8208ea50ed09ab66fb9fb7216fc3964348ee033d78bc7bdb",
+          "sha256_before": "750e70beabfa6c7e5c1f4016567a8aa26a3d37a7cbb22fdc99c7d9b247031ac8",
+          "sha256_after": "9bf67259929a93ff4db7c0cecddd06a1140cdeaf6795e74a200885b2e1aea867",
           "license": "no-license-header",
           "license_basis": "directory-level license file Source/JavaScriptCore/COPYING.LIB (GNU Library GPL, LGPL-2); the file has no header of its own"
         }
@@ -219,8 +219,8 @@
         },
         {
           "file": "Source/WebCore/page/ChromeClient.h",
-          "sha256_before": "619783769453b47305b90a067f8a904c7a342db82523be7ac27b23798aa39bee",
-          "sha256_after": "6beede7b0ac6fb9c53313d23b95de661ee80f5d41876191344bda3a9e2b2b6ec",
+          "sha256_before": "ae8ccdcfc1c571c16d33001bbad05ef650c7c552b2ab232bf25f4b50820d3874",
+          "sha256_after": "8a2430da7990e5bdadde63aba21d0d9352f268f0fcea4b7d07c11877dcae110c",
           "license": "LGPL-2+"
         },
         {
@@ -354,8 +354,8 @@
         },
         {
           "file": "Source/WebKit/UIProcess/WebProcessPool.h",
-          "sha256_before": "47f31b8eeaeec692c9efb141436ddfbbe0acdfde01c6f1a5146a573f8b47b603",
-          "sha256_after": "840ba42437e43b283914d89f1f14975cb1c87083b8e212610e30d674aefcbd14",
+          "sha256_before": "7a314fd34a2882b362e70019d1b1bcc3e6e3f039fe476628f1739418c8d5b3ae",
+          "sha256_after": "c28f8b749ece193c3451e8e2f478e218cdb441c21be2e1d9fb3d4b242fd3168d",
           "license": "BSD-2-Clause"
         },
         {
@@ -378,20 +378,20 @@
         },
         {
           "file": "Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.cpp",
-          "sha256_before": "1b89e7ac69f6c7cdca7f3ff5fd3b2936202fe3d2ecfc75bf2a092dcfd6f84784",
-          "sha256_after": "0dc110406036909313820e341073556b703361a41f1bf3338f93d1160fea98e5",
+          "sha256_before": "1e68f859f9efcf71ca9ccb5255463d705a8c71aa305ae80bcd7ed2569088b130",
+          "sha256_after": "8d5a1233912e6848e3b536f7a7f9d6f3cf141f2f02ed88730252f072bc150626",
           "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WebKit/WebProcess/WebCoreSupport/WebChromeClient.h",
-          "sha256_before": "ab980b1e4ea9e32d8c92805bc096d3f2ad6aad6be3a03c0b2f8c6b728cabc1d7",
-          "sha256_after": "32d3e74db1a6367a4a2a5ec035545a2b41bf751a4dea12439917feffdc5a51d6",
+          "sha256_before": "fa27e3269e5caa2320d3ad65c6bccdb7613bf75a2bb7396b3ebaf4da614dc22e",
+          "sha256_after": "fec24ba485f43da7f34ecf47d3f8697ef5016357f5c31817267525389688a8c8",
           "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WebKit/WebProcess/WebPage/WebPage.cpp",
-          "sha256_before": "6e44e911f3469284e098812740d9e2cd689365e16f80258bc25b74e2a67539c9",
-          "sha256_after": "a3e573bd503459b3500684ae0a9250efa22aaeb8290942072eabda459f08eac0",
+          "sha256_before": "650393d8976979fd9f2f7bfa8e47ad6f2cb1ca2b35e904b27862ce0771c3cca4",
+          "sha256_after": "11df443ff7513146db1229c26731a79ed813b2d80f585632ef679cb8cb239095",
           "license": "BSD-2-Clause"
         }
       ],
@@ -590,14 +590,14 @@
         },
         {
           "file": "Source/WebKit/WebProcess/WebPage/WebPage.h",
-          "sha256_before": "84d588509c87bd41c9df125f534eedbbcf60d26b72959282e1ef9dc730bd8d6a",
-          "sha256_after": "e84db68b26a114a82bb35e1c926effb5e3a60127bd67c9ce8c0751ce36d51697",
+          "sha256_before": "cb437153e4b2aa20bc5c321a61e56a6e16f188a1509317a33206f992fbc7293c",
+          "sha256_after": "bc63078cf544bef5a5798decfdc223e726508716362c90bd2fe5e679f07895bf",
           "license": "BSD-2-Clause"
         },
         {
           "file": "Source/WebKit/WebProcess/WebPage/WebPage.cpp",
-          "sha256_before": "a3e573bd503459b3500684ae0a9250efa22aaeb8290942072eabda459f08eac0",
-          "sha256_after": "36bdb242eb1fcfa588bacc5f64c3778726bd18b1545509849f17c655815cf150",
+          "sha256_before": "11df443ff7513146db1229c26731a79ed813b2d80f585632ef679cb8cb239095",
+          "sha256_after": "f857666d73170d074e2d358570dfc6aadf64d1bd551af0f0d5e94aa41fc7736c",
           "license": "BSD-2-Clause"
         }
       ],

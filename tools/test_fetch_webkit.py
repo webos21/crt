@@ -33,8 +33,8 @@ class RealPinTests(unittest.TestCase):
     def test_the_committed_pin_is_well_formed(self) -> None:
         recipe = json.loads(RECIPE.read_text(encoding="utf-8"))
         source = fetch_webkit.validate_recipe(recipe)
-        self.assertEqual("2.54.1", recipe["version"])
-        self.assertEqual("wpewebkit-2.54.1.tar.xz", source["archive_name"])
+        self.assertEqual("2.54.2", recipe["version"])
+        self.assertEqual("wpewebkit-2.54.2.tar.xz", source["archive_name"])
         self.assertTrue(source["archive_url"].endswith("/" + source["archive_name"]))
         self.assertEqual(source["tag"], "wpewebkit-" + recipe["version"])
 

@@ -404,5 +404,6 @@ waive. Rules 4 and 6 are procedures for the owner and are not machine-checked.
 
 **Still open.** Whether rule 6 should promise a fixed deprecation notice period.
 
-**Current application.** 2.54 is the newest stable (2.54.1, 2026-10-06); 2.56 is unannounced, expected about
-March 2027. A release before then satisfies every rule.
+**Current application (2026-10-27).** The pin is 2.54.2 (released 2026-10-23).
+Its fresh advisory/support-window snapshot passes; native replay and release
+assembly remain separate gates in [release qualification](../acceptance/release_qualification.md).

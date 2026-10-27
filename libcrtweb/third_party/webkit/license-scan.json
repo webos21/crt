@@ -2,18 +2,18 @@
   "schema": 1,
   "source": {
     "role": "PlatformCRT product source",
-    "commit": "537776966344c4982751692dd475c94124504271",
-    "tree": "60295deedb6abea300bfae633223baed8c8f6258",
+    "commit": "32717fabcb9dcad9aa00a54ef1f23e41ee64e849",
+    "tree": "952d1a2ab51b8c902861f5f3da1a3726b6b106b8",
     "scanned_paths": [
       "Source"
     ]
   },
   "method": "tools/scan_webkit_headers.py: first 8 KiB of every file; SPDX tag, else standard license texts; never guessed (unmatched copyright text is 'unclassified-with-copyright')",
-  "files_scanned": 69575,
+  "files_scanned": 69600,
   "by_class": {
-    "BSD-2-Clause": 25043,
-    "BSD-3-Clause": 19534,
-    "no-license-header": 13036,
+    "BSD-2-Clause": 25047,
+    "BSD-3-Clause": 19553,
+    "no-license-header": 13038,
     "Apache-2.0": 3533,
     "LGPL-2+": 3040,
     "binary": 3017,
@@ -87,7 +87,7 @@
       "no-license-header": 1
     },
     "JavaScriptCore": {
-      "BSD-2-Clause": 3292,
+      "BSD-2-Clause": 3291,
       "no-license-header": 201,
       "LGPL-2+": 197,
       "BSD-3-Clause": 104,
@@ -120,12 +120,12 @@
       "no-license-header": 1
     },
     "ThirdParty/ANGLE": {
-      "BSD-3-Clause": 2816,
+      "BSD-3-Clause": 2835,
       "Apache-2.0": 1346,
-      "no-license-header": 880,
+      "no-license-header": 882,
       "binary": 132,
       "MIT": 46,
-      "BSD-2-Clause": 38,
+      "BSD-2-Clause": 41,
       "unclassified-with-copyright": 22,
       "GPL": 20,
       "GPL-with-exception": 6,
@@ -269,7 +269,7 @@
       "MIT": 3
     },
     "WebKit": {
-      "BSD-2-Clause": 5951,
+      "BSD-2-Clause": 5953,
       "LGPL-2+": 672,
       "no-license-header": 182,
       "LGPL-2.1+": 42,

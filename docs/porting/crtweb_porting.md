@@ -7,7 +7,9 @@ deliberately differs from upstream and why. Acceptance and tranche order are in
 provenance are in
 [`libcrtweb/third_party/webkit/README.md`](../../libcrtweb/third_party/webkit/README.md).
 
-The reference is **WPE WebKit 2.54.1**. What is below comes from its release
+The current reference is **WPE WebKit 2.54.2**; its source and carried-patch
+validation are recorded in [release qualification](../acceptance/release_qualification.md).
+Earlier tranche results retain their original pins. What is below comes from the 2.54 release
 notes and announcement plus an inventory of the verified archive (file names and
 license files), the Tranche 1 JavaScriptCore builds, and the Tranche 2 native build
 and source reading across WebCore, WebKit, WPEPlatform and the GLib process launcher. A row marked
@@ -52,8 +54,8 @@ the tranche that touches it reads the source. Not yet decided means blank.
 
 | Source | Role |
 | --- | --- |
-| WPE WebKit 2.54.1 release tarball (`recipe.json`) | *Reference*: the WPE baseline, JSCOnly bring-up, the Linux 3A prototype. Has no Windows port |
-| Full WebKit commit `73f39d84...` (the signed tag's target; pinned 2026-10-10 as `product_source`: commit, tree id and listing digest, `tools/fetch_webkit_commit.py`; licensing: `license-scan.json`, `tools/check_webkit_patch_manifest.py`) | *PlatformCRT product source*: the Mac and Win ports as references, and the tree `PlatformCRT` lives in |
+| WPE WebKit 2.54.2 release tarball (`recipe.json`) | *Reference*: the WPE baseline and source provenance. Earlier JSCOnly and 3A evidence retain their original pins. Has no Windows port |
+| Full WebKit commit `32717fab...` (the signed tag's target; pinned 2026-10-27 as `product_source`: commit, tree id and listing digest, `tools/fetch_webkit_commit.py`; licensing: `license-scan.json`, `tools/check_webkit_patch_manifest.py`) | *PlatformCRT product source*: the Mac and Win ports as references, and the tree `PlatformCRT` lives in |
 
 ## Rules
 
@@ -72,7 +74,9 @@ the tranche that touches it reads the source. Not yet decided means blank.
 
 `libcrtweb/patches/manifest.json` is authoritative for target selection, exact source hashes,
 reasons and removal conditions. The current patches describe target ABI/object-format traits
-that WebKit 2.54.1 selects through `OS()` rather than CRT/PAL deficiencies:
+that WebKit 2.54 selects through `OS()` rather than CRT/PAL deficiencies.
+The 2.54.2 update changes only seven patched files' manifest hashes; the patch
+definitions, reasons and removal conditions remain unchanged:
 
 - `0001` keeps Darwin's real `int64_t` identity while the macOS target uses the Linux-shaped
   source persona.

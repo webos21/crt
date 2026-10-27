@@ -1,58 +1,64 @@
 {
   "schema_version": 1,
   "name": "wpewebkit",
-  "version": "2.54.1",
+  "version": "2.54.2",
   "role": "reference",
   "source": {
     "type": "release-tarball",
-    "release_page": "https://wpewebkit.org/release/wpewebkit-2.54.1.html",
-    "archive_url": "https://wpewebkit.org/releases/wpewebkit-2.54.1.tar.xz",
-    "archive_name": "wpewebkit-2.54.1.tar.xz",
-    "archive_size": 46206356,
-    "archive_sha256": "0de8bdfba011f9cd63ba9a9171fa6038dd2c08237894f4082abbb821f29d3fe9",
+    "release_page": "https://wpewebkit.org/release/wpewebkit-2.54.2.html",
+    "archive_url": "https://wpewebkit.org/releases/wpewebkit-2.54.2.tar.xz",
+    "archive_name": "wpewebkit-2.54.2.tar.xz",
+    "archive_size": 49565492,
+    "archive_sha256": "f3284e19e47fcb5ac8c63c2e1c113dbd65b2423eb8a545f5b345707829004f56",
     "repository": "https://github.com/WebKit/WebKit",
-    "tag": "wpewebkit-2.54.1",
-    "tag_object": null,
-    "tag_signed": false,
-    "expected_commit": "537776966344c4982751692dd475c94124504271",
-    "released": "2026-10-06",
+    "tag": "wpewebkit-2.54.2",
+    "tag_object": "6c294e37d744618c3f9983b44c7759b8265ecf63",
+    "tag_signed": true,
+    "expected_commit": "32717fabcb9dcad9aa00a54ef1f23e41ee64e849",
+    "released": "2026-10-23",
     "archive_signature": {
       "verified": true,
-      "method": "gpg --verify of the detached wpewebkit-2.54.1.tar.xz.asc published beside the archive, signer key fetched from keys.openpgp.org by fingerprint. The release page also publishes the SHA-256, which equals archive_sha256. The upstream git tag wpewebkit-2.54.1 is a lightweight tag (no tag object, no tag signature): it resolves directly to expected_commit.",
+      "method": "gpg --verify of the official detached wpewebkit-2.54.2.tar.xz.asc using the signer key fetched from keys.openpgp.org by fingerprint; recomputed archive SHA-256 equals the official release page.",
       "signer": "Adrián Pérez de Castro <aperez@igalia.com>",
       "fingerprint": "5AA3BC334FD7E3369E7C77B291C559DBE4C9123B",
-      "caveats": "The key is not certified through any web of trust here, so this proves the archive was signed by that key, not independently who holds it. The key is DSA-1024 (created 2008, expires 2027-03-16); a release that outlives the expiry needs the key's renewal checked. The commit is not covered by a signature: its binding to the archive is the measured tarball correspondence below."
+      "caveats": "The key is not certified through a web of trust here: verification proves the archive was signed by this key, not independently who holds it. The DSA-1024 key expires 2027-03-16; releases after that need renewal checked. The annotated Git tag is independently signature-verified with the same key."
+    },
+    "tag_signature": {
+      "verified": true,
+      "method": "git verify-tag --raw wpewebkit-2.54.2 in an isolated GNUPGHOME; VALIDSIG matches the archive signer fingerprint.",
+      "fingerprint": "5AA3BC334FD7E3369E7C77B291C559DBE4C9123B",
+      "caveats": "Signer identity is not independently certified; the archive/commit correspondence below is separately measured."
     }
   },
   "product_source": {
     "role": "PlatformCRT product source",
     "tool": "tools/fetch_webkit_commit.py",
     "repository": "https://github.com/WebKit/WebKit",
-    "tag": "wpewebkit-2.54.1",
-    "tag_object": null,
-    "commit": "537776966344c4982751692dd475c94124504271",
-    "tree": "60295deedb6abea300bfae633223baed8c8f6258",
-    "tree_entries": 462083,
-    "ls_tree_sha256": "26817efd3eadf55ee40642a3cdf4cdbcf298618fc0a8ee149b5e8d8f41fd6e1c",
-    "pinned": "2026-10-20",
+    "tag": "wpewebkit-2.54.2",
+    "tag_object": "6c294e37d744618c3f9983b44c7759b8265ecf63",
+    "commit": "32717fabcb9dcad9aa00a54ef1f23e41ee64e849",
+    "tree": "952d1a2ab51b8c902861f5f3da1a3726b6b106b8",
+    "tree_entries": 462138,
+    "ls_tree_sha256": "67328e85b8da67d9355498a5aa4301bf9630b0c5ae9f301b0d66b5d40d9ba7c5",
+    "pinned": "2026-10-27",
     "fetch": "git fetch --depth=1 --filter=blob:none <repository> <commit>: trees only (about 14 MB); blobs of the checkout paths are fetched on demand",
     "checkout_paths": [
       "Source"
     ],
     "notes": [
-      "The commit id and its tree id pin every byte of the tree (git hashes the commit, the directories and each file); ls_tree_sha256 and tree_entries additionally pin the recursive listing, so adding or dropping a file is also detected.",
+      "The signed annotated tag binds the commit; its tree id pins every file. ls_tree_sha256 and tree_entries additionally pin the complete recursive listing.",
       "The WPE tarball stays the *reference* source (WPE baseline, JSCOnly, 3A). This source exists because the tarball has no Windows port (no PlatformWin.cmake, no Windows IPC backend) and PlatformCRT's Mac/Win reference reading needs the whole tree.",
       "Nothing from this tree is patched in place. A PlatformCRT file is either a new CRT-owned file or a recorded patch (libcrtweb/patches/manifest.json) with its license class."
     ],
     "tarball_correspondence": {
       "tool": "tools/fetch_webkit_commit.py --correspondence",
-      "measured": "2026-10-20",
-      "archive_files": 38844,
-      "identical_to_commit": 34419,
+      "measured": "2026-10-27",
+      "archive_files": 39101,
+      "identical_to_commit": 34445,
       "same_after_crlf_to_lf": 130,
       "content_differs_from_commit": 0,
       "only_in_archive": {
-        "Documentation (generated API docs)": 4294,
+        "Documentation (generated API docs)": 4525,
         "NEWS": 1
       },
       "only_in_commit_under_Source": 35810,
@@ -63,13 +69,13 @@
         ".gemini": 1,
         ".github": 2,
         "Configurations": 10,
-        "JSTests": 69173,
-        "LayoutTests": 303427,
+        "JSTests": 69180,
+        "LayoutTests": 303451,
         "ManualTests": 634,
         "PerformanceTests": 3093,
         "Source": 35810,
         "TestExpectations": 1,
-        "Tools": 4196,
+        "Tools": 4194,
         "WebDriverTests": 1500,
         "WebKit.xcworkspace": 8,
         "WebKitLibraries": 591,
@@ -77,51 +83,47 @@
         "metadata": 4,
         "resources": 9
       },
-      "reading": "Every file of the release tarball is the tagged commit's blob, byte for byte, except 130 ANGLE files (Windows shader headers and one .bat) that have CRLF line endings in the tarball and LF in git (.gitattributes eol conversion); zero files differ in content. The tarball is a strict subset of the tree plus generated Documentation and NEWS. The 35,810 Source files only the commit has are the ports the tarball leaves out (Windows, Mac, iOS, ...), which is why PlatformCRT needs the commit."
+      "reading": "Every shared regular file is byte-identical to the tagged commit, except 130 ANGLE files that match after CRLF-to-LF normalization. Zero content differences. The tarball-only files are generated Documentation and NEWS; PlatformCRT uses the full commit for the additional Source files."
     }
   },
   "license": {
     "summary": "Mixed per-file licensing. License files in the archive: LGPL-2 and LGPL-2.1 texts (Source/WebCore/LICENSE-LGPL-2, LICENSE-LGPL-2.1, Source/JavaScriptCore/COPYING.LIB), an Apple BSD-style 2-clause notice (Source/WebCore/LICENSE-APPLE), and bundled third-party components each with their own license file. Per-file headers: see license-scan.json (Apple/WebKit BSD-2-Clause and BSD-3-Clause are the bulk of the code, LGPL-2+/2.1+ the rest of WebKit's own; bundled components keep their licenses).",
-    "scan_status": "license files inventoried 2026-10-03 (64 files, license-inventory.json); per-file header scan of the whole Source tree of the pinned commit done 2026-10-10 (69,573 files, license-scan.json, tools/scan_webkit_headers.py); patch manifest checked by tools/check_webkit_patch_manifest.py",
+    "scan_status": "Regenerated 2026-10-27 for 2.54.2: 64 unchanged license/notice files in license-inventory.json; 69,600 product-tree files classified in license-scan.json. All 23 carried patch definitions are unchanged; 16 before/after hashes were refreshed for seven changed upstream files. Linux/macOS/Windows patch selections apply with zero fuzz; native compilation/replay is a separate gate.",
     "notices_required_in_sdk": true,
     "source_correspondence_required": true,
     "bundled_third_party": {
-      "ANGLE": 5169,
-      "skia": 3059,
-      "pdfjs": 399,
+      "ANGLE": 5193,
       "gtest": 155,
       "libsysprof-capture": 34,
-      "xdgmime": 19,
-      "unifdef": 6
+      "pdfjs": 399,
+      "skia": 3059,
+      "unifdef": 6,
+      "xdgmime": 19
     },
     "bundled_skia_milestone": 154,
     "crt_skia_milestone": 148
   },
   "verification": {
-    "date": "2026-10-03",
+    "date": "2026-10-27",
     "confirmed_from_primary_sources": [
-      "wpewebkit.org/release lists 2.54.x as the current stable series, 2.54.0 released 2026-09-16, development series 2.53.92.",
-      "The 2.54.0 release page states: the WPEPlatform embedding API is stable and enabled by default; the legacy libwpe-based API remains but is deprecated; cairo rendering was removed and Skia is the only 2D renderer, with the compositor moved from TextureMapper to Skia in the web process; Ninja is mandatory; ENABLE_WPE_LEGACY_API=OFF disables the legacy API.",
-      "GitHub API: refs/tags/wpewebkit-2.54.0 is an annotated tag (object 1616e9ae260d8d0601da601de24cd8d96adc5e0f, tagger date 2026-09-16T09:54:47Z, PGP-signed) pointing at commit 73f39d84ea9d4071994214373efbde3665402b05.",
-      "HTTP HEAD of the archive URL: 200, Content-Length 46202080 bytes, Last-Modified 2026-09-16 10:01:39 GMT.",
-      "WSA-2026-0006 (2026-09-29) is the latest advisory listed and gives its affected versions as 'WebKitGTK and WPE WebKit before 2.54.0 or earlier' (upstream's wording), so this pin is not listed as affected; the advisory is a large batch dominated by bundled Skia/ANGLE issues. Its CVE list was not audited here.",
-      "The archive was downloaded and its SHA-256 recomputed locally: efa9bcc3cb891c2d88f50eec710d9ccee71cbdf1040420361eb98c17355eb452, size 46202080, identical to the release page (tools/fetch_webkit.py).",
-      "The tag's signature verifies with gpg (see source.tag_signature).",
-      "Six sampled source files (Source/cmake/OptionsWPE.cmake, Source/JavaScriptCore/COPYING.LIB, Source/WebCore/LICENSE-LGPL-2.1, Source/ThirdParty/skia/include/core/SkMilestone.h, Source/WTF/wtf/Platform.h, CMakeLists.txt) are byte-identical (git blob SHA-1) to the tree at the tagged commit; the top-level NEWS is a release-tarball file with no counterpart at that commit. The tarball is not otherwise proven to equal the commit tree.",
-      "The archive bundles its own Skia (milestone 154, Source/ThirdParty/skia/include/core/SkMilestone.h) and ANGLE; CRT's Skia is m148.",
-      "2026-10-10 (Tranche 3B): the whole tarball, not six samples, was compared with the tagged commit's tree by git blob id: 34,417 files identical, 130 identical after CRLF->LF, 0 content differences, 4,295 only in the archive (generated Documentation, NEWS); see product_source.tarball_correspondence.",
-      "2026-10-10 (Tranche 3B): per-file license headers of all 69,573 files under Source/ of the pinned commit were classified (libcrtweb/third_party/webkit/license-scan.json): the classifier recognises standard texts and SPDX tags and reports the rest as unclassified, never guessed."
+      "Official release page: WPE WebKit 2.54.2, stable 2.54 series, released 2026-10-23. Downloaded archive is 49,565,492 bytes; SHA-256 f3284e19e47fcb5ac8c63c2e1c113dbd65b2423eb8a545f5b345707829004f56 matches the published checksum.",
+      "Both detached archive signature and annotated Git tag signature verify with fingerprint 5AA3BC334FD7E3369E7C77B291C559DBE4C9123B; tag object 6c294e37d744618c3f9983b44c7759b8265ecf63 peels to product_source.commit.",
+      "Complete recursive Git listing matches product_source tree/count/digest; every shared tarball file matches the commit by Git blob id, allowing only measured ANGLE line-ending normalization. See product_source.tarball_correspondence.",
+      "License-file inventory and per-file Source header scan regenerated from these identified bytes. No license/notice file changed from 2.54.1; the header scanner still reports unknown classes explicitly.",
+      "Official advisory/release indexes checked through tools/check_webkit_security.py: pin_is_latest_micro=true, series_within_grace=true, passed=true; latest listed advisory WSA-2026-0006. This is a version-bound check, not security certification.",
+      "Prior 2.54.0/2.54.1 bring-up and native acceptance remain historical evidence in docs/acceptance/crtweb_acceptance.md and sdk_split_acceptance.md; they do not establish native 2.54.2 replay."
     ],
     "not_yet_verified": [
-      "Upstream publishes no support duration or end-of-life date for a stable series (checked 2026-10-20). It states that only the latest stable branch (even minor number) receives security updates and that fixes are generally not backported; in practice a series' last micro precedes its successor by 1-28 days (2.48, 2.50, 2.52) and none follows. See docs/acceptance/crtweb_acceptance.md, upstream support window."
+      "Native PlatformCRT compile/run/SDK packaging on the new 2.54.2 pin remains a release-qualification gate; applying other-host patch selections on Linux is not native macOS/Windows replay.",
+      "No public upstream end-of-life guarantee is inferred; the adopted CRT support-window policy remains in docs/design/libcrtweb_api_policy.md."
     ]
   },
   "import": {
-    "status": "pinned and verified (Web Tranche 0); nothing is fetched into a build, imported or compiled yet",
-    "fetch": "tools/fetch_webkit.py (download and verify); tools/scan_webkit_licenses.py (license inventory); extraction arrives with Tranche 1",
+    "status": "2.54.2 source pin, archive/tag signatures, correspondence and licensing verified; native compile/run acceptance follows in release qualification.",
+    "fetch": "tools/fetch_webkit.py for the verified release tarball; tools/fetch_webkit_commit.py for the pinned full PlatformCRT product tree.",
     "notes": [
-      "The archive is a release tarball, not a git archive, so it carries no commit header: expected_commit is the authority for provenance and is recorded from the signed tag, while archive_sha256 pins the exact bytes CRT builds from.",
-      "WPE WebKit 2.54 is the reference for Tranche 2 and the structural model for PlatformCRT. It is not itself the product: the CRT port is a separate platform implementation (docs/porting/crtweb_porting.md).",
+      "The archive has no commit header. Its detached signature and the annotated tag signature are verified independently; complete tarball/tree correspondence binds the source bytes.",
+      "WPE WebKit 2.54 is the reference and structural model for PlatformCRT, a separate platform implementation (docs/porting/crtweb_porting.md).",
       "Do not patch upstream source to hide a missing CRT/PAL surface (AGENTS.md porting loop). Any carried patch needs a row in docs/porting/crtweb_porting.md with its upstream reference and removal condition."
     ]
   },
@@ -130,11 +132,11 @@
     "advisory_mailing_list": "webkit-wpe",
     "observed_cadence_2026": "WSA-2026-0001 2026-03-18, 0002 2026-03-28, 0003 2026-06-02, 0004 2026-07-10, 0006 2026-09-29 (0005 date not recorded)",
     "support_window": {
-      "checked": "2026-10-20",
+      "checked": "2026-10-27",
       "upstream_rule": "Only the latest stable release branch (even minor number) receives security updates; fixes are generally not backported (docs.webkit.org SecurityUpdates).",
       "upstream_cadence": "Two feature releases a year, typically March and September (wpewebkit.org/release/schedule).",
       "published_end_of_life": null,
-      "observed": "The last micro of 2.48, 2.50 and 2.52 was released 1, 6 and 28 days before the next stable series; none after. 2.54.0 was released 2026-09-16; 2.56 is not announced.",
+      "observed": "2.54.2 is the newest micro in the pinned series in the official release index checked 2026-10-27. Prior series-cadence observations remain historical; the executable support-window gate is authoritative at assembly time.",
       "crt_policy": "adopted 2026-10-21: public release allowed up to 60 days after the next stable series first ships; re-pin starts within 30 days (docs/design/libcrtweb_api_policy.md)"
     },
     "rule": "A pinned version is affected by an advisory when it is older than the advisory's fixed version. Re-check the pin against every new advisory; see docs/acceptance/crtweb_acceptance.md Tranche 0."
