@@ -887,7 +887,7 @@ actual clean/tagged release assembly. Earlier checkpoints calling that remaining
 rehearsal "B4" describe the former combined scope; their test results and failure
 evidence are unchanged.
 
-The independent [Planned work](../../TODO.md#release-qualification-and-assembly-rehearsal)
+The independent [release qualification work](../../TODO.md#release-qualification-and-assembly-rehearsal)
 starts after build-system consolidation and the required native SDK producer /
 verification gates. Before accepting local release assembly it must establish:
 
@@ -904,6 +904,10 @@ verification gates. Before accepting local release assembly it must establish:
    before marking release assembly accepted. Tag creation, upload and public
    publication remain separately authorized actions; a local rehearsal grants
    none of them implicitly.
+
+The first real positive Linux/x86_64 collection on a clean fixed source is
+recorded in [release qualification](release_qualification.md#linuxx86_64-positive-assembly-2026-10-27).
+It does not grant other-host replay or public publication.
 
 This is a scheduling/ownership split only: no release gate is weakened and no
 native replay is newly claimed. B5 Linux/macOS replay and final build-entry-point

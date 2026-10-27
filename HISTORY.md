@@ -11,6 +11,28 @@ substantive update.
 
 ## 2026-10-27
 
+### Pass the first real Linux Development/Full release assembly rehearsal
+
+Froze clean `3741ea5` after the WebKit 2.54.2 source gate, selected the local
+`v0.4.0-rehearsal.20261027` version parameter and built fresh Linux/x86_64
+Development and cumulative Full `06-web` SDKs plus matching source assets.
+Both actual CMake release collectors pass without a dirty/provenance bypass.
+Extracted archives preserve every SDK file/link, and the paired SDKs share all
+23 inherited runtime digests. The corresponding-source bundle matches the
+baseline's 1,942 source paths, with only the five explicitly declared Git CRLF
+conversions; the initial overly strict raw-blob audit and corrected evidence
+are retained without changing any collected payload.
+
+Core CTest 144/144, six imported-libc++ static/shared smokes, the new-pin Web
+build/API/network/relocated browser replay, and the packaged source-hidden Dev
+consumer with all eight S5 negatives pass. Source/release unit suites pass
+164/168 with four conditional skips. The existing owner record permits the
+fresh Web release decision once the micro pin is current. The run creates no
+CRT tag, upload, artifact promotion or CLI adoption. Other-host new-pin replay,
+Linux/aarch64 cross packaging and the final combined review remain In Progress.
+Artifact hashes, exact commands, receipts and limits belong to
+[release qualification](docs/acceptance/release_qualification.md#linuxx86_64-positive-assembly-2026-10-27).
+
 ### Prepare the WebKit 2.54.2 source pin for release qualification
 
 Moved release qualification into `TODO.md` In Progress after the five-pair SDK

@@ -70,10 +70,12 @@ Current execution and evidence: [release qualification](docs/acceptance/release_
 
 - [x] Update the WebKit micro pin (`2.54.1 -> 2.54.2`) with verified source,
   licensing and carried-patch evidence; native SDK replay follows below.
-- [ ] Select a clean fixed source commit and release/rehearsal version; generate
-  matching Development/Full SDKs and source assets without relabeling old builds.
-- [ ] Run real `crt-dev-release` and `crt-full-release` positive collection;
-  verify archives, checksums, manifests, source identity and runtime equality.
+- [x] Freeze a clean source/version and generate matching Linux/x86_64
+  Development/Full SDKs and source assets without relabeling old builds.
+- [x] Run real Linux/x86_64 `crt-dev-release` and `crt-full-release` positive
+  collection; verify archives, checksums, source identity and runtime equality.
+- [ ] Replay the new pin and matching assembly on macOS/arm64 and Windows/x64,
+  plus Linux/aarch64 cross-target packaging; retain each native/cross scope.
 - [ ] Complete final evidence review before accepting release assembly. Tag
   creation, upload and public release require separate authorization.
 

@@ -122,6 +122,19 @@ runtime hashes or an older predecessor's known source commit do not qualify a
 matching clean/tagged release pair. The strict release collectors and their
 independent positive rehearsal remain the release gate.
 
+For a local assembly rehearsal, select a clean producer commit and a valid
+prerelease version parameter, configure a fresh build with
+`-DCRT_RELEASE_TAG=<version>`, then run `crt-development-sdk-test`,
+`crt-dev-release` and `crt-full-release`. The Full target builds and tests
+`06-web`; the Dev target pairs against plain `02-cxx`. Both retain the strict
+identity checks and require fresh release output directories. Inspect/extract
+the collected archives, verify their payloads/checksums and retain the source
+offer and source-asset provenance before accepting assembly. A version
+parameter creates no Git tag. Reproducing an identified collector run requires
+its exact producer commit, even if a newer checkout changes only documentation.
+See [the first native Linux rehearsal](../acceptance/release_qualification.md#linuxx86_64-positive-assembly-2026-10-27)
+for its commands, artifact identities and outstanding host replay.
+
 #### S5 package, negative and identity replay
 
 After the native producer is accepted, use a fresh evidence directory and an
