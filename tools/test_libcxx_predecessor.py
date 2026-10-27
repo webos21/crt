@@ -2,6 +2,7 @@
 """Focused tests for imported-libc++ predecessor and build-environment isolation."""
 
 import importlib.util
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -9,6 +10,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("crt-libcxx-build.py")
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("crt_libcxx_build", SCRIPT)
 assert SPEC and SPEC.loader
 DRIVER = importlib.util.module_from_spec(SPEC)

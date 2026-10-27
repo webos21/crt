@@ -12,7 +12,7 @@ Original B4/B5 results remain in [build-system acceptance](build_system_acceptan
 | --- | --- | --- |
 | Linux/x86_64 | Current producer and static/shared eight-case replay pass below | Pass below |
 | macOS/arm64 | Current producer, archive/extraction, static/shared eight-case replay and shared-consumer binding audit pass below | Pass below, using the extracted archive |
-| Windows/x64 | Recorded producer/profile, static/shared eight cases, app-local imports and relocation at the [Windows baseline](build_system_acceptance.md#development-sdk-windows-replay) | Not run |
+| Windows/x64 | Current ports/package and static/shared eight-case replay pass below using an identified external `02-cxx`; earlier [Windows baseline](build_system_acceptance.md#development-sdk-windows-replay) retained | Pass below, using the extracted archive |
 | Linux/aarch64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Pass below, using the extracted archive |
 | Windows/arm64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Not run: the relocated consumer below is not producer-tree-hidden |
 
@@ -20,6 +20,214 @@ S4's local collector implementation and negative/atomic fixtures are complete.
 Actual clean/tagged positive collection remains the independent
 [release qualification](../../TODO.md#release-qualification-and-assembly-rehearsal)
 gate. No tag, upload, consumer lock or runtime adoption is part of this record.
+
+## Windows libc++ long-path fetch recovery (2026-10-27)
+
+The follow-up to the S3 failure below is resolved in CRT's host fetch driver,
+not in upstream LLVM sources. `crt-libcxx-build.py` now delegates directory
+copying to `crt_file_ops.copy_tree`, whose extended Win32 paths affect Python IO
+only. Git/CMake/compiler arguments and the requested work root keep their
+original spelling; no short alias, registry setting, global Git configuration,
+source exclusion or recipe-pin change was introduced. Shared sibling trees use
+the same path-safe copy. The `02-cxx` source asset already includes
+`tools/crt_file_ops.py`; a regression asserts that packaging dependency. The
+actual final source archive contains byte-identical current driver/helper files
+(`libcxx-final-assertions.json`); recipe source SHA-256 is
+`bc373028654ee77696f5773fad9112563dccffb25954d982eed5332edb2b3329`.
+
+Each new source directory is copied in a private staging directory and published
+only after the complete copy succeeds. Failed copies are not mistaken for
+completed fetches, and copy failure leaves an existing destination intact. Fetch
+also checks the presence of required shared sibling directories before taking
+the already-fetched branch; a missing sibling recovers from the pinned clone.
+This is per-directory publication, not an all-recipes transaction or a new
+source-cache manifest format.
+
+The legacy partial directory left by the old implementation was explicitly
+preserved as
+`producer/external/llvm-runtimes/libcxx.failed-copy-20261027` under the evidence
+root below; it was not silently accepted as complete. Both resolved move targets
+were checked inside that generated cache before the rename. The original
+`.clone-libcxx` and failure logs remain. Recovery used locally cached LLVM commit
+`37f38d1f3276b62fba09462ab4807dce846c732d`. All **five** previously missing source
+files (original source paths 260..270 characters) now match the clone's SHA-256
+values (`libcxx-restored-files.json`); no pinned test file was dropped.
+
+The default C++ producer was restored and exercised in the **same** deep tree:
+
+```powershell
+cmake --fresh --preset windows-host-ninja-debug -B out/dev-sdk-windows-x64-20261027/producer `
+  -DCRT_DEV_PREDECESSOR= `
+  -DCRT_DEV_OUTPUT=C:/Users/Lee/DevWorks/crt/out/dev-sdk-windows-x64-20261027/producer/dist/dev-default-followup
+cmake --build out/dev-sdk-windows-x64-20261027/producer --target crt-cxx-test crt-cxx-dist --parallel 8
+```
+
+Fetch, configuration, shared/static imported-runtime compilation and installation
+succeed. Static/shared C++17 smoke, string-ABI boundary tests and iostream tests
+pass, and `producer/dist/02-cxx` passes ordinary distribution verification.
+There is no external-predecessor bypass in this replay. The distinct Dev output
+path protects the earlier S3 SDK; a full new networking/Development producer
+replay is **Not run** here. The S3 package still retains its original predecessor
+identity and acceptance evidence; it is not relabeled to use this new C++ SDK.
+This local C++ candidate records CRT `0b7456c` with uncommitted changes, not a
+clean/tagged release or a new cross-host qualification claim.
+
+The focused suite (`tools.test_libcxx_fetch`, `tools.test_libcxx_predecessor`,
+`tools.test_crt_file_ops`) passes **26/26**. It covers real sparse Git primary and
+extra directory copies with 350+ character paths, ordinary space-containing
+work roots, preservation when copying a replacement fails, no partial publication, bounded
+copy errors, destination confinement and cached-commit missing-sibling recovery.
+The exact existing CI tooling selection passes **143/147**, with four
+host-conditional skips; no second workflow/full build was added. Native
+Linux/macOS replay and hosted CI of this fix are **Not run**.
+
+Evidence root: `out/dev-sdk-windows-x64-20261027/`, including the original
+`producer-entry.log` and `default-producer-failure.json`,
+`libcxx-default-configure.log`, `libcxx-default-replay.log`,
+`libcxx-default-final.log`, `libcxx-final-assertions.json`,
+`libcxx-restored-files.json`, `libcxx-fix-unit-final.log` and
+`libcxx-fix-ci-tooling.log`. The final assertions also confirm the earlier S3
+Development SDK retains its original strict inventory. The resolved long-path
+item is removed from TODO;
+Windows/aarch64 source-hidden S3 and release qualification remain independent
+open work. No SDK/profile schema, ABI, tag, upload or consumer lock changed.
+
+## Windows/x64 source-hidden and package replay (2026-10-27)
+
+Host: native AMD64 Windows NT 10.0.26100, Python 3.11.9, Clang 22.1.8 and
+Windows SDK 10.0.28000.0 (`um/x64`). Reviewed CRT `0b7456c` plus the local
+Windows acceptance-tool changes. This closes only Windows/x64 S3; aarch64 must
+run the same procedure on its native host. No CPU emulation or WSL result is
+substituted for that native execution.
+
+### Producer and preserved failures
+
+The old `out/build-system-development/cmake-dev` fails current ordinary
+verification because it predates the required `tools/crt_relink_kit.py` payload.
+It was preserved, not edited to pass. A fresh default CMake producer then failed
+in `crt-libcxx-build.py:fetch_recipe`'s plain `shutil.copytree`: five pinned test
+source paths could not be copied. The first source path has 261 characters;
+normal `isfile` returns false while its Windows extended-path spelling exists.
+`producer-entry.log` and `default-producer-failure.json` preserve this distinct
+fetch/path defect. It was not fixed during that S3 replay or hidden by shortening
+the work root, skipping source files or modifying upstream. The separate
+[follow-up above](#windows-libc-long-path-fetch-recovery-2026-10-27) records its
+subsequent fix and default C++ producer replay without relabeling S3 artifacts.
+
+S3 continued through the already-supported external-predecessor entry point:
+
+```powershell
+cmake --fresh --preset windows-host-ninja-debug -B out/dev-sdk-windows-x64-20261027/producer `
+  -DCRT_DEV_PREDECESSOR=C:/Users/Lee/DevWorks/crt/out/build-system-producer/dist/02-cxx
+cmake --build out/dev-sdk-windows-x64-20261027/producer --target crt-development-sdk-test --parallel 8
+```
+
+The new SDK at `producer/dist/dev` under the evidence root below contains freshly
+built static/shared zlib 1.3.1, Mbed TLS 3.6.7 and curl 8.21.0, plus current SDK
+tooling. Ordinary and Development profile verification pass with dependency /
+notice records and no `03+` payload. The ordinary SDK-only consumer passes all
+eight HTTPS/inflate and explicit-trust cases. All **27** inherited runtime
+digests equal the supplied plain predecessor. The current producer/port compile
+identity is `0b7456c8bc9cd0176af17e2cacb63df95afb4b6d`, dirty; the predecessor
+retains `1033c86e5c85a7bbe8594542ee890afda1cbb4da`. No core-runtime rebuild from
+the current commit is claimed. The cache correctly declined to cache production
+after acceptance-tool inputs changed during execution; no cache-hit claim or
+guard relaxation was used.
+
+### ZIP and relocated consumer
+
+The existing archive helper, without a release collector, creates
+`archives-final/crt-development-windows-x86_64-dev.zip` under the evidence root:
+
+- Size: **144,976,001 bytes**.
+- SHA-256: `d30507866893fdd5aa3e66a7cc530b56395766f5df9ab2502dbfa22880608369`.
+- **2,695** payload paths; each extracted path has identical bytes to its source.
+- Source link-aware inventory SHA-256:
+  `4ce5cd3aee0776a8fe68eedb2aa55cf68f9d5f41f4cbe94070e4aa77de7474aa`.
+- Extracted/externally relocated inventory SHA-256:
+  `3575ceeb60102c3de03fa6e0781f4c2e1ba9dd54fae936ace5eb3541f7d2753f`.
+
+The first comparison intentionally failed rather than silently equating links
+with files (`package-replay.log`, `package-first-differences.json`). The existing
+Windows ZIP helper materializes exactly two declared internal zlib file aliases,
+`lib/libz.so` and `lib/libz.so.1`, targeting `libz.so.1.3.1`. Their extracted file
+bytes equal that target; no other path/type/content difference is permitted.
+The final replay records both strict inventories separately, checks payload
+bytes at every path and checks each tree remains unchanged. The archive helper
+and POSIX tar/link behavior were not changed. First archive/extraction evidence
+is retained separately from the final attempt.
+
+Extraction into `extracted verified SDK with spaces/dev` passes full
+`verify_dist.py --stage 02-cxx --profile dev`, then an ordinary static/shared
+consumer. It is relocated again outside the checkout for the actual hidden-tree
+test:
+
+```powershell
+python tools/test_dev_sdk_external.py `
+  --sdk-root 'out/dev-sdk-windows-x64-20261027/extracted verified SDK with spaces/dev' `
+  --output out/dev-sdk-windows-x64-20261027/external-final
+```
+
+### OS-enforced original-tree denial and load evidence
+
+The driver now supports native Windows through `crt_windows_external.py`.
+Read-and-write restricting SIDs add a second OS access check, without changing
+the checkout, original SDK, installed tools or user/account/machine policy. Only
+a newly created private external directory receives a per-run synthetic-SID
+ACL. A private copy of build-host Python (without user site packages), the
+relocated SDK, reference C++ source and the same hashed **12-script** validation
+capsule live there. No producer headers/objects, `build_dev_sdk.py` or
+`crt-libcxx-build.py` are supplied outside the SDK. The bounded capsule no longer
+needs a dynamic import of the full WebKit builder merely to convert a Windows CA
+filename.
+
+Before profile checks or compilation, the restricted process must fail directory
+enumeration and direct reads of the original source, SDK manifest, header,
+static libc and DLL. Fresh Python descendants must also receive `PermissionError`
+on those files. The receipt records `descendant_denial_checked: true`. All child
+processes inherit the restricted token and a kill-on-close job, run hidden and
+receive no producer handles. Missing isolation, public-readable producer roots,
+token/job setup failure or failed probes abort without an unrestricted fallback.
+This is a trusted acceptance-fixture boundary, not a general hostile-code sandbox.
+
+With this checkout and its entire `out/` inaccessible, fresh SDK-only C++17
+static/shared consumers pass **eight** cases: verified HTTPS+inflate, wrong CA,
+missing explicit CA despite ambient valid trust variables, and malformed CA.
+Static linkage has no SDK DLL imports. The shared recursive closure contains
+**ten SDK images** copied app-local, including the PE zlib image with its `.so`
+spelling; successful execution with **System32-only PATH** proves imports resolve
+at load. Both modes declare only `kernel32.dll` and
+`api-ms-win-core-synch-l1-2-0.dll` as external imports. Original, extracted and
+externally relocated inventories remain unchanged.
+
+### Negatives, evidence and limits
+
+Seven actual private-copy verifier negatives return failure: missing static
+curl, missing shared curl, changed inherited libc, upper-stage content, missing
+curl notice, missing dependency declaration and bundled/ambient trust policy.
+Each mutation is restored and the private inventory matches its source again.
+The focused Development suite passes **28/28**; the exact existing CI tooling
+selection passes **136/140**, with four host-conditional skips. The broader
+tooling/network-fixture selection also passes (its earlier run selected 143,
+139 pass/four skips); no extra workflow or full native SDK CI build was added.
+Hosted GitHub CI and native Linux/macOS replay of these changes are **Not run**.
+
+Evidence root: `out/dev-sdk-windows-x64-20261027/`, retaining
+`configure-{fresh,predecessor}.log`, `producer-{entry,predecessor}.log`,
+`original-profile.log`, `default-producer-failure.json`, `package-replay{,-final}.log`,
+`package-result.json`, `current-profile.log`, `extracted-profile.log`,
+`consumer-extracted.log`, `external-final/{command.json,consumer.log,result.json}`,
+`negative-*.log`, `unit-final.log` and `ci-tooling-final.log`. The successful
+external work directory and launcher/host-Python/fixture hashes are in its
+receipt. No native Windows/aarch64 replay environment was supplied for this run;
+that S3 sub-gate stays open. Run the same driver there with native arm64 Python
+and the matching `um/arm64` external import libraries; do not count x64 execution
+or cross-compilation as arm64 acceptance.
+
+This extends CRT-owned validation only: SDK/profile format, recipe schemas and
+public ABI are unchanged. The consumer review baselines below remain unchanged;
+CLI/Studio adoption, stale-Full native pairing and matching clean/tagged release
+qualification are not claimed. No tag, upload or artifact promotion occurred.
 
 ## macOS/arm64 source-hidden and shared-consumer replay (2026-10-27)
 
@@ -249,8 +457,10 @@ Private-copy negatives are rejected by `verify_dist.py --profile dev`: missing s
 (`bin/libcurl-4.dll`) and one flipped byte in the inherited `bin/libc.dll` (inherited runtime digest mismatch). The Development unit
 suite (`tools/test_dev_sdk.py`) passes **17/17**. No producer code or contract/schema change was required.
 
-*Not claimed.* There is no Windows equivalent of the bubblewrap driver, so this is **not** a producer-tree-hidden replay: the extracted
-SDK sits inside the checkout's `out/` and was not hidden from the build. The stale-Full-SDK pairing negative (collector) and a clean/tagged
+*Not claimed.* That replay predates the Windows restricted-token driver above,
+so it is **not** a producer-tree-hidden replay: the extracted SDK sits inside the
+checkout's `out/` and was not hidden from the build. The new driver still needs
+native arm64 replay. The stale-Full-SDK pairing negative (collector) and a clean/tagged
 release pair are not part of this replay. The VM has no GPU, which does not matter for this profile.
 
 Build-host inputs, all outside the repository: a native arm64 shell (an x64 Git Bash configures the x86_64 sources),
@@ -328,8 +538,9 @@ The CI step is implemented; a hosted GitHub run is **Not run** in this replay.
 ## Producer/consumer review
 
 The producer owner is CRT's `build_dev_sdk.py`, profile verifier, reference
-consumer and external acceptance driver. Review baseline: CRT `181f74b`;
-consumer baselines remain CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and
+consumer and external acceptance driver. Initial review baseline: CRT `181f74b`;
+later host extensions retain their exact baselines in the host sections above.
+Consumer baselines remain CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and
 Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`, with no approved runtime
 combination in CLI's `docs/compatibility.md`. This adds an acceptance procedure,
 not a new SDK/CLI wire contract: SDK manifest/profile format 1, port recipe

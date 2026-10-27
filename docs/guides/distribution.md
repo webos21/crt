@@ -87,8 +87,35 @@ Optional `--work-root <fresh-path>` must be outside all hidden roots; the work
 directory is retained and recorded in `result.json`. Missing isolation tools,
 namespace/sandbox setup or consumer failures produce no success receipt; there
 is no unisolated fallback. This driver rejects foreign-target execution.
-Windows producer-tree-hidden acceptance remains a separate, unimplemented
-procedure. See the [split matrix](../acceptance/sdk_split_acceptance.md).
+On native Windows, the same driver uses a read-and-write restricted token and
+an inherited job for bounded child cleanup. Set `CRT_CC`, `CRT_CXX`, `CRT_AR`,
+`CRT_RANLIB` and `CRT_WINDOWS_SDK_LIBPATH` to external host tools and the matching
+Windows SDK import-library directory, then run with native host Python:
+
+```powershell
+python tools/test_dev_sdk_external.py --sdk-root 'out/<preset>/dist/dev' --output out/dev-sdk-external
+```
+
+Only a new private work directory receives a per-run synthetic-SID ACL; no
+existing source, SDK, tool installation or user ACL/account/policy is changed.
+The build-host Python runtime is copied there too, without user site packages;
+the SDK and fixture are relocated under paths with spaces. The restricted
+token retains public OS/tool and logon access but not private producer-file
+access, following Windows' [additional restricted-SID access check](https://learn.microsoft.com/en-us/windows/win32/secauthz/restricted-tokens).
+The directory/file-denial probe and a descendant's direct-file-denial probe must
+pass before profile/consumer testing. A publicly readable producer checkout may
+therefore fail this gate: do not weaken the probe or silently retry unrestricted.
+This is an acceptance boundary for trusted build/test tools, not a general
+hostile-code sandbox. No producer handles are inherited and child processes run
+hidden; shared consumers use app-local DLLs with System32-only runtime PATH.
+Foreign-target execution is rejected; run Windows/aarch64 with native arm64
+Python on that host, not as an x64 cross-compile claim. See the
+[split matrix](../acceptance/sdk_split_acceptance.md) for actually replayed pairs.
+For Windows ZIP replay, record source links and extracted object types separately:
+the existing archive helper materializes internal file aliases as target bytes.
+Require equal payload bytes at every path and explain each declared alias, while
+checking each source/extracted/relocated inventory remains unchanged by testing.
+This does not replace the real-filesystem symlink requirement for Windows builds.
 
 These targets produce local SDK candidates. A `development` VERSION, equal
 runtime hashes or an older predecessor's known source commit do not qualify a

@@ -21,7 +21,7 @@ class ExternalConsumerBoundary(unittest.TestCase):
             output.mkdir()
             result = output / 'result.json'
             result.write_text('{"passed": true}')
-            with self.assertRaisesRegex(ValueError, 'native Linux/macOS SDK'):
+            with self.assertRaisesRegex(ValueError, 'native Linux/macOS/Windows SDK'):
                 external.main(['--sdk-root', str(sdk), '--output', str(output)])
             self.assertFalse(result.exists())
 
@@ -40,6 +40,107 @@ class ExternalConsumerBoundary(unittest.TestCase):
             for target in ({'os': 'macos', 'arch': 'x86_64'}, {'os': 'linux', 'arch': 'aarch64'}):
                 with self.assertRaisesRegex(ValueError, 'cross targets are compile-only'):
                     external.native_target({'target': target})
+
+    def test_windows_only_accepts_the_native_architecture(self):
+        from unittest.mock import patch
+        with patch.object(external.sys, 'platform', 'win32'), patch.object(external.platform, 'machine', return_value='AMD64'):
+            self.assertEqual('windows', external.native_target({'target': {'os': 'windows', 'arch': 'x86_64'}}))
+            with self.assertRaisesRegex(ValueError, 'cross targets are compile-only'):
+                external.native_target({'target': {'os': 'windows', 'arch': 'aarch64'}})
+        with patch.object(external.sys, 'platform', 'win32'), patch.object(external.platform, 'machine', return_value='ARM64'):
+            self.assertEqual('windows', external.native_target({'target': {'os': 'windows', 'arch': 'aarch64'}}))
+
+    def test_windows_environment_drops_ambient_paths_and_requires_external_sdk_libs(self):
+        import os
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            libraries = root / 'host sdk'
+            libraries.mkdir()
+            (libraries / 'kernel32.lib').write_text('fixture')
+            with patch.dict(os.environ, {'SystemRoot': str(root / 'Windows'), 'CRT_WINDOWS_SDK_LIBPATH': str(libraries),
+                                         'PYTHONPATH': '/ambient', 'CURL_CA_BUNDLE': '/ambient'}), \
+                    patch.object(external.shutil, 'which', return_value=str(root / 'host/clang.exe')):
+                env = external.windows_environment(root / 'work', [root / 'producer'])
+                self.assertNotIn('PYTHONPATH', env)
+                self.assertNotIn('CURL_CA_BUNDLE', env)
+                self.assertEqual('windows-restricted-token', env['CRT_TEST_ISOLATION'])
+                with self.assertRaisesRegex(ValueError, 'inside a hidden producer tree'):
+                    external.windows_environment(root / 'work', [root / 'host'])
+                with self.assertRaisesRegex(ValueError, 'external native Windows SDK'):
+                    external.windows_environment(root / 'work', [libraries])
+
+    @unittest.skipUnless(sys.platform == 'win32', 'native Windows ACL/token fixture')
+    def test_windows_acl_setup_refuses_existing_directory(self):
+        import crt_windows_external as windows
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with self.assertRaises(FileExistsError):
+                windows.create_work(root)
+            with self.assertRaisesRegex(ValueError, 'non-root directory'):
+                external.hidden_roots(Path(root.anchor))
+
+    @unittest.skipUnless(sys.platform == 'win32', 'native Windows restricted-token process')
+    def test_windows_token_denies_private_files_and_inherits_to_cmd_children(self):
+        import os
+        import shutil
+        import crt_windows_external as windows
+        work, sid = windows.create_work()
+        protected, _ = windows.create_work()
+        self.addCleanup(shutil.rmtree, work)
+        self.addCleanup(shutil.rmtree, protected)
+        secret = protected / 'secret.txt'
+        secret.write_text('not accessible')
+        source = protected / 'source.txt'
+        source.write_text('Bionic fixture source')
+        script = work / 'probe.cmd'
+        script.write_text('@echo off\n'
+                          'echo allowed>allowed.txt\n'
+                          f'type "{secret}" >denied.txt 2>&1\n'
+                          'if not errorlevel 1 exit /b 11\n'
+                          f'"%COMSPEC%" /d /c type "{source}" >child-denied.txt 2>&1\n'
+                          'if not errorlevel 1 exit /b 12\n'
+                          'exit /b 0\n')
+        windows.run([os.environ['COMSPEC'], '/d', '/c', 'probe.cmd'], work=work,
+                    sid=sid, env=dict(os.environ), timeout=15)
+        self.assertEqual('allowed', (work / 'allowed.txt').read_text().strip())
+        self.assertNotIn('not accessible', (work / 'denied.txt').read_text(errors='replace'))
+        self.assertNotIn('Bionic', (work / 'child-denied.txt').read_text(errors='replace'))
+
+    def test_windows_ca_path_conversion_does_not_import_a_web_producer(self):
+        from pathlib import PureWindowsPath
+        import test_dev_sdk_consumer as consumer
+        self.assertEqual('/c/CA path with spaces/ca.pem', consumer.target_path(PureWindowsPath('C:/CA path with spaces/ca.pem'), True))
+        self.assertEqual('/tmp/ca.pem', consumer.target_path(Path('/tmp/ca.pem'), False))
+        self.assertNotIn('build_webkit_crt_port.py', {p.name for p in external.validation_scripts()})
+
+    def test_failed_windows_token_has_no_unrestricted_retry_or_success_receipt(self):
+        import subprocess
+        from unittest.mock import patch
+        import crt_windows_external as windows
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            sdk, work, output = root / 'sdk', root / 'work', root / 'evidence'
+            sdk.mkdir()
+            work.mkdir()
+            output.mkdir()
+            (sdk / 'manifest.json').write_text('{"target":{"os":"windows","arch":"x86_64"}}')
+            for relative in ('include/stdio.h', 'lib/libc.a', 'bin/libc.dll'):
+                path = sdk / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('fixture')
+            (output / 'result.json').write_text('{"passed":true}')
+            with patch.object(external, 'native_target', return_value='windows'), \
+                    patch.object(windows, 'create_work', return_value=(work, 'fixture-sid')), \
+                    patch.object(external, 'windows_environment', return_value={}), \
+                    patch.object(external, 'windows_python', return_value=Path(sys.executable)), \
+                    patch.object(windows, 'run', side_effect=subprocess.CalledProcessError(1, ['restricted'])) as run, \
+                    patch.object(external.subprocess, 'run') as unrestricted:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    external.main(['--sdk-root', str(sdk), '--output', str(output)])
+            self.assertEqual(1, run.call_count)
+            unrestricted.assert_not_called()
+            self.assertFalse((output / 'result.json').exists())
 
     def test_hidden_tree_cannot_contain_or_be_contained_in_the_external_work(self):
         root = Path(tempfile.gettempdir()).resolve() / 'crt-external-boundary-fixture'

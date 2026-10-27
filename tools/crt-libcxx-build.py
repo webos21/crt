@@ -143,7 +143,10 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
+
+from crt_file_ops import atomic_replace, copy_tree, filesystem_path
 
 
 PREDECESSOR_FINGERPRINT_FILE = ".crt-predecessor-fingerprint.json"
@@ -354,6 +357,30 @@ def resolve_build_order(recipes, target_os, selected=None):
     return ordered
 
 
+def copy_fetched_tree(source, destination, source_root):
+    """Materialize the complete pinned tree before exposing a fetched checkout.
+
+    Python file IO needs extended Win32 paths independently of Git's longpaths
+    setting. Keep those spellings internal; no tool command/work root changes.
+    Failed copies must not leave a partial checkout that fetch_recipe's existing
+    directory check could mistake for a completed fetch on the next invocation.
+    """
+    root, target = source_root.resolve(), destination.resolve()
+    if target == root or not target.is_relative_to(root) or destination.is_symlink():
+        raise ValueError(f'fetched destination must stay inside its source cache: {destination}')
+    Path(filesystem_path(destination.parent)).mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=f'.copy-{destination.name}-',
+                                      dir=filesystem_path(destination.parent)))
+    try:
+        staged = temporary / 'checkout'
+        copy_tree(source, staged, ignore=shutil.ignore_patterns('.git'))
+        if destination.exists():
+            shutil.rmtree(filesystem_path(destination))
+        atomic_replace(staged, destination)
+    finally:
+        shutil.rmtree(filesystem_path(temporary))
+
+
 def fetch_recipe(recipe, source_root, rebuild=False):
     source = recipe["source"]
     if source["type"] != "git":
@@ -363,7 +390,11 @@ def fetch_recipe(recipe, source_root, rebuild=False):
     ref = source.get("ref", "refs/heads/main")
     sparse_paths = source.get("sparse_paths")
 
-    if checkout_dir.exists() and not rebuild:
+    # A primary tree alone is not a completed fetch if an interrupted sibling
+    # copy left the shared CMake/libc inputs absent. Each new tree publishes
+    # only after its copy succeeds.
+    extra_destinations = [source_root / name for name in source.get('extra_checkout_dirs', [])]
+    if checkout_dir.is_dir() and all(path.is_dir() for path in extra_destinations) and not rebuild:
         progress(f"{recipe['name']}: already fetched: {checkout_dir}")
         return
 
@@ -401,13 +432,13 @@ def fetch_recipe(recipe, source_root, rebuild=False):
         # *content*, never trims the *commit graph* itself.
         if clone_dir.exists() and rebuild:
             if clone_dir.is_dir():
-                shutil.rmtree(clone_dir)
+                shutil.rmtree(filesystem_path(clone_dir))
             else:
                 clone_dir.unlink()
         elif clone_dir.exists() and not is_git_worktree(clone_dir):
             progress(f"{recipe['name']}: removing incomplete clone cache: {clone_dir}")
             if clone_dir.is_dir():
-                shutil.rmtree(clone_dir)
+                shutil.rmtree(filesystem_path(clone_dir))
             else:
                 clone_dir.unlink()
 
@@ -442,9 +473,7 @@ def fetch_recipe(recipe, source_root, rebuild=False):
         source_dir = clone_dir / checkout_subdir
         if not source_dir.is_dir():
             raise SystemExit(f"{recipe['name']}: checkout_subdir {checkout_subdir!r} not found under {clone_dir}")
-        if checkout_dir.exists():
-            shutil.rmtree(checkout_dir)
-        shutil.copytree(source_dir, checkout_dir, ignore=shutil.ignore_patterns(".git"))
+        copy_fetched_tree(source_dir, checkout_dir, source_root)
         # extra_checkout_dirs: some fetched sources are not self-contained
         # and include() shared sibling directories from the same monorepo
         # by relative path (libunwind -- see its own recipe.json notes,
@@ -461,10 +490,7 @@ def fetch_recipe(recipe, source_root, rebuild=False):
             src = clone_dir / extra_dir
             if not src.is_dir():
                 raise SystemExit(f"{recipe['name']}: extra_checkout_dirs entry {extra_dir!r} not found under {clone_dir}")
-            if dest.exists():
-                shutil.rmtree(dest)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git"))
+            copy_fetched_tree(src, dest, source_root)
     else:
         # No recipe in this project uses this branch today (all three
         # now set sparse_paths -- see the sparse branch above's own

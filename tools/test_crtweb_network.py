@@ -77,7 +77,8 @@ def make_pki(directory, openssl):
     def run(*args):
         try:
             subprocess.run([openssl, *args], cwd=directory, env=tool_env,
-                           check=True, capture_output=True, timeout=60)
+                           check=True, capture_output=True, timeout=60,
+                           creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         except subprocess.CalledProcessError as error:
             detail = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr or ""
             raise RuntimeError(f"OpenSSL fixture {args[0]} failed: {detail[-4096:]}") from error

@@ -4,16 +4,78 @@
 import importlib.util
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("crt-libcxx-build.py")
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("crt_libcxx_build", SCRIPT)
 assert SPEC and SPEC.loader
 DRIVER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(DRIVER)
+
+
+class LongPathCopyTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix='libcxx fetch actual spaces '))
+        self.addCleanup(lambda: shutil.rmtree(DRIVER.filesystem_path(self.root)))
+
+    def test_deep_primary_and_sibling_source_bytes_are_preserved(self):
+        relative = Path(*['upstream directory ' + str(i) + 'x' * 40 for i in range(5)]) / 'pinned.cpp'
+        for name in ('libcxx', 'cmake'):
+            source = self.root / 'clone' / name
+            file = Path(DRIVER.filesystem_path(source / relative))
+            file.parent.mkdir(parents=True)
+            file.write_bytes(b'unchanged pinned upstream source')
+            (source / '.git').mkdir()
+            (source / '.git/private').write_text('not source')
+            cache = self.root / 'actual source cache with spaces'
+            target = cache / name
+            DRIVER.copy_fetched_tree(source, target, cache)
+            copied = Path(DRIVER.filesystem_path(target / relative))
+            self.assertGreater(len(str(target / relative)), 350)
+            self.assertEqual(file.read_bytes(), copied.read_bytes())
+            self.assertFalse((target / '.git').exists())
+            self.assertEqual([], list(cache.glob('.copy-*')))
+
+    def test_copy_failure_never_publishes_a_partial_checkout(self):
+        from unittest.mock import patch
+        cache = self.root / 'cache'
+        def partial(source, destination, **kwargs):
+            destination.mkdir()
+            (destination / 'incomplete').write_text('partial')
+            raise OSError('injected copy failure')
+        with patch.object(DRIVER, 'copy_tree', side_effect=partial):
+            with self.assertRaisesRegex(OSError, 'injected copy failure'):
+                DRIVER.copy_fetched_tree(self.root / 'source', cache / 'libcxx', cache)
+        self.assertFalse((cache / 'libcxx').exists())
+        self.assertEqual([], list(cache.iterdir()))
+
+    def test_failed_replacement_preserves_existing_checkout(self):
+        from unittest.mock import patch
+        cache = self.root / 'cache'
+        target = cache / 'libcxx'
+        target.mkdir(parents=True)
+        (target / 'complete.cpp').write_text('old complete source')
+        with patch.object(DRIVER, 'copy_tree', side_effect=OSError('injected')):
+            with self.assertRaises(OSError):
+                DRIVER.copy_fetched_tree(self.root / 'source', target, cache)
+        self.assertEqual('old complete source', (target / 'complete.cpp').read_text())
+        self.assertEqual([], list(cache.glob('.copy-*')))
+
+    def test_copy_cannot_replace_cache_root_or_outside_directory(self):
+        cache = self.root / 'cache'
+        cache.mkdir()
+        for target in (cache, self.root / 'outside'):
+            with self.assertRaisesRegex(ValueError, 'inside its source cache'):
+                DRIVER.copy_fetched_tree(self.root / 'source', target, cache)
+
+    def test_isolated_cxx_source_asset_already_carries_shared_file_helper(self):
+        import create_stage_source
+        self.assertIn('tools/crt_file_ops.py', create_stage_source.STAGES['02-cxx']['project_paths'])
 
 
 class SourcePatchTests(unittest.TestCase):
@@ -94,7 +156,27 @@ class SparseFetchRecoveryTests(unittest.TestCase):
         }
 
     def tearDown(self) -> None:
+        # Keep TemporaryDirectory's read-only Git-object cleanup while opting
+        # its file IO into long paths; external Git arguments stayed ordinary.
+        self.temporary.name = DRIVER.filesystem_path(self.root)
         self.temporary.cleanup()
+
+    def test_sparse_fetch_copies_deep_primary_and_extra_paths(self) -> None:
+        relative = Path(*['deep upstream ' + str(i) + 'x' * 42 for i in range(5)]) / 'original.cpp'
+        for name in ('libunwind', 'cmake', 'runtimes/cmake'):
+            path = Path(DRIVER.filesystem_path(self.repository / name / relative))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(name.encode())
+        subprocess.run(['git', '-c', 'core.longpaths=true', 'add', '.'], cwd=self.repository, check=True)
+        subprocess.run(['git', 'commit', '--quiet', '-m', 'deep pinned source'], cwd=self.repository, check=True)
+        self.recipe['source']['ref'] = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=self.repository, text=True).strip()
+        DRIVER.fetch_recipe(self.recipe, self.source_root)
+        for name in ('libunwind', 'cmake', 'runtimes/cmake'):
+            target = self.source_root / name / relative
+            self.assertGreater(len(str(target)), 350)
+            self.assertEqual(name.encode(), Path(DRIVER.filesystem_path(target)).read_bytes())
+        self.assertFalse((self.source_root / 'libunwind/.git').exists())
 
     def test_missing_sparse_worktree_recovers_from_cached_commit(self) -> None:
         DRIVER.fetch_recipe(self.recipe, self.source_root)
@@ -112,6 +194,17 @@ class SparseFetchRecoveryTests(unittest.TestCase):
         self.assertTrue((self.source_root / "libunwind" / "CMakeLists.txt").is_file())
         self.assertTrue((self.source_root / "cmake" / "Modules" / "HandleCompilerRT.cmake").is_file())
         self.assertTrue((self.source_root / "runtimes" / "cmake" / "Modules" / "HandleFlags.cmake").is_file())
+
+    def test_existing_primary_with_missing_sibling_recovers_instead_of_skipping(self):
+        from unittest.mock import patch
+        DRIVER.fetch_recipe(self.recipe, self.source_root)
+        shutil.rmtree(self.source_root / 'cmake')
+        self.assertTrue((self.source_root / 'libunwind/CMakeLists.txt').is_file())
+        with patch.object(DRIVER, 'run', wraps=DRIVER.run) as run:
+            DRIVER.fetch_recipe(self.recipe, self.source_root)
+        self.assertTrue((self.source_root / 'cmake/Modules/HandleCompilerRT.cmake').is_file())
+        self.assertTrue(run.called)
+        self.assertFalse(any('fetch' in call.args[0] for call in run.call_args_list))
 
 
 if __name__ == "__main__":

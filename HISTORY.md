@@ -11,6 +11,62 @@ substantive update.
 
 ## 2026-10-27
 
+### Fix Windows libc++ long-path source copying and close the fetch follow-up
+
+Imported-runtime fetch now reuses the existing extended-path filesystem helper
+for primary and shared sibling source copies. Each directory is fully copied
+in a private sibling staging area before publication, so a failed copy cannot
+leave a partial destination accepted as fetched. A missing shared CMake source
+also triggers recovery even when the primary directory remains. Tool arguments,
+work roots, pinned upstream bytes and Git/global Windows configuration are
+unchanged; the isolated 02 source asset already carries the shared helper.
+
+Preserved the known incomplete libc++ directory under an explicit failed-copy
+name, recovered from the existing pinned clone and verified all five originally
+missing files against upstream SHA-256. In the original deep CMake tree, with
+`CRT_DEV_PREDECESSOR` empty, the normal C++ fetch/configure/build, static/shared
+smokes (including string ABI and iostream) and verified `02-cxx` distribution
+succeed. The earlier S3 Development SDK and its predecessor are preserved, not
+relabeled as using this new runtime.
+
+Focused fetch/predecessor/filesystem regression passes 26/26; the existing CI
+tooling selection passes 143/147 with four host-conditional skips. Fixtures
+exercise 350+ character paths, real sparse Git primary/sibling copies, failed
+copy publication and missing-sibling recovery without network access. Removed
+the resolved work from TODO rather than leaving another pending tranche. No
+new runtime ABI, recipe pin, CI workflow, tag, upload or consumer lock changed.
+Original failures, recovery commands and limits belong to
+[SDK split acceptance](docs/acceptance/sdk_split_acceptance.md#windows-libc-long-path-fetch-recovery-2026-10-27).
+
+### Verify the Windows/x64 Development SDK with producer trees inaccessible
+
+Added a native Windows restricted-token counterpart to the Linux/macOS external
+consumer driver. Only new private test-work directories receive synthetic-SID
+ACLs; producer/source/SDK permissions and accounts are untouched. A child probe
+and fresh descendants prove source, headers, static libc and DLL reads fail
+before SDK-only compilation. The inherited job bounds cleanup, processes remain
+hidden and there is no unrestricted fallback. The fixture supplies a private
+host Python and the bounded validation capsule, not another runtime/toolchain.
+
+Fresh networking ports and current SDK tooling were assembled through the
+official external-02-cxx CMake entry point, retaining the predecessor's source
+identity. The package and its relocated/external consumers pass profile checks,
+all eight static/shared HTTPS/inflate/trust cases and app-local DLL loading with
+System32-only PATH. All 27 inherited runtime digests match; seven private-copy
+verifier negatives reject their inputs. ZIP materialization of two declared zlib
+file aliases is recorded separately from full payload-byte equality and each
+tree's unchanged link-aware inventory; no archive behavior was changed.
+
+The old local Dev SDK's missing required tool and a fresh default producer's
+deep-path libc++ fetch-copy failure were preserved, not relabeled successes.
+The latter is a separate Planned defect; no short-root workaround or upstream
+patch was used. Marked only Windows/x64 S3 complete; Windows/aarch64 still needs
+native replay. The focused unit suite passes 28/28 and the exact CI tooling
+selection passes 136/140 with four existing host-conditional skips. No runtime
+ABI/schema, CI workflow, STATUS or consumer lock changed, and no release was
+published. Commands, artifact identities, probe receipts and remaining limits
+belong to [SDK split acceptance](docs/acceptance/sdk_split_acceptance.md#windowsx64-source-hidden-and-package-replay-2026-10-27).
+
 ### Complete macOS Development SDK isolated-consumer verification
 
 Regenerated the native macOS/arm64 Development SDK through the ordinary CMake

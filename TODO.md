@@ -102,7 +102,9 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
   - [x] macOS/arm64 packaged, relocated static/shared consumer, shared-consumer
     binding audit and producer-tree-hidden replay;
     [evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-source-hidden-and-shared-consumer-replay-2026-10-27).
-  - [ ] Windows/x64 and Windows/aarch64 producer-tree-hidden replay.
+  - [x] Windows/x64 packaged, relocated static/shared consumer with producer trees
+    inaccessible under a restricted token; [evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-source-hidden-and-package-replay-2026-10-27).
+  - [ ] Windows/aarch64 native producer-tree-hidden replay after the Windows fixture.
 - [x] S4 Release tool: compose `prepare_release_assets.py` gates with the Development profile collector
   (`crt_sdk_release.py`) for both kinds (checksums, release manifest, recipes
   pointing at the release, `VERSION` equal to the tag) and checks that the two share the source commit and the

@@ -22,6 +22,11 @@ from test_crtweb_network import make_pki
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def target_path(path, windows):
+    text = path.as_posix()
+    return f'/{text[0].lower()}{text[2:]}' if windows and len(text) > 2 and text[1] == ':' else text
+
+
 def closure(program, sdk, manifest):
     target_os = manifest["target"]["os"]
     norm = str.lower if target_os == "windows" else str
@@ -127,10 +132,7 @@ def main():
             run_env = dict(compile_env)
             if windows:
                 run_env["PATH"] = str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32")
-                from build_webkit_crt_port import crt_path
-                target_path = crt_path
             else:
-                target_path = str
                 run_env["LD_LIBRARY_PATH" if manifest["target"]["os"] == "linux" else "DYLD_LIBRARY_PATH"] = str(sdk / "lib")
             cases = {}
             # No globally installed CA bundle may grant trust. The valid CA is
@@ -139,7 +141,7 @@ def main():
             for name, ca, expected in (("verified", "ca.pem", "ok"), ("wrong-ca", "other.pem", "reject"),
                                        ("missing-ca", None, "reject"), ("malformed-ca", "malformed.pem", "reject")):
                 command = [str(program), f"https://127.0.0.1:{server.server_port}/payload",
-                           target_path(pki / ca) if ca else "-", expected]
+                           target_path(pki / ca, windows) if ca else "-", expected]
                 completed = subprocess.run(command, env=run_env, capture_output=True, text=True,
                                            timeout=30, creationflags=flags)
                 marker = "development-sdk: HTTPS+inflate ok" if expected == "ok" else "development-sdk: rejected"
