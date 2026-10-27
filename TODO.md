@@ -82,7 +82,7 @@ stays in the CLI repository. Residual-defect triage finished 2026-10-22
 - [x] S1 Add a CLI-shaped reference consumer to this repository's tests (C++17: HTTPS GET with
   certificate verification plus zlib inflate) linked only through the Development SDK wrappers; its
   ELF/Mach-O/PE imports, via `crt_binary_dependencies.py`, define the runtime closure instead of a guessed list.
-- [ ] S2 Producer: build zlib, Mbed TLS and libcurl through one shared implementation with the
+- [x] S2 Producer: build zlib, Mbed TLS and libcurl through one shared implementation with the
   `04-gfx-media` stage builder, then assemble the Development SDK on top of
   `02-cxx` for Linux x86_64/aarch64, macOS arm64 and Windows x64/arm64.
   - [x] Shared producer/profile implementation and recorded Linux/x86_64,
