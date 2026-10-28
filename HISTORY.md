@@ -9,7 +9,67 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-29
+
+### Consolidate the native CLI producer contract and handoff documentation
+
+Recorded the native JSON/LLVM app-build boundary, experimental producer exporter,
+Linux regression fix and linked CLI-owned acceptance in README/TODO/design docs.
+The runtime fix remains `64b447b`, the clean build baseline of the local Dev SDK;
+this later exporter/documentation commit does not relabel that SDK or promote
+an artifact. The CLI repository records its own implementation commit and
+unchanged source-input comparison with the original 2026-10-28 receipts.
+Other-host replay and final artifact/lock adoption remain open. Documentation
+links, source/exporter hashes and recorded evidence were rechecked; no runtime
+source changed in this consolidation. STATUS remains unchanged.
+
 ## 2026-10-28
+
+### Native CLI compiler policy and Linux directory-type regression
+
+The owner replaced CLI CMake/Python application builds with native `crt.json`
+and internal compiler-driver modules, using `src/main/` and C/C++ `src/test/`.
+CRT retains ABI/startup/link-policy ownership. The new
+`tools/export_cli_toolchain.py` captures installed wrapper argv into a separately
+hashed experimental Linux/x86_64 provider without modifying the immutable SDK.
+This producer migration tool still uses Python/shell; CLI build/test/run and
+control commands invoke native LLVM directly. Existing SDK consumers keep their
+wrapper/CMake entry points; no CRT -> CLI build dependency is introduced.
+
+Native SDK inventory exposed an existing Linux `readdir` defect: the PAL uses
+getdents64 on both architectures, but read `d_type` from legacy record-tail
+padding instead of byte 18. Following Bionic's getdents64 behavior, fix commit
+`64b447ba40ef339a65ca009adeda80530a83689c` corrects the offset without public ABI
+changes. The strengthened file-path regression fails against the older SDK and
+passes after the fix. The CLI scanner is unchanged; no host/upstream workaround
+or old SDK mutation is used.
+
+A clean worktree at that commit builds local Dev SDK `v0.4.0-cli.20261028`
+from source-only caches, with newly compiled core, imported C++ and TLS/network
+ports. All 144 C tests and the static/shared Dev HTTPS+inflate/trust consumer
+pass. Local producer logs live under
+`/home/syszone/GitLocal/crt-cli-producer-20261028`; CLI source/SDK-hidden native
+self-build, generated C/C++ workflows and 429 assertions pass under
+`/home/syszone/GitLocal/crt-cli-replay/tranche1-native-linux-20261028-r2`.
+The native CLI has zero ELF DT_NEEDED/RPATH and bare runtime maps contain only
+itself and the declared OS loader. The CLI repository's bootstrap acceptance and
+compatibility ledger own the exact hashes/commands, failed attempts and bounds.
+
+This is an unpromoted Linux D0 experiment. Other-host replay, CLI HTTPS,
+authenticated self-integrity, automatic SDK/store installation, self-upgrade and
+stable/general SDK contracts remain open. Root consumer lock adoption and any
+public SDK/CLI release are separate gates. STATUS is unchanged.
+
+### Coordinate the first CRT-native CLI consumer increment
+
+Applied the owner's selected CLI name, shared immutable SDK/project references,
+first-build acquisition and one-executable/helper boundary. Tranche 1 records
+the completed initial layout/input/fixture work and leaves macOS/Windows native
+replay and coherent final artifact adoption open. The existing clean producer
+Dev SDK feeds a separately identified CLI local bootstrap; no CRT runtime or
+upstream source changed. CLI owns commands, formats, execution receipts and
+adoption in its acceptance/compatibility records. Linux results are not copied
+into a new producer ABI/release qualification claim, and STATUS is unchanged.
 
 ### Align the SDK/CLI bootstrap and lifecycle plan
 

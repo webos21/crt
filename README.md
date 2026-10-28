@@ -218,8 +218,10 @@ follow-ups, not prerequisites of the accepted Web embedding baseline.
 
 The SDK producer supports Full and Development profiles. The next developer
 workflow is SDK -> CLI -> Studio, starting with the
-[producer contract gate](docs/design/sdk_development_contract.md). CLI/Studio
-commands and compatibility contracts remain design work.
+[producer contract gate](docs/design/sdk_development_contract.md). The separate
+[crt-cli repository](https://github.com/webos21/crt-cli) now owns the minimal
+native JSON/LLVM bootstrap; app builds do not require CMake, Python or shell.
+Full developer workflows and Studio integration remain planned.
 
 See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
 

@@ -58,9 +58,10 @@ a profile name alone does not prove that an optional feature is enabled.
 Each project selects an exact SDK version/profile/target/content identity;
 different projects may select different SDKs without changing one another.
 SDK profiles describe content/capabilities, independently of Debug/Release
-build settings. CLI owns whether the selected SDK is physically project-local
-or an immutable shared installation with a project binding, and when it is
-acquired. Neither storage optimization nor CLI self-upgrade may silently
+build settings. CLI owns storage/acquisition and now selects shared immutable
+SDK payloads with exact project references. First configure/build acquires a
+missing SDK; new creates sources without downloading one. Handoff/test copies
+remain separate from an implemented general project-local storage mode. Neither storage optimization nor CLI self-upgrade may silently
 change a project's lock or assemble an unvalidated runtime/ABI mixture.
 
 Distinguish the following concepts:
@@ -72,7 +73,8 @@ Distinguish the following concepts:
   revisions have separate identities.
 - Host tools: mksh/toybox/awk/make and generators that **execute on the build
   machine**.
-- External toolchain: Clang/LLD, CMake/Ninja, and required OS/vendor SDKs.
+- External toolchain: Clang/LLD and required OS/vendor SDKs; SDK-producer
+  CMake/Ninja and optional port generators are separate roles.
   Preserve the existing policy of not bundling compilers in CRT SDKs.
 
 SDK production order, port dependencies, and deployment runtime closures are
@@ -99,10 +101,11 @@ initial CLI or source-first port engine.
 | `verify_dist.py`, ELF/Mach-O/PE and Host ABI checks | SDK/application/port validation foundation | Stable consumer interface for port/runtime closures |
 
 Reusing existing APIs/wrappers does not make internal Python module APIs or
-build trees public contracts. The initial CLI adapter invokes **version-pinned
-entry points in the installed SDK**. Declare Python as a host requirement when
-needed. A later fully CRT-native recipe executor must preserve compatibility
-against the same fixtures and results.
+build trees public contracts. The owner selected native CLI execution on
+2026-10-28. CLI control/self-build and generated app build/test/run consume declarative SDK policy and invoke
+LLVM directly, with no Python/shell/CMake prerequisite. CRT SDK production
+keeps its existing tools. A native port-recipe executor must preserve reviewed
+JSON semantics and fixtures; optional upstream shell/make tools remain explicit.
 
 ## 4. Proposed SDK Build Contract v1 Contents
 
@@ -127,7 +130,8 @@ The producer must supply at least:
    conditions. Do not assume an as-yet undefined public `crt_abi` number
    exists. Conservatively bind v1 compatibility to exact SDK content identity.
 3. **Build:** SDK-relative wrapper/toolchain paths, language standards,
-   startup/link modes, public CMake targets or link interfaces, and
+   startup/link modes, declarative native compiler/link arguments, optional
+   CMake compatibility interfaces, and
    compiler-rt requirements.
 4. **Run/deploy:** runtime libraries, aliases, workers/resources by executable
    type, package-local search policy, and explicit OS/framework/driver
@@ -235,8 +239,10 @@ and real HTTPS remain D1 gates. An unproven or failed single-file target must
 be recorded as a gap, not silently replaced by a passing dynamic-bundle claim.
 Existing dynamic SDK/runtime evidence remains valid for its original scope.
 
-The precise one-file criterion, temporary update helpers/launchers, trust data
-and notices/resources require early CLI-owned decisions. No CA bundle is baked
+The owner-approved criterion allows OS dependencies, data/cache/certificates,
+previous versions and temporary update helpers, with no permanent auxiliary
+launcher. Exact trust provisioning, notices/resources and update activation
+still require CLI-owned implementation and native evidence. No CA bundle is baked
 into the curl port. The producer reference contract requires a **consumer-supplied
 explicit CA file**, peer verification and hostname verification. It does not
 inherit ambient CA environment variables or disable verification. The eventual
@@ -308,8 +314,8 @@ submodules, and sibling-checkout paths are unnecessary.
 
 The initial implementation target is CRT-native C/C++ (C++17 baseline).
 The earlier proposal requiring a host-native Go/Rust CLI is not adopted.
-The C99 core policy is unchanged; build-host Python/CMake tools are not
-categorically prohibited.
+The C99 core policy is unchanged; CRT SDK-producer Python/CMake tools remain
+allowed. This does not make them prerequisites for native CLI/app workflows.
 
 Explicitly validate the CRT-built ports needed for minimal CLI TLS/download
 support. Do not make the whole UI/Web SDK a runtime prerequisite or silently
@@ -405,3 +411,37 @@ Apply this as a manual review checklist now. Lightweight future automation can
 check pinned references, owner/version links, declared vs implemented commands,
 and TODO-to-acceptance links once concrete metadata exists. Do not enforce
 identical Markdown text across owners or add a second full build for doc edits.
+
+## Experimental Native Compiler Provider (2026-10-28)
+
+The CLI owner selected `crt.json`, C/C++ `src/main` and `src/test`, internal
+compiler-driver modules and direct LLVM execution. CRT still owns SDK ABI,
+startup objects, runtime order and flags. The implementation bridge is
+[`export_cli_toolchain.py`](../../tools/export_cli_toolchain.py): a producer-only
+migration tool captures installed wrapper argv for a bounded native Linux/x86_64
+static/hosted/exceptions/RTTI policy. Python/shell remain producer dependencies;
+CLI does not execute this exporter or wrappers in the app path.
+
+The separately hashed provider `crt.experimental.native-toolchain`, format 0,
+binds the existing SDK's complete inventory, clean producer provenance, wrapper
+bytes and exporter hash. It stays beside the immutable SDK; exporting does not
+modify or relabel old SDK content. SDK and provider identities are separate
+explicit inputs. This is not the general development contract v1, a packaged
+new SDK schema, three-host support or a promoted consumer lock. The CLI's
+`docs/reference/bootstrap_contract.md` owns expansion/selection behavior;
+`docs/compatibility.md` owns actually exercised combinations. A provider change
+requires fresh consumer evidence; producer artifacts are promoted before final
+consumer lock adoption. Existing wrappers/CMake consumers remain available.
+The current Linux consumer record is owned by
+[CLI native acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-linuxx86_64-2026-10-28);
+its compatibility ledger records the final source commits separately from the
+SDK build baseline.
+
+Native directory-inventory replay exposed a Linux getdents64 decoding defect:
+`d_type` is byte 18, not legacy record-tail padding. Fix commit `64b447b` changes
+no public ABI. The Bionic reference reads the corresponding field directly
+([dirent implementation](https://raw.githubusercontent.com/aosp-mirror/platform_bionic/main/libc/bionic/dirent.cpp),
+[public layout](https://raw.githubusercontent.com/aosp-mirror/platform_bionic/main/libc/include/dirent.h)).
+The previous Dev SDK stays immutable and failed evidence is retained. A fresh
+clean-source Dev candidate is required for the native builder; no CLI inventory
+workaround or host-runtime fallback is accepted.

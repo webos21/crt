@@ -64,8 +64,8 @@ under an active tranche only to make its execution order legible.
 
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
-This whole initiative is active; the current focus is **Tranche 1 planning and
-contract review**. Numbered tranches 1-8 map to D0-D7, not implementation claims.
+This whole initiative is active; the current focus is **Tranche 1 Linux bootstrap
+and remaining native-pair replay**. Numbered tranches 1-8 map to D0-D7.
 SDK split and local assembly rehearsal are complete
 ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
 The SDK Producer Contract Gate P0 is the producer work within the early
@@ -82,27 +82,29 @@ for producer work and diagnosis, while CLI inputs remain the public SDK surface
 
 CRT owns the SDK/host-tool/recipe work below; CLI and
 [Studio](docs/design/crt_studio.md) own their implementation and acceptance.
-Reviewed consumer planning baselines: CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93`,
+Original reviewed consumer planning baselines: CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93`,
 Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`; these are not artifact locks.
 Follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review);
 the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
 #### Tranche 1. SDK/CLI contracts and minimal bootstrap (P0 + D0)
 
-- [ ] **1.1** Review the CLI command name, single-executable distribution boundary
-  and bootstrap command scopes; retain unresolved storage/acquisition/resource decisions.
-- [ ] **1.2** Review the initial CLI source/module/build layout before implementation;
-  share a public project/template contract while allowing internal layout evolution.
-- [ ] **1.3** Review actual SDK candidates, public wrappers/imports and host/target
+- [x] **1.1** Record crt-cli naming, one-executable/data/temporary-helper policy,
+  shared immutable SDK references and first-configure/build acquisition.
+- [x] **1.2** Review the initial CLI source/module/build layout before implementation;
+  share native crt.json/lock, src/main modules and C/C++ src/test with templates.
+- [x] **1.3** Identify the existing Linux Dev SDK, public wrappers/imports and host/target
   identities; record local handoff, producer/CLI snapshots, archive/content hashes and tools.
-- [ ] **1.4** Define project SDK identity/capability and lock/JSON fixtures, distinguishing
-  existing formats from proposed contracts; add focused contract/link checks.
+- [x] **1.4** Implement CLI-owned bootstrap input/result records and experimental
+  manifest/lock fixtures, without claiming the general SDK contract is implemented.
 - [ ] **1.5** Supply SDK-owned startup/link rules for minimal CLI help/version/bootstrap
   diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
+  Linux passes; native macOS/arm64 and Windows/x64 replay remains.
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
   review native consumer/ABI evidence before each initial pair's adoption
   ([CLI D0 acceptance baseline](https://github.com/webos21/crt-cli/blob/5fcdc995d231fe2f9dbab4292000a81e0b4fce93/docs/acceptance/bootstrap_acceptance.md)).
+  Linux passes; see the [current CLI native evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-linuxx86_64-2026-10-28).
 - [ ] **1.7** Select coherent exact assets before promotion/consumer locks;
   resolve the rehearsal's same-name source-asset variants without relabeling builds.
 
