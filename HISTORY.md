@@ -11,6 +11,15 @@ substantive update.
 
 ## 2026-10-28
 
+### Pass the native Linux/aarch64 Development assembly at the WebKit 2.54.2 pin
+
+Ran the Development profile natively on the aarch64 guest from the same clean `3741ea5` (detached worktree) and version
+parameter as the other hosts: `crt-c-test` 144/144, imported libc++ smokes, the Dev SDK consumer, real `crt-dev-release`,
+extracted-archive equality (2,579 paths), 23 runtime digests equal to the plain `02-cxx`, clean source identities and the
+source-hidden relocated external consumer. The Full `06-web` was not run: Linux/aarch64 is only a cross target of that stage
+(x86_64 host), so that packaging and S5 stay open for an x86_64 host. Evidence and artifact hashes:
+[release qualification](docs/acceptance/release_qualification.md#linuxaarch64-native-development-assembly-2026-10-28).
+
 ### Pass the Windows/x64 release assembly rehearsal at the WebKit 2.54.2 pin
 
 Replayed the Linux rehearsal natively on Windows/x64 from the same clean `3741ea5`

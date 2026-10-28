@@ -6,8 +6,8 @@ The [build-system scope](build_system_acceptance.md#release-qualification-scope-
 defines the gate; the completed [SDK split](sdk_split_acceptance.md) does not
 qualify old candidates for release. CLI adoption remains consumer-owned.
 
-Linux/x86_64, macOS/arm64 and Windows/x64 local assembly pass below. New-pin
-Linux/aarch64 cross-target replay, followed by the combined final review,
+Linux/x86_64, macOS/arm64 and Windows/x64 local assembly pass below, and Linux/aarch64 passes natively for the Development profile. The
+Linux/aarch64 Full `06-web` cross-target packaging (x86_64 host), followed by the combined final review,
 remain open. Existing SDK split evidence stays accepted at its original pins.
 
 ## Execution scope
@@ -392,3 +392,53 @@ is not committed.
 review. Windows/arm64 has no `06-web` collector scope (its Full reference is
 `05-ui`). Producer promotion, consumer locks, tag creation, upload and public release
 remain out of scope.
+
+## Linux/aarch64 native Development assembly (2026-10-28)
+
+**Accepted locally, Development profile only.** Native Linux/aarch64 (Ubuntu 26.04 QEMU guest, 4 CPU, Clang 21.1.8,
+preset `linux-host-ninja-debug`, Debug), from the **same** clean CRT commit
+`3741ea515f129483efa631c6d2663d27de9ebc62` and version parameter `v0.4.0-rehearsal.20261027` as the other hosts, in a
+detached worktree (`../crt-rq-3741ea5`) so later documentation commits cannot change the producer identity. No Git tag was
+created, nothing was uploaded, no source cache or earlier build was reused.
+
+**Scope kept explicit:** the TODO's "Linux/aarch64 cross-target packaging" is the Full `06-web` SDK built on an x86_64
+host; `build_stage_06_web.py` accepts Linux/aarch64 only as that cross target and rejects a native aarch64 build by design.
+This device is native aarch64, so `crt-full-release`, the Full `06-web` collection and S5 (which needs a Full SDK) were
+**not run here**. They remain with an x86_64 Linux host.
+
+```sh
+git worktree add --detach ../crt-rq-3741ea5 3741ea5 && cd ../crt-rq-3741ea5
+rehearsal_root="$PWD/out/release-qualification-linux-aarch64-20261028"
+cmake --fresh --preset linux-host-ninja-debug -B "$rehearsal_root/build" \
+  -DCRT_RELEASE_TAG=v0.4.0-rehearsal.20261027
+cmake --build "$rehearsal_root/build" --target crt-development-sdk-test -j 3
+cmake --build "$rehearsal_root/build" --target crt-c-test crt-dev-release -j 3
+cmake --build "$rehearsal_root/build" --target crt-cxx-test -j 3
+python3 tools/test_dev_sdk_external.py --sdk-root "<extracted path with spaces>/dev" --output "$rehearsal_root/external"
+```
+
+Results (all exit codes 0): Development SDK build and consumer (static/shared HTTPS+inflate, trust negatives), `crt-c-test`
+**144/144**, imported libc++ runtime/string-ABI/iostream smokes (static and shared), `crt-dev-release`.
+
+| Collected artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.4.0-rehearsal.20261027-linux-aarch64-dev.tar.xz` | 8,787,100 | `1ae946c26d4d83236b024d5c3793294b6f1b4233407c1e0171666105bb56a925` |
+| `crt-v0.4.0-rehearsal.20261027-linux-02-cxx-source.tar.xz` | 8,557,328 | `8fdd7229e65c8e005e15ba66c43aa4f688546b3f30bbf52b42906c69a160aefd` |
+| `crt-v0.4.0-rehearsal.20261027-linux-03-gfx-simple-source.tar.xz` | 834,220 | `8d74625ebf9db236960b5b5fb355f1d2714393710f89d3625af0656ca0705adf` |
+
+The Dev release manifest (SHA-256 `b23e2f17d6752bd9fdf97f2f119a63b97c679d33ca99371939ea53325e399495`) lists exactly these three
+assets; `SHA256SUMS-dev-linux-aarch64` verifies each. The SDK `manifest.json` SHA-256 is
+`8b70ae99417c0154df71a1537e20b606fb2c44b5947cdfd4be722553745f1359`.
+
+Independent checks: the extracted archive's **2,579** paths equal the original SDK directory with identical content hashes
+(the same count as the Linux/x86_64 Development SDK); the extracted package, in a path with spaces, passes `verify_dist.py
+--stage 02-cxx`; all **23** `runtime_sha256` entries of the Development contract match in both the Dev SDK and the plain
+`02-cxx`; the contract records `producer_source_commit` = `base_source_commit` = the fixed commit with
+`producer_working_tree_dirty: false`, and both stage-source assets carry that commit with `working_tree_dirty: false`.
+The extracted package then passes `tools/test_dev_sdk_external.py` with the producer checkout hidden: relocated static and
+shared HTTPS+inflate and the trust negatives.
+
+Not covered: a `06-web` collector/S5 proof for Linux/aarch64, Windows/arm64's `06-web` (it has no collector scope), producer
+promotion, consumer locks, tag creation, upload and public release. Evidence:
+`../crt-rq-3741ea5/out/release-qualification-linux-aarch64-20261028/` (`configure.log`, `dev-build.log`, `release-build.log`,
+`cxx-test.log`, `external.log`, `build/release/dev/`); the worktree is outside the main checkout and is not committed.
