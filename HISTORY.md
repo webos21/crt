@@ -11,6 +11,23 @@ substantive update.
 
 ## 2026-10-28
 
+### Align the SDK/CLI bootstrap and lifecycle plan
+
+Moved the full SDK -> CLI -> Studio initiative into TODO In Progress and
+numbered its D0-D7 producer/joint tranches. The first tranche now reviews
+product/initial-layout decisions before minimal CLI implementation, then SDK
+handoff, identity fixtures, one-executable feasibility and native consumption.
+Clarified local unreleased SDK experimentation and producer-first final pin
+adoption without requiring simultaneous public releases.
+
+Updated the producer contract from a default dynamic CLI bundle to a
+single-executable goal requiring native proof; retained existing SDK evidence
+at its original scope. CLI owns self-upgrade, scoped doctor, evolving templates
+and per-project SDK storage/acquisition. Command prefix, precise file/helper/data
+policy and storage/acquisition defaults remain open decisions. The CLI-owned
+design/acceptance and compatibility record own details and future results;
+this is planning/documentation work, not a CLI build, runtime pass or promotion.
+
 ### Close the release qualification and local assembly rehearsal
 
 Completed the remaining Linux/x86_64-host -> Linux/aarch64 Full `06-web`

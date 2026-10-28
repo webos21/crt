@@ -55,6 +55,14 @@ installing/selecting a separate immutable SDK, not overwriting an existing
 SDK. Check actual manifest options/capabilities even for the same profile;
 a profile name alone does not prove that an optional feature is enabled.
 
+Each project selects an exact SDK version/profile/target/content identity;
+different projects may select different SDKs without changing one another.
+SDK profiles describe content/capabilities, independently of Debug/Release
+build settings. CLI owns whether the selected SDK is physically project-local
+or an immutable shared installation with a project binding, and when it is
+acquired. Neither storage optimization nor CLI self-upgrade may silently
+change a project's lock or assemble an unvalidated runtime/ABI mixture.
+
 Distinguish the following concepts:
 
 - SDK: one validated runtime/ABI combination. Do not mix arbitrary `libc` and
@@ -206,7 +214,7 @@ same sources, stage outputs and port recipes:
 | --- | --- | --- |
 | **Full SDK** | End users and CRT application developers (installed by the CLI) | The existing validated cumulative stage archives `01-c` .. `06-web`; unchanged. "Full" is `06-web` |
 | **Development SDK** | `crt-cli` developers and CI | The `02-cxx` stage plus the ports the CLI links: zlib, Mbed TLS, libcurl (headers, static and shared libraries, startup, toolchain files, notices), extended only when the real link result requires another library. No graphics, media, UI or Web content |
-| **CLI runtime bundle** | End users, no SDK installed | The CLI executable and only the runtime files its import closure needs, placed app-local. Assembled by `crt-cli`; CRT supplies the libraries and the closure contract |
+| **CLI executable/runtime closure** | End users, no SDK installed | Single-executable distribution is the goal; CRT supplies static/shared libraries and the closure contract, while CLI owns linking, resources and packaging policy |
 
 The Development SDK is a reduced packaging of verified `01-c`/`02-cxx` and port
 outputs, not a second build system, ABI or recipe set, and it is not a cumulative
@@ -218,9 +226,18 @@ be byte-identical to those of the Full SDK from the same release. The ports are
 produced and validated by CRT; `crt-cli` neither ports them nor vendors CRT
 headers or libraries, and consumes only the pinned Development SDK identity.
 The runtime closure is computed from the CLI's actual ELF/Mach-O/PE imports,
-never from a guessed list. Whether a static CLI is viable is a separate technical
-check; the default is a minimal dynamic bundle. No CA bundle is baked into the
-curl port. The producer reference contract requires a **consumer-supplied
+never from a guessed list. The product target is one CLI executable with
+non-OS CRT/C++/HTTP/TLS dependencies linked into it, subject to native technical
+validation. Declared OS/PAL dependencies remain allowed. External LLVM, SDKs
+and host tools remain separate build assets, not contents of that executable.
+A minimal static-link feasibility check starts in D0; SDK-free native execution
+and real HTTPS remain D1 gates. An unproven or failed single-file target must
+be recorded as a gap, not silently replaced by a passing dynamic-bundle claim.
+Existing dynamic SDK/runtime evidence remains valid for its original scope.
+
+The precise one-file criterion, temporary update helpers/launchers, trust data
+and notices/resources require early CLI-owned decisions. No CA bundle is baked
+into the curl port. The producer reference contract requires a **consumer-supplied
 explicit CA file**, peer verification and hostname verification. It does not
 inherit ambient CA environment variables or disable verification. The eventual
 CLI trust-store selection, distribution and updating policy remain CLI work.
@@ -310,6 +327,24 @@ consumer measurements; writing this requirement is not execution evidence.
 
 ## 7. Change, Validation, and Release Principles
 
+Local producer/consumer development does not require a public SDK release.
+One authorized session may work on adjacent CRT and CLI checkouts. CRT source
+and build results supply producer development, candidate generation and failure
+diagnosis; the CLI consumes only a produced SDK's public wrappers, headers,
+libraries, toolchain and declared resources. Copy/extract the candidate to an
+immutable handoff outside the producer checkout/build tree and validate the
+CLI without access to those producer trees. Direct object-library links,
+private headers and sibling `add_subdirectory` shortcuts do not satisfy this
+boundary.
+
+Identify each local candidate by its producer source/build provenance, actual
+clean/dirty snapshot, archive size/digest and content identity, target and tools;
+record the CLI snapshot and result separately. Changed inputs require a new
+candidate identity and replay, not replacement under an existing identity.
+Local experiment records are not promoted consumer locks or public-release
+acceptance. The CLI-owned development guide describes the handoff procedure;
+its `docs/compatibility.md` owns adoption and links original execution evidence.
+
 Keep early producer/consumer changes narrow and ordered:
 
 1. Jointly review use cases, reproducer fixtures, public contracts, errors,
@@ -329,7 +364,11 @@ host/target identities, and results without duplicating the original evidence.
 Follow the [CLI joint sequence](crt_cli.md#9-joint-development-sequence)
 for the detailed development order.
 
-SDK/CLI/Studio versions are independent. A consumer design or development
+SDK/CLI/Studio versions and publication times are independent. Coordinate a
+public SDK/CLI combination by promoting the producer artifact first, verifying
+that actual artifact, then adopting its exact identity and publishing the CLI;
+simultaneous public releases are not a version-pin requirement.
+A consumer design or development
 snapshot alone does not authorize publication. The `05-ui`/`06-web` release
 tooling, source/notices/SBOM obligations and continuing security checks belong
 to [Web acceptance](../acceptance/crtweb_acceptance.md) and the

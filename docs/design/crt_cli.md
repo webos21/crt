@@ -88,7 +88,7 @@ must not be required.
 ```text
 CRT_HOME/
   bin/                         optional stable launcher only
-  cli/<cli-version>-<digest>/   crt executable + app-local runtime closure
+  cli/<cli-version>-<digest>/   CLI executable + agreed resources/metadata
   host/<host-tuple>/<tools-id>/ manifest + existing rootfs-relative layout
   toolchains/<toolchain-id>/    external LLVM/OS SDK paths, versions, fingerprints
   sdk/<release>/<target>/<sdk-content-id>/
@@ -107,6 +107,9 @@ CRT_HOME/
 This is a logical target layout, not an instruction to rearrange existing SDK
 internals. In particular, do not assume `crt-toolchain.cmake` lives in a new
 `cmake/` directory.
+The shared SDK subtree is one storage option. The CLI-owned review now separates
+project SDK version/profile selection from the undecided physical default:
+project-local payloads or shared immutable payloads with project bindings.
 
 SDKs, host tools, CLI versions, and ports have independent installation
 identities and lifetimes. Updates install a new directory and atomically change
@@ -159,8 +162,8 @@ native Clang/CMake paths. Delegate approved native-tool invocation to the
 existing bridge and preserve paths containing spaces or Korean characters in
 actual argv. Pin exact environment construction to an SDK contract version.
 
-`crt doctor` must diagnose at least host/target identity, Developer Mode and
-symlinks, LLVM/LLD/OS SDK, CMake/Ninja, required Python/Perl/pkg-config/generators,
+The environment/project scopes of the draft `doctor` command diagnose host/target,
+Developer Mode and symlinks, LLVM/LLD/OS SDK, CMake/Ninja, required generators,
 tool runtime DLLs, recipe applet requirements, and actual CRT compile/link/run
 probes. It must not automatically install OS SDKs/compilers or change security
 settings.
@@ -369,20 +372,22 @@ completion checklist. Each repository's TODO/acceptance owns actual status.
 
 | Stage | `crt` producer work | `crt-cli` consumer work | Acceptance goal |
 | --- | --- | --- | --- |
-| D0 Contracts/inventory | Inspect SDK/host tools/app imports/current driver gaps; schema fixtures | Minimal CRT-native CLI consuming a pinned SDK; lock/JSON drafts | CLI compile/link/run; no private headers/build tree; distinct host/target identities |
-| D1 Windows environment/bootstrap | Host tools/aliases/DLL/rootfs bundle and technical validation | Independent CLI closure, environment resolver, doctor/env/shell | CLI runs without an SDK; actual CRT mksh/awk/make without global PATH changes |
-| D2 Safe SDK management | Immutable stage artifacts and contract metadata | Profile installation/selection/update, verification/transactions/rollback | Linux/x86_64, macOS/arm64, Windows/x64 installs; spaces/Korean paths; tamper/interruption/DLL-collision handling |
+| D0 Contracts/inventory | SDK inputs/startup/link/import contracts and fixtures | Initial layout/product review, minimal CLI and single-executable feasibility; lock/JSON drafts | SDK-only compile/link/run; no private build inputs; distinct host/target identities |
+| D1 Windows environment/bootstrap | Separate host tools/rootfs and SDK technical validation | SDK-free single CLI executable, trust inputs, scoped doctor and host environments | Native one-file/HTTPS proof and actual CRT tools without global PATH changes |
+| D2 SDK management/self-upgrade | Immutable stage/profile artifacts and contract metadata | Project SDK storage/selection plus verified CLI self-upgrade transactions | Three-host installs/activation/recovery, path/collision checks and unchanged project pins |
 | D3 First source port | Existing zlib recipe/tests and packaged driver contract | Fetch/verify/build/test/store adapter | Windows CRT mksh/make static/shared zlib link/run; SDK/source roots unchanged |
 | D4 Dependencies/cache/lock | Review SQLite/libpng and host-generator/target-dependency roles | Resolver, variants/build keys, local cache, project views | SQLite and libpng->zlib; rerun/recovery/ABI-mixing rejection; three-native-OS replay |
 | D5 Application workflow | Improve SDK-only CMake/runtime/public imports | new/add/configure/build/run, layer-specific templates | External C/C++ and supported GFX/Media/UI/Web apps run; Web worker/ABI checks |
 | D6 Deployment/automation stability | Runtime closure and notices/source contracts | test/package, locked/offline/cancel, versioned JSON | App runs without SDK/store/build roots; CI/AI controls workflow through commands; repeated child-process acceptance |
 | D7 Studio integration | Consumer-driven generic UI/input/PAL gaps | CLI compatibility and debug-adapter contracts | A thin [Studio](crt_studio.md) frontend uses the same workflow |
 
-**Repository layout and self-test (adopted direction, 2026-10-22).** The
-`crt-cli` repository is laid out exactly as `crt new` generates a project
-(`crt.toml`, `crt.lock`, sources, tests, and a CMake entry that delegates to the
-SDK's `crt-toolchain.cmake`); it has no private layout. The template is owned by
-this repository and is what `crt new --template cxx` emits. The first binary is
+**Repository layout and self-test (adopted direction, clarified 2026-10-28).**
+Review the CLI's initial source/module/build layout in D0 before implementing
+the minimal CLI. The repository and generated C++ projects share the public
+project contract (`crt.toml`, `crt.lock`, sources, tests, and a CMake entry that
+delegates to the SDK's `crt-toolchain.cmake`). Internal module directories may
+evolve; this does not require identical full source trees or a permanent layout.
+The CLI repository owns template evolution and migration. The first binary is
 built by an ordinary external CMake build against the pinned Development SDK
 ([Development SDK](sdk_development_contract.md#full-sdk-and-development-sdk-adopted-direction-2026-10-22)).
 From the first stage that has `new`/`build`/`run`, the acceptance test is that
@@ -392,10 +397,20 @@ project builds and runs the same way. A layout the CLI cannot build with its own
 commands is a defect of the template, not an exception.
 
 Bootstrap proceeds B0 (SDK-based build; `--version`, `--help`,
-`doctor --bootstrap`), B1 (run without an SDK from the runtime bundle),
+bootstrap diagnosis and single-executable link feasibility), B1 (single CLI
+executable on an SDK-free host, with agreed resource/OS boundaries),
 B2 (CRT-native HTTPS download with fail-closed trust checks) and B3
 (SDK/Host Tools installation), mapped onto D0-D2. Host Tools are not needed to
 start the CLI. A checksum file alone is not publisher authentication.
+
+The executable prefix is currently drafted as `crt`; choosing it versus
+`crt-cli` is an open CLI product decision, not a rename performed here.
+CLI owns self-upgrade, self/environment/project doctor, generated-project SDK
+acquisition and physical storage policy in its local design and acceptance.
+Project SDK version/profile/target/content selection stays independent of CLI
+updates. Project-local SDK copies versus shared immutable storage/bindings,
+acquisition timing and the detailed one-file/helper policy remain early review
+decisions. SDK profiles select content, not Debug/Release compiler settings.
 
 D0 snapshots may start with manually installed existing SDKs. Unfinished D1/D2
 work does not block runtime development or recipe-schema fixtures. Conversely,

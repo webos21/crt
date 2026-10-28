@@ -60,46 +60,121 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-No active tranche. The next ordered producer gate is
-[SDK Producer Contract Gate P0](#crt-developer-experience-sdk---cli---studio).
-
-## Planned
-
-SDK Producer Contract Gate P0 below follows the completed SDK split and local
-assembly rehearsal ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
-The remaining sections are independent follow-ups, not a prerequisite chain for
-CLI/Studio or a reopening of accepted SDK stages; long-term extensions stay
-conditional on a real consumer.
-
 ### CRT developer experience: SDK -> CLI -> Studio
 
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
-[Studio](docs/design/crt_studio.md) is a later CLI consumer; the development
-contracts remain design work, not an implemented or released product.
+This whole initiative is active; the current focus is **Tranche 1 planning and
+contract review**. Numbered tranches 1-8 map to D0-D7, not implementation claims.
+SDK split and local assembly rehearsal are complete
+([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
+The SDK Producer Contract Gate P0 is the producer work within the early
+tranches, developed together with the CLI consumer rather than completed as a
+separate prerequisite to all CLI work. Later tranches extend those contracts.
+D0 may start with a manually installed identified SDK snapshot; promotion gates
+apply before consumer-lock adoption, not before every bootstrap experiment.
+Use one authorized local session for the sibling `crt` and `crt-cli` repositories:
+produce a Dev SDK candidate, hand off an immutable copy/extraction outside the
+producer checkout/build tree, run the CLI consumer, then fix/rebuild/retest.
+A public SDK release is not required for this loop; source/build-tree access is
+for producer work and diagnosis, while CLI inputs remain the public SDK surface
+([candidate policy](docs/design/sdk_development_contract.md#7-change-validation-and-release-principles)).
 
-**SDK Producer Contract Gate P0** (feeds CLI D0/D1; not started):
-
-- [ ] Supply external-consumer identity/capability fixtures, distinguishing
-  existing manifest/stage/port formats from the proposed development contract.
-- [ ] Select coherent exact producer assets before promotion/consumer locks;
-  resolve the rehearsal's same-name source-asset variants
-  ([assembly review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
-- [ ] Publish the SDK-owned startup/link/runtime-query rules and public imports for both the Full
-  and Development SDK, and the runtime-bundle contract: closure computed from the CLI's
-  ELF/Mach-O/PE imports, app-local placement, Windows import resolution at load.
-- [ ] Define host-tools/rootfs identity and runtime closure separately from the
-  target sysroot; validate actual native tool/alias execution.
-- [ ] Validate the minimum CRT-native CLI HTTP/TLS stack and trust inputs for bootstrap without an
-  installed development SDK, including fail-closed negative cases (the SDK producer
-  transport scope is in [SDK split acceptance](docs/acceptance/sdk_split_acceptance.md)).
-- [ ] Record independent consumer build/run and ABI evidence for each initial
-  native pair before promoting the corresponding artifact/consumer lock.
-
+CRT owns the SDK/host-tool/recipe work below; CLI and
+[Studio](docs/design/crt_studio.md) own their implementation and acceptance.
+Reviewed consumer planning baselines: CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93`,
+Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`; these are not artifact locks.
 Follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review);
 the CLI repository owns adoption evidence in `docs/compatibility.md`.
-Add lightweight automated contract/link checks once fixtures exist, without
-duplicating full WebKit builds for documentation changes.
+
+#### Tranche 1. SDK/CLI contracts and minimal bootstrap (P0 + D0)
+
+- [ ] **1.1** Review the CLI command name, single-executable distribution boundary
+  and bootstrap command scopes; retain unresolved storage/acquisition/resource decisions.
+- [ ] **1.2** Review the initial CLI source/module/build layout before implementation;
+  share a public project/template contract while allowing internal layout evolution.
+- [ ] **1.3** Review actual SDK candidates, public wrappers/imports and host/target
+  identities; record local handoff, producer/CLI snapshots, archive/content hashes and tools.
+- [ ] **1.4** Define project SDK identity/capability and lock/JSON fixtures, distinguishing
+  existing formats from proposed contracts; add focused contract/link checks.
+- [ ] **1.5** Supply SDK-owned startup/link rules for minimal CLI help/version/bootstrap
+  diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
+- [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
+  from the relocated candidate with producer trees unavailable;
+  review native consumer/ABI evidence before each initial pair's adoption
+  ([CLI D0 acceptance baseline](https://github.com/webos21/crt-cli/blob/5fcdc995d231fe2f9dbab4292000a81e0b4fce93/docs/acceptance/bootstrap_acceptance.md)).
+- [ ] **1.7** Select coherent exact assets before promotion/consumer locks;
+  resolve the rehearsal's same-name source-asset variants without relabeling builds.
+
+#### Tranche 2. SDK-free CLI runtime and host environment (P0 + D1)
+
+- [ ] **2.1** Prove the single-executable CLI on SDK-free native hosts through actual
+  imports, self-diagnosis and declared OS dependencies; review trust/resource/helper policy.
+- [ ] **2.2** Separate host-tools/rootfs identity and closure from target sysroots;
+  validate native CRT tools/aliases, paths and bounded owned-process cleanup.
+- [ ] **2.3** Validate CLI SDK-free HTTP/TLS/trust and fail-closed negatives with
+  the CLI-owned D1-07 gate; reuse the [SDK transport evidence](docs/acceptance/sdk_split_acceptance.md).
+
+#### Tranche 3. Immutable SDK installation and selection (D2)
+
+- [ ] **3.1** Supply exact stage/profile artifacts and contract metadata for CLI
+  installation/selection/update; promote producer artifacts before consumer locks.
+- [ ] **3.2** Review three-host consumer transactions, tamper/interruption recovery
+  and path/DLL collisions; keep project-lock updates explicit.
+- [ ] **3.3** Support CLI-owned self-upgrade staging, candidate diagnosis, OS-specific
+  activation and rollback; upgrading the CLI must preserve project SDK/port pins.
+
+#### Tranche 4. First source-built port (D3)
+
+- [ ] **4.1** Expose the existing zlib recipe/driver through a versioned public
+  adapter, retaining SDK-owned configure/build and ABI policy.
+- [ ] **4.2** Review Windows CRT-shell/make static/shared zlib build/link/run;
+  require unchanged SDK/source inputs and a separate CLI-owned port store.
+
+#### Tranche 5. Dependencies, variants, locks and cache (D4)
+
+- [ ] **5.1** Review SQLite and libpng-to-zlib recipe/dependency contracts,
+  distinguishing host generators, target ports and SDK-provided dependencies.
+- [ ] **5.2** Support CLI build-key/project-view/cache validation with three-host
+  static/shared, ABI-mismatch, collision and rerun/recovery evidence.
+  Bind native ports to exact SDK/target/tool identities regardless of storage backend.
+
+#### Tranche 6. SDK-only application workflow (D5)
+
+- [ ] **6.1** Complete public imports and startup/link/runtime-query rules for
+  Development and supported Full stages; keep technical policy in the SDK.
+- [ ] **6.2** Validate CLI-owned templates and external C/C++/GFX/Media/UI/Web
+  consumers, including runtime/worker resources and CLI self-build/run.
+- [ ] **6.3** Support project-local SDK selection by version/profile/target/content
+  identity; CLI owns storage mode, acquisition timing and failure/offline behavior.
+
+#### Tranche 7. Deployment and automation contracts (D6)
+
+- [ ] **7.1** Complete SDK-owned runtime/resource/source-notice contracts for
+  packages that run without development SDK/build/store roots.
+- [ ] **7.2** Review CLI test/package, versioned JSON/job events, cancellation,
+  locked/offline behavior and recovery through original consumer evidence.
+  Include the one-executable release goal and self/environment/project doctor scopes.
+- [ ] **7.3** Coordinate SDK/CLI publication from the exercised combination:
+  promote the SDK first, verify the actual promoted artifact, then adopt its exact
+  pin and release the CLI; independent versions need no simultaneous publication.
+
+#### Tranche 8. Studio integration and exercised combinations (D7)
+
+- [ ] **8.1** Support consumer-proven public UI/input/IME/debugger gaps; Studio
+  owns S0-S5 GUI/editor/debug/self-development acceptance, CLI owns workflow UX.
+- [ ] **8.2** Review actual SDK/CLI/Studio combinations against implemented
+  command/JSON/debug capabilities; retain native evidence and immutable adoption identities.
+
+Studio SDK-only S0/UI PoCs may proceed earlier. Live build/run requires the
+applicable D5/D6 capabilities, not completion of every tranche or D7 approval
+([feature prerequisites](docs/design/crt_studio.md#5-staged-goals)).
+
+## Planned
+
+The following sections are independent follow-ups, not prerequisites for the
+active SDK/CLI/Studio initiative or a reopening of accepted SDK stages;
+long-term extensions stay conditional on a real consumer.
 
 ### Focused CRT/PAL follow-ups: revalidate before fixing
 
