@@ -12,6 +12,9 @@ preview (Windows/x64, macOS/arm64 and Linux/x86_64, 27 uploaded files). The
 [original release notes](../releases/release_notes_v0.4.0-preview.1.md) are
 retained as history, not a current download. For present build/use contracts,
 see the [distribution guide](distribution.md) and [Web acceptance](../acceptance/crtweb_acceptance.md).
+The later [local assembly rehearsal](../acceptance/release_qualification.md)
+records Full/Development candidates and their exact native/cross scope; it
+does not replace the withdrawn preview with a new public download.
 
 That preview is positioned as the first public developer preview of the CRT
 Graphics/Media SDK stage (`04-gfx-media`).

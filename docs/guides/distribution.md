@@ -132,8 +132,11 @@ the collected archives, verify their payloads/checksums and retain the source
 offer and source-asset provenance before accepting assembly. A version
 parameter creates no Git tag. Reproducing an identified collector run requires
 its exact producer commit, even if a newer checkout changes only documentation.
-See [the first native Linux rehearsal](../acceptance/release_qualification.md#linuxx86_64-positive-assembly-2026-10-27)
-for its commands, artifact identities and outstanding host replay.
+See the [assembly rehearsal record](../acceptance/release_qualification.md)
+for the native commands, exact artifact identities and separately bounded
+Linux/aarch64 cross compile/package procedure. The in-tree Web targets require
+a native pair; cross packaging does not execute target programs or grant
+native device acceptance.
 
 #### S5 package, negative and identity replay
 

@@ -6,7 +6,7 @@ identity policy belong to the [SDK contract](../design/sdk_development_contract.
 commands belong to the [distribution guide](../guides/distribution.md#development-sdk-producer-and-external-validation).
 Original B4/B5 results remain in [build-system acceptance](build_system_acceptance.md#development-sdk-windows-replay).
 
-## Remaining matrix
+## Accepted native matrix
 
 | Pair | Development producer / ordinary consumer | Producer-tree-hidden consumer |
 | --- | --- | --- |
@@ -17,18 +17,19 @@ Original B4/B5 results remain in [build-system acceptance](build_system_acceptan
 | Windows/arm64 | Native producer, archive/extraction, static/shared eight-case replay and port recipe tests pass below | Pass below under a restricted token, using the extracted archive |
 
 S4's local collector implementation and negative/atomic fixtures are complete.
-Actual clean/tagged positive collection remains the independent
-[release qualification](../../TODO.md#release-qualification-and-assembly-rehearsal)
-gate. No tag, upload, consumer lock or runtime adoption is part of this record.
+Actual clean positive collection belongs to the independent
+[release qualification record](release_qualification.md), which retains the
+later matching artifacts and assembly review. No tag, upload, consumer lock or
+runtime adoption is part of this SDK split record.
 
 ## S5 native negative and candidate handoff gate
 
 S2/S3's five native producer and isolated-consumer results remain accepted at
 their recorded baselines. S5 adds required negative/pairing evidence and hands
 off identified producer candidates; it does not wait for a CLI implementation
-or grant release qualification. The current remaining scope is:
+or grant release qualification. The accepted native scope is:
 
-| Pair | Required native negative evidence | Candidate identity / remaining work |
+| Pair | Native negative evidence | Candidate identity |
 | --- | --- | --- |
 | Linux/x86_64 | Eight S5 negatives and packaged isolated consumer pass below | New `handoff.json` below |
 | Linux/aarch64 | Missing static/shared curl, changed inherited runtime and stale Full rejection already passed in the [native replay](#linuxaarch64-native-producer-and-package-replay-2026-10-27) | Existing native archive/source identity retained there |
@@ -364,7 +365,9 @@ archives retain exact link-aware identity. Hosted CI and native macOS/Windows
 execution of the S5 driver were **Not run** at the original Linux checkpoint.
 The later native macOS/Windows records above supersede that pending scope,
 including Windows/arm64 (Full reference `05-ui`, since `06-web` is not built
-there). Actual tagged collection remains in release qualification.
+there). The later clean-version local collector runs belong to
+[release qualification](release_qualification.md); these S5 handoffs keep their
+original identities and decisions.
 
 ## Windows libc++ long-path fetch recovery (2026-10-27)
 

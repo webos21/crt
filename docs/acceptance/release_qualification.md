@@ -1,14 +1,17 @@
 # Release qualification and assembly rehearsal
 
 This record owns the identified artifacts and positive local collection evidence
-for the active [release qualification work](../../TODO.md#release-qualification-and-assembly-rehearsal).
+for the release qualification and assembly rehearsal, completed **2026-10-28**
+within the per-host local scope below; completion is recorded in [HISTORY](../../HISTORY.md).
 The [build-system scope](build_system_acceptance.md#release-qualification-scope-split-2026-10-23)
 defines the gate; the completed [SDK split](sdk_split_acceptance.md) does not
 qualify old candidates for release. CLI adoption remains consumer-owned.
 
-Linux/x86_64, macOS/arm64 and Windows/x64 local assembly pass below, and Linux/aarch64 passes natively for the Development profile. The
-Linux/aarch64 Full `06-web` cross-target packaging (x86_64 host), followed by the combined final review,
-remain open. Existing SDK split evidence stays accepted at its original pins.
+Linux/x86_64, macOS/arm64 and Windows/x64 native local assembly pass below.
+Linux/aarch64 passes native Development assembly and separate Full `06-web`
+cross compile/package from x86_64. The [combined review](#final-combined-assembly-review-2026-10-28)
+accepts the local rehearsal and retains the promotion boundary and source-asset
+variants. Existing SDK split evidence stays accepted at its original pins.
 
 ## Execution scope
 
@@ -442,3 +445,197 @@ Not covered: a `06-web` collector/S5 proof for Linux/aarch64, Windows/arm64's `0
 promotion, consumer locks, tag creation, upload and public release. Evidence:
 `../crt-rq-3741ea5/out/release-qualification-linux-aarch64-20261028/` (`configure.log`, `dev-build.log`, `release-build.log`,
 `cxx-test.log`, `external.log`, `build/release/dev/`); the worktree is outside the main checkout and is not committed.
+
+## Linux/aarch64 Full cross assembly (2026-10-28)
+
+Build host: Linux/x86_64, Clang 21.1.8. Target: Linux/aarch64. Producer source:
+clean detached `3741ea515f129483efa631c6d2663d27de9ebc62`; version parameter:
+`v0.4.0-rehearsal.20261027`. This is a separate cross compile/package record,
+not execution of the native-only in-tree Web targets or a native ARM browser
+replay. Evidence root: `out/release-qualification-cross-20261028/`.
+
+The bootstrap used `cmake/toolchains/linux-aarch64.cmake`, fresh C/C++ runtime
+objects and source-only/download caches identified in `source-caches.json`.
+The host compiler installation has no AArch64 compiler-rt archive, so the
+target builtins were compiled from the owned AOSP LLVM pin
+`37f38d1f3276b62fba09462ab4807dce846c732d`, using CRT headers and compiler
+intrinsic headers. Initial CMake option discovery and corrected configure
+logs are retained. Imported libc++ source headers supply only the bootstrap
+discovery path; the installed runtime uses its own target-generated headers.
+`crt-cxx-dist` builds fresh target libc/libm/libdl, shell and imported C++
+runtime; no target test executable is run on the build host.
+
+The explicit cross predecessor procedure compiles/installs the existing
+standalone `03`, `04` and `05` projects, using the shared packaging helpers,
+target Skia/ports and explicit OS library bindings. It does not invoke stage
+drivers that require native execution. Retained procedural entry points are
+`prepare_predecessor.py`, `assemble_predecessor.py`, `run_web.py`, their command
+JSON files and per-stage configure/build/verification logs. All **23** inherited
+runtime digests of `sdk05` equal the fresh plain `02-cxx`; the predecessor
+inventory contains **136** AArch64 ELF images and **29** AArch64-only archives.
+
+Target Vulkan/Wayland/VA-API libraries and narrow VA/V4L2 header inputs came
+from official Ubuntu ports packages extracted under `target-system/root`,
+never installed over the host. The signed InRelease, index size/hash and each
+package size/hash are verified; `target-system/imports.json` and
+`signature.log` retain provenance. This uses the existing PAL boundary and
+`CRT_LINUX_SDK_ROOT` sentinel, not a foreign libc sysroot or public-header
+replacement. The host Wayland scanner is separately identified as x86_64,
+version 1.26.0, in `host-scanner.json`; only its generated target protocol
+objects enter the SDK.
+
+Preparation failures remain visible with their recoveries:
+
+- Relocated target VA pkg-config flags initially exposed the global OS include
+  root to every FFmpeg translation unit. The generated cross recipe removes
+  that exact global flag after configure; existing per-object adapter flags
+  retain the necessary VA/V4L2 inputs. CRT's Bionic-compatible public headers
+  remain authoritative. No upstream source is patched.
+- Absolute install RPATHs and two temporary VA library-search paths in installed
+  `.pc` files failed ordinary verification. The procedure uses the existing
+  ELF relocation helper to generate layout-relative `$ORIGIN` paths and removes
+  only those exact scratch search paths, retaining the OS library names.
+- An omitted architecture argument caused an incorrect external-loader
+  declaration, caught by verification and regenerated with explicit aarch64.
+  A first UI link also rejected a host x86_64 Wayland library; rerunning with
+  the four explicit target OS library bindings resolved the search ambiguity.
+
+Initial failure logs/configuration and final passing `verify03.log`,
+`verify04.log`, `verify05.log`, `predecessor-inventory.json` are retained. The
+strict verifier and architecture checks are unchanged. These procedural
+recoveries change no committed CRT/runtime/upstream source.
+
+The Full build uses the official explicit isolated entry point:
+
+```sh
+python3 tools/crt-stage-build.py \
+  --sdk-root "$evidence/sdk05" \
+  --recipe "$bootstrap/stage-sources/06-web.json" \
+  --asset "$bootstrap/stage-sources/crt-v0.4.0-rehearsal.20261027-linux-06-web-source.tar.xz" \
+  --work-root "$evidence/web-build" --output "$evidence/sdk06" \
+  --dependency-jobs 6 --source-cache "$verified_webkit_source_cache" \
+  --linux-system-lib-dir "$evidence/target-system/root/usr/lib/aarch64-linux-gnu"
+```
+
+Here `$bootstrap` is the fresh cross build root and `$evidence` is the evidence
+root above. `web-command.json` records the exact absolute invocation at the
+frozen checkout. Build-host gperf/Perl/Python/Ruby/ICU generators are separate
+from target ICU/libc++/JSC/WebCore/WebKit; fontconfig's generated header is
+reproduced in the host-only proof directory and compared with its target input.
+
+The build and ordinary `06-web` verifier pass. `cross-build-evidence.json`
+identifies all seven host executables as x86_64 and all five target artifact
+families as AArch64. Fontconfig's reproduced header SHA-256 is
+`299726ec60bc7a06ce3e523c75aef6745cb94cec4450e8ad53817427a3f7c84b`.
+The final SDK contains **176** AArch64 ELF images and **29** archives whose
+members are all AArch64. All **23** inherited runtime digests still equal
+`sdk05` and the fresh plain `02-cxx`. All five source assets are clean at the
+frozen commit and byte-identical to the Linux/x86_64 rehearsal's source assets.
+Target discovery, source correspondence/patches,
+licenses/source offer, advisory/support-window and the unchanged owner decision
+pass the ordinary package gate. Target execution is **not attempted**.
+
+Receipts under `web-build/build/06-web/`: `host-tools.json`,
+`target-discovery.json`, `cross-build-evidence.json`,
+`target-elf-inventory.json`, `target-archive-inventory.json`, and
+`host/fontconfig-proof/fccase.h`. The SDK embeds the host-tool and cross-build
+proof in `share/crt/`; host generator binaries are not shipped.
+
+Actual Full collection uses the unchanged strict ordinary collector, after
+`crt_sdk_release.check_full_source` independently verifies the clean `06-web`
+source asset. `collect_cross.py` copies the SDK byte-for-byte to the canonical
+`full input/06-web` directory, then runs at the frozen clean checkout:
+
+```sh
+python3 tools/prepare_release_assets.py \
+  --dist-root "$bootstrap/dist" --version v0.4.0-rehearsal.20261027 \
+  --output-dir "$evidence/full-release" \
+  --stage-source-dir "$bootstrap/stage-sources" --stages 06-web \
+  --sdk "06-web=$evidence/full input/06-web"
+```
+
+No dirty allowance, dry run or native-only wrapper bypass is used. This is the
+explicit cross collector path, not a claim that `crt-full-release` or paired
+native S5 ran for this target. The release manifest's legacy `host` field names
+the SDK target; the cross proof separately identifies the x86_64 build host.
+
+| Collected artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.4.0-rehearsal.20261027-linux-aarch64-06-web.tar.xz` | 92,628,300 | `7d7a0c5a8688ac42062e1f70fec32bf4a2b3c70f217bf68c9d24890a1d05eb2d` |
+| `crt-v0.4.0-rehearsal.20261027-corresponding-source.tar.xz` | 25,235,504 | `b04a5d60a854152381619339fc68350a9ecd4f4e945908546d7ba89bc36710a7` |
+
+All seven collected asset sizes/hashes and `SHA256SUMS-linux-aarch64` verify.
+Extraction into a path containing spaces passes the ordinary `06-web` verifier
+and preserves all **3,697** file/symlink entries exactly. Original SDK inventory
+is unchanged after collection. The corresponding-source bundle is byte-identical
+to the three native Full collections above. Receipts: `collection-command.json`,
+`collection.log`, `full-release/release-manifest-linux-aarch64.json`,
+`extracted-verifier.log`, `cross-assembly-result.json`; the complete procedural
+audit is `collect_cross.py`. The result receipt SHA-256 is
+`a860ed41852a7419fb4a59e4e256c236ca0a1ffdd9c7172df25b3078f239428e`.
+The clean producer checkout and ignored outputs remain at their recorded paths;
+`retention.json` records their location. **Accepted for cross compile/package only**: no
+target execution, native ARM browser/device claim or Dev/Full native S5 pairing
+is inferred from this collection.
+
+## Final combined assembly review (2026-10-28)
+
+**Local rehearsal accepted and closed.** The required native new-pin replays,
+actual native collectors, separate ARM cross packaging and final evidence review
+are complete at the frozen producer/version. This accepts identified per-host
+local assemblies, not a globally promoted publication set.
+
+| Build/target scope | Accepted collection | Execution boundary |
+| --- | --- | --- |
+| Native Linux/x86_64 | Actual `crt-dev-release` and `crt-full-release` | Core/C++ and native packaged Web/consumer/S5 replay |
+| Native macOS/arm64 | Actual `crt-dev-release` and `crt-full-release` | Core/C++ and native packaged Web/consumer/S5 replay |
+| Native Windows/x64 | Actual `crt-dev-release` and `crt-full-release` | Core/C++ and native packaged Web/consumer/S5 replay |
+| Native Linux/aarch64 | Actual `crt-dev-release` | Core/C++, extracted Dev and source-hidden consumer; no Full Web replay |
+| Linux/x86_64 -> Linux/aarch64 | Explicit Full `06-web` cross collector above | Compile/package, architecture/host-tool separation and extracted inventory; no target execution |
+
+The original host records above retain their exact commands, hashes, failures
+and execution scope. macOS/Windows/native ARM results are reviewed from those
+committed records, not described as new executions on this x86_64 machine.
+The original Linux receipt and its ten referenced evidence hashes were also
+rechecked unchanged (`native-linux-receipt-review.json` under the cross evidence
+root). Current focused source/licensing/Web stage/release/profile/source-offer
+suites select **168** tests: **164 pass**, **four host-conditional skips**, no
+failures/errors (`final-tooling-tests.{log,json}`). No runtime code changed in
+this final review. `final-review.json` retains the combined review and the
+documentation path/anchor check (257 local links, no unresolved references).
+
+All new rehearsal artifacts use clean CRT `3741ea5` and the same local version
+parameter. That is an identity check, not a claim of equal runtime bytes across
+architectures or independent builds. Each native paired replay compares its own
+plain predecessor/Dev/Full runtime: **23** Linux/x86_64, **18** macOS/arm64 and
+**27** Windows/x64 entries. The native Linux/aarch64 Dev run independently
+compares **23** entries to its own plain predecessor. Its bytes are not silently
+paired with the separately cross-built Full SDK, and no native S5 result is
+claimed for that new cross artifact. Windows/arm64 Full `06-web` remains outside
+support; the earlier SDK split uses `05-ui` there.
+
+### Promotion boundary and source-asset variants
+
+The per-host local candidates are not one flattened public upload directory.
+Final review found two different clean Linux `02-cxx` source assets with the
+same filename, `crt-v0.4.0-rehearsal.20261027-linux-02-cxx-source.tar.xz`:
+
+| Candidate scope | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Native Linux/x86_64; also reproduced by the ARM cross producer | 8,561,756 | `c80622128c957c20479213ff455c410a8bf0f4a14d2a17ec0453d5a9a5b9b373` |
+| Native Linux/aarch64 Dev | 8,557,328 | `8fdd7229e65c8e005e15ba66c43aa4f688546b3f30bbf52b42906c69a160aefd` |
+
+Each local collector checks its own recipe's exact size/hash; the two files
+cannot substitute for one another. This review does not claim a member-by-member
+comparison of the native ARM archive on this host, or change an existing recipe
+to hide the difference. Before public assembly/promotion, select a coherent
+exact asset set and rebuild/recollect affected candidates where required, or
+adopt an explicitly reviewed naming contract. This is retained under
+[SDK Producer Contract Gate P0](../../TODO.md#crt-developer-experience-sdk---cli---studio).
+It does not reopen the completed source-hidden SDK split or invalidate an
+individually identified local collection.
+
+Selecting the rehearsal version creates no Git tag. No assets were uploaded or
+promoted, no consumer lock changed and no CLI/Studio compatibility was accepted.
+The existing Web owner record is unchanged; current advisory/support-window,
+source-offer and exact artifact checks remain required for future publication.

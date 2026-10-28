@@ -11,8 +11,8 @@ links this evidence. Existing Full SDK and Development SDK
 production remain separate from release publication approval.
 Build-system consolidation closes after native entry-point replay and final
 review, not after an actual clean/tagged release collection. The separate
-[release qualification item](../../TODO.md#release-qualification-and-assembly-rehearsal)
-retains that positive rehearsal and its final artifact review; see the
+[release qualification record](release_qualification.md)
+owns that positive rehearsal and its final artifact review; see the
 [scope split](#release-qualification-scope-split-2026-10-23).
 
 ## Public stage target naming (2026-10-26)
@@ -887,7 +887,7 @@ actual clean/tagged release assembly. Earlier checkpoints calling that remaining
 rehearsal "B4" describe the former combined scope; their test results and failure
 evidence are unchanged.
 
-The independent [release qualification work](../../TODO.md#release-qualification-and-assembly-rehearsal)
+The independent [release qualification work](release_qualification.md)
 starts after build-system consolidation and the required native SDK producer /
 verification gates. Before accepting local release assembly it must establish:
 

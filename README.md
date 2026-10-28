@@ -210,11 +210,16 @@ Networking & Streaming
       |
 Application UI
       |
-Web Runtime          <-- current
+Web Runtime
 ```
 
 WebRTC, WebGPU, EME/DRM and other large Web capabilities are consumer-driven
 follow-ups, not prerequisites of the accepted Web embedding baseline.
+
+The SDK producer supports Full and Development profiles. The next developer
+workflow is SDK -> CLI -> Studio, starting with the
+[producer contract gate](docs/design/sdk_development_contract.md). CLI/Studio
+commands and compatibility contracts remain design work.
 
 See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
 
@@ -458,6 +463,13 @@ CRT is built as cumulative SDK stages.
 
 A later stage is expected to contain everything from the preceding stage.
 
+The Full SDK follows that cumulative chain. The smaller Development SDK is
+`02-cxx` plus static/shared zlib, Mbed TLS and curl for native developer tools;
+it excludes graphics, media, UI and Web. Build and validate it with
+`cmake --build --preset <preset> --target crt-development-sdk-test`.
+Profile contents and external-consumer validation belong to the
+[distribution guide](docs/guides/distribution.md#development-sdk-producer-and-external-validation).
+
 The stronger release gate is a predecessor-only source-stage build:
 
 ```text
@@ -570,14 +582,15 @@ cmake --build --preset <preset> --target crt-dev-release
 cmake --build --preset <preset> --target crt-full-release
 ```
 
-They require a real `CRT_RELEASE_TAG`, a clean source tree, matching producer
-commits and byte-identical inherited runtimes. The default `development` tag
+They require a valid release/rehearsal `CRT_RELEASE_TAG`, a clean source tree,
+matching producer commits and byte-identical inherited runtimes. The default `development` tag
 fails immediately. Development SDK means `02-cxx` plus zlib/Mbed TLS/curl, not
 a development-candidate Web build; Full SDK here is cumulative `06-web`.
-No target uploads a release. New producer paths are under
-[Windows acceptance](docs/acceptance/build_system_acceptance.md); Linux/macOS
-replay follows the Windows implementation, so target existence is not a claim
-that this release path has passed on every host.
+No target uploads a release or creates a Git tag. The
+[assembly rehearsal record](docs/acceptance/release_qualification.md) owns the
+identified native collector results and the separate Linux/aarch64 cross path;
+the in-tree Web targets accept native pairs only. Artifact promotion and
+consumer adoption follow the [SDK contract](docs/design/sdk_development_contract.md).
 
 ### Rebuilding only what changed
 

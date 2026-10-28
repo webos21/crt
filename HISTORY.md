@@ -11,6 +11,28 @@ substantive update.
 
 ## 2026-10-28
 
+### Close the release qualification and local assembly rehearsal
+
+Completed the remaining Linux/x86_64-host -> Linux/aarch64 Full `06-web`
+cross build from the same clean `3741ea5` and rehearsal version as the native
+records. Fresh target core/C++, Skia, ports and standalone predecessors feed
+the official isolated Web builder; host generators, target binaries/archives,
+fontconfig proof, ordinary distribution verification and inherited-runtime
+equality pass. Actual strict cross collection and space-path extraction also
+pass, with the corresponding-source bundle identical to the three native Full
+collections. Preparation failures and bounded procedural recoveries are retained;
+no committed runtime or upstream source changed.
+
+Reviewed the pulled macOS/Windows/native ARM evidence together with the original
+Linux receipts and current focused tooling tests. Closed the per-host local
+rehearsal in TODO and synchronized STATUS, root README and owning guide/acceptance
+links. The imported Toybox README remains unchanged. Native ARM Dev and cross
+Full execution/pairing limits remain explicit. Same-name Linux source-asset
+variants require coherent selection/rebuild before future promotion under P0;
+no tag, upload, artifact promotion or CLI adoption occurred. Exact commands,
+artifact hashes, receipts and final scope:
+[release qualification](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28).
+
 ### Pass the native Linux/aarch64 Development assembly at the WebKit 2.54.2 pin
 
 Ran the Development profile natively on the aarch64 guest from the same clean `3741ea5` (detached worktree) and version

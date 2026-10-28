@@ -5,10 +5,10 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-10-22**.
-Reviewed commits through `2d2853d` together with the owner-approved Tranche 10
-closure changes in the working tree. This is a documentation synchronization,
-not a new runtime replay or a claim that those edits are already committed.
+Last synchronized with the source tree and git history: **2026-10-28**.
+Reviewed commits through `2ceba30` and the final local assembly review recorded
+in [release qualification](docs/acceptance/release_qualification.md). Its frozen
+producer is clean `3741ea5`; later documentation does not relabel those artifacts.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -274,7 +274,7 @@ not evidence that a new release has been published. Original gates, artifact
 identities and limitations belong to
 [Web acceptance](docs/acceptance/crtweb_acceptance.md#tranche-10-closure-and-owner-release-approval-2026-10-22).
 
-- The product pin is WPE WebKit 2.54.1 with source/patch correspondence,
+- The product pin is WPE WebKit 2.54.2 with source/patch correspondence,
   notices, SPDX composition and a version-bound advisory snapshot. The original
   native Linux WPE reference remains a separate baseline, not the CRT product.
 - JavaScriptCore has interpreter, Baseline/DFG/FTL, WebAssembly, profiler and
@@ -302,7 +302,7 @@ matrix. A completed historical replay does not certify every new build.
 | Linux/x86_64 | Regenerated SDKs; isolated stage/relink evidence | Native isolated SDK, installed/relocated consumers; later `04 -> 05 -> 06` chain and scoped installed-device gates |
 | macOS/arm64 | Regenerated SDKs; isolated stage/relink evidence | Native isolated `04 -> 05 -> 06`, relocation, consumer and runtime checks |
 | Windows/x64 | Regenerated SDKs; isolated stage/relink evidence | Native isolated SDK, fresh predecessor/space-path replay, external consumers and PE Host ABI checks |
-| Linux/aarch64 | Regenerated `01-c..05-ui`, native isolated `03 -> 04 -> 05`, relink evidence | x86_64-host cross compile/package; additional native in-tree WebKit run, with guest audio/GPU/VA limits |
+| Linux/aarch64 | Regenerated `01-c..05-ui`, native isolated `03 -> 04 -> 05`, relink evidence | x86_64-host cross compile/package; the separate older native in-tree WebKit run retains its original pin and guest audio/GPU/VA limits |
 | Windows/arm64 | Regenerated `01-c..05-ui`, isolated `03 -> 04 -> 05`, relink with packaged FFmpeg | `06-web` unsupported; lower-stage VM skips are not hardware acceptance |
 
 The inherited C/C++/shell notices, generated LGPL source offer, corresponding
@@ -312,14 +312,25 @@ regeneration and owner review are complete for the supported scope; the
 Exact native results remain in the original acceptance records, not copied
 as new test results here.
 
+The [Full / Development SDK split](docs/acceptance/sdk_split_acceptance.md) is
+complete across the five native pairs at their recorded baselines. Full follows
+the cumulative stages; Development is `02-cxx` plus static/shared zlib, Mbed TLS
+and curl. It has no graphics/media/UI/Web content. Its profile, external
+source-hidden consumers and S5 handoffs are distinct from release qualification
+and future CLI adoption. Windows/arm64 uses Full `05-ui` as its reference.
+
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
-record accepts only the completed native/cross-packaging reminder. Failed
+record accepts only the recorded native/cross-packaging scope. Failed
 advisory checks, a stale micro pin, expired support grace or unrelated blockers
 still prevent publication. Existing development SDKs keep their recorded
 candidate decisions; new artifacts must embed the approval and pass current
-release checks. No replacement release or new archive was published by this
-documentation work. See the [release guide](docs/guides/release_preview.md#05-ui-and-06-web).
+release checks. The [local assembly rehearsal](docs/acceptance/release_qualification.md)
+records the clean frozen producer, native Dev/Full collectors and separate ARM
+cross scope at WebKit 2.54.2. These local candidates are unpromoted; same-name
+source-asset variants must be resolved before selecting a public upload set.
+No replacement binary release or CLI/Studio adoption has been published.
+See the [release guide](docs/guides/release_preview.md#05-ui-and-06-web).
 
 ## Verification Model
 
@@ -396,8 +407,9 @@ statuses, and exceptions are maintained in:
 
 ### CRT/PAL
 
-- The DNS resolver is intentionally small: synchronous UDP A-record lookup,
-  without complete IPv6, TCP fallback, search-domain, or caching behavior.
+- The built-in Linux/Windows DNS resolver supplies synchronous UDP A-record
+  lookup; AAAA queries, TCP fallback, search domains and caching remain open.
+  IPv6 literals and sockets already exist; macOS uses the system resolver.
 - Toybox `timeout` remains disabled until cross-process signal delivery and
   meaningful `SIGCHLD` `siginfo_t` data are complete.
 - Interactive POSIX job control remains deferred. The project mksh build does
@@ -506,26 +518,25 @@ statuses, and exceptions are maintained in:
 - The release tool supports `05-ui` and `06-web`; that does not imply an uploaded
   binary release. The in-tree package ships `crtui/skia*.h` even when
   Skia/FFmpeg are off but builds the companion libraries only when they are on.
-- `crt-ui-dist` needs `-DCRTUI_ENABLE_LVGL=ON` (after `crtui-lvgl-fetch`); with
-  the default configuration it fails at `verify_dist.py` because the required
-  `ui-basic` sample is not built.
+- `crt-ui-dist` requires LVGL and its packaged sample. The native host presets
+  enable the complete LVGL/Skia/FFmpeg/curl path; explicitly minimal or disabled
+  configurations do not supply that package contract. Partial-option curl
+  combinations remain a bounded [follow-up](TODO.md#focused-crtpal-follow-ups-revalidate-before-fixing).
 
 ## Next Priorities
 
-No implementation tranche is active after Web Tranche 10 closure. The next
-planned producer increment is the **SDK Producer Contract Gate P0** in
+No implementation tranche is active after the SDK split and local assembly
+rehearsal closure. The next planned producer increment is the
+**SDK Producer Contract Gate P0** in
 [TODO](TODO.md#crt-developer-experience-sdk---cli---studio); CLI/Studio
 implementation and consumer compatibility acceptance have not started here.
 
 - Keep SDK identity/capability/startup/link/runtime contracts with CRT and use
   immutable public artifacts for external consumers. The separate CLI/Studio
   repositories remain documentation/bootstrap plans, not implemented products.
-- A new public release still needs an explicitly scoped assembly/publication
-  action and current artifact checks; approval alone does not perform it.
-- Two existing Windows relink-kit fixture portability failures (path separators
-  and a directly executed POSIX fake compiler) are tracked separately in
-  [TODO](TODO.md#relink-kit-test-portability-on-windows). They reproduce from the
-  unchanged committed tests and are not new actual-DLL relink failures.
+- A new public release still needs a coherent exact asset set, current artifact
+  checks and an explicitly authorized publication action. Local rehearsal and
+  the existing Web owner approval do not publish or promote it.
 - Broader CRT/PAL hardening, allocator replacement and deferred upper-runtime
   extensions remain consumer-driven follow-ups, not reopened Web gates.
 

@@ -60,30 +60,13 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-### Release qualification and assembly rehearsal
-
-Start after build-system consolidation and the required native SDK producer /
-verification gates. B4 supplied the local tools, not release-qualified artifacts;
-the [acceptance contract](docs/acceptance/build_system_acceptance.md#release-qualification-scope-split-2026-10-23)
-owns the checks and existing provenance limitations.
-Current execution and evidence: [release qualification](docs/acceptance/release_qualification.md).
-
-- [x] Update the WebKit micro pin (`2.54.1 -> 2.54.2`) with verified source,
-  licensing and carried-patch evidence; native SDK replay follows below.
-- [x] Freeze a clean source/version and generate matching Linux/x86_64
-  Development/Full SDKs and source assets without relabeling old builds.
-- [x] Run real Linux/x86_64 `crt-dev-release` and `crt-full-release` positive
-  collection; verify archives, checksums, source identity and runtime equality.
-- [ ] Replay the new pin and matching assembly on macOS/arm64 and Windows/x64,
-  plus Linux/aarch64 cross-target packaging; retain each native/cross scope.
-  macOS/arm64 and Windows/x64 done (2026-10-28); Linux/aarch64 native Development done (2026-10-28);
-  the Full `06-web` cross-target packaging remains for an x86_64 host.
-- [ ] Complete final evidence review before accepting release assembly. Tag
-  creation, upload and public release require separate authorization.
+No active tranche. The next ordered producer gate is
+[SDK Producer Contract Gate P0](#crt-developer-experience-sdk---cli---studio).
 
 ## Planned
 
-SDK Producer Contract Gate P0 below continues after the completed SDK split.
+SDK Producer Contract Gate P0 below follows the completed SDK split and local
+assembly rehearsal ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
 The remaining sections are independent follow-ups, not a prerequisite chain for
 CLI/Studio or a reopening of accepted SDK stages; long-term extensions stay
 conditional on a real consumer.
@@ -99,13 +82,17 @@ contracts remain design work, not an implemented or released product.
 
 - [ ] Supply external-consumer identity/capability fixtures, distinguishing
   existing manifest/stage/port formats from the proposed development contract.
+- [ ] Select coherent exact producer assets before promotion/consumer locks;
+  resolve the rehearsal's same-name source-asset variants
+  ([assembly review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
 - [ ] Publish the SDK-owned startup/link/runtime-query rules and public imports for both the Full
   and Development SDK, and the runtime-bundle contract: closure computed from the CLI's
   ELF/Mach-O/PE imports, app-local placement, Windows import resolution at load.
 - [ ] Define host-tools/rootfs identity and runtime closure separately from the
   target sysroot; validate actual native tool/alias execution.
 - [ ] Validate the minimum CRT-native CLI HTTP/TLS stack and trust inputs for bootstrap without an
-  installed development SDK, including fail-closed negative cases (the producer side is S1 above).
+  installed development SDK, including fail-closed negative cases (the SDK producer
+  transport scope is in [SDK split acceptance](docs/acceptance/sdk_split_acceptance.md)).
 - [ ] Record independent consumer build/run and ABI evidence for each initial
   native pair before promoting the corresponding artifact/consumer lock.
 
