@@ -445,7 +445,13 @@ int main(void) {
   while ((entry = readdir(dir)) != 0) {
     if (strcmp(entry->d_name, "sample.tmp") == 0) {
       found_sample = 1;
+#if defined(CRT_TARGET_OS_LINUX)
+      /* Our native Linux temporary-filesystem lane supplies getdents64
+       * types. Accepting UNKNOWN hid a read from record-tail padding. */
+      if (entry->d_type != DT_REG) {
+#else
       if (entry->d_type != DT_UNKNOWN && entry->d_type != DT_REG) {
+#endif
         closedir(dir);
         close(fd);
         return fail("readdir type");

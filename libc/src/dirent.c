@@ -383,8 +383,12 @@ struct dirent* readdir(DIR* dirp) {
     }
 
 #if defined(CRT_TARGET_OS_LINUX)
+    /* Both Linux PALs use getdents64 (x86_64 217, aarch64 61).
+     * Its d_type is byte 18, before d_name; the legacy getdents trailing
+     * byte is padding here and may contain stale bytes from another entry.
+     * Bionic also consumes __getdents64's d_type field directly. */
     reclen = *(unsigned short*)(void*)(dirp->buffer + dirp->pos + 16);
-    type = *(unsigned char*)(void*)(dirp->buffer + dirp->pos + reclen - 1);
+    type = *(unsigned char*)(void*)(dirp->buffer + dirp->pos + 18);
     name = dirp->buffer + dirp->pos + 19;
     dirp->entry.d_ino = *(uint64_t*)(void*)(dirp->buffer + dirp->pos);
 #else
