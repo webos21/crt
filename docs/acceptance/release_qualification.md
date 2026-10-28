@@ -6,7 +6,7 @@ The [build-system scope](build_system_acceptance.md#release-qualification-scope-
 defines the gate; the completed [SDK split](sdk_split_acceptance.md) does not
 qualify old candidates for release. CLI adoption remains consumer-owned.
 
-Linux/x86_64 local assembly passes below. New-pin macOS/arm64, Windows/x64
+Linux/x86_64 and macOS/arm64 local assembly pass below. New-pin Windows/x64
 and Linux/aarch64 cross-target replay, followed by the combined final review,
 remain open. Existing SDK split evidence stays accepted at its original pins.
 
@@ -187,8 +187,88 @@ Packaged Web evidence is under
 `build/isolated-web/test-ik01zxff/packaged-browser-observation/result.json`;
 collected artifacts/manifests/checksums are in `build/release/{dev,full}/`.
 
-**Not run:** new-pin native macOS/arm64 and Windows/x64, new-pin Linux/aarch64
+**Not run on Linux:** new-pin native macOS/arm64 and Windows/x64, new-pin Linux/aarch64
 cross-target packaging and the combined release review. Windows/arm64's
 accepted S5 Full reference is `05-ui`; it is not a `06-web` collector proof.
 Producer promotion, consumer locks/adoption, CRT Git tag creation, upload and
 public release are not performed by this rehearsal.
+
+## macOS/arm64 positive assembly (2026-10-28)
+
+**Accepted locally:** real Development and Full `06-web` collection, native
+macOS/arm64 (preset `macos-host-ninja-debug`, Debug), from the **same** clean CRT
+commit `3741ea515f129483efa631c6d2663d27de9ebc62` and version parameter
+`v0.4.0-rehearsal.20261027` as the Linux run. The commit was checked out as a
+detached worktree (`git worktree add --detach ../crt-rq-3741ea5 3741ea5`) so the
+later documentation commits do not change the producer identity; no Git tag was
+created. No source cache was supplied: Skia, ports, LVGL, libc++ and the WebKit
+2.54.2 product were fetched and built fresh.
+
+```sh
+cd ../crt-rq-3741ea5
+rehearsal_root="$PWD/out/release-qualification-macos-20261028"
+cmake --fresh --preset macos-host-ninja-debug -B "$rehearsal_root/build" \
+  -DCRT_RELEASE_TAG=v0.4.0-rehearsal.20261027 -DCRT_WEB_JOBS=8
+cmake --build "$rehearsal_root/build" --target crt-development-sdk-test -j 8
+cmake --build "$rehearsal_root/build" --target crt-c-test crt-dev-release crt-full-release -j 8
+cmake --build "$rehearsal_root/build" --target crt-cxx-test -j 8
+python3 tools/test_sdk_split_s5.py --sdk-root "$rehearsal_root/build/dist/dev" \
+  --full-sdk "$rehearsal_root/build/dist/06-web" --output "$rehearsal_root/s5-replay"
+```
+
+The build directory must live under the checkout's own `out/`:
+`crt-port-build.py --preset` reconstructs `root/out/<name>` from the directory
+name, so a `-B` outside it fails at the `make` port with `source not found`
+(first attempt, retained as `out/rq-macos-failed-wrongroot/` in the main
+checkout). This is the documented `CRT_BUILD_PRESET_NAME` limitation, not a new
+defect.
+
+Results (all exit codes 0): Development SDK build and external consumer
+(static/shared HTTPS+inflate, trust negatives), `crt-c-test` **143/143**,
+imported libc++ string-ABI/iostream smokes, `crt-dev-release`,
+`crt-full-release` (including the isolated `crt-web-build`, `crt-web-test` and the
+relocated packaged browser: HostProcess/NetworkProcess/WebProcess, one C++
+runtime per role, zero violations, zero remaining owned processes).
+
+| Collected artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.4.0-rehearsal.20261027-macos-aarch64-dev.tar.xz` | 6,359,584 | `fa7cd04c6d20a3d6ec8c88c496e3276c823a50df9474b7e787401c59ecacb835` |
+| `crt-v0.4.0-rehearsal.20261027-macos-aarch64-06-web.tar.xz` | 83,885,684 | `c718051f330cd55f973dbf82a12db96d45d58750db9035b543a7b00d9d4acb35` |
+| `crt-v0.4.0-rehearsal.20261027-corresponding-source.tar.xz` | 25,235,504 | `b04a5d60a854152381619339fc68350a9ecd4f4e945908546d7ba89bc36710a7` |
+
+The corresponding-source bundle is byte-identical to the Linux/x86_64 one, as
+expected for the same commit. Release-manifest SHA-256: Dev
+`a41b25d095ac6b3ec3c15559d8479f96eb20f4e4eb4e26c0ec475010c8329051`, Full
+`6d99761710df41db284d1f9ad6c1713f728232c5ccb4309be217f555a3d037e6`. Both
+`SHA256SUMS-*` files verify every listed asset (Dev: SDK + 02/03 source assets;
+Full: SDK + 02-06 source assets + corresponding source).
+
+Independent checks: extracted archive inventories equal the original SDK
+directories exactly (Dev **2,570**, Full **3,603** files/symlinks, content
+hashes included); the **18** `runtime_sha256` files of the Development contract
+match in both Dev and Full; the Development contract records the fixed commit
+with `producer_working_tree_dirty: false` and base commit equal to it; all five
+stage-source assets carry that commit with `working_tree_dirty: false`; the
+corresponding-source bundle names the same commit/version. S5 passes natively
+(external relocated consumer plus **8** negatives, original payloads
+unchanged, no promotion/adoption). The packaged `web-security.json` reports
+2.54.2 as the newest micro, advisory `passed`, within the support window; the
+raw snapshot keeps `public_release_allowed: false` by design, and
+`crt_web_release.decide()` with the existing owner record yields `true` with no
+open blockers. No approval record was changed.
+
+Observation: 10 port-library files outside the runtime contract
+(`libz`, `libmbedtls/crypto/x509` and `libcurl` archives/dylibs) differ in bytes
+between the Dev and Full SDKs on macOS because the Full stage rebuilds them. The
+contract compares only the 18 runtime files, so this is not a gate failure, but
+it was not examined further here.
+
+Evidence: `<worktree>/out/release-qualification-macos-20261028/`
+(`configure.log`, `dev-build.log`, `release-build.log`, `cxx-test.log`,
+`s5.log`, `s5-replay/`, `build/release/{dev,full}/`,
+`build/isolated-web/test-gxbeqdsh/`); the worktree is a sibling of the main
+checkout and is not committed.
+
+**Not run on macOS:** Windows/x64 native, Linux/aarch64 cross-target packaging
+and the combined release review. Producer promotion, consumer locks, tag
+creation, upload and public release remain out of scope.
