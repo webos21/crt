@@ -6,8 +6,8 @@ The [build-system scope](build_system_acceptance.md#release-qualification-scope-
 defines the gate; the completed [SDK split](sdk_split_acceptance.md) does not
 qualify old candidates for release. CLI adoption remains consumer-owned.
 
-Linux/x86_64 and macOS/arm64 local assembly pass below. New-pin Windows/x64
-and Linux/aarch64 cross-target replay, followed by the combined final review,
+Linux/x86_64, macOS/arm64 and Windows/x64 local assembly pass below. New-pin
+Linux/aarch64 cross-target replay, followed by the combined final review,
 remain open. Existing SDK split evidence stays accepted at its original pins.
 
 ## Execution scope
@@ -272,3 +272,123 @@ checkout and is not committed.
 **Not run on macOS:** Windows/x64 native, Linux/aarch64 cross-target packaging
 and the combined release review. Producer promotion, consumer locks, tag
 creation, upload and public release remain out of scope.
+
+## Windows/x64 positive assembly (2026-10-28)
+
+**Accepted locally:** real Development and Full `06-web` collection, native
+Windows/x64 (preset `windows-host-ninja-debug`, Debug, Clang 22.1.8, Windows SDK
+10.0.28000.0), from the **same** clean CRT commit
+`3741ea515f129483efa631c6d2663d27de9ebc62` and version parameter
+`v0.4.0-rehearsal.20261027` as the Linux and macOS runs. The commit was a detached
+worktree (`git worktree add --detach C:/crtw/rqw 3741ea5`), so later documentation
+commits do not change the producer identity; no Git tag was created. The Windows
+S5 and release evidence for the previous pin (`2.54.1`) is not reused.
+
+The WebKit 2.54.2 source cache was prepared on this host as in the Linux run:
+`tools/fetch_webkit.py` (archive 49,565,492 bytes, SHA-256 `f3284e19…4f56`, matching
+the recipe) and `tools/fetch_webkit_commit.py --checkout --correspondence`
+(commit `32717fab…`, tree and 462,138-entry listing match the pin; **34,445**
+identical files, **130** equal after CRLF-to-LF, **zero** content differences, as
+on Linux), validated by the builder's own `validate_source_cache`. The archive
+signature file was downloaded but not re-verified here (no public key was fetched);
+the signature evidence for this pin is the Linux record. Of the other sources only
+the earlier Windows run's `curl`, `ffmpeg`, `freetype`, `mbedtls`, `zlib` and `make`
+archives were copied in (re-verified by size and SHA-256 when used); Skia, libc++,
+LVGL, mingw-w64 headers and the Web ports were fetched fresh.
+
+```sh
+# C:/crtw/rqw, build tree and evidence under out/rq (driver: out/rq/run_rq.py)
+cmake --fresh --preset windows-host-ninja-debug -B out/rq/build \
+  -DCRT_RELEASE_TAG=v0.4.0-rehearsal.20261027 \
+  -DCRT_WEB_SOURCE_CACHE=out/rq/pin/source-cache -DCRT_WEB_JOBS=8
+cmake --build out/rq/build --target crt-development-sdk-test --parallel 8
+cmake --build out/rq/build --target crt-c-test crt-dev-release crt-full-release --parallel 8
+cmake --build out/rq/build --target crt-cxx-test --parallel 8
+python tools/test_sdk_split_s5.py --sdk-root out/rq/build/dist/dev \
+  --full-sdk out/rq/build/dist/06-web --output out/rq/s5-replay
+```
+
+Host environment, as in the earlier Windows run: external Clang/AR/RANLIB, the
+Windows SDK `um/x64` import libraries (`CRT_WINDOWS_SDK_LIBPATH`), the `TEMP` of
+the producer under the evidence root, and the pure Perl modules Git's POSIX Perl
+lacks copied from Strawberry Perl to `host-perl-modules/` (`host-perl-inputs.json`)
+for `CRT_WEB_HOST_PERL_LIB`. Two host preconditions mattered:
+
+- **Path length.** The first attempt under `out/release-qualification-windows-20261028`
+  failed in the Web stage: unpacking EGL-Registry needs a directory whose path was
+  one character beyond the 247-character Win32 directory limit
+  (`.../docbook4`). The root was shortened (`out/rq`) and the run restarted from
+  `configure`; the failure is retained as `out/attempt1-path-too-long/`.
+- **Producer visibility.** The S5 source-hidden consumer uses a restricted token and
+  relies on the producer tree not being readable through the public Users/Everyone
+  grants (as under the user profile). `C:/crtw` grants `BUILTIN\Users` read, so the
+  first S5 attempt correctly failed with "producer/SDK root remains visible"
+  (`out/rq/s5-replay-attempt1-visible-root/`). With the owner's approval the ACL of
+  that one scratch directory, `C:/crtw/rqw`, was made private (inheritance removed;
+  Lee, SYSTEM and Administrators only; the previous ACL is saved in
+  `out/rq/acl-before-rqw.txt`). No other path, account or machine policy changed,
+  and the S5 test itself is unchanged.
+
+Results (all exit codes 0): Development SDK build and external consumer (static and
+shared HTTPS+inflate, trust negatives; `development-consumer/result.json` passed,
+two link modes), `crt-c-test` **164/164**, imported libc++ smokes (`crt-cxx-test`),
+`crt-dev-release` and `crt-full-release` including the isolated `crt-web-build` and
+`crt-web-test`. Durations: development SDK test 836 s, release build 5,149 s,
+C++ test 25 s, S5 replay 137 s. The relocated packaged browser sees HostProcess,
+NetworkProcess and WebProcess with **141** mapped files, one C++ runtime per role,
+zero violations and zero remaining owned processes; the packaged network probe passes
+**10** cases and the Host ABI audit reports no violation (28 libraries, 4 known host
+libraries).
+
+| Collected artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.4.0-rehearsal.20261027-windows-x86_64-dev.zip` | 144,697,997 | `9bf56d46deaa4c5905b50ae4faacfd0f97f315ad723e6f773f667815a8970fff` |
+| `crt-v0.4.0-rehearsal.20261027-windows-x86_64-06-web.zip` | 380,081,238 | `cd9c8ec4e602a1ca25514efb18b6ae57a0084eb17ff6e958d6ec6235fd6dafca` |
+| `crt-v0.4.0-rehearsal.20261027-corresponding-source.tar.xz` | 25,235,504 | `b04a5d60a854152381619339fc68350a9ecd4f4e945908546d7ba89bc36710a7` |
+
+The corresponding-source bundle is again byte-identical to the Linux and macOS
+bundle (1,942 tracked paths, same commit and version). Release-manifest SHA-256: Dev
+`26a9f6ce71962369fe4d5a133436315ac31bd965526b5204afc51a8ac0ffa00a`, Full
+`2bd189d84645182075fb4abeb71506916323cfea31ca8ec8b0d3827182edffbb`; SDK manifests:
+Dev `f502ebcbe35e356e2480739ffb22ccd1741be779c532bde07c8072453edb4923`, Full
+`505504d7bc17e5e7c06f40393bda23b2f8200fdf613832dccc8c12330ebcb590`.
+
+Independent checks (`out/rq/check_assembly.py`, **37** checks, `assembly-result.json`
+`passed: true`): every listed size and SHA-256 matches the file and its
+`SHA256SUMS-*` entry and no unlisted file exists; ZIP CRCs are good; the extracted
+archives equal the original SDK directories exactly (Dev **2,695**, Full **3,673**
+paths, bytes included; the two declared zlib aliases `lib/libz.so` and
+`lib/libz.so.1` are ZIP-materialized files); the **27** inherited runtime digests
+match across plain `02-cxx`, Dev, `05-ui` and `06-web`; all five stage-source
+assets and every SDK manifest name the fixed commit, the sources report
+`working_tree_dirty: false` and every `VERSION` is the rehearsal version; the
+packaged `web-security.json` reports 2.54.2, newest micro, advisory `passed` and
+`series_within_grace: true`. The raw snapshot keeps `public_release_allowed: false`
+by design; the SDK's recorded release decision from the existing owner approval is
+`true` with no open blockers. No approval record was changed.
+
+S5 passes natively on the second attempt (`s5-replay/handoff.json`): relocated
+Development SDK with **2,695** payload paths, restricted-token isolation with the
+producer source/build and the original SDK hidden, static and shared linkage each with
+verified, wrong-CA, missing-CA and malformed-CA cases (**8**), shared closure from the
+package only, **8** negative cases, `original_payloads_unchanged: true`,
+`promotion: not-promoted`, `release_qualified: false`, `cli_adoption: not-run`.
+
+Focused unit suites on the pinned checkout (fetch, licensing, Web release, source
+offer, relink kit, license choices, release assets, verify_dist, create_dist, Web
+stage): **173** tests, OK, **8** host-conditional skips. A run with `TEMP` inside the
+checkout fails `test_commit_lookup_tolerates_a_source_asset_without_git` because
+that fixture's "no Git" directory is then inside the repository; with the ordinary
+temporary directory it passes. This is the same fixture/`TEMP` interaction recorded
+for the earlier Windows run, not a product failure.
+
+Evidence: `C:/crtw/rqw/out/rq/` (`status.json`, `logs/`, `source-caches.json`,
+`pin/{correspondence.json,archive/,source-cache/}`, `assembly-result.json`,
+`check_assembly.py`, `s5-replay/`, `build/release/{dev,full}/`,
+`build/isolated-web/test-2xjaj4vo/`); the worktree is outside the main checkout and
+is not committed.
+
+**Not run on Windows:** Linux/aarch64 cross-target packaging and the combined release
+review. Windows/arm64 has no `06-web` collector scope (its Full reference is
+`05-ui`). Producer promotion, consumer locks, tag creation, upload and public release
+remain out of scope.

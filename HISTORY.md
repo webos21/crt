@@ -9,6 +9,29 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-28
+
+### Pass the Windows/x64 release assembly rehearsal at the WebKit 2.54.2 pin
+
+Replayed the Linux rehearsal natively on Windows/x64 from the same clean `3741ea5`
+(detached worktree) and version parameter, with a WebKit 2.54.2 source cache prepared
+and validated on the host (archive hash and size, commit/tree/listing, 34,445 identical
+files and zero content differences against the tarball). Core CTest 164/164, the
+Development SDK consumer, both release collectors, the new-pin Web build with the
+relocated packaged browser (141 mapped files, zero violations), HTTP/TLS 10/10 and the
+Host ABI audit pass; a 37-check assembly audit confirms checksums, ZIP/inventory
+equality (2,695 and 3,673 paths), 27 runtime digests, clean source identity and the
+byte-identical 1,942-path corresponding-source bundle. S5 passes natively with eight
+negatives and no promotion or adoption.
+
+Two host preconditions surfaced and are recorded rather than bypassed: a work root
+one character past the Win32 directory limit during the EGL-Registry unpack (root
+shortened, rerun from configure), and the restricted-token S5 consumer needing a
+producer tree that public Users grants cannot read (the one scratch worktree's ACL was
+made private with the owner's approval; the test is unchanged). Evidence and hashes are
+in [release qualification](docs/acceptance/release_qualification.md#windowsx64-positive-assembly-2026-10-28).
+Linux/aarch64 cross packaging and the final combined review remain In Progress.
+
 ## 2026-10-27
 
 ### Pass the first real Linux Development/Full release assembly rehearsal

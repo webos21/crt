@@ -76,7 +76,7 @@ Current execution and evidence: [release qualification](docs/acceptance/release_
   collection; verify archives, checksums, source identity and runtime equality.
 - [ ] Replay the new pin and matching assembly on macOS/arm64 and Windows/x64,
   plus Linux/aarch64 cross-target packaging; retain each native/cross scope.
-  macOS/arm64 done (2026-10-28); Windows/x64 and Linux/aarch64 cross remain.
+  macOS/arm64 and Windows/x64 done (2026-10-28); Linux/aarch64 cross remains.
 - [ ] Complete final evidence review before accepting release assembly. Tag
   creation, upload and public release require separate authorization.
 
