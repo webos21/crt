@@ -183,7 +183,18 @@ int main(int argc, char** argv) {
                  '--linker', tools['linker'], '--ar', tools['ar'], '--allow-dirty-sdk', 'true']
     run('configure', [seed, *configure, '--json'], boxed=True)
     run('build', [seed, 'build', '--project', source, '--json'], boxed=True)
+    # The incremental cache would let the self-build reuse the seed's objects; drop them so it recompiles from source.
+    for stale in (source / 'out/native').iterdir():
+        if stale.suffix in ('.o', '.key', '.d'):
+            stale.unlink()
     run('self-build', [source / 'out/native/crt-cli', 'build', '--project', source, '--json'], boxed=True)
+    cold = json.loads((evidence / 'self-build.stdout').read_text())['data']['cache']
+    if cold['executed'] < 2 or cold['reused'] != 0:
+        raise ValueError(f'self-build did not recompile from source: {cold}')
+    run('cached-build', [source / 'out/native/crt-cli', 'build', '--project', source, '--json'], boxed=True)
+    warm = json.loads((evidence / 'cached-build.stdout').read_text())['data']['cache']
+    if warm['executed'] != 0 or warm['reused'] != cold['executed']:
+        raise ValueError(f'unchanged rebuild was not served from the cache: {cold} {warm}')
     program = work / 'bare/crt-cli'
     shutil.copy2(source / 'out/native/crt-cli', program)
     run('native-tests', [program, 'test', '--project', source, '--json'], boxed=True, timeout=2400)
@@ -202,7 +213,7 @@ int main(int argc, char** argv) {
                          'source_sha256': inventory_digest(input_inventory), 'binary_sha256': digest(program),
                          'binary_size': program.stat().st_size, 'imports': image['dependencies'],
                          'owns_malloc': image['owns_malloc'], 'bindings': {key: sorted(value) for key, value in image['bound'].items()},
-                         'doctor': doctor, 'tests': json.loads((evidence / 'native-tests.stdout').read_text())})
+                         'doctor': doctor, 'cache': {'cold': cold, 'warm': warm}, 'tests': json.loads((evidence / 'native-tests.stdout').read_text())})
     print('CLI contract replay passed:', evidence / 'result.json')
 
 
