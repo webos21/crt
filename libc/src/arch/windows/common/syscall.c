@@ -3745,6 +3745,8 @@ long __crt_sys_pread(int fd, void* buf, unsigned long count, long long offset) {
   HANDLE handle = get_fd_handle(fd);
   OVERLAPPED overlapped;
   DWORD bytes_read = 0;
+  long long position = 0;
+  BOOL have_position;
 
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     return -ESPIPE;
@@ -3758,12 +3760,18 @@ long __crt_sys_pread(int fd, void* buf, unsigned long count, long long offset) {
   memset(&overlapped, 0, sizeof(overlapped));
   overlapped.Offset = (DWORD)((uint64_t)offset & 0xffffffffU);
   overlapped.OffsetHigh = (DWORD)(((uint64_t)offset >> 32) & 0xffffffffU);
+  /* An OVERLAPPED transfer on a synchronous handle moves the file pointer; POSIX pread must not. */
+  have_position = SetFilePointerEx(handle, 0, &position, FILE_CURRENT);
   if (!ReadFile(handle, buf, (DWORD)count, &bytes_read, &overlapped)) {
-    if (GetLastError() == CRT_ERROR_HANDLE_EOF) {
+    DWORD error = GetLastError();
+    if (have_position) SetFilePointerEx(handle, position, 0, FILE_BEGIN);
+    if (error == CRT_ERROR_HANDLE_EOF) {
       return 0;
     }
+    SetLastError(error);
     return fail_last_error();
   }
+  if (have_position) SetFilePointerEx(handle, position, 0, FILE_BEGIN);
   return (long)bytes_read;
 }
 
@@ -3771,6 +3779,8 @@ long __crt_sys_pwrite(int fd, const void* buf, unsigned long count, long long of
   HANDLE handle = get_fd_handle(fd);
   OVERLAPPED overlapped;
   DWORD written = 0;
+  long long position = 0;
+  BOOL have_position;
 
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     return -ESPIPE;
@@ -3784,9 +3794,14 @@ long __crt_sys_pwrite(int fd, const void* buf, unsigned long count, long long of
   memset(&overlapped, 0, sizeof(overlapped));
   overlapped.Offset = (DWORD)((uint64_t)offset & 0xffffffffU);
   overlapped.OffsetHigh = (DWORD)(((uint64_t)offset >> 32) & 0xffffffffU);
+  have_position = SetFilePointerEx(handle, 0, &position, FILE_CURRENT);
   if (!WriteFile(handle, buf, (DWORD)count, &written, &overlapped)) {
+    DWORD error = GetLastError();
+    if (have_position) SetFilePointerEx(handle, position, 0, FILE_BEGIN);
+    SetLastError(error);
     return fail_last_error();
   }
+  if (have_position) SetFilePointerEx(handle, position, 0, FILE_BEGIN);
   return (long)written;
 }
 

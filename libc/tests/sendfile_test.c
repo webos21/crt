@@ -5,6 +5,11 @@
 #include <unistd.h>
 
 /* sendfile must copy on every host: libc++'s filesystem copy_file chooses it whenever the header exists. */
+static int fail(int step) {
+  printf("sendfile_test: failed at step %d\n", step);
+  return step;
+}
+
 #define SIZE 200003
 static unsigned char data[SIZE];
 static unsigned char copy[SIZE];
@@ -26,31 +31,31 @@ int main(void) {
   ssize_t copied;
   for (int i = 0; i < SIZE; ++i) data[i] = (unsigned char)(i * 31 + i / 251);
   in = open(source, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-  if (in < 0 || write(in, data, SIZE) != SIZE) return 1;
+  if (in < 0 || write(in, data, SIZE) != SIZE) return fail(1);
   close(in);
 
   in = open(source, O_RDONLY);
   out = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-  if (in < 0 || out < 0) return 2;
+  if (in < 0 || out < 0) return fail(2);
   copied = sendfile(out, in, 0, SIZE);
   close(in); close(out);
-  if (copied != SIZE || read_all(target) != SIZE || memcmp(copy, data, SIZE) != 0) return 3;
+  if (copied != SIZE || read_all(target) != SIZE || memcmp(copy, data, SIZE) != 0) return fail(3);
 
   in = open(source, O_RDONLY);
   out = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0600);
   copied = sendfile(out, in, &offset, 70000);
-  if (copied != 70000 || offset != 71000 || lseek(in, 0, SEEK_CUR) != 0) return 4;
+  if (copied != 70000 || offset != 71000 || lseek(in, 0, SEEK_CUR) != 0) return fail(4);
   close(in); close(out);
-  if (read_all(target) != 70000 || memcmp(copy, data + 1000, 70000) != 0) return 5;
+  if (read_all(target) != 70000 || memcmp(copy, data + 1000, 70000) != 0) return fail(5);
 
   in = open(source, O_RDONLY);
   out = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0600);
   offset = SIZE - 10;
   copied = sendfile(out, in, &offset, 4096);
   close(in); close(out);
-  if (copied != 10 || offset != SIZE) return 6;
-  if (sendfile(-1, -1, 0, 1) != -1) return 7;
+  if (copied != 10 || offset != SIZE) return fail(6);
+  if (sendfile(-1, -1, 0, 1) != -1) return fail(7);
   unlink(source); unlink(target);
   puts("sendfile_test: ok");
-  return 0;
+  return fail(0);
 }
