@@ -29,11 +29,39 @@ class NativePolicy(unittest.TestCase):
 
     def test_windows_spellings_of_the_sdk_and_resource_directory_are_normalized(self):
         sdk = Path('C:/Users/Lee/SDK space 한글/dev')
-        captured = ['--sysroot=C:/Users/Lee/SDK space 한글/dev', '-I' + 'C:\Program Files\LLVM\lib\clang\22' + '\include',
+        captured = ['--sysroot=C:/Users/Lee/SDK space 한글/dev', '-I' + r'C:\Program Files\LLVM\lib\clang\22' + r'\include',
                     'C:/Users/Lee/SDK space 한글/dev/lib/libc.a']
         self.assertEqual(['--sysroot=@SDK@', '-I@RESOURCE@/include', '@SDK@/lib/libc.a'],
-                         [value.replace('@RESOURCE@\include', '@RESOURCE@/include') for value in
-                          exporter.normalize_argv(captured, sdk, 'C:\Program Files\LLVM\lib\clang\22', 'cpp')])
+                         [value.replace(r'@RESOURCE@\include', '@RESOURCE@/include') for value in
+                          exporter.normalize_argv(captured, sdk, r'C:\Program Files\LLVM\lib\clang\22', 'cpp')])
+
+    def test_linux_shared_executables_find_a_project_library_beside_them(self):
+        link = ['-nostdlib', '-Wl,-rpath,@SDK@/lib', '@OBJECTS@', '@LIBRARIES@', '-o', '@OUTPUT@']
+        fixed = exporter.project_local_shared_rpath(link, 'executable-shared', 'link', 'linux')
+        self.assertEqual(['-nostdlib', '-Wl,-rpath,@SDK@/lib', '-Wl,-rpath,$ORIGIN', '@OBJECTS@', '@LIBRARIES@',
+                          '-o', '@OUTPUT@'], fixed)
+        # idempotent, and the C vector that has no rpath at all gets the entry too
+        self.assertEqual(fixed, exporter.project_local_shared_rpath(fixed, 'executable-shared', 'link', 'linux'))
+        self.assertIn('-Wl,-rpath,$ORIGIN', exporter.project_local_shared_rpath(
+            ['@OBJECTS@', '@LIBRARIES@'], 'executable-shared', 'link', 'linux'))
+
+    def test_other_modes_operations_and_hosts_are_unchanged(self):
+        link = ['-Wl,-rpath,@SDK@/lib', '@OBJECTS@', '@LIBRARIES@']
+        for mode, operation, target_os in [('executable-static', 'link', 'linux'), ('static-library', 'link', 'linux'),
+                                           ('shared-library', 'link', 'linux'), ('executable-shared', 'compile', 'linux'),
+                                           ('executable-shared', 'link', 'macos')]:
+            with self.subTest(mode=mode, operation=operation, target_os=target_os):
+                self.assertEqual(link, exporter.project_local_shared_rpath(link, mode, operation, target_os))
+
+    def test_wrapper_temporary_files_are_not_replayable(self):
+        sdk = Path('/handoff/SDK/dev')
+        stale = ['-Wl,--no-as-needed', '/tmp/crt-loader-needed-x86_64.93Tr2x/loader.so', '-Wl,--as-needed']
+        self.assertEqual(['/tmp/crt-loader-needed-x86_64.93Tr2x/loader.so'], exporter.unreplayable_paths(stale, sdk))
+        shipped = ['-Wl,--no-as-needed', '@SDK@/lib/crt-loader-import.so', '@OBJECTS@', '-L@SDK@/lib', '-o', '@OUTPUT@']
+        self.assertEqual([], exporter.unreplayable_paths(shipped, sdk))
+        for temporary in ('/var/folders/ab/cd/T/x.o', '-Wl,-rpath,/private/tmp/y', '-I/tmp/inc', '--out=/var/tmp/o'):
+            with self.subTest(temporary=temporary):
+                self.assertTrue(exporter.unreplayable_paths([temporary], sdk))
 
 
 if __name__ == '__main__':

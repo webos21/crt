@@ -262,6 +262,31 @@ def copy_stage_recipes(recipes: list[Path], destination: Path) -> None:
         shutil.copy2(recipe, recipe_dest / recipe.name)
 
 
+LOADER_IMPORT_SONAMES = {"x86_64": "ld-linux-x86-64.so.2", "aarch64": "ld-linux-aarch64.so.1"}
+LOADER_IMPORT_STUB = "lib/crt-loader-import.so"
+
+
+def install_loader_import_stub(destination: Path, target_arch: str, compiler: str) -> Path | None:
+    """Ship the link-only loader import stub that tools/crt-c++ names for a shared-runtime Linux executable.
+
+    CRT's libc.so does not list the dynamic loader as DT_NEEDED, so a shared executable that uses `thread_local`
+    destructors could not resolve `__tls_get_addr`. The wrapper therefore names a small shared object carrying the
+    loader's soname and that symbol; nothing of the host is linked and the soname resolves to the interpreter that is
+    already mapped. It used to be built into a temporary directory on every link, which left that path in any recorded
+    link command (and the command unusable once the file was gone). Shipping it makes the path an SDK path."""
+    soname = LOADER_IMPORT_SONAMES.get(target_arch)
+    if soname is None or not compiler:
+        return None
+    output = destination / LOADER_IMPORT_STUB
+    output.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [compiler, f"--target={target_arch}-linux-gnu", "-fuse-ld=lld", "-x", "c", "-",
+         "-shared", "-nostdlib", "-ffreestanding", "-fno-stack-protector", "-fPIC",
+         f"-Wl,-soname,{soname}", "-o", str(output)],
+        input="void *__tls_get_addr(void *index) { return index; }\n", text=True, check=True)
+    return output
+
+
 def install_wrapper_applets(destination: Path, target_os: str) -> None:
     """Install every enabled Toybox applet needed by the packaged mksh."""
     suffix = ".exe" if target_os == "windows" else ""
@@ -769,6 +794,8 @@ def main() -> None:
                 item["notices"].append(offer)
     copy_porting_sdk(root, destination)
     copy_stage_recipes([recipe.resolve() for recipe in args.stage_recipe], destination)
+    if args.target_os == "linux" and (destination / "lib/libc.so").is_file():
+        install_loader_import_stub(destination, normalized_arch, args.cc)
     install_wrapper_applets(destination, args.target_os)
     if args.target_os in ("linux", "macos"):
         # GNU make is a fully static port in this SDK (no DT_NEEDED entries

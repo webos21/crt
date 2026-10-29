@@ -99,7 +99,8 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   manifest/lock fixtures, without claiming the general SDK contract is implemented.
 - [ ] **1.5** Supply SDK-owned startup/link rules for minimal CLI help/version/bootstrap
   diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
-  Linux, macOS/arm64 and Windows/x64 pass (local, unpromoted); the changed CLI sources still need a Linux/macOS replay.
+  Linux, macOS/arm64 and Windows/x64 pass (local, unpromoted). The revised PAL-only contract was replayed on Linux 2026-10-29
+  (two Linux-only producer defects found and fixed); the changed CLI sources still need a Linux/macOS replay.
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
   review native consumer/ABI evidence before each initial pair's adoption

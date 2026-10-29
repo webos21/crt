@@ -30,6 +30,33 @@ sources are not done. Evidence: `out/cli-windows-20261029/` (r17 `result.json` S
 `ed373d1e825e255f960ee07cfaca6378f80f3412e4abbf888bf2dbc9b57df708`) and the
 [CLI Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29).
 
+### Replay the revised PAL-only CLI contract on Linux and fix two Linux-only producer defects
+
+macOS had passed the revised contract (CRT PAL queries, JSON/SHA-2 ports, typed build targets, incremental cache) and the CLI record listed
+Linux as open. The Dev SDK was rebuilt from `d054a66` (`crt-development-sdk`); the Linux core suite passes **146/146** (macOS recorded 145) and the
+Dev consumer passes. New `tools/replay_cli_contract_linux.py` is the Linux twin of the macOS driver: the same inputs, steps and pass criteria, with
+Bubblewrap (no network, the producer checkout and CLI repository replaced by empty directories, masked shells/Python/CMake/Ninja/make, cleared
+environment) and an `strace` execve audit in place of Seatbelt.
+
+The first runs stopped in the CLI's own native tests, on the shared-runtime variants, and the cause was in the producer both times:
+
+- The exported `executable-shared` link vector had no `$ORIGIN` RUNPATH, so a consumer executable could not find a shared library of its own project
+  beside it (`variant-c-shared-library`; the C vector had no rpath at all, the C++ one only `<SDK>/lib`). macOS resolves the dylib by path and never
+  showed it. `export_cli_toolchain.py` now adds `-Wl,-rpath,$ORIGIN` to the Linux `executable-shared` link vector only.
+- The same vector recorded `/tmp/crt-loader-needed-x86_64.XXXXXX/loader.so`, the loader import stub `crt-c++` builds into a temporary directory for
+  every shared-runtime link and deletes afterwards, so no consumer could replay it. `create_dist.py` now ships the stub as `lib/crt-loader-import.so`
+  (soname `ld-linux-x86-64.so.2`, advertises `__tls_get_addr`), `crt-c++` uses it when present (otherwise the old per-link stub), and the exporter
+  fails when a recorded argv names a temporary-directory file outside the SDK.
+
+Result (`out/cli-contract-20261029-linux/replay-l4/`): self-build cold 7 executed/0 reused, unchanged rebuild 0/7, **626** native checks, bare
+help/version/doctor with SDK, source and compilers hidden, no DT_NEEDED and no RUNPATH, interpreter `/lib64/ld-linux-x86-64.so.2`, SDK inventory
+unchanged, 21 distinct executed files (365 execve), none outside the toolchain and the build's own outputs, zero shell/Python/CMake/make/`crt-cc`/`crt-c++`.
+Earlier attempts `replay-l2` and `replay-l3` failed for the two reasons above and are kept.
+
+Not done: the `bin/linux/crt-cli` binary is not committed (it lives in the CLI repository), the Linux record in the CLI acceptance document is not
+written, and `crt-cc` still ignores `CRT_CXX_RUNTIME_LINKAGE=shared` on Linux (it links the static libc and adds no rpath; a minimal C executable
+works with an explicit `$ORIGIN`, so the replay does not need it). Linux/x86_64 only; Windows is still open.
+
 ### Move CLI platform queries into the CRT PAL and ship JSON/SHA-2 ports
 
 The CLI used host macros and direct dyld/procfs calls, so the missing PAL surface

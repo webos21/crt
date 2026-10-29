@@ -1146,6 +1146,12 @@ if [ "$target_os" = linux ]; then
       *aarch64*|*arm64*|*ARM64*) loader_arch=aarch64; loader_soname="ld-linux-aarch64.so.1" ;;
       *) loader_arch=x86_64; loader_soname="ld-linux-x86-64.so.2" ;;
     esac
+    # The SDK ships this stub (lib/crt-loader-import.so, tools/create_dist.py), so the link names a file that exists
+    # beside the other SDK libraries and a consumer can record the same argv. An SDK without it (an older one, an
+    # in-tree build) gets the per-link stub below.
+    loader_stub_dir=""
+    loader_stub="${CRT_SYSROOT}/lib/crt-loader-import.so"
+    if [ ! -f "$loader_stub" ]; then
     # Private per-link storage: never trust a predictable world-writable /tmp
     # cache. Explicit target selection also works for an x86_64 build host
     # producing an aarch64 executable. No host headers/runtime are used.
@@ -1159,6 +1165,7 @@ if [ "$target_os" = linux ]; then
       rmdir "$loader_stub_dir"
       echo "crt-c++: failed to create the target loader import stub" >&2
       exit 1
+    fi
     fi
     set -- "$@" -Wl,--no-as-needed "$loader_stub" -Wl,--as-needed
   fi
@@ -1196,8 +1203,10 @@ if [ "$target_os" = linux ]; then
     else
       loader_link_status=$?
     fi
-    rm -f "$loader_stub"
-    rmdir "$loader_stub_dir"
+    if [ -n "$loader_stub_dir" ]; then
+      rm -f "$loader_stub"
+      rmdir "$loader_stub_dir"
+    fi
     exit "$loader_link_status"
   fi
   # Use the project's primary ELF linker for a static C++ runtime and ignore
