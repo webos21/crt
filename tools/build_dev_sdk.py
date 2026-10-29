@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble 02-cxx + CRT-built zlib/Mbed TLS/curl; never compile upper stages."""
+"""Assemble 02-cxx + networking/JSON/SHA-2 utilities; never compile upper stages."""
 import argparse
 from datetime import datetime, timezone
 import json
@@ -62,7 +62,7 @@ def main(argv=None):
                 or previous.get("runtime_sha256") != inherited
                 or profile.runtime_digests(staged) != inherited):
             raise ValueError("packaging retry predecessor/runtime changed; choose a fresh build")
-        for name in profile.PORTS:
+        for name in profile.PORTS | profile.HEADER_PORTS.keys():
             recorded = staged / "share/crt/dependencies" / name / "recipe.json"
             if recipe_build_identity(recorded) != recipe_build_identity(ROOT / "porting/recipes" / (name + ".json")):
                 raise ValueError("packaging retry port recipe changed; choose a fresh build")
@@ -77,22 +77,39 @@ def main(argv=None):
         shutil.copytree(base, staged, symlinks=True)
         copy_porting_sdk(ROOT, staged)
         env = runtime_env(staged, manifest)
-        sources = media.fetch_port_sources(ROOT, staged, temp, env, ports=("curl",), download_cache=work / "downloads")
+        sources = media.fetch_port_sources(ROOT, staged, temp, env, ports=("curl", "cjson", "nlohmann-json"), download_cache=work / "downloads")
         media.build_curl_ports(ROOT, sources, staged, temp, manifest, env, args.jobs)
+        run([sys.executable, staged / "tools/crt-port-build.py", "--sdk-root", staged,
+             "--target-os", manifest["target"]["os"], "--target-arch", manifest["target"]["arch"],
+             "--source-root", sources, "--work-root", temp / "port-build-utilities",
+             "--install-prefix", staged, "--jobs", str(args.jobs), "--port", "cjson", "--port", "nlohmann-json", "--test"], env=env, cwd=ROOT)
+        run([sys.executable, staged / "tools/crt-port-build.py", "--sdk-root", staged,
+             "--target-os", manifest["target"]["os"], "--target-arch", manifest["target"]["arch"],
+             "--source-root", sources, "--work-root", temp / "port-build-curl",
+             "--install-prefix", staged, "--port", "mbedtls", "--test"], env=env, cwd=ROOT)
     dependencies = media.network_dependency_records(staged, ROOT, sources)
+    for name, notice, headers, links, patterns in (
+            ("cjson", "LICENSE", ["include/cJSON.h"], ["lib/libcjson.a"],
+             ("lib/libcjson*.so*", "lib/libcjson*.dylib", "lib/cjson.dll")),
+            ("nlohmann-json", "LICENSE.MIT", ["include/nlohmann"], [], ())):
+        source = next(sources.glob(name + "-*"))
+        entry = media.copy_dependency_record(staged, name, ROOT / "porting/recipes" / (name + ".json"),
+                                            source / notice, headers, links, media.existing_relative_files(staged, patterns))
+        entry["kind"] = "public-port" if links else "header-only-port"
+        dependencies.append(entry)
     mbed = next(entry for entry in dependencies if entry["name"] == "mbedtls")
     notice = "share/licenses/mbedtls/CRT-LICENSE-CHOICE.txt"
     (staged / notice).write_text(media.MBEDTLS_CHOICE, encoding="utf-8")
     mbed["notices"].append(notice)
     manifest["redistributed_dependencies"] = [entry for entry in manifest.get("redistributed_dependencies", [])
-                                              if entry.get("name") not in profile.PORTS] + dependencies
+                                              if entry.get("name") not in profile.PORTS | profile.HEADER_PORTS.keys()] + dependencies
     if profile.runtime_digests(staged) != inherited:
         raise ValueError("port builds changed inherited runtime bytes")
     # The producer commit is distinct from the predecessor's byte identity.
     # Do not claim an unknown old SDK was built from the current commit.
     commit = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
     dirty = bool(subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain"], text=True).strip())
-    data = {"format": 1, "profile": "dev", "target": manifest["target"],
+    data = {"format": 1, "profile": "dev", "capabilities": profile.CAPABILITIES, "target": manifest["target"],
             "version": (base / "VERSION").read_text().strip(), "producer_source_commit": commit,
             "producer_working_tree_dirty": dirty, "base_source_commit": manifest.get("source_commit"),
             "compile_provenance": compile_identity,

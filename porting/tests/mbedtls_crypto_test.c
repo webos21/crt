@@ -8,6 +8,7 @@
  */
 #include <mbedtls/aes.h>
 #include <mbedtls/sha256.h>
+#include <mbedtls/sha512.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -37,6 +38,27 @@ int main(void) {
   if (strlen(digest_hex) != 64 || memcmp(digest_hex, expected_sha256, 64) != 0) {
     fprintf(stderr, "mbedtls_crypto_test: sha256 mismatch got=%s\n", digest_hex);
     return 1;
+  }
+
+  /* The SDK's SHA-2 provider covers SHA-224/256/384/512, not just TLS use. */
+  {
+    unsigned char wide[64];
+    char encoded[129];
+    mbedtls_sha256_context stream;
+    if (mbedtls_sha256(msg, 3, wide, 1) != 0) return 1;
+    hex(wide, 28, encoded);
+    if (strcmp(encoded, "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7")) return 1;
+    if (mbedtls_sha512(msg, 3, wide, 1) != 0) return 1;
+    hex(wide, 48, encoded);
+    if (strcmp(encoded, "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7")) return 1;
+    if (mbedtls_sha512(msg, 3, wide, 0) != 0) return 1;
+    hex(wide, 64, encoded);
+    if (strcmp(encoded, "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f")) return 1;
+    mbedtls_sha256_init(&stream);
+    if (mbedtls_sha256_starts(&stream, 0) || mbedtls_sha256_update(&stream, msg, 1) ||
+        mbedtls_sha256_update(&stream, msg + 1, 2) || mbedtls_sha256_finish(&stream, wide)) return 1;
+    mbedtls_sha256_free(&stream);
+    if (memcmp(wide, digest, 32)) return 1;
   }
 
   /* --- AES-128-CBC round trip --- */

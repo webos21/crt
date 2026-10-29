@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "cjson",
+  "version": "1.7.19",
+  "source": {
+    "url": "https://codeload.github.com/DaveGamble/cJSON/tar.gz/refs/tags/v1.7.19",
+    "archive": "cJSON-1.7.19.tar.gz",
+    "source_dir": "cjson-1.7.19",
+    "sha256": "7fa616e3046edfa7a28a32d5f9eacfd23f92900fe1f8ccd988c1662f30454562"
+  },
+  "dependencies": [],
+  "build": {
+    "system": "amalgamation",
+    "sources": ["cJSON.c"],
+    "archive": "libcjson.a",
+    "shared": true,
+    "install_headers": ["cJSON.h"],
+    "cflags": ["-DCJSON_HIDE_SYMBOLS"]
+  },
+  "tests": [
+    {"name": "roundtrip-static", "source": "porting/tests/cjson_roundtrip.c", "cflags": ["-I@PORT_PREFIX@/include", "-DCJSON_HIDE_SYMBOLS"], "link_args": ["@PORT_PREFIX@/lib/libcjson.a"], "expect_stdout": "cjson_roundtrip: ok"},
+    {"name": "roundtrip-shared", "source": "porting/tests/cjson_roundtrip.c", "cflags": ["-I@PORT_PREFIX@/include", "-DCJSON_HIDE_SYMBOLS"], "env": {"CRT_CXX_RUNTIME_LINKAGE": "shared"}, "target_overrides": {
+      "linux": {"link_args": ["@PORT_PREFIX@/lib/libcjson.so"]},
+      "macos": {"link_args": ["@PORT_PREFIX@/lib/libcjson.dylib"]},
+      "windows": {"link_args": ["@PORT_PREFIX@/lib/cjson.dll"]}
+    }, "expect_stdout": "cjson_roundtrip: ok"}
+  ],
+  "status": {"linux": "planned", "macos": "planned", "windows": "planned"},
+  "notes": [
+    "Embedded C JSON parser/encoder (MIT), selected for its small ANSI C implementation; no claim of measured market-share ranking. Unmodified upstream cJSON.c/cJSON.h are built against CRT.",
+    "CJSON_HIDE_SYMBOLS disables upstream's Windows dllimport/dllexport annotations for the CRT GNU-like toolchain; its shared linker exports public definitions. This is a build configuration, not an upstream patch. Static and shared consumers use the same header configuration."
+  ]
+}

@@ -22,8 +22,8 @@ the **SDK wrappers, toolchain, and deployment contract**, not the CLI.
 | `webos21/crt-cli` | SDK installation/selection, development environments, port resolution/local builds, project build/run/package | A separate implementation of CRT ABI/link rules |
 | `webos21/crt-studio` | CRT-native IDE and editing/debugging UX | A duplicate SDK installer or recipe engine |
 
-The separate CLI and Studio repositories now contain their own design and
-bootstrap documentation, not product implementations. Their local designs own
+The separate CLI repository now contains a bounded native bootstrap and the
+Studio repository remains design-only. Their local designs own
 subsequent product decisions; CRT's CLI/Studio documents retain the original
 integration baseline. Initially, develop `crt` and `crt-cli` together; Studio
 workflow integration follows available CLI capabilities.
@@ -157,6 +157,25 @@ headers/libraries.
 
 ## 5. Host Tools Bundle
 
+### Adopted Native Consumer Boundary (2026-10-29)
+
+Consumers minimize OS/architecture preprocessor branches and use the public
+CRT/POSIX PAL. Missing neutral queries are producer-owned
+[CRT extensions](platform_queries.md), not private headers or direct host API
+declarations in the CLI. The common default SDK store is
+`$USER_HOME/.crt/sdks/` on Linux, macOS and Windows; this supersedes earlier
+per-OS CLI data-root proposals for SDK installation.
+
+The experimental native provider format **1** adds independent target kinds
+(`executable`, `static-library`, `shared-library`) and runtime linkage
+(`static`, `shared`) plus producer-owned artifact/library choices and argv.
+The CLI product's single-executable goal does not restrict application outputs
+to static executables. Shared libraries use PIC/shared-runtime policy; an
+explicit native archiver is pinned for static libraries. This is still not the
+general SDK Build Contract v1. Old format-0 providers are not silently upgraded.
+Uncommitted producer candidates require explicit local dirty-SDK opt-in and
+retain their true provenance/full inventory; no release/pin promotion follows.
+
 An independent bundle is a **new distribution design**. Do not arbitrarily
 move existing tools out of SDKs or flatten everything into one `bin/`.
 Preserve `/system/bin`, `/bin`, and `/usr/bin` as interpreted through
@@ -217,7 +236,7 @@ same sources, stage outputs and port recipes:
 | Artifact | For | Content |
 | --- | --- | --- |
 | **Full SDK** | End users and CRT application developers (installed by the CLI) | The existing validated cumulative stage archives `01-c` .. `06-web`; unchanged. "Full" is `06-web` |
-| **Development SDK** | `crt-cli` developers and CI | The `02-cxx` stage plus the ports the CLI links: zlib, Mbed TLS, libcurl (headers, static and shared libraries, startup, toolchain files, notices), extended only when the real link result requires another library. No graphics, media, UI or Web content |
+| **Development SDK** | `crt-cli` developers and CI | The `02-cxx` stage plus zlib, Mbed TLS (including SHA-2), libcurl, cJSON (static/shared), and nlohmann/json (header-only), with startup, toolchain files and notices. No graphics, media, UI or Web content |
 | **CLI executable/runtime closure** | End users, no SDK installed | Single-executable distribution is the goal; CRT supplies static/shared libraries and the closure contract, while CLI owns linking, resources and packaging policy |
 
 The Development SDK is a reduced packaging of verified `01-c`/`02-cxx` and port
@@ -418,7 +437,8 @@ The CLI owner selected `crt.json`, C/C++ `src/main` and `src/test`, internal
 compiler-driver modules and direct LLVM execution. CRT still owns SDK ABI,
 startup objects, runtime order and flags. The implementation bridge is
 [`export_cli_toolchain.py`](../../tools/export_cli_toolchain.py): a producer-only
-migration tool captures installed wrapper argv for a bounded native Linux/x86_64
+migration tool captures installed wrapper argv for bounded native Linux/x86_64
+and macOS/arm64
 static/hosted/exceptions/RTTI policy. Python/shell remain producer dependencies;
 CLI does not execute this exporter or wrappers in the app path.
 
@@ -445,3 +465,24 @@ no public ABI. The Bionic reference reads the corresponding field directly
 The previous Dev SDK stays immutable and failed evidence is retained. A fresh
 clean-source Dev candidate is required for the native builder; no CLI inventory
 workaround or host-runtime fallback is accepted.
+
+### macOS native provider replay (2026-10-29)
+
+The macOS variant captures the installed wrappers with an explicit Xcode OS SDK
+(`external_os_sdk` and `-isysroot`) and selects real native Clang/Apple ld.
+This avoids compiler-launcher SDK lookup during isolated app builds; the
+captured Bionic header paths, `-nostdinc`/`-nostdinc++`, static C++ runtime order
+and libc/PAL startup remain producer-owned. The OS SDK is for declared vendor
+linker/libSystem discovery, not a host C/C++ runtime substitute. The provider is
+still experimental format 0, separate from the immutable SDK, not general
+development contract v1 or a promoted lock. Linux exports retain their original
+command policy; native Linux execution of this change is not claimed here.
+
+The CLI owner records the exact macOS candidate, source delta, native self-build,
+generated C/C++ workflows, process/Unicode negatives and SDK-free runtime audit
+in [macOS acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-macosarm64-2026-10-29).
+Review baselines are CRT `17de3510c37cdb07e3c5c98583b22ebe4e1463ec`, CLI
+`0f14ed3bee6b6512a6969b6118dcbd82c1c564b7` plus its identified local source patch,
+and unchanged Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`. SDK/port/stage
+manifest formats are unchanged; CLI compatibility/adoption remains owned by its
+ledger. No consumer lock, source tag or public artifact is promoted by this replay.

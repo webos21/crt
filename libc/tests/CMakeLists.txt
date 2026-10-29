@@ -248,6 +248,11 @@ set_tests_properties(dns_thread_test_runs PROPERTIES
 )
 
 add_crt_test(dl_test dl_test.c)
+add_crt_test(sendfile_test sendfile_test.c)
+set_tests_properties(sendfile_test_runs PROPERTIES PASS_REGULAR_EXPRESSION "sendfile_test: ok")
+add_crt_test(platform_test platform_test.c)
+target_link_libraries(platform_test PRIVATE dl)
+set_tests_properties(platform_test_runs PROPERTIES PASS_REGULAR_EXPRESSION "platform_test: ok")
 target_link_libraries(dl_test PRIVATE dl)
 add_dependencies(dl_test dl)
 set_tests_properties(dl_test_runs PROPERTIES

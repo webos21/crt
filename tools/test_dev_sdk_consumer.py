@@ -103,11 +103,11 @@ def main():
             compile_env = dict(env, CRT_CXX_RUNTIME_LINKAGE=mode)
             program = work / ("consumer-" + mode + (".exe" if windows else ""))
             libraries = [str(sdk / "lib" / name) for name in (
-                "libcurl.a", "libmbedtls.a", "libmbedx509.a", "libmbedcrypto.a", "libz.a")] if mode == "static" else [
-                "-L" + str(sdk / "lib"), "-lcurl", "-lmbedtls", "-lmbedx509", "-lmbedcrypto", "-lz"]
+                "libcurl.a", "libmbedtls.a", "libmbedx509.a", "libmbedcrypto.a", "libz.a", "libcjson.a")] if mode == "static" else [
+                "-L" + str(sdk / "lib"), "-lcurl", "-lmbedtls", "-lmbedx509", "-lmbedcrypto", "-lz", "-lcjson"]
             if mode == "shared" and windows:
                 libraries = [str(sdk / "lib" / name) for name in (
-                    "libcurl.dll.a", "libmbedtls.dll.a", "libmbedx509.dll.a", "libmbedcrypto.dll.a", "libz.so")]
+                    "libcurl.dll.a", "libmbedtls.dll.a", "libmbedx509.dll.a", "libmbedcrypto.dll.a", "libz.so", "cjson.dll")]
             command = [str(sdk / ("tools/crt-c++.cmd" if windows else "tools/crt-c++")),
                        "-std=c++17", *profile["consumer_compile_options"], str(source), *libraries, "-o", str(program)]
             compiled = subprocess.run(command, env=compile_env, capture_output=True, text=True,

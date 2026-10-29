@@ -104,7 +104,7 @@ def macos_sandbox_command(sandbox, work, hidden, program, args):
     # Use OS-enforced denial, not renaming/chmod of the shared checkout. Children
     # (compiler, linker, dyld and consumers) inherit the same file restrictions.
     profile = '(version 1)\n(allow default)\n' + ''.join(
-        f'(deny file-read* file-write* (subpath {json.dumps(str(path))}))\n' for path in hidden)
+        f'(deny file-read* file-write* (subpath {json.dumps(str(path), ensure_ascii=False)}))\n' for path in hidden)
     return [sandbox, '-p', profile, program, *args]
 
 

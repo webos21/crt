@@ -313,6 +313,10 @@
 --exclude-symbols=confstr
 --exclude-symbols=connect
 --exclude-symbols=creat
+--exclude-symbols=crt_get_platform_info
+--exclude-symbols=crt_get_user_home
+--exclude-symbols=crt_is_native_executable
+--exclude-symbols=crt_dl_iterate_images
 --exclude-symbols=ctermid
 --exclude-symbols=ctime
 --exclude-symbols=ctime_r

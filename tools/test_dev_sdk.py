@@ -168,11 +168,12 @@ class ExternalConsumerBoundary(unittest.TestCase):
 
     def test_macos_sandbox_denies_reads_and_writes_with_quoted_paths(self):
         root = Path(tempfile.gettempdir()).resolve()
-        hidden = [root / 'producer "quoted" path']
+        hidden = [root / 'producer "quoted" 한글 path']
         work = root / 'separate work'
         command = external.macos_sandbox_command('sandbox-exec', work, hidden, 'python', ['probe.py'])
         self.assertEqual(['sandbox-exec', '-p'], command[:2])
-        self.assertIn('(deny file-read* file-write* (subpath ' + json.dumps(str(hidden[0])) + '))', command[2])
+        self.assertIn('(deny file-read* file-write* (subpath ' + json.dumps(str(hidden[0]), ensure_ascii=False) + '))', command[2])
+        self.assertNotIn('\\ud55c', command[2])
         self.assertEqual(['python', 'probe.py'], command[3:])
         with self.assertRaisesRegex(ValueError, 'disjoint'):
             external.macos_sandbox_command('sandbox-exec', hidden[0] / 'work', hidden, 'python', [])
@@ -240,7 +241,12 @@ class DevelopmentProfile(unittest.TestCase):
                 self.put(relative)
             self.manifest["redistributed_dependencies"].append({"name": name,
                 "link_artifacts": list(profile.STATIC[name]), "runtime_artifacts": shared})
-        self.data = {"format": 1, "profile": "dev", "version": "v1.0.0", "target": self.manifest["target"],
+        for name, header in profile.HEADER_PORTS.items():
+            self.put(header)
+            self.manifest["redistributed_dependencies"].append({"name": name, "kind": "header-only-port", "headers": [header]})
+        for header in ("include/cJSON.h", "include/mbedtls/sha256.h", "include/mbedtls/sha512.h", "include/crt/platform.h", "include/crt/dl.h"):
+            self.put(header)
+        self.data = {"format": 1, "profile": "dev", "capabilities": profile.CAPABILITIES, "version": "v1.0.0", "target": self.manifest["target"],
                      "producer_source_commit": "a" * 40, "base_source_commit": "a" * 40,
                      "producer_working_tree_dirty": False,
                      "compile_provenance": {"source_commit": "a" * 40, "working_tree_dirty": False},

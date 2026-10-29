@@ -5,9 +5,11 @@
 #include <unistd.h>
 
 /* sysinfo(2) and sendfile(2): Linux system calls that Bionic exposes through
- * <sys/sysinfo.h> and <sys/sendfile.h>. They have no counterpart on macOS or
- * Windows, where they fail with ENOSYS so a caller can fall back (WTF reads
- * total RAM through sysinfo only on Linux). */
+ * <sys/sysinfo.h> and <sys/sendfile.h>. sysinfo has no counterpart on macOS or
+ * Windows and fails with ENOSYS (WTF reads total RAM through it only on Linux).
+ * sendfile is emulated there with a pread/read + write loop: callers such as
+ * libc++'s filesystem copy_file select sendfile whenever the header exists and
+ * do not fall back when it fails, so ENOSYS would make copy_file throw. */
 #if defined(CRT_TARGET_OS_LINUX)
 int sysinfo(struct sysinfo* info) {
   return syscall(SYS_sysinfo, (long)info) < 0 ? -1 : 0;
@@ -24,11 +26,29 @@ int sysinfo(struct sysinfo* info) {
 }
 
 ssize_t sendfile(int out_fd, int in_fd, off_t* offset, size_t count) {
-  (void)out_fd;
-  (void)in_fd;
-  (void)offset;
-  (void)count;
-  errno = ENOSYS;
-  return -1;
+  char buffer[65536];
+  size_t total = 0;
+  if (count > 0x7ffff000u) count = 0x7ffff000u;
+  while (total < count) {
+    size_t want = count - total < sizeof(buffer) ? count - total : sizeof(buffer);
+    ssize_t got = offset ? pread(in_fd, buffer, want, *offset) : read(in_fd, buffer, want);
+    if (got < 0) {
+      if (errno == EINTR) continue;
+      return total ? (ssize_t)total : -1;
+    }
+    if (got == 0) break;
+    for (ssize_t done = 0; done < got;) {
+      ssize_t put = write(out_fd, buffer + done, (size_t)(got - done));
+      if (put < 0) {
+        if (errno == EINTR) continue;
+        if (offset) *offset += done;
+        return total + (size_t)done ? (ssize_t)(total + (size_t)done) : -1;
+      }
+      done += put;
+    }
+    if (offset) *offset += got;
+    total += (size_t)got;
+  }
+  return (ssize_t)total;
 }
 #endif

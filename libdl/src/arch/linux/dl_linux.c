@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <sys/auxv.h>
 #include <unistd.h>
+#include <crt/dl.h>
+#include <errno.h>
 
 #include "../../dl_internal.h"
 
@@ -242,4 +244,35 @@ int crt_dl_backend_addr_info(const void* addr, Dl_info* info) {
   info->dli_fname = path;
   info->dli_fbase = (void*)(uintptr_t)bias;
   return 1;
+}
+
+struct crt_image_walk {
+  int (*callback)(const struct crt_dl_image*, size_t, void*);
+  void* data;
+};
+
+static int crt_image_from_phdr(struct dl_phdr_info* info, size_t size, void* data) {
+  struct crt_image_walk* walk = data;
+  struct crt_dl_image image;
+  char path[4096];
+  ssize_t length;
+  (void)size;
+  image.path = info->dlpi_name;
+  if (image.path == 0 || image.path[0] == 0) {
+    length = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (length < 0) return -1;
+    path[length] = 0;
+    image.path = path;
+  }
+  image.base = (const void*)(uintptr_t)info->dlpi_addr;
+  image.format = "elf";
+  return walk->callback(&image, sizeof(image), walk->data);
+}
+
+int crt_dl_iterate_images(int (*callback)(const struct crt_dl_image*, size_t, void*), void* data) {
+  struct crt_image_walk walk;
+  if (callback == 0) return __set_errno(EINVAL);
+  walk.callback = callback;
+  walk.data = data;
+  return crt_dl_backend_iterate_phdr(crt_image_from_phdr, &walk);
 }

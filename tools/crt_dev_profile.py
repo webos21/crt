@@ -6,11 +6,13 @@ import re
 import struct
 
 SIDECAR = "share/crt/contracts/development.json"
-PORTS = {"zlib", "mbedtls", "curl"}
+CAPABILITIES = ["crt-platform-queries-1", "json-sha2-1"]
+PORTS = {"zlib", "mbedtls", "curl", "cjson"}
+HEADER_PORTS = {"nlohmann-json": "include/nlohmann/json.hpp"}
 STATIC = {"zlib": ("lib/libz.a",), "curl": ("lib/libcurl.a",),
-          "mbedtls": ("lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a")}
+          "mbedtls": ("lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a"), "cjson": ("lib/libcjson.a",)}
 SHARED = {"zlib": ("libz",), "curl": ("libcurl",),
-          "mbedtls": ("libmbedtls", "libmbedx509", "libmbedcrypto")}
+          "mbedtls": ("libmbedtls", "libmbedx509", "libmbedcrypto"), "cjson": ("libcjson",)}
 
 
 def consumer_options(target_os):
@@ -66,6 +68,8 @@ def check(sdk, manifest):
         problems.append("Development SDK profile/manifest/version identity mismatch")
     if profile.get("tls_trust") != {"mode": "explicit-ca-file", "bundled": False}:
         problems.append("Development SDK must require consumer-supplied explicit CA trust")
+    if profile.get("capabilities") != CAPABILITIES:
+        problems.append("Development SDK missing platform-query/JSON/SHA-2 capabilities")
     if profile.get("consumer_compile_options") != consumer_options(manifest.get("target", {}).get("os")):
         problems.append("Development SDK missing the SDK-owned portable networking compile options")
     observed = runtime_digests(sdk)
@@ -79,10 +83,19 @@ def check(sdk, manifest):
         if any(value not in entry.get("link_artifacts", []) or not (sdk / value).is_file() for value in STATIC[name]):
             problems.append(f"Development SDK missing {name} static archive")
         for stem in SHARED[name]:
-            if not any(re.match(re.escape(stem) + r"[.\-]", Path(value).name)
+            pattern = r"(?:lib)?cjson" if name == "cjson" else re.escape(stem)
+            if not any(re.match(pattern + r"[.\-]", Path(value).name)
                        and is_shared_runtime(sdk / value, manifest.get("target", {}).get("os"))
                        for value in entry.get("runtime_artifacts", [])):
                 problems.append(f"Development SDK missing {name} shared runtime: {stem}")
+    for name, header in HEADER_PORTS.items():
+        entry = dependencies.get(name, {})
+        if not (sdk / header).is_file() or not entry.get("headers") or entry.get("kind") != "header-only-port":
+            problems.append(f"Development SDK missing header-only dependency {name}")
+    for header in ("include/cJSON.h", "include/mbedtls/sha256.h", "include/mbedtls/sha512.h",
+                   "include/crt/platform.h", "include/crt/dl.h"):
+        if not (sdk / header).is_file():
+            problems.append(f"Development SDK missing public utility/PAL header {header}")
     for name in ("ffmpeg", "skia", "freetype", "lvgl", "webkit"):
         if name in dependencies:
             problems.append(f"Development SDK contains forbidden dependency {name}")

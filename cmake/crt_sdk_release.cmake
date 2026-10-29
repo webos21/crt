@@ -14,6 +14,8 @@ if(Python3_Interpreter_FOUND)
     INPUTS "${crt_dev_predecessor}" "${CMAKE_SOURCE_DIR}/tools/build_dev_sdk.py"
       "${CMAKE_SOURCE_DIR}/porting/recipes/curl.json" "${CMAKE_SOURCE_DIR}/porting/recipes/mbedtls.json"
       "${CMAKE_SOURCE_DIR}/porting/recipes/zlib.json" "${CMAKE_SOURCE_DIR}/tools/build_stage_04_gfx_media.py"
+      "${CMAKE_SOURCE_DIR}/porting/recipes/cjson.json" "${CMAKE_SOURCE_DIR}/porting/recipes/nlohmann-json.json"
+      "${CMAKE_SOURCE_DIR}/tools/crt_dev_profile.py"
     OUTPUTS "${CRT_DEV_OUTPUT}"
     COMMAND ${crt_web_env} "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build_dev_sdk.py"
       --sdk-root "${crt_dev_predecessor}" --work-root "${CRT_DEV_WORK_ROOT}" --output "${CRT_DEV_OUTPUT}")

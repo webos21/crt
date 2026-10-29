@@ -1,5 +1,8 @@
 #include <dlfcn.h>
 #include <stddef.h>
+#include <crt/dl.h>
+#include <errno.h>
+#include <stdint.h>
 
 #include "../../dl_internal.h"
 
@@ -16,6 +19,51 @@ __declspec(dllimport) BOOL __stdcall GetModuleHandleExA(
     DWORD dwFlags, const char* lpModuleName, HMODULE* phModule);
 __declspec(dllimport) DWORD __stdcall GetModuleFileNameA(
     HMODULE hModule, char* lpFilename, DWORD nSize);
+
+struct crt_module_entry {
+  DWORD size, module_id, process_id, global_usage, process_usage;
+  unsigned char* base;
+  DWORD image_size;
+  HMODULE module;
+  unsigned short name[256];
+  unsigned short path[260];
+};
+__declspec(dllimport) void* __stdcall CreateToolhelp32Snapshot(DWORD flags, DWORD pid);
+__declspec(dllimport) BOOL __stdcall Module32FirstW(void* snapshot, struct crt_module_entry* entry);
+__declspec(dllimport) BOOL __stdcall Module32NextW(void* snapshot, struct crt_module_entry* entry);
+__declspec(dllimport) BOOL __stdcall CloseHandle(void* handle);
+__declspec(dllimport) DWORD __stdcall GetLastError(void);
+__declspec(dllimport) int __stdcall WideCharToMultiByte(
+    unsigned int page, DWORD flags, const unsigned short* wide, int length,
+    char* output, int capacity, const char* replacement, BOOL* used);
+
+int crt_dl_iterate_images(int (*callback)(const struct crt_dl_image*, size_t, void*), void* data) {
+  void* snapshot;
+  struct crt_module_entry entry;
+  int result = 0;
+  BOOL present;
+  if (callback == 0) return __set_errno(EINVAL);
+  snapshot = CreateToolhelp32Snapshot(0x8, 0);
+  if (snapshot == (void*)(intptr_t)-1) return __set_errno(EIO);
+  entry.size = sizeof(entry);
+  present = Module32FirstW(snapshot, &entry);
+  while (present) {
+    struct crt_dl_image image;
+    char path[1040];
+    if (!WideCharToMultiByte(65001, 0x80, entry.path, -1, path, sizeof(path), 0, 0)) {
+      result = __set_errno(EILSEQ); break;
+    }
+    image.path = path;
+    image.base = entry.base;
+    image.format = "pe";
+    result = callback(&image, sizeof(image), data);
+    if (result != 0) break;
+    present = Module32NextW(snapshot, &entry);
+  }
+  if (!present && GetLastError() != 18) result = __set_errno(EIO);
+  CloseHandle(snapshot);
+  return result;
+}
 
 #define CRT_GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS 0x00000004UL
 

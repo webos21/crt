@@ -29,6 +29,7 @@ set(CRT_LIBC_SOURCES
   src/mntent.c
   src/nl_types.c
   src/poll.c
+  src/platform.c
   src/prctl.c
   src/printf.c
   src/process.c

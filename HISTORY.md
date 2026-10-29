@@ -11,6 +11,44 @@ substantive update.
 
 ## 2026-10-29
 
+### Move CLI platform queries into the CRT PAL and ship JSON/SHA-2 ports
+
+The CLI used host macros and direct dyld/procfs calls, so the missing PAL surface
+was added to CRT: `<crt/platform.h>` (target info, native-executable detection,
+user home) and `<crt/dl.h>` loaded-image iteration with Linux/macOS/Windows
+backends ([design](docs/design/platform_queries.md)). The Development SDK now
+carries cJSON, nlohmann/json and Mbed TLS SHA-2 (recipes, round-trip tests) and the
+experimental provider exports typed build modes. The macOS replay found that
+`sendfile` was an ENOSYS stub that libc++ `copy_file` relies on; it is now a
+pread/write emulation on macOS/Windows with `sendfile_test`. Core CTest
+145/145; replay evidence is in the CLI acceptance record. This supersedes the
+statement below that no libc/PAL change was required.
+
+### Replay the SDK/native CLI bootstrap on macOS
+
+Produced a clean-source macOS/arm64 Dev SDK from `17de3510...` before changing
+producer tools, then handed its unchanged payload to an external CLI source
+export. The ordinary static/shared Dev consumer and 143 core C tests pass.
+Extended the experimental producer exporter to native macOS with explicit
+Xcode OS SDK discovery, preserving Bionic headers/static runtime order and Linux
+command policy. No libc/PAL/stdlib source or public ABI change was required.
+
+The CLI-owned macOS self-build, native workflows and bare-runtime acceptance
+pass; their exact candidate/source hashes and native evidence belong to
+[CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-macosarm64-2026-10-29),
+not a second producer ledger. Updated Tranche 1.5/1.6 to retain Windows replay
+and promotion as open work. The replay also found an acceptance-tool issue:
+SBPL needs literal UTF-8 paths, not JSON Unicode escapes. The shared SDK driver
+is corrected and passes its Korean-path isolation replay; bounded exporter/
+policy regressions extend the existing CI tooling selection (147 pass, seven
+conditional skips), not another full native CI build.
+
+Producer logs remain under `out/cli-macos-20261029`. The SDK is local
+`v0.4.0-cli.20261029`, not a Git tag or public release; modified producer tooling
+and CLI code are separate identified local inputs. Both STATUS files and
+production/adopted locks are untouched; no commit or public promotion is
+implied by this verification.
+
 ### Consolidate the native CLI producer contract and handoff documentation
 
 Recorded the native JSON/LLVM app-build boundary, experimental producer exporter,

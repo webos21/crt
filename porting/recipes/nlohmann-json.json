@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "name": "nlohmann-json",
+  "version": "3.12.0",
+  "source": {
+    "url": "https://codeload.github.com/nlohmann/json/tar.gz/refs/tags/v3.12.0",
+    "archive": "json-3.12.0.tar.gz",
+    "source_dir": "nlohmann-json-3.12.0",
+    "sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187"
+  },
+  "dependencies": [],
+  "build": {"system": "headers", "sysroot_stage": "02-cxx", "headers": [{"from": "single_include/nlohmann", "to": "include/nlohmann"}]},
+  "tests": [
+    {"name": "roundtrip-static", "language": "c++", "source": "porting/tests/json_roundtrip.cc", "cflags": ["-std=c++17", "-I@PORT_PREFIX@/include"], "env": {"CRT_CXX_ENABLE_EXCEPTIONS": "1", "CRT_CXX_ENABLE_RTTI": "1", "CRT_CXX_HOSTED": "1"}, "expect_stdout": "json_roundtrip: ok"},
+    {"name": "roundtrip-shared", "language": "c++", "source": "porting/tests/json_roundtrip.cc", "cflags": ["-std=c++17", "-I@PORT_PREFIX@/include"], "env": {"CRT_CXX_RUNTIME_LINKAGE": "shared", "CRT_CXX_ENABLE_EXCEPTIONS": "1", "CRT_CXX_ENABLE_RTTI": "1", "CRT_CXX_HOSTED": "1"}, "expect_stdout": "json_roundtrip: ok"}
+  ],
+  "status": {"linux": "planned", "macos": "planned", "windows": "planned"},
+  "notes": ["MIT header-only C++ JSON dependency supplied by the Development SDK instead of vendored in crt-cli. No JSON DSO exists: both tests exercise the same upstream headers with static/shared CRT C++ runtime linkage."]
+}

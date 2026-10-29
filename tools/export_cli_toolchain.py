@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export a local experimental Linux static CLI policy from installed SDK wrappers.
+"""Export experimental native target policies from installed SDK wrappers.
 
 Producer migration tool, not a CLI runtime dependency or SDK Build Contract v1.
 The immutable SDK is read only; the separately hashed output binds its full
@@ -20,6 +20,21 @@ def digest(path):
     return hashlib.file_digest(path.open('rb'), 'sha256').hexdigest()
 
 
+def native_target(system=None, machine=None):
+    system = system or platform.system()
+    machine = (machine or platform.machine()).lower()
+    arch = {'amd64': 'x86_64', 'arm64': 'aarch64'}.get(machine, machine)
+    target_os = {'Linux': 'linux', 'Darwin': 'macos'}.get(system)
+    if (target_os, arch) not in (('linux', 'x86_64'), ('macos', 'aarch64')):
+        raise ValueError('experimental export supports native Linux/x86_64 and macOS/arm64 only')
+    return {'os': target_os, 'arch': arch}
+
+
+def normalize_argv(vector, sdk, resource, suffix):
+    return [value.replace(str(sdk), '@SDK@').replace(resource, '@RESOURCE@')
+            .replace(f'@SOURCE@.{suffix}', '@SOURCE@') for value in vector]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sdk-root', type=Path, required=True)
@@ -30,10 +45,16 @@ def main():
     sdk = args.sdk_root.resolve(strict=True)
     manifest = json.loads((sdk / 'manifest.json').read_text())
     profile = json.loads((sdk / 'share/crt/contracts/development.json').read_text())
-    if platform.system() != 'Linux' or platform.machine() != 'x86_64' or manifest['target'] != {'os': 'linux', 'arch': 'x86_64'}:
-        parser.error('experimental export currently supports native Linux/x86_64 only')
+    try:
+        target = native_target()
+    except ValueError as error:
+        parser.error(str(error))
+    if manifest['target'] != target:
+        parser.error('experimental export requires an SDK for the native host target')
     if profile.get('format') != 1 or profile.get('profile') != 'dev':
         parser.error('expected development packaging profile format 1')
+    if not {'crt-platform-queries-1', 'json-sha2-1'} <= set(profile.get('capabilities', [])):
+        parser.error('SDK lacks platform-query/JSON/SHA-2 capabilities; produce a new candidate')
     inventory = []
     for path in sorted(sdk.rglob('*')):
         if path.is_symlink():
@@ -42,10 +63,32 @@ def main():
         elif path.is_file():
             inventory.append([path.relative_to(sdk).as_posix(), 'file', digest(path)])
     compact = json.dumps(inventory, ensure_ascii=False, separators=(',', ':'))
-    result = dict(schema='crt.experimental.native-toolchain', format=0,
-                  target=dict(os='linux', arch='x86_64'), policy='static-hosted-exceptions-rtti',
+    result = dict(schema='crt.experimental.native-toolchain', format=1,
+                  target=target, policy='native-targets-exceptions-rtti',
                   sdk_inventory=inventory, sdk_content_sha256=hashlib.sha256(compact.encode()).hexdigest(),
-                  producer_source_commit=profile['producer_source_commit'], commands={})
+                  producer_source_commit=profile['producer_source_commit'], commands={}, modes={})
+    result['provenance'] = {key: profile[key] for key in
+                            ('producer_working_tree_dirty', 'base_source_commit', 'compile_provenance')}
+    result['artifacts'] = dict(executable_suffix='', static_library_prefix='lib', static_library_suffix='.a',
+                               shared_library_prefix='lib', shared_library_suffix='.dylib' if target['os'] == 'macos' else '.so')
+    result['libraries'] = {}
+    for archive in sorted((sdk / 'lib').glob('lib*.a')):
+        if archive.name.endswith('.dll.a'):
+            continue
+        name = archive.name[3:-2]
+        choices = {'static': archive.relative_to(sdk).as_posix()}
+        shared = sdk / 'lib' / ('lib' + name + result['artifacts']['shared_library_suffix'])
+        if shared.is_file():
+            choices['shared'] = shared.relative_to(sdk).as_posix()
+        result['libraries'][name] = choices
+    os_sdk_flags = []
+    if target['os'] == 'macos':
+        # Explicit vendor SDK for libSystem/linker lookup; -nostdinc and the
+        # installed Bionic include paths still own target C/C++ headers.
+        os_sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+        os_sdk = str(Path(os_sdk).resolve(strict=True))
+        result['external_os_sdk'] = os_sdk
+        os_sdk_flags = ['-isysroot', os_sdk]
     with tempfile.TemporaryDirectory(prefix='crt-cli-policy-') as tmp:
         work = Path(tmp)
         recorder = work / 'record'
@@ -62,18 +105,33 @@ with open(os.environ['CAPTURE_ARGV'], 'w') as stream:
             resource = subprocess.check_output([real, '-print-resource-dir'], text=True).strip()
             env = {'PATH': '/usr/bin:/bin', 'CRT_SYSROOT': str(sdk), 'CRT_ROOTFS': str(sdk),
                    'CRT_HOST_CC': str(recorder), 'CRT_HOST_CXX': str(recorder),
-                   'CRT_TARGET_OS': 'linux', 'CRT_TARGET_ARCH': 'x86_64',
+                   'CRT_TARGET_OS': target['os'], 'CRT_TARGET_ARCH': target['arch'],
                    'CRT_CXX_RUNTIME_LINKAGE': 'static', 'CRT_RUNTIME_LINKAGE': 'static',
                    'CRT_CXX_ENABLE_EXCEPTIONS': '1', 'CRT_CXX_ENABLE_RTTI': '1', 'CRT_CXX_HOSTED': '1',
                    'REAL_CLANG': real, 'CAPTURE_ARGV': str(work / 'argv.json')}
-            for operation, flags in [('compile', ['@EXTRA@', '-c', f'@SOURCE@.{suffix}', '-o', '@OUTPUT@']),
-                                     ('link', ['@OBJECTS@', '@LIBRARIES@', '-o', '@OUTPUT@'])]:
-                subprocess.run([str(sdk / 'tools' / wrapper), *flags], env=env, check=True)
-                vector = json.loads((work / 'argv.json').read_text())
-                vector = [v.replace(str(sdk), '@SDK@').replace(resource, '@RESOURCE@').replace(f'@SOURCE@.{suffix}', '@SOURCE@') for v in vector]
-                if any(str(work) in v for v in vector):
-                    raise RuntimeError('unresolved producer scratch path')
-                result['commands'][operation + '_' + language] = vector
+            for mode, linkage, shared, pic in (
+                    ('executable-static', 'static', False, False),
+                    ('executable-shared', 'shared', False, True),
+                    ('static-library', 'static', False, True),
+                    ('shared-library', 'shared', True, True)):
+                selected_env = dict(env, CRT_CXX_RUNTIME_LINKAGE=linkage, CRT_RUNTIME_LINKAGE=linkage,
+                                    CRT_CXX_STL_LINKAGE=linkage)
+                commands = result['modes'].setdefault(mode, {})
+                compile_flags = (['-fPIC'] if pic else []) + ['@EXTRA@', '-c', f'@SOURCE@.{suffix}', '-o', '@OUTPUT@']
+                naming = (['-dynamiclib', '-Wl,-install_name,@OUTPUT@'] if target['os'] == 'macos'
+                          else ['-shared', '-Wl,-soname,@OUTPUT_NAME@']) if shared else []
+                for operation, flags in [('compile', compile_flags),
+                                         ('link', naming + ['@OBJECTS@', '@LIBRARIES@', '-o', '@OUTPUT@'])]:
+                    if mode == 'static-library' and operation == 'link':
+                        commands['archive'] = ['rcs', '@OUTPUT@', '@OBJECTS@']
+                        continue
+                    subprocess.run([str(sdk / 'tools' / wrapper), *os_sdk_flags, *flags], env=selected_env, check=True)
+                    vector = normalize_argv(json.loads((work / 'argv.json').read_text()), sdk, resource, suffix)
+                    if any(str(work) in v for v in vector):
+                        raise RuntimeError('unresolved producer scratch path')
+                    commands[operation + '_' + language] = vector
+                if mode == 'executable-static':
+                    result['commands'].update(commands)
     result['exporter_sha256'] = digest(Path(__file__))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # No overwrite: a candidate is a new input identity, never an in-place update.

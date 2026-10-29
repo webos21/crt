@@ -81,13 +81,13 @@ installation is not the initial default.
 
 | Host | Default data root |
 | --- | --- |
-| Windows | `%LOCALAPPDATA%/CRT` |
-| Linux | `$XDG_DATA_HOME/crt`, otherwise `~/.local/share/crt` |
-| macOS | `~/Library/Application Support/CRT` |
+| Windows | `$USER_HOME/.crt` (`USERPROFILE` through CRT PAL) |
+| Linux | `$USER_HOME/.crt` (`HOME` through CRT PAL) |
+| macOS | `$USER_HOME/.crt` (`HOME` through CRT PAL) |
 
-Allow a `CRT_HOME` override. Linux configuration/cache data may use separate
-XDG locations while retaining the same identity rules. A space-free home path
-must not be required.
+SDK installations default to `$USER_HOME/.crt/sdks` on every host. This owner
+decision supersedes the former per-OS data-root proposal. Root overrides for
+other CLI/cache data remain future design; a space-free home is not required.
 
 ```text
 CRT_HOME/
@@ -95,7 +95,7 @@ CRT_HOME/
   cli/<cli-version>-<digest>/   CLI executable + agreed resources/metadata
   host/<host-tuple>/<tools-id>/ manifest + existing rootfs-relative layout
   toolchains/<toolchain-id>/    external LLVM/OS SDK paths, versions, fingerprints
-  sdk/<release>/<target>/<sdk-content-id>/
+  sdks/<sdk-id>/
                                manifest.json, include/, lib/, bin/, system/,
                                libexec/, tools/, share/, crt-toolchain.cmake
   ports/store/<build-key>/      include/, lib/, bin/, manifest, notices, evidence

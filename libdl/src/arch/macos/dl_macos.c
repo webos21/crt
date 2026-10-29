@@ -1,5 +1,8 @@
 #include <dlfcn.h>
 #include <stddef.h>
+#include <crt/dl.h>
+#include <errno.h>
+#include <stdint.h>
 
 #include <private/crt_macho_symbol.h>
 
@@ -27,6 +30,27 @@
  * image list instead, without going through this API at all. */
 extern const void* NSAddImage(const char* image_name, unsigned long options);
 #define CRT_NSADDIMAGE_OPTION_RETURN_ON_ERROR 0x1UL
+
+extern uint32_t _dyld_image_count(void);
+extern const void* _dyld_get_image_header(uint32_t index);
+extern const char* _dyld_get_image_name(uint32_t index);
+
+int crt_dl_iterate_images(int (*callback)(const struct crt_dl_image*, size_t, void*), void* data) {
+  uint32_t i, count;
+  if (callback == 0) return __set_errno(EINVAL);
+  count = _dyld_image_count();
+  for (i = 0; i < count; ++i) {
+    struct crt_dl_image image;
+    int result;
+    image.path = _dyld_get_image_name(i);
+    image.base = _dyld_get_image_header(i);
+    image.format = "macho";
+    if (image.path == 0 || image.base == 0) continue;
+    result = callback(&image, sizeof(image), data);
+    if (result != 0) return result;
+  }
+  return 0;
+}
 
 void* crt_dl_backend_open(const char* filename, int flags) {
   const void* image;
