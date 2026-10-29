@@ -35,6 +35,39 @@ def normalize_argv(vector, sdk, resource, suffix):
             .replace(f'@SOURCE@.{suffix}', '@SOURCE@') for value in vector]
 
 
+TEMPORARY_PREFIXES = ('/tmp/', '/var/tmp/', '/private/tmp/', '/var/folders/', '/private/var/folders/')
+
+
+def unreplayable_paths(vector, sdk):
+    """Absolute temporary-directory paths in a recorded argv that do not belong to the SDK.
+
+    Placeholders (@SDK@, @RESOURCE@, @OBJECTS@ ...) and the SDK itself are fine; a path under a temporary directory
+    is a file some wrapper made for that one call."""
+    found = []
+    for value in vector:
+        for token in str(value).split(','):
+            token = token.split('=', 1)[-1] if token.startswith('-') else token
+            token = token.lstrip('-L').lstrip('I') if token[:2] in ('-L', '-I') else token
+            if token.startswith(TEMPORARY_PREFIXES) and not token.startswith(str(sdk)):
+                found.append(token)
+    return found
+
+
+def project_local_shared_rpath(vector, mode, operation, target_os):
+    """Let a consumer executable find a shared library of its own project beside it.
+
+    An ELF executable that links a shared library records only the library's soname (DT_NEEDED) and finds it through
+    RUNPATH. The recorded wrapper argv carries the SDK directory (C++ only) but not the executable's own directory, so
+    a project-local shared library next to the executable was not found at run time (2026-10-29 Linux replay,
+    variant-c-shared-library). macOS resolves the dylib by its recorded path and needs nothing here; every other
+    mode and operation is returned unchanged."""
+    if not (mode == 'executable-shared' and operation == 'link' and target_os == 'linux'):
+        return list(vector)
+    result = [value for value in vector if value != '-Wl,-rpath,$ORIGIN']
+    result.insert(result.index('@OBJECTS@') if '@OBJECTS@' in result else 0, '-Wl,-rpath,$ORIGIN')
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sdk-root', type=Path, required=True)
@@ -129,6 +162,12 @@ with open(os.environ['CAPTURE_ARGV'], 'w') as stream:
                     vector = normalize_argv(json.loads((work / 'argv.json').read_text()), sdk, resource, suffix)
                     if any(str(work) in v for v in vector):
                         raise RuntimeError('unresolved producer scratch path')
+                    # A wrapper-made temporary file (the loader import stub used to be one) is gone once the wrapper
+                    # returns, so a vector that names one cannot be replayed by a consumer.
+                    leaked = unreplayable_paths(vector, sdk)
+                    if leaked:
+                        raise RuntimeError('recorded argv names temporary files outside the SDK: ' + ', '.join(leaked))
+                    vector = project_local_shared_rpath(vector, mode, operation, target['os'])
                     commands[operation + '_' + language] = vector
                 if mode == 'executable-static':
                     result['commands'].update(commands)
