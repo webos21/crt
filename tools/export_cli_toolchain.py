@@ -24,15 +24,27 @@ def native_target(system=None, machine=None):
     system = system or platform.system()
     machine = (machine or platform.machine()).lower()
     arch = {'amd64': 'x86_64', 'arm64': 'aarch64'}.get(machine, machine)
-    target_os = {'Linux': 'linux', 'Darwin': 'macos'}.get(system)
-    if (target_os, arch) not in (('linux', 'x86_64'), ('macos', 'aarch64')):
-        raise ValueError('experimental export supports native Linux/x86_64 and macOS/arm64 only')
+    target_os = {'Linux': 'linux', 'Darwin': 'macos', 'Windows': 'windows'}.get(system)
+    if (target_os, arch) not in (('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')):
+        raise ValueError('experimental export supports native Linux/x86_64, macOS/arm64 and Windows/x64 only')
     return {'os': target_os, 'arch': arch}
 
 
+def spellings(path):
+    """Every way a build records one path: native separators, forward slashes, and the 8.3-free resolved form."""
+    text = str(path)
+    return sorted({text, text.replace('\\', '/'), Path(text).as_posix()}, key=len, reverse=True)
+
+
 def normalize_argv(vector, sdk, resource, suffix):
-    return [value.replace(str(sdk), '@SDK@').replace(resource, '@RESOURCE@')
-            .replace(f'@SOURCE@.{suffix}', '@SOURCE@') for value in vector]
+    result = []
+    for value in vector:
+        for spelling in spellings(sdk):
+            value = value.replace(spelling, '@SDK@')
+        for spelling in spellings(resource):
+            value = value.replace(spelling, '@RESOURCE@')
+        result.append(value.replace(f'@SOURCE@.{suffix}', '@SOURCE@'))
+    return result
 
 
 def main():
@@ -56,7 +68,9 @@ def main():
     if not {'crt-platform-queries-1', 'json-sha2-1'} <= set(profile.get('capabilities', [])):
         parser.error('SDK lacks platform-query/JSON/SHA-2 capabilities; produce a new candidate')
     inventory = []
-    for path in sorted(sdk.rglob('*')):
+    # Component-wise, case-sensitive: the order of the CLI's std::filesystem::path sort on every host. Python's own
+    # Path ordering is case-insensitive on Windows and would make the same SDK hash differently there.
+    for path in sorted(sdk.rglob('*'), key=lambda item: item.relative_to(sdk).parts):
         if path.is_symlink():
             path.resolve(strict=True).relative_to(sdk)
             inventory.append([path.relative_to(sdk).as_posix(), 'symlink', os.readlink(path)])
@@ -69,17 +83,27 @@ def main():
                   producer_source_commit=profile['producer_source_commit'], commands={}, modes={})
     result['provenance'] = {key: profile[key] for key in
                             ('producer_working_tree_dirty', 'base_source_commit', 'compile_provenance')}
-    result['artifacts'] = dict(executable_suffix='', static_library_prefix='lib', static_library_suffix='.a',
-                               shared_library_prefix='lib', shared_library_suffix='.dylib' if target['os'] == 'macos' else '.so')
+    windows = target['os'] == 'windows'
+    result['artifacts'] = dict(executable_suffix='.exe' if windows else '', static_library_prefix='lib',
+                               static_library_suffix='.a', shared_library_prefix='lib',
+                               shared_library_suffix={'macos': '.dylib', 'windows': '.dll'}.get(target['os'], '.so'))
     result['libraries'] = {}
     for archive in sorted((sdk / 'lib').glob('lib*.a')):
         if archive.name.endswith('.dll.a'):
             continue
         name = archive.name[3:-2]
         choices = {'static': archive.relative_to(sdk).as_posix()}
-        shared = sdk / 'lib' / ('lib' + name + result['artifacts']['shared_library_suffix'])
-        if shared.is_file():
-            choices['shared'] = shared.relative_to(sdk).as_posix()
+        if windows:
+            # A Windows DLL is linked through its import library; the DLL itself is a run-time file in bin/.
+            import_library = sdk / 'lib' / f'lib{name}_dll.dll.a'
+            runtime = sdk / 'bin' / f'lib{name}.dll'
+            if import_library.is_file() and runtime.is_file():
+                choices['shared'] = import_library.relative_to(sdk).as_posix()
+                choices['shared_runtime'] = runtime.relative_to(sdk).as_posix()
+        else:
+            shared = sdk / 'lib' / ('lib' + name + result['artifacts']['shared_library_suffix'])
+            if shared.is_file():
+                choices['shared'] = shared.relative_to(sdk).as_posix()
         result['libraries'][name] = choices
     os_sdk_flags = []
     if target['os'] == 'macos':
@@ -89,26 +113,44 @@ def main():
         os_sdk = str(Path(os_sdk).resolve(strict=True))
         result['external_os_sdk'] = os_sdk
         os_sdk_flags = ['-isysroot', os_sdk]
+    if windows:
+        # The Windows SDK import libraries (kernel32.lib, ...) are the external OS boundary, as the Xcode SDK is on macOS.
+        libpath = os.environ.get('CRT_WINDOWS_SDK_LIBPATH', '')
+        if not libpath or not Path(libpath, 'kernel32.lib').is_file():
+            parser.error('set CRT_WINDOWS_SDK_LIBPATH to the Windows SDK um/<arch> import-library directory')
+        result['external_os_sdk'] = Path(libpath).resolve(strict=True).as_posix()
     with tempfile.TemporaryDirectory(prefix='crt-cli-policy-') as tmp:
         work = Path(tmp)
-        recorder = work / 'record'
-        recorder.write_text('''#!/usr/bin/python3
+        recorder = work / ('record.exe' if windows else 'record')
+        if windows:
+            real_cc = str(Path(shutil.which(args.clang) or args.clang).resolve(strict=True))
+            subprocess.run([real_cc, '-O1', '-D_CRT_SECURE_NO_WARNINGS', '-Wno-deprecated-declarations',
+                        str(Path(__file__).with_name('cli_argv_recorder.c')), '-o', str(recorder)], check=True)
+        else:
+            recorder.write_text('''#!/usr/bin/python3
 import json, os, subprocess, sys
 if sys.argv[1:] == ['-print-resource-dir']:
     sys.exit(subprocess.call([os.environ['REAL_CLANG'], '-print-resource-dir']))
 with open(os.environ['CAPTURE_ARGV'], 'w') as stream:
     json.dump(sys.argv[1:], stream)
 ''')
-        recorder.chmod(0o700)
+            recorder.chmod(0o700)
         for language, compiler, wrapper, suffix in [('c', args.clang, 'crt-cc', 'c'), ('cxx', args.clangxx, 'crt-c++', 'cpp')]:
+            if windows:
+                wrapper += '.cmd'
             real = str(Path(shutil.which(compiler) or compiler).resolve(strict=True))
             resource = subprocess.check_output([real, '-print-resource-dir'], text=True).strip()
             env = {'PATH': '/usr/bin:/bin', 'CRT_SYSROOT': str(sdk), 'CRT_ROOTFS': str(sdk),
-                   'CRT_HOST_CC': str(recorder), 'CRT_HOST_CXX': str(recorder),
+                   'CRT_HOST_CC': recorder.as_posix(), 'CRT_HOST_CXX': recorder.as_posix(),
                    'CRT_TARGET_OS': target['os'], 'CRT_TARGET_ARCH': target['arch'],
                    'CRT_CXX_RUNTIME_LINKAGE': 'static', 'CRT_RUNTIME_LINKAGE': 'static',
                    'CRT_CXX_ENABLE_EXCEPTIONS': '1', 'CRT_CXX_ENABLE_RTTI': '1', 'CRT_CXX_HOSTED': '1',
                    'REAL_CLANG': real, 'CAPTURE_ARGV': str(work / 'argv.json')}
+            if windows:
+                env.update(PATH=os.environ['SystemRoot'] + '/System32', SystemRoot=os.environ['SystemRoot'],
+                           TEMP=tmp, TMP=tmp, CRT_SYSROOT=sdk.as_posix(), CRT_ROOTFS=sdk.as_posix(),
+                           CRT_MKSH_EXE=str(sdk / 'system/bin/mksh.exe'),
+                           CRT_WINDOWS_SDK_LIBPATH=result['external_os_sdk'])
             for mode, linkage, shared, pic in (
                     ('executable-static', 'static', False, False),
                     ('executable-shared', 'shared', False, True),
@@ -117,9 +159,9 @@ with open(os.environ['CAPTURE_ARGV'], 'w') as stream:
                 selected_env = dict(env, CRT_CXX_RUNTIME_LINKAGE=linkage, CRT_RUNTIME_LINKAGE=linkage,
                                     CRT_CXX_STL_LINKAGE=linkage)
                 commands = result['modes'].setdefault(mode, {})
-                compile_flags = (['-fPIC'] if pic else []) + ['@EXTRA@', '-c', f'@SOURCE@.{suffix}', '-o', '@OUTPUT@']
+                compile_flags = (['-fPIC'] if pic and not windows else []) + ['@EXTRA@', '-c', f'@SOURCE@.{suffix}', '-o', '@OUTPUT@']
                 naming = (['-dynamiclib', '-Wl,-install_name,@OUTPUT@'] if target['os'] == 'macos'
-                          else ['-shared', '-Wl,-soname,@OUTPUT_NAME@']) if shared else []
+                          else ['-shared'] if windows else ['-shared', '-Wl,-soname,@OUTPUT_NAME@']) if shared else []
                 for operation, flags in [('compile', compile_flags),
                                          ('link', naming + ['@OBJECTS@', '@LIBRARIES@', '-o', '@OUTPUT@'])]:
                     if mode == 'static-library' and operation == 'link':
