@@ -99,12 +99,12 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   manifest/lock fixtures, without claiming the general SDK contract is implemented.
 - [ ] **1.5** Supply SDK-owned startup/link rules for minimal CLI help/version/bootstrap
   diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
-  Linux and macOS/arm64 pass; native Windows/x64 replay remains.
+  Linux, macOS/arm64 and Windows/x64 pass (local, unpromoted); the changed CLI sources still need a Linux/macOS replay.
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
   review native consumer/ABI evidence before each initial pair's adoption
   ([CLI D0 acceptance baseline](https://github.com/webos21/crt-cli/blob/5fcdc995d231fe2f9dbab4292000a81e0b4fce93/docs/acceptance/bootstrap_acceptance.md)).
-  Linux and macOS/arm64 pass; Windows/x64 remains; see the
+  Linux, macOS/arm64 and Windows/x64 pass; see the
   [macOS CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-macosarm64-2026-10-29).
 - [ ] **1.7** Select coherent exact assets before promotion/consumer locks;
   resolve the rehearsal's same-name source-asset variants without relabeling builds.
@@ -180,6 +180,17 @@ active SDK/CLI/Studio initiative or a reopening of accepted SDK stages;
 long-term extensions stay conditional on a real consumer.
 
 ### Focused CRT/PAL follow-ups: revalidate before fixing
+
+Found by the CLI's Windows replay (reproducers and numbers in the CLI's
+[Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29)):
+
+- [ ] Make `fread`/`fwrite` copy blocks instead of looping `fgetc`/`fputc` (`libc/src/stdio.c`; about 70 MB/s against
+  5 GB/s for `read()` on Windows), with a throughput regression test.
+- [ ] Specify and implement non-ASCII narrow paths on Windows (ANSI code-page `argv`/`path.string()`, imported libc++
+  `locale not supported`, `u8string()` correct): either a UTF-8 process code page or an explicit conversion contract.
+- [ ] Scope the Dev profile's `consumer_compile_options` (`-U_WIN32 ...`, curl headers) per library or make the curl headers
+  usable without it: it flips libc++'s `<filesystem>` path type and breaks C++ consumers.
+- [ ] Decide whether `posix_spawn` should detect non-CRT children itself instead of requiring `CRT_SPAWN_NATIVE_WINDOWS`.
 
 These older reports need bounded checks against identified current artifacts;
 neither later large-consumer passes nor a stale build tree settles them.

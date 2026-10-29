@@ -11,6 +11,25 @@ substantive update.
 
 ## 2026-10-29
 
+### Replay the CLI native contract on Windows/x64 with an OS-recorded process inventory
+
+Produced a clean local Windows/x64 Development SDK (`d054a66`, `v0.4.0-cli.20261029`, core tests 166/166, ordinary consumer
+passing) in a detached worktree under the user profile, because the stage-source step refuses a producer checkout that is
+edited during the build. Added the Windows side of the producer tooling: `tools/export_cli_toolchain.py` now exports a
+`windows/x86_64` provider (native recorder `tools/cli_argv_recorder.c` in place of the POSIX recorder script, `.exe`/`.dll`
+naming, import libraries, the Windows SDK library directory as `external_os_sdk`) and sorts the SDK inventory component-wise
+and case-sensitively; `tools/crt_windows_trace.py` launches a child under the restricted token with redirected stdio and a
+job-object record of every process it starts (the Windows counterpart of the execve trace and the macOS exec policy; accounting,
+not denial) plus `private_directory()` for per-phase SIDs; `tools/replay_cli_contract_windows.py` is the macOS driver's
+counterpart. The CLI builds, self-builds and passes its native suite (714 assertions) with only `kernel32` and one API-set DLL
+imported. The replay found consumer-side defects fixed in the CLI (`posix_spawn` instead of fork, the native-child stdio
+hint, per-source SDK consumer options, wchar stream constructors, renaming a running executable aside, pipe drain, descriptor
+reads for hashing, per-child runtime `PATH`) and producer follow-ups recorded in `TODO.md`: Unicode narrow paths, the
+consumer-option/`<filesystem>` conflict, byte-at-a-time `fread`, process groups. Linux/macOS replays of the changed CLI
+sources are not done. Evidence: `out/cli-windows-20261029/` (r17 `result.json` SHA-256
+`ed373d1e825e255f960ee07cfaca6378f80f3412e4abbf888bf2dbc9b57df708`) and the
+[CLI Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29).
+
 ### Move CLI platform queries into the CRT PAL and ship JSON/SHA-2 ports
 
 The CLI used host macros and direct dyld/procfs calls, so the missing PAL surface
