@@ -13,7 +13,8 @@ class NativePolicy(unittest.TestCase):
         self.assertEqual({'os': 'linux', 'arch': 'aarch64'}, exporter.native_target('Linux', 'aarch64'))
         self.assertEqual({'os': 'macos', 'arch': 'aarch64'}, exporter.native_target('Darwin', 'arm64'))
         self.assertEqual({'os': 'windows', 'arch': 'x86_64'}, exporter.native_target('Windows', 'AMD64'))
-        for system, arch in [('Darwin', 'x86_64'), ('Linux', 'riscv64'), ('Windows', 'ARM64'), ('Windows', 'x86')]:
+        self.assertEqual({'os': 'windows', 'arch': 'aarch64'}, exporter.native_target('Windows', 'ARM64'))
+        for system, arch in [('Darwin', 'x86_64'), ('Linux', 'riscv64'), ('Windows', 'x86')]:
             with self.subTest(system=system, arch=arch), self.assertRaises(ValueError):
                 exporter.native_target(system, arch)
 

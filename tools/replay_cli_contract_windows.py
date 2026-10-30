@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Producer-side Windows/x64 CLI contract replay; never a CLI runtime dependency.
+"""Producer-side native Windows (x64 or arm64) CLI contract replay; never a CLI runtime dependency.
 
 Windows counterpart of replay_cli_contract_macos.py. A disposable hosted C++ seed is compiled from the provider's
 argv, builds the CRT-native CLI, which then self-builds and runs its native integration suite. Every consumer
@@ -158,7 +158,7 @@ def main():
 
     # CRT-native probe, compiled with the SDK under test; it must fail to read the denied trees.
     activation = dict(producer_env, CRT_SYSROOT=sdk.as_posix(), CRT_ROOTFS=sdk.as_posix(), CRT_TARGET_OS='windows',
-                      CRT_TARGET_ARCH='x86_64', CRT_MKSH_EXE=str(sdk / 'system/bin/mksh.exe'),
+                      CRT_TARGET_ARCH=contract['target']['arch'], CRT_MKSH_EXE=str(sdk / 'system/bin/mksh.exe'),
                       CRT_HOST_CC=tools['clang'].as_posix(), CRT_HOST_CXX=tools['clangxx'].as_posix(),
                       CRT_WINDOWS_SDK_LIBPATH=contract['external_os_sdk'])
     probe_source = work / 'probe.c'
