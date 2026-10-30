@@ -35,6 +35,14 @@ int main(int argc, char** argv) {
   int result;
   char* child_argv[] = {"spawn_status_test", "child", 0};
 
+  if (argc >= 3 && strcmp(argv[1], "group-child") == 0) {
+    pid_t expected = strcmp(argv[2], "self") == 0 ? getpid() : (pid_t)atoi(argv[2]);
+    sigset_t mask;
+    if (getpgrp() != expected) return 20;
+    if (argc == 4 && (sigprocmask(SIG_SETMASK, 0, &mask) != 0 || sigismember(&mask, SIGUSR1) != 1)) return 21;
+    return 0;
+  }
+
   if (argc > 1 && strcmp(argv[1], "child") == 0) {
     return 7;
   }
@@ -81,6 +89,55 @@ int main(int argc, char** argv) {
   }
   if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 7) {
     return fail("the spawned child ran and exited 7");
+  }
+
+  /* CLI children need their own group; preserve masks and report attribute errors synchronously. */
+  {
+    posix_spawnattr_t attr;
+    sigset_t mask, parent_mask;
+    char parent_group[32];
+    char* group_argv[] = {path, "group-child", "self", "masked", 0};
+    pid_t original_group = getpgrp();
+    int parent_blocked;
+
+    if (sigprocmask(SIG_SETMASK, 0, &parent_mask) != 0) return fail("read parent mask");
+    parent_blocked = sigismember(&parent_mask, SIGUSR1);
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR1);
+    if (posix_spawnattr_init(&attr) != 0 ||
+        posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK) != 0 ||
+        posix_spawnattr_setpgroup(&attr, 0) != 0 || posix_spawnattr_setsigmask(&attr, &mask) != 0) {
+      return fail("prepare process group attributes");
+    }
+    result = posix_spawn(&pid, path, 0, &attr, group_argv, environ);
+    if (result != 0) {
+      fprintf(stderr, "spawn_status_test: SETPGROUP returned %d\n", result);
+      posix_spawnattr_destroy(&attr);
+      return fail("spawn child in its own group with a signal mask");
+    }
+    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      posix_spawnattr_destroy(&attr);
+      return fail("child process group and signal mask");
+    }
+    snprintf(parent_group, sizeof parent_group, "%d", (int)original_group);
+    group_argv[2] = parent_group;
+    group_argv[3] = 0;
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+    posix_spawnattr_setpgroup(&attr, original_group);
+    result = posix_spawn(&pid, path, 0, &attr, group_argv, environ);
+    if (result != 0 || waitpid(pid, &status, 0) != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      posix_spawnattr_destroy(&attr);
+      return fail("join an existing process group");
+    }
+    posix_spawnattr_setpgroup(&attr, -1);
+    pid = -1;
+    result = posix_spawn(&pid, path, 0, &attr, group_argv, environ);
+    posix_spawnattr_destroy(&attr);
+    if (result != EINVAL || pid != -1 || waitpid(-1, &status, WNOHANG) != -1 || errno != ECHILD) {
+      return fail("invalid process group returns EINVAL without a child to reap");
+    }
+    if (getpgrp() != original_group || sigprocmask(SIG_SETMASK, 0, &mask) != 0 ||
+        sigismember(&mask, SIGUSR1) != parent_blocked) return fail("parent attributes unchanged");
   }
 
   printf("spawn_status_test: ok\n");

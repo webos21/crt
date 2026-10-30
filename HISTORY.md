@@ -9,6 +9,42 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-30
+
+### Revalidate the Windows-merged CLI on Linux and support spawn process groups
+
+A fresh Dev SDK at clean CRT `a46e430` reproduced the actual compatibility
+failure: the shared CLI runner now asks posix_spawn for SETPGROUP, but the Unix
+PAL returned ENOTSUP. Both a minimal C reproducer and a strengthened
+`spawn_status_test` fail before the fix; replay r1 fails at compiler-query
+launch after successfully compiling/linking the seed.
+
+The common non-Windows spawn implementation now applies `setpgid(0, pgroup)`
+in the child before file actions/exec, following
+[Bionic's spawn attributes](https://raw.githubusercontent.com/aosp-mirror/platform_bionic/main/libc/bionic/spawn.cpp).
+The existing exec-status pipe propagates attribute errors and reaps the failed
+child. Regression checks cover child-owned/existing groups, composition with a
+signal mask, invalid group EINVAL/no leaked child, and unchanged parent state.
+No public symbol/header or Windows spawn backend changed. macOS execution of
+this common-path fix still requires native replay.
+
+Built a separate fresh local dirty Dev candidate (`development`) from source-only
+caches. Its exact baseline and two-file patch are frozen in
+`out/cli-linux-revalidation-20261030/fixed-source-inputs.json` and
+`producer-fix.patch`, distinct from the failed clean candidate. Core 146/146,
+imported libc++ smokes, Dev static/shared HTTPS+JSON/SHA-2/trust checks and the
+updated CLI's isolated Linux replay pass. The CLI itself needs no code change;
+it also bootstraps from the previously committed Linux executable with the new
+SDK. Exact source/SDK/provider/binary identities, native assertions, traces,
+cache and bare-runtime results remain CLI-owned in
+[Linux revalidation](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#linux-revalidation-after-windows-changes-2026-10-30).
+
+Producer build/replay/test logs are retained under
+`out/cli-linux-revalidation-20261030`; the old SDK, failed tests and replay r1
+remain intact. This is unpromoted dirty-source validation, not a clean release,
+production lock update or full three-host closure. STATUS is unchanged; no
+commit/push was performed in this verification turn.
+
 ## 2026-10-29
 
 ### Replay the CLI native contract on Windows/x64 with an OS-recorded process inventory

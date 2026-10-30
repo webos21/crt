@@ -99,13 +99,14 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   manifest/lock fixtures, without claiming the general SDK contract is implemented.
 - [ ] **1.5** Supply SDK-owned startup/link rules for minimal CLI help/version/bootstrap
   diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
-  Linux, macOS/arm64 and Windows/x64 pass (local, unpromoted). The revised PAL-only contract was replayed on Linux 2026-10-29
-  (two Linux-only producer defects found and fixed); the changed CLI sources still need a Linux/macOS replay.
+  Linux, macOS/arm64 and Windows/x64 pass (local, unpromoted). The Windows-merged sources pass Linux replay on 2026-10-30 after the
+  Unix SETPGROUP fix; current-source macOS replay remains.
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
   review native consumer/ABI evidence before each initial pair's adoption
   ([CLI D0 acceptance baseline](https://github.com/webos21/crt-cli/blob/5fcdc995d231fe2f9dbab4292000a81e0b4fce93/docs/acceptance/bootstrap_acceptance.md)).
-  Linux, macOS/arm64 and Windows/x64 pass; see the
+  Initial native pairs pass at their recorded snapshots; see the
+  [current Linux replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#linux-revalidation-after-windows-changes-2026-10-30) and
   [macOS CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-macosarm64-2026-10-29).
 - [ ] **1.7** Select coherent exact assets before promotion/consumer locks;
   resolve the rehearsal's same-name source-asset variants without relabeling builds.
