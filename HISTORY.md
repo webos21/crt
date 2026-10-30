@@ -9,6 +9,21 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-10-31
+
+### Add the CLI HTTPS fetch case driver and rehearse the Windows/arm64 Development SDK release assets
+
+`tools/test_cli_fetch_https.py` generates a throw-away PKI with OpenSSL, serves controlled loopback HTTPS endpoints and
+runs the CLI's new `fetch` command from a clean directory with an empty `PATH`: a pinned metadata/artifact pair and 15
+rejections (wrong CA, expired certificate, host name mismatch, malformed CA file, tampered metadata, size and digest
+mismatch, interrupted transfer, timeout, HTTP 404, redirect, plain HTTP, existing output). It is a producer-side test
+tool; the endpoint is not a public publisher. A local `crt-dev-release` rehearsal at `1c3d120` (version
+`v0.4.0-rehearsal.20261030`, no tag, nothing uploaded) produced the Windows/arm64 Development SDK ZIP and two stage-source
+assets with matching `SHA256SUMS`; `crt-c-test` passes 166/166 again. The ZIP stores `lib/libz.so` and `lib/libz.so.1`
+as regular file copies where the SDK directory has symlinks, so an extracted archive has a different content inventory
+than the producer directory (2 of 2,711 entries). No CRT runtime code changed. Evidence is under
+`out/cli-windows-arm64-20261031`; identities are in the CLI repository's acceptance record.
+
 ## 2026-10-30
 
 ### Export the Windows/arm64 CLI toolchain and build the argv recorder freestanding
