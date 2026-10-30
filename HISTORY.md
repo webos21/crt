@@ -11,6 +11,18 @@ substantive update.
 
 ## 2026-10-30
 
+### Export the Windows/arm64 CLI toolchain and build the argv recorder freestanding
+
+Replaying the CLI on a native Windows/arm64 host needed two producer-tool changes. `tools/export_cli_toolchain.py` refused the
+pair by design and `tools/replay_cli_contract_windows.py` hard-coded `CRT_TARGET_ARCH=x86_64`; the exporter now accepts
+Windows/arm64 (its unit test moved the rejection to Windows/x86) and the driver follows the SDK target. Then the exporter's
+hosted `cli_argv_recorder.c` could not link because the Visual Studio Build Tools have no ARM64 `libcmt.lib`; it now uses only
+kernel32/shell32 and `-nostdlib`, needing just the Windows SDK import libraries, and matches the old recorder byte for byte on
+ASCII arguments (non-ASCII arguments are now UTF-8). A Development SDK built from a clean `67f9516` passes
+`crt-development-sdk-test` and `crt-c-test` 166/166 (one test skipped by CRT) on Windows/arm64 with the Linux/aarch64
+`fcntl.h` change compiled in. The new recorder was not regenerated on Windows/x64. Evidence and identities are in the CLI
+repository's acceptance record; the producer artifacts are under `out/cli-windows-arm64-20261030`.
+
 ### Use the arm64 kernel values for O_NOFOLLOW and O_DIRECTORY and export the Linux/aarch64 CLI toolchain
 
 Replaying the CLI on a native Linux/aarch64 host needed two producer changes, still
