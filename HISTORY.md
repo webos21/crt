@@ -11,6 +11,18 @@ substantive update.
 
 ## 2026-10-31
 
+### Propose the Windows narrow-string model (UTF-8 active code page)
+
+Windows narrow strings were two encodings: `argv`, the environment and the `...A` file calls (and imported libc++'s
+`CP_ACP` conversion) followed the ANSI code page, while `mbstowcs`, `nl_langinfo` and `crt_dl_iterate_images` were already
+UTF-8. `docs/design/windows_narrow_strings.md` compares keeping ANSI, an `activeCodePage=UTF-8` application manifest and
+wide calls inside CRT, recommends the manifest (Windows 10 1903+) with the wide-call rewrite as the fallback, and
+defines the contract, the invalid-sequence hazard and the increments. A prototype on Windows/arm64 (manifest at link
+time through a provider copy) made `argv`, the environment, C file calls, libc++ `filesystem` and a full CLI
+`new`/`configure`/`build`/`test`/`run` work in a Hangul, `é` and space directory without any CRT or libc++ source change.
+Nothing is implemented in the SDK; the owner decisions are listed in the document. Evidence is in the CLI repository's
+acceptance record and under `out/cli-windows-arm64-20261031/narrow-strings`.
+
 ### Add the CLI HTTPS fetch case driver and rehearse the Windows/arm64 Development SDK release assets
 
 `tools/test_cli_fetch_https.py` generates a throw-away PKI with OpenSSL, serves controlled loopback HTTPS endpoints and
