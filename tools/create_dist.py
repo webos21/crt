@@ -37,6 +37,8 @@ DIST_PORTING_TOOLS = (
 )
 DIST_PORTING_DIRS = ("recipes", "tests", "shims")
 DIST_WRAPPER_TOOLS = ("crt-cc", "crt-c++", "crt-cc.cmd", "crt-c++.cmd")
+# Windows narrow strings are UTF-8 (docs/design/windows_narrow_strings.md): the wrappers embed this manifest in executables.
+WINDOWS_UTF8_MANIFEST = ("crt-windows-utf8.manifest", "share/crt/windows/utf8.manifest")
 
 
 def copy_base(source: Path | None, destination: Path) -> None:
@@ -458,6 +460,10 @@ def write_sdk_files(root: Path, destination: Path, target_os: str, target_arch: 
     tools_dest.mkdir(parents=True, exist_ok=True)
     for name in DIST_WRAPPER_TOOLS:
         shutil.copy2(root / "tools" / name, tools_dest / name)
+    if target_os == "windows":
+        source_name, installed = WINDOWS_UTF8_MANIFEST
+        (destination / installed).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / "tools" / source_name, destination / installed)
     (tools_dest / "crt-target.sh").write_text(
         f"CRT_SDK_TARGET_OS={target_os}\nCRT_SDK_TARGET_ARCH={target_arch}\n", encoding="utf-8", newline="\n")
     shutil.copy2(root / "LICENSE.md", destination / "LICENSE.md")

@@ -306,6 +306,11 @@ elseif(CRT_TARGET_OS STREQUAL "windows")
   # the same strategy tools/crt-cc applies to every port, so in-tree code and tests
   # see the same TLS semantics (found by pthread_native_tls_test on Windows).
   target_compile_options(crt_build_flags INTERFACE -femulated-tls)
+  # Narrow strings are UTF-8 on Windows (docs/design/windows_narrow_strings.md): every in-tree executable (mksh, toybox,
+  # awk, make, the tests) embeds the SDK's active-code-page manifest, so it sees the same argv/environment/path encoding as
+  # a program linked through tools/crt-cc. Executables only: a DLL cannot choose the process code page.
+  add_link_options("$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:-Wl,/manifest:embed>"
+                   "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:-Wl,/manifestinput:${CMAKE_SOURCE_DIR}/tools/crt-windows-utf8.manifest>")
 endif()
 
 # CRT_ENABLE_DEBUG_MALLOC (introduced 2026-09-14 diagnosing the Skia/SkSL

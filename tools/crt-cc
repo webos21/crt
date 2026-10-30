@@ -957,6 +957,12 @@ if [ "$target_os" = windows ]; then
       "${CRT_SYSROOT}/lib/crt1_ctors_end.o" \
       ${CRT_WINDOWS_SDK_LIBPATH:+"-L${CRT_WINDOWS_SDK_LIBPATH}"}
   fi
+  # Windows narrow strings are UTF-8 (docs/design/windows_narrow_strings.md): embed the SDK's active-code-page
+  # manifest. A sysroot without the file (an older SDK) links as before.
+  windows_utf8_manifest="${CRT_SYSROOT}/share/crt/windows/utf8.manifest"
+  if [ -f "$windows_utf8_manifest" ]; then
+    set -- "$@" "-Wl,/manifest:embed" "-Wl,/manifestinput:${windows_utf8_manifest}"
+  fi
   # shellcheck disable=SC2086
   run_cc -nostdlib -nostartfiles -nodefaultlibs \
     -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld \

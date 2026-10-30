@@ -41,6 +41,20 @@
 #error Unsupported CRT architecture
 #endif
 
+#if defined(CRT_TARGET_OS_WINDOWS)
+/* Declared here, not via <windows.h>: kernel32 is already a CRT import. */
+__declspec(dllimport) unsigned int GetACP(void);
+#endif
+
+const char* crt_get_narrow_encoding(void) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  /* 65001 = CP_UTF8, set per process by the activeCodePage manifest. */
+  return GetACP() == 65001U ? "utf-8" : "ansi";
+#else
+  return "utf-8";
+#endif
+}
+
 const struct crt_platform_info* crt_get_platform_info(void) {
   static const struct crt_platform_info info = {
       CRT_PLATFORM_OS, CRT_PLATFORM_ARCH, CRT_IMAGE_FORMAT, CRT_EXE_SUFFIX,

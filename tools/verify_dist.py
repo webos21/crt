@@ -490,6 +490,13 @@ def main() -> None:
     manifest = validate_manifest_schema(
         json.loads((dist / "manifest.json").read_text(encoding="utf-8")),
         args.stage)
+    if manifest["target"]["os"] == "windows":
+        # Narrow strings are UTF-8 on Windows (docs/design/windows_narrow_strings.md): the wrappers embed this file.
+        utf8_manifest = dist / "share/crt/windows/utf8.manifest"
+        require(utf8_manifest)
+        text = utf8_manifest.read_text(encoding="utf-8")
+        if "<activeCodePage" not in text or ">UTF-8</activeCodePage>" not in text:
+            raise SystemExit("share/crt/windows/utf8.manifest must set activeCodePage to UTF-8")
     if args.profile == "dev" or (dist / crt_dev_profile.SIDECAR).exists():
         problems = crt_dev_profile.check(dist, manifest)
         if problems:

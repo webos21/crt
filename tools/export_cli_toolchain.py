@@ -100,8 +100,8 @@ def main():
         parser.error('experimental export requires an SDK for the native host target')
     if profile.get('format') != 1 or profile.get('profile') != 'dev':
         parser.error('expected development packaging profile format 1')
-    if not {'crt-platform-queries-1', 'json-sha2-1'} <= set(profile.get('capabilities', [])):
-        parser.error('SDK lacks platform-query/JSON/SHA-2 capabilities; produce a new candidate')
+    if not {'crt-platform-queries-1', 'json-sha2-1', 'crt-narrow-encoding-1'} <= set(profile.get('capabilities', [])):
+        parser.error('SDK lacks platform-query/JSON/SHA-2/narrow-encoding capabilities; produce a new candidate')
     inventory = []
     # Component-wise, case-sensitive: the order of the CLI's std::filesystem::path sort on every host. Python's own
     # Path ordering is case-insensitive on Windows and would make the same SDK hash differently there.

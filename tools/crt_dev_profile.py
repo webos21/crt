@@ -6,7 +6,9 @@ import re
 import struct
 
 SIDECAR = "share/crt/contracts/development.json"
-CAPABILITIES = ["crt-platform-queries-1", "json-sha2-1"]
+# crt-narrow-encoding-1: crt_get_narrow_encoding() exists and Windows executables linked through the wrappers embed the
+# UTF-8 active-code-page manifest (docs/design/windows_narrow_strings.md).
+CAPABILITIES = ["crt-platform-queries-1", "json-sha2-1", "crt-narrow-encoding-1"]
 PORTS = {"zlib", "mbedtls", "curl", "cjson"}
 HEADER_PORTS = {"nlohmann-json": "include/nlohmann/json.hpp"}
 STATIC = {"zlib": ("lib/libz.a",), "curl": ("lib/libcurl.a",),

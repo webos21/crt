@@ -1060,6 +1060,12 @@ if [ "$target_os" = windows ]; then
       "${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o" \
       "${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o" \
       "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib"
+    # Windows narrow strings are UTF-8 (docs/design/windows_narrow_strings.md): embed the SDK's active-code-page
+    # manifest. A sysroot without the file (an older SDK) links as before.
+    windows_utf8_manifest="${CRT_SYSROOT}/share/crt/windows/utf8.manifest"
+    if [ -f "$windows_utf8_manifest" ]; then
+      set -- "$@" "-Wl,/manifest:embed" "-Wl,/manifestinput:${windows_utf8_manifest}"
+    fi
     if [ -n "$cxx_main_lib" ]; then set -- "$@" "$cxx_main_lib"; fi
     if [ -n "$cxx_abi_selected" ]; then set -- "$@" "$cxx_abi_selected"; fi
     if [ -n "$cxx_unwind_selected" ]; then set -- "$@" "$cxx_unwind_selected"; fi

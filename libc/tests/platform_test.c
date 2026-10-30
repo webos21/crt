@@ -48,6 +48,12 @@ int main(int argc, char** argv) {
   if (count != 0) return 10;
   errno = 0;
   if (crt_is_native_executable(0) != -1 || errno != EINVAL) return 11;
+  {
+    const char* encoding = crt_get_narrow_encoding();
+    if (encoding == 0 || (strcmp(encoding, "utf-8") != 0 && strcmp(encoding, "ansi") != 0)) return 12;
+    /* Every CRT-linked executable carries the UTF-8 manifest on Windows and is UTF-8 everywhere else. */
+    if (strcmp(encoding, "utf-8") != 0) return 13;
+  }
   puts("platform_test: ok");
   return 0;
 }

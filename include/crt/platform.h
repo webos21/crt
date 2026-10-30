@@ -30,6 +30,13 @@ int crt_get_user_home(char* buffer, size_t capacity);
  * authenticate it, and is not a substitute for kernel loader validation. */
 int crt_is_native_executable(const char* path);
 
+/* Encoding of the char* strings this process uses for argv, the environment and
+ * paths: "utf-8", or "ansi" for a Windows process that lacks the UTF-8 active
+ * code page (an executable linked without the SDK's manifest policy, a CRT DLL
+ * inside a foreign host, or Windows before 10 version 1903). Every other target
+ * is "utf-8". Never NULL. Reports the state; it never changes it. */
+const char* crt_get_narrow_encoding(void);
+
 #ifdef __cplusplus
 }
 #endif
