@@ -11,6 +11,23 @@ substantive update.
 
 ## 2026-10-30
 
+### Use the arm64 kernel values for O_NOFOLLOW and O_DIRECTORY and export the Linux/aarch64 CLI toolchain
+
+Replaying the CLI on a native Linux/aarch64 host needed two producer changes, still
+uncommitted. `tools/export_cli_toolchain.py` refused the host pair by design and now
+accepts Linux/aarch64 (its unit test moved the rejection to Linux/riscv64). The replay
+then passed every native check and failed at the final `remove_all` with `ENOTEMPTY`:
+`include/fcntl.h` carried the x86_64 Linux open-flag values, which the arm64 kernel
+reads as `O_LARGEFILE`/`O_DIRECT`, so `O_NOFOLLOW` was silently ignored and imported
+libc++ could not recognise (and so never unlinked) dangling symlinks. The aarch64
+Linux branch now defines the kernel values. `libc/tests/open_nofollow_test.c` (Linux
+and macOS) checks `ELOOP`/`ENOTDIR` and fails against the old header. All 128 libc
+test executables were rebuilt and `ctest` passes 201 of 209; the eight failures are
+`crtmedia_*` tests whose binaries predate the change and were not investigated. The
+x86_64, macOS and Windows branches are untouched and were not replayed for this
+change. Evidence and identities are in the CLI repository's acceptance record; the
+producer artifacts are under `out/cli-linux-aarch64-20261030`.
+
 ### Replay the merged CLI contract on macOS/arm64
 
 Built the Development SDK natively from `74ea992` (the common `POSIX_SPAWN_SETPGROUP`

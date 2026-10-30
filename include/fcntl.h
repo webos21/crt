@@ -31,8 +31,15 @@ extern "C" {
 #define O_NONBLOCK 0x0800
 #define O_NDELAY O_NONBLOCK
 #define O_NOCTTY 0x0100
+#if defined(CRT_TARGET_OS_LINUX) && defined(__aarch64__)
+/* The kernel's asm/fcntl.h for arm64 differs from x86_64 here. The x86_64 values would reach the kernel as O_DIRECT
+ * and O_LARGEFILE, silently dropping the symlink refusal that directory walkers such as remove_all rely on. */
+#define O_NOFOLLOW 0100000
+#define O_DIRECTORY 040000
+#else
 #define O_NOFOLLOW 0x20000
 #define O_DIRECTORY 0x10000
+#endif
 #define O_CLOEXEC 0x80000
 #endif
 

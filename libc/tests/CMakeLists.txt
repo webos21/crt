@@ -71,6 +71,13 @@ set_tests_properties(fd_errno_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fd_errno_test: ok"
 )
 
+if(NOT CRT_TARGET_OS STREQUAL "windows")
+  add_crt_test(open_nofollow_test open_nofollow_test.c)
+  set_tests_properties(open_nofollow_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "open_nofollow_test: ok"
+  )
+endif()
+
 add_crt_test(virtual_device_dup_test virtual_device_dup_test.c)
 set_tests_properties(virtual_device_dup_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "virtual_device_dup_test: ok"

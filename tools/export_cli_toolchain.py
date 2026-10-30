@@ -25,8 +25,9 @@ def native_target(system=None, machine=None):
     machine = (machine or platform.machine()).lower()
     arch = {'amd64': 'x86_64', 'arm64': 'aarch64'}.get(machine, machine)
     target_os = {'Linux': 'linux', 'Darwin': 'macos', 'Windows': 'windows'}.get(system)
-    if (target_os, arch) not in (('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')):
-        raise ValueError('experimental export supports native Linux/x86_64, macOS/arm64 and Windows/x64 only')
+    if (target_os, arch) not in (('linux', 'x86_64'), ('linux', 'aarch64'), ('macos', 'aarch64'),
+                           ('windows', 'x86_64')):
+        raise ValueError('experimental export supports native Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64 only')
     return {'os': target_os, 'arch': arch}
 
 

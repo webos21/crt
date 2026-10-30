@@ -10,9 +10,10 @@ import export_cli_toolchain as exporter
 class NativePolicy(unittest.TestCase):
     def test_only_explicit_native_pairs_are_supported(self):
         self.assertEqual({'os': 'linux', 'arch': 'x86_64'}, exporter.native_target('Linux', 'x86_64'))
+        self.assertEqual({'os': 'linux', 'arch': 'aarch64'}, exporter.native_target('Linux', 'aarch64'))
         self.assertEqual({'os': 'macos', 'arch': 'aarch64'}, exporter.native_target('Darwin', 'arm64'))
         self.assertEqual({'os': 'windows', 'arch': 'x86_64'}, exporter.native_target('Windows', 'AMD64'))
-        for system, arch in [('Darwin', 'x86_64'), ('Linux', 'aarch64'), ('Windows', 'ARM64'), ('Windows', 'x86')]:
+        for system, arch in [('Darwin', 'x86_64'), ('Linux', 'riscv64'), ('Windows', 'ARM64'), ('Windows', 'x86')]:
             with self.subTest(system=system, arch=arch), self.assertRaises(ValueError):
                 exporter.native_target(system, arch)
 
