@@ -159,8 +159,13 @@ def main():
         recorder = work / ('record.exe' if windows else 'record')
         if windows:
             real_cc = str(Path(shutil.which(args.clang) or args.clang).resolve(strict=True))
-            subprocess.run([real_cc, '-O1', '-D_CRT_SECURE_NO_WARNINGS', '-Wno-deprecated-declarations',
-                        str(Path(__file__).with_name('cli_argv_recorder.c')), '-o', str(recorder)], check=True)
+            # Freestanding (kernel32/shell32 only): no host C runtime or Visual C++ libraries are needed, which a
+            # Windows/arm64 host may not have installed. The Windows SDK import-library directory is the only input.
+            subprocess.run([real_cc, '-O1', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-nostdlib',
+                            '-Wl,/entry:recorder_main', '-Wl,/subsystem:console',
+                            '-Wl,/libpath:' + result['external_os_sdk'],
+                            str(Path(__file__).with_name('cli_argv_recorder.c')), '-lkernel32', '-lshell32',
+                            '-o', str(recorder)], check=True)
         else:
             recorder.write_text('''#!/usr/bin/python3
 import json, os, subprocess, sys
