@@ -99,8 +99,8 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   manifest/lock fixtures, without claiming the general SDK contract is implemented.
 - [ ] **1.5** Supply SDK-owned startup/link rules for minimal CLI help/version/bootstrap
   diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
-  Linux, macOS/arm64 and Windows/x64 pass (local, unpromoted). The Windows-merged sources pass Linux replay on 2026-10-30 after the
-  Unix SETPGROUP fix; current-source macOS replay remains.
+  Linux, macOS/arm64 and Windows/x64 pass (local, unpromoted). The Windows-merged sources pass Linux and macOS replay on 2026-10-30 after the
+  Unix SETPGROUP fix.
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
   review native consumer/ABI evidence before each initial pair's adoption

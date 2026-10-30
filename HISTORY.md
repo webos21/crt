@@ -11,6 +11,17 @@ substantive update.
 
 ## 2026-10-30
 
+### Replay the merged CLI contract on macOS/arm64
+
+Built the Development SDK natively from `74ea992` (the common `POSIX_SPAWN_SETPGROUP`
+fix) and replayed CLI `754ca29` with `tools/replay_cli_contract_macos.py`: seed,
+cold/cached self-build, a bootstrap loop from the previous committed binary and the
+native suite (700 checks) pass. The driver gained the loop stage and now allows
+fixtures under `$TMPDIR`; its fixed-point test compares code and data segments,
+because ld64's `LC_UUID` and debug-map timestamps in `__LINKEDIT` differ per build.
+Evidence and hashes are in the CLI repository's acceptance record. No CRT code
+change was needed.
+
 ### Revalidate the Windows-merged CLI on Linux and support spawn process groups
 
 A fresh Dev SDK at clean CRT `a46e430` reproduced the actual compatibility

@@ -18,6 +18,34 @@ from test_dev_sdk_external import inventory, inventory_digest
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def macho_difference(first, second):
+    """Classify the byte differences of two arm64 Mach-O executables by load-command region.
+
+    ld64 derives LC_UUID from the link inputs and records each object file's modification time in the debug map (N_OSO)
+    inside __LINKEDIT, next to the ad-hoc code signature hashes, so two builds of the same sources are never
+    byte-identical on macOS even though every code and data segment is."""
+    import struct
+    one, two = Path(first).read_bytes(), Path(second).read_bytes()
+    if len(one) != len(two):
+        return {'identical': False, 'size_mismatch': [len(one), len(two)]}
+    count, offset, segments, uuid = struct.unpack_from('<I', one, 16)[0], 32, [], None
+    for _ in range(count):
+        command, size = struct.unpack_from('<2I', one, offset)
+        if command == 0x19:
+            segments.append((one[offset + 8:offset + 24].rstrip(b'\0').decode(), *struct.unpack_from('<2Q', one, offset + 40)))
+        if command == 0x1b:
+            uuid = offset + 8
+        offset += size
+    where = {}
+    for index, (left, right) in enumerate(zip(one, two)):
+        if left != right:
+            region = 'LC_UUID' if uuid is not None and uuid <= index < uuid + 16 else next(
+                (name for name, start, length in segments if start <= index < start + length), 'header')
+            where[region] = where.get(region, 0) + 1
+    return {'identical': not where, 'differing_bytes': where,
+            'code_and_data_identical': not set(where) - {'LC_UUID', '__LINKEDIT'}}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--cli-source', type=Path, required=True)
@@ -27,6 +55,7 @@ def main():
     parser.add_argument('--clangxx', type=Path, required=True)
     parser.add_argument('--linker', type=Path, required=True)
     parser.add_argument('--ar', type=Path, required=True)
+    parser.add_argument('--previous-cli', type=Path, help='an earlier committed crt-cli executable for the bootstrap loop')
     args = parser.parse_args()
     if sys.platform != 'darwin':
         parser.error('this acceptance driver requires native macOS Seatbelt')
@@ -85,7 +114,7 @@ def main():
         print('PASS', label, flush=True)
     def policy(bare):
         denied = [ROOT, cli] + ([source, sdk] if bare else [])
-        allowed = [work / 'bare/crt-cli', work / 'probe']
+        allowed = [work / 'bare/crt-cli', work / 'probe', work / 'loop/prev/crt-cli', work / 'loop/stage1/crt-cli']
         if not bare:
             # ar runs ranlib itself to build the archive index
             ranlib = tools['ar'].with_name('ranlib')
@@ -93,7 +122,10 @@ def main():
         terms = ' '.join('(literal ' + json.dumps(str(p), ensure_ascii=False) + ')' for p in allowed)
         if not bare:
             terms += ' (subpath ' + json.dumps(str(source / 'out/native'), ensure_ascii=False) + ')'
+            terms += ' (subpath ' + json.dumps(str(work / 'loop/source/out/native'), ensure_ascii=False) + ')'
             terms += ' (regex "^/private/tmp/crt-cli-native-[^/]+/.*")'
+            # the native suite builds its fixtures under $TMPDIR (the replay's work/tmp), not a literal /tmp
+            terms += ' (regex ' + json.dumps('^' + re.escape(str(work / 'tmp')) + '/crt-cli-native-[^/]+/.*', ensure_ascii=False) + ')'
         text = '(version 1)\n(allow default)\n(deny network*)\n'
         text += ''.join('(deny file-read* file-write* (subpath ' + json.dumps(str(p), ensure_ascii=False) + '))\n' for p in denied)
         if bare:
@@ -195,6 +227,42 @@ int main(int argc, char** argv) {
     warm = json.loads((evidence / 'cached-build.stdout').read_text())['data']['cache']
     if warm['executed'] != 0 or warm['reused'] != cold['executed']:
         raise ValueError(f'unchanged rebuild was not served from the cache: {cold} {warm}')
+    if args.previous_cli:
+        # Bootstrap loop: an already built (older) CLI plus the changed SDK produce a new CLI, which then rebuilds itself
+        # from a cleared cache through the local .sdk.json alone; stage1 and stage2 must be byte-identical.
+        loop = work / 'loop'
+        loop_source = loop / 'source'
+        for name in ('prev', 'stage1'):
+            (loop / name).mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, loop_source, ignore=shutil.ignore_patterns('out', '.crt'))
+        (loop_source / 'crt.lock').write_text((cli / 'crt.lock').read_text())
+        prev = loop / 'prev/crt-cli'
+        shutil.copy2(args.previous_cli, prev)
+        loop_configure = list(configure)
+        loop_configure[loop_configure.index(source)] = loop_source
+        run('loop-configure-prev', [prev, *loop_configure, '--json'], boxed=True)
+        run('loop-build-prev', [prev, 'build', '--project', loop_source, '--json'], boxed=True)
+        stage1 = loop / 'stage1/crt-cli'
+        shutil.copy2(loop_source / 'out/native/crt-cli', stage1)
+        shutil.rmtree(loop_source / 'out')
+        shutil.rmtree(loop_source / '.crt')
+        (loop_source / 'crt.lock').write_text((cli / 'crt.lock').read_text())
+        (loop_source / '.sdk.json').write_text(json.dumps({
+            'format': 0, 'sdk_root': str(sdk), 'sdk_contract': str(provider), 'contract_sha256': digest(provider),
+            'cc': str(tools['clang']), 'cxx': str(tools['clangxx']), 'linker': str(tools['linker']), 'ar': str(tools['ar']),
+            'allow_dirty_sdk': True, 'seed': str(prev), 'origin': 'replay_cli_contract_macos.py'}, indent=2) + '\n')
+        run('loop-configure-stage1', [stage1, 'configure', '--project', loop_source, '--json'], boxed=True)
+        run('loop-build-stage1', [stage1, 'build', '--project', loop_source, '--json'], boxed=True)
+        stage2 = loop_source / 'out/native/crt-cli'
+        loop_cold = json.loads((evidence / 'loop-build-stage1.stdout').read_text())['data']['cache']
+        difference = macho_difference(stage1, stage2)
+        if not difference['code_and_data_identical'] or loop_cold['reused'] != 0:
+            raise ValueError(f'bootstrap loop is not a fixed point: {difference} {loop_cold}')
+        loop_result = {'previous_sha256': digest(prev), 'stage1_sha256': digest(stage1), 'stage2_sha256': digest(stage2),
+                       'cold': loop_cold, 'stage1_vs_stage2': difference}
+        save('bootstrap-loop.json', loop_result)
+    else:
+        loop_result = None
     program = work / 'bare/crt-cli'
     shutil.copy2(source / 'out/native/crt-cli', program)
     run('native-tests', [program, 'test', '--project', source, '--json'], boxed=True, timeout=2400)
@@ -213,7 +281,7 @@ int main(int argc, char** argv) {
                          'source_sha256': inventory_digest(input_inventory), 'binary_sha256': digest(program),
                          'binary_size': program.stat().st_size, 'imports': image['dependencies'],
                          'owns_malloc': image['owns_malloc'], 'bindings': {key: sorted(value) for key, value in image['bound'].items()},
-                         'doctor': doctor, 'cache': {'cold': cold, 'warm': warm}, 'tests': json.loads((evidence / 'native-tests.stdout').read_text())})
+                         'doctor': doctor, 'cache': {'cold': cold, 'warm': warm}, 'bootstrap_loop': loop_result, 'tests': json.loads((evidence / 'native-tests.stdout').read_text())})
     print('CLI contract replay passed:', evidence / 'result.json')
 
 
