@@ -11,6 +11,28 @@ substantive update.
 
 ## 2026-10-31
 
+### License original CRT-owned work under Apache-2.0
+
+The owner selected Apache License, Version 2.0 for original CRT-owned code and
+documentation, replacing the BSD-style project default. `LICENSE.md` contains
+the complete license text and preserves the imported/adapted-code boundary;
+the README links it. Keeping the terms in `LICENSE.md` preserves the existing
+SDK and stage-source notice-copy paths. Updated the explicit license headers
+of 24 declared CRT-owned WebKit overlay files and four CRT-owned helpers/stubs,
+the overlay manifest's project default/new-file licenses, and its checker.
+The checker now verifies the actual license of each new CRT-owned file, with
+a regression rejecting a stale BSD or GPL header despite Apache metadata.
+
+Validation: `tools.test_webkit_licensing`, `tools.test_crt_runtime_notices`,
+`tools.test_create_dist`, `tools.test_stage_source_closure`,
+`tools.test_crt_source_offer`, `tools.test_license_choices` and
+`tools.test_webkit_host_generators` ran 78 tests: 73 pass and five host-conditional
+skips. The patch manifest check passes (23 patches, 63 modified-file records,
+24 new CRT-owned files). The Apache text matches the system license copy;
+local links and whitespace checks pass. Imported sources, upstream patch
+records/licenses and implementation bodies are unchanged. No SDK/runtime
+rebuild, artifact promotion, consumer-lock update or public release is claimed.
+
 ### Implement the Windows UTF-8 narrow-string model
 
 Adopting option B of `docs/design/windows_narrow_strings.md` (commit `85546d9`): the SDK ships `share/crt/windows/utf8.manifest`, the

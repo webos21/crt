@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-License-Identifier: Apache-2.0
 """Run a build-host Python generator without an OS-sized argument list."""
 import json
 from pathlib import Path

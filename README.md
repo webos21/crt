@@ -941,6 +941,10 @@ snapshot and is updated separately, not automatically by this README.
 
 CRT contains project-owned code plus imported and externally built upstream components.
 
+Project-owned code and documentation are licensed under the Apache License,
+Version 2.0 (`Apache-2.0`), unless otherwise noted. See [LICENSE.md](LICENSE.md)
+for the license text and the boundary between project-owned and imported code.
+
 Each component retains its applicable license and provenance requirements.
 
 Bionic/OpenBSD-derived imports are tracked under `third_party/`. External runtime, graphics, media, UI, shell, and porting dependencies have project-owned recipe/import metadata alongside their integration.

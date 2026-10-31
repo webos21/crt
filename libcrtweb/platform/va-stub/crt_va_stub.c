@@ -1,3 +1,7 @@
+/* Copyright (c) 2026 The CRT Project.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 /* CRT VA-API stub for the web stage (Web Tranche 8B).
  *
  * libcrtmedia.so is linked against VA-API for its hardware decoder. The Web process plays media on the
@@ -5,7 +9,7 @@
  * in it. This stub library, installed as libva.so.2 and libva-drm.so.2 next to the web stage, satisfies
  * those dependencies: every entry point fails with VA_STATUS_ERROR_UNIMPLEMENTED (and the display
  * query returns NULL), so crtmedia reports "no hardware decoder" and decodes in software. It is
- * never a way to run hardware decode. Copyright (c) 2026 The CRT Project. BSD-2-Clause. */
+ * never a way to run hardware decode. */
 
 #include <stddef.h>
 

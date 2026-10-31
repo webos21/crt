@@ -24,7 +24,7 @@ MANIFEST = ROOT / "libcrtweb" / "patches" / "manifest.json"
 
 # Classes in which CRT may modify a file and redistribute the result (LICENSE.md, Tranche 3B).
 MODIFIABLE = {"BSD-2-Clause", "BSD-3-Clause", "MIT"} | scanner.LGPL
-CRT_DEFAULT = "BSD-2-Clause"
+CRT_DEFAULT = "Apache-2.0"
 CRT_HEADER_PHRASE = "the crt project"
 
 
@@ -96,9 +96,13 @@ def check(manifest: dict, tree: Path | None, repo: Path) -> list:
             problems.append(f"new_files: {path}: license must be {CRT_DEFAULT}")
         source = repo / entry.get("source", path)
         if source.is_file():
-            head = source.read_bytes()[:scanner.HEADER_BYTES].decode("utf-8", "replace").lower()
+            data = source.read_bytes()
+            head = data[:scanner.HEADER_BYTES].decode("utf-8", "replace").lower()
             if CRT_HEADER_PHRASE not in head:
                 problems.append(f"new_files: {path}: the CRT license header is missing")
+            measured = scanner.classify_header(data)
+            if measured != CRT_DEFAULT:
+                problems.append(f"new_files: {path}: header says {measured!r}, expected {CRT_DEFAULT}")
         else:
             problems.append(f"new_files: {path}: source {source} not found")
     return problems

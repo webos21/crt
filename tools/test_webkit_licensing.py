@@ -156,6 +156,24 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue(any("header says" in p for p in problems))
         self.assertTrue(any("sha256_before" in p for p in problems))
 
+    def test_new_file_header_must_match_the_project_license(self):
+        manifest = copy.deepcopy(self.manifest)
+        manifest["patches"] = []
+        manifest["new_files"] = [{"file": "Source/Foo.cpp", "source": "new.cpp",
+                                  "origin": "crt", "license": "Apache-2.0"}]
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            for license_ in ("BSD-2-Clause", "GPL-3.0-only", "Apache-2.0"):
+                with self.subTest(license=license_):
+                    (repo / "new.cpp").write_text(
+                        "// Copyright (c) 2026 The CRT Project.\n"
+                        f"// SPDX-License-Identifier: {license_}\nint value;\n")
+                    problems = checker.check(manifest, None, repo)
+                    if license_ == "Apache-2.0":
+                        self.assertEqual(problems, [])
+                    else:
+                        self.assertTrue(any("header says" in p for p in problems))
+
 
 if __name__ == "__main__":
     unittest.main()

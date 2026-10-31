@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: BSD-2-Clause
+# SPDX-License-Identifier: Apache-2.0
 # Build-host adaptation only: leave pinned WebKit sources and target ABI alone.
 include_guard(GLOBAL)
 if(NOT CMAKE_HOST_WIN32)

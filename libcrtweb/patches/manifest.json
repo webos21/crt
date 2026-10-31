@@ -640,7 +640,7 @@
     }
   ],
   "license_policy": {
-    "rule": "A file this manifest modifies keeps its upstream license and header; the patch is a derivative under that license, so every entry records the class of the modified file (from tools/scan_webkit_headers.py) and it must be one CRT can carry: LGPL-2/2.1 (WebKit's own LGPL code), BSD-2/3-Clause (Apple's and most WebKit code) or another permissive class. A file CRT adds is a *new CRT-owned file*, listed under new_files with the project default license (LICENSE.md, BSD-2-Clause) and its header. Never mix: no CRT code is added to an LGPL file beyond the patch itself.",
+    "rule": "A file this manifest modifies keeps its upstream license and header; the patch is a derivative under that license, so every entry records the class of the modified file (from tools/scan_webkit_headers.py) and it must be one CRT can carry: LGPL-2/2.1 (WebKit's own LGPL code), BSD-2/3-Clause (Apple's and most WebKit code) or another permissive class. A file CRT adds is a *new CRT-owned file*, listed under new_files with the project default license (LICENSE.md, Apache-2.0) and its header. Never mix: no CRT code is added to an LGPL file beyond the patch itself.",
     "checked_by": "tools/check_webkit_patch_manifest.py",
     "allowed_for_modified_files": [
       "BSD-2-Clause",
@@ -652,175 +652,175 @@
       "LGPL-2",
       "no-license-header (only with a license_basis naming the directory-level license file)"
     ],
-    "crt_default_license": "BSD-2-Clause"
+    "crt_default_license": "Apache-2.0"
   },
   "new_files": [
     {
       "file": "Source/cmake/OptionsCRT.cmake",
       "source": "libcrtweb/port/Source/cmake/OptionsCRT.cmake",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "the port's options (B1: JSCOnly's; B3: with -DCRT_ENABLE_WEBCORE=ON the WebCore/Skia configuration), plus the BUILDING_CRT__/WTF_PLATFORM_CRT identity"
     },
     {
       "file": "Source/WTF/wtf/PlatformCRT.cmake",
       "source": "libcrtweb/port/Source/WTF/wtf/PlatformCRT.cmake",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "WTF platform file list (JSCOnly's, plus unix/UnixFileDescriptor.h for WebCore's SharedMemory)"
     },
     {
       "file": "Source/bmalloc/PlatformCRT.cmake",
       "source": "libcrtweb/port/Source/bmalloc/PlatformCRT.cmake",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "bmalloc platform file list (B1: JSCOnly's)"
     },
     {
       "file": "Source/JavaScriptCore/PlatformCRT.cmake",
       "source": "libcrtweb/port/Source/JavaScriptCore/PlatformCRT.cmake",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "JavaScriptCore platform file list (B1: JSCOnly's)"
     },
     {
       "file": "Source/WebCore/PlatformCRT.cmake",
       "source": "libcrtweb/port/Source/WebCore/PlatformCRT.cmake",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "WebCore platform file list (B3), modelled on PlatformPlayStation.cmake"
     },
     {
       "file": "Source/WebCore/PAL/pal/PlatformCRT.cmake",
       "source": "libcrtweb/port/Source/WebCore/PAL/pal/PlatformCRT.cmake",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "PAL platform file list (B3): OpenSSL digests, generic clock"
     },
     {
       "file": "Source/WebCore/platform/crt/OpenSSL3Compat.h",
       "source": "libcrtweb/port/Source/WebCore/platform/crt/OpenSSL3Compat.h",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "force-included into CryptoKeyRSAOpenSSL.cpp: EVP_PKEY_get0_RSA() returning RSA* as OpenSSL 1.1 did"
     },
     {
       "file": "Source/WebCore/platform/network/crt/CurlSSLHandleCRT.cpp",
       "source": "libcrtweb/port/Source/WebCore/platform/network/crt/CurlSSLHandleCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "curl TLS handle: CA bundle from the CRT trust store instead of the PlayStation certificate store"
     },
     {
       "file": "Source/WebKit/PlatformCRT.cmake",
       "source": "libcrtweb/port/Source/WebKit/PlatformCRT.cmake",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "WebKit platform file list (B4), modelled on PlatformPlayStation.cmake"
     },
     {
       "file": "Source/WebKit/UIProcess/Launcher/crt/ProcessLauncherCRT.cpp",
       "source": "libcrtweb/port/Source/WebKit/UIProcess/Launcher/crt/ProcessLauncherCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "process launcher (B4): posix_spawn of the Web and Network process executables over a SOCK_SEQPACKET pair"
     },
     {
       "file": "Source/WebKit/WebProcess/InjectedBundle/crt/InjectedBundleCRT.cpp",
       "source": "libcrtweb/port/Source/WebKit/WebProcess/InjectedBundle/crt/InjectedBundleCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "injected bundle loader (B4): dlopen + WKBundleInitialize"
     },
     {
       "file": "Source/WebKit/WebProcess/WebPage/crt/DrawingAreaCRT.h",
       "source": "libcrtweb/port/Source/WebKit/WebProcess/WebPage/crt/DrawingAreaCRT.h",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "Web process drawing area for CRT (B4: accepts calls; B5: CPU painting)"
     },
     {
       "file": "Source/WebKit/WebProcess/WebPage/crt/DrawingAreaCRT.cpp",
       "source": "libcrtweb/port/Source/WebKit/WebProcess/WebPage/crt/DrawingAreaCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "Web process drawing area for CRT (B4: accepts calls; B5: CPU painting)"
     },
     {
       "file": "Source/WebCore/platform/crt/UserAgentCRT.cpp",
       "source": "libcrtweb/port/Source/WebCore/platform/crt/UserAgentCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "user agent string: 'Mozilla/5.0 (CRT) AppleWebKit/605.1.15 ...'"
     },
     {
       "file": "Source/WebKit/Platform/crt/WPELoaderCRT.cpp",
       "source": "libcrtweb/port/Source/WebKit/Platform/crt/WPELoaderCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "libwpe loader interface (static libwpe): no backend objects from WebKit"
     },
     {
       "file": "Source/WebKit/UIProcess/API/C/crt/WKViewCRT.h",
       "source": "libcrtweb/port/Source/WebKit/UIProcess/API/C/crt/WKViewCRT.h",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "CRT C API extension (B5): copy the view's backing store out"
     },
     {
       "file": "Source/WebKit/UIProcess/API/C/crt/WKViewCRT.cpp",
       "source": "libcrtweb/port/Source/WebKit/UIProcess/API/C/crt/WKViewCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "CRT C API extension (B5): copy the view's backing store out"
     },
     {
       "file": "Source/WebCore/platform/crt/SystemFontDatabaseCRT.cpp",
       "source": "libcrtweb/port/Source/WebCore/platform/crt/SystemFontDatabaseCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "system font shorthands: generic sans-serif at 13/11 px (PlayStation's file returns the standard family and logs)"
     },
     {
       "file": "Source/WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.h",
       "source": "libcrtweb/port/Source/WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.h",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "CRT playback engine (Tranche 8B): the MediaPlayerPrivate over the crtmedia public API"
     },
     {
       "file": "Source/WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.cpp",
       "source": "libcrtweb/port/Source/WebCore/platform/graphics/crt/MediaPlayerPrivateCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "CRT playback engine (Tranche 8B): worker-thread demux/decode/audio over crtmedia, CPU frames to Skia"
     },
     {
       "file": "Source/WebCore/platform/mediastream/crt/CRTVideoCaptureSource.h",
       "source": "libcrtweb/port/Source/WebCore/platform/mediastream/crt/CRTVideoCaptureSource.h",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "CRT video capture source (Tranche 8C): RealtimeVideoCaptureSource over crtmedia capture, VideoFrameCRT"
     },
     {
       "file": "Source/WebCore/platform/mediastream/crt/CRTVideoCaptureSource.cpp",
       "source": "libcrtweb/port/Source/WebCore/platform/mediastream/crt/CRTVideoCaptureSource.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "CRT video capture source (Tranche 8C): device manager, worker, factories (audio/display unsupported)"
     },
     {
       "file": "Source/WebCore/platform/mediastream/crt/MockRealtimeSourcesCRT.cpp",
       "source": "libcrtweb/port/Source/WebCore/platform/mediastream/crt/MockRealtimeSourcesCRT.cpp",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "explicit failure for the stale generic mock capture sources (not compiled in the CRT port)"
     },
     {
       "file": "Source/WebKit/WebProcess/crt/UserMediaCaptureManager.h",
       "source": "libcrtweb/port/Source/WebKit/WebProcess/crt/UserMediaCaptureManager.h",
       "origin": "crt",
-      "license": "BSD-2-Clause",
+      "license": "Apache-2.0",
       "purpose": "the supplement type WebProcess names for MediaStream; PlatformCRT captures in the Web process and registers no capture IPC"
     }
   ]
