@@ -11,6 +11,18 @@ substantive update.
 
 ## 2026-10-31
 
+### Implement the Windows UTF-8 narrow-string model
+
+Adopting option B of `docs/design/windows_narrow_strings.md` (commit `85546d9`): the SDK ships `share/crt/windows/utf8.manifest`, the
+`crt-cc`/`crt-c++` executable links embed it (a sysroot without the file links as before), the top-level CMake file gives in-tree
+executables the same option (the SDK's `mksh.exe` and `toybox.exe` carry it), `create_dist.py`, `create_stage_source.py` and
+`verify_dist.py` install, package and check it, `crt_get_narrow_encoding()` reports `utf-8` or `ansi`, and the Development profile gains
+the `crt-narrow-encoding-1` capability that the CLI toolchain exporter now requires. `windows_utf8_narrow_test` (argv, environment, file
+names, a child process) and `platform_test` pass in `crt-c-test` 167/167 on Windows/arm64; the Python tool tests pass. A local
+`crt-dev-release` rehearsal (`v0.4.0-rehearsal.20261031`, no tag, nothing uploaded) collected the Dev SDK ZIP, and the CLI replay
+passes against its extraction. Not done: Windows/x64, the port tests in Unicode directories, the Linux/macOS SDKs rebuilt with the
+new capability. Evidence is under `out/cli-windows-arm64-20261031/utf8-implementation`.
+
 ### Propose the Windows narrow-string model (UTF-8 active code page)
 
 Windows narrow strings were two encodings: `argv`, the environment and the `...A` file calls (and imported libc++'s
