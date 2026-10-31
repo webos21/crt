@@ -11,6 +11,49 @@ substantive update.
 
 ## 2026-10-31
 
+### Extend CLI fetch cases for explicit-key signatures and record D1 limits
+
+`tools/test_cli_fetch_https.py --publisher-cases` extends the existing transport
+driver with disposable RSA-PSS keys and 15 explicit-key signature cases. The
+CLI's final Linux binary passes all 32 transport/authentication cases with
+SDK/source/providers hidden; test Python/OpenSSL only serve and generate PKI.
+No official publisher key or signed-release metadata policy is established.
+The consumer still uses the exact clean `f826397` Dev candidate; this producer
+test-driver/documentation change does not relabel or rebuild that SDK.
+
+The D1 host-tools audit runs actual CRT mksh/sh, toybox, awk and make with host
+fallbacks masked. A direct space-containing make SHELL path fails, while the
+existing explicit temporary symlink-bridge approach passes with the same mksh.
+The failure remains evidence for the future CLI port environment. The CLI's
+per-gate audit retains independent host-tools, official trust and native-host
+gaps rather than declaring complete D1 acceptance. Exact identities, results
+and limits remain consumer-owned in
+[D1 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#d1-publisher-and-host-environment-audit-2026-10-31).
+
+### Revalidate the latest CLI on Linux/x86_64 with a fresh clean Dev SDK
+
+Built a new Dev SDK at clean CRT `f826397` (`v0.4.0-cli.20261031`, a local
+version parameter) in `out/cli-linux-revalidation-20261031/build`, reusing only
+LLVM source caches and verified download archives. Producer/base/compile
+provenance agree and are clean; `crt-narrow-encoding-1` is present. Core tests
+pass 147/147, imported C++ exception/string-ABI/shared-iostream smokes pass,
+and the ordinary Dev consumer passes both linkage modes and trust negatives.
+Exporter/profile fixtures pass 36 with two conditional skips. Installed SDK
+license files and both generated stage-source archives carry the updated
+Apache-2.0 policy and complete text.
+
+CLI `36c6f65` needs no implementation fix: its isolated replay passes 684 native
+checks, cold/warm 9/0 and 0/9, no unexpected execve, SDK-free help/version/doctor
+and an ELF audit with no DT_NEEDED/RPATH/RUNPATH. A separate isolated loop from
+the prior Linux executable produces byte-identical stage1/stage2 and passes
+684 checks again. All 17 controlled CLI HTTPS cases pass with SDK/source/provider
+hidden (test Python/OpenSSL remain available to serve the loopback endpoint).
+Original evidence is under `out/cli-linux-revalidation-20261031`; exact consumer
+identities and limits remain CLI-owned in
+[Linux acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#linux-latest-source-revalidation-2026-10-31).
+No SDK archive/promotion, production pin or public release was made; the
+remaining native pairs need the latest changes. STATUS is unchanged.
+
 ### License original CRT-owned work under Apache-2.0
 
 The owner selected Apache License, Version 2.0 for original CRT-owned code and

@@ -44,7 +44,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 - [Shared Library Artifacts](design/shared_libraries.md)
 - [Signal Delivery](design/signal_delivery.md)
 - [Windows Fork Emulation: Current Implementation](design/windows_fork_emulation.md)
-- [Windows Narrow-String Model](design/windows_narrow_strings.md): proposed UTF-8 active code page; prototype-validated, not implemented
+- [Windows Narrow-String Model](design/windows_narrow_strings.md): implemented UTF-8 active code page; native Windows/arm64 evidence, other-host replay limits recorded
 
 ## Build, distribution, import, and usage guides
 

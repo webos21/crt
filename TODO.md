@@ -99,14 +99,15 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   manifest/lock fixtures, without claiming the general SDK contract is implemented.
 - [ ] **1.5** Supply SDK-owned startup/link rules for minimal CLI help/version/bootstrap
   diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
-  Linux, macOS/arm64 and Windows/x64 pass (local, unpromoted). The Windows-merged sources pass Linux and macOS replay on 2026-10-30 after the
-  Unix SETPGROUP fix.
+  All five native pairs pass at their recorded local/unpromoted snapshots.
+  Linux/x86_64 replays the latest fetch/encoding sources with a fresh clean
+  Dev SDK (2026-10-31); Windows/x64, macOS and Linux/aarch64 need those changes.
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
   review native consumer/ABI evidence before each initial pair's adoption
   ([CLI D0 acceptance baseline](https://github.com/webos21/crt-cli/blob/5fcdc995d231fe2f9dbab4292000a81e0b4fce93/docs/acceptance/bootstrap_acceptance.md)).
   Initial native pairs pass at their recorded snapshots; see the
-  [current Linux replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#linux-revalidation-after-windows-changes-2026-10-30) and
+  [current Linux replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#linux-latest-source-revalidation-2026-10-31) and
   [macOS CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-macosarm64-2026-10-29).
 - [ ] **1.7** Select coherent exact assets before promotion/consumer locks;
   resolve the rehearsal's same-name source-asset variants without relabeling builds.
@@ -119,6 +120,9 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   validate native CRT tools/aliases, paths and bounded owned-process cleanup.
 - [ ] **2.3** Validate CLI SDK-free HTTP/TLS/trust and fail-closed negatives with
   the CLI-owned D1-07 gate; reuse the [SDK transport evidence](docs/acceptance/sdk_split_acceptance.md).
+  Linux explicit-key signature cases and real repository HTTPS are measured;
+  official signing/metadata policy, host-tools/env adapter and native Windows/macOS
+  gates remain open in the CLI-owned D1 audit.
 
 #### Tranche 3. Immutable SDK installation and selection (D2)
 
@@ -188,8 +192,9 @@ Found by the CLI's Windows replay (reproducers and numbers in the CLI's
 
 - [ ] Make `fread`/`fwrite` copy blocks instead of looping `fgetc`/`fputc` (`libc/src/stdio.c`; about 70 MB/s against
   5 GB/s for `read()` on Windows), with a throughput regression test.
-- [ ] Specify and implement non-ASCII narrow paths on Windows (ANSI code-page `argv`/`path.string()`, imported libc++
-  `locale not supported`, `u8string()` correct): either a UTF-8 process code page or an explicit conversion contract.
+- [ ] Replay the [implemented UTF-8 narrow-string model](docs/design/windows_narrow_strings.md)
+  on Windows/x64 and CRT host tools in Unicode directories; Windows/arm64 passes
+  at its recorded snapshot. Retain the pre-1903 and foreign-host DLL limits.
 - [ ] Scope the Dev profile's `consumer_compile_options` (`-U_WIN32 ...`, curl headers) per library or make the curl headers
   usable without it: it flips libc++'s `<filesystem>` path type and breaks C++ consumers.
 - [ ] Decide whether `posix_spawn` should detect non-CRT children itself instead of requiring `CRT_SPAWN_NATIVE_WINDOWS`.

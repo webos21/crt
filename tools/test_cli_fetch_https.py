@@ -19,6 +19,7 @@ parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.R
 parser.add_argument('--cli', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--work', type=Path, help='fresh work directory (default: a new one under TEMP)')
+parser.add_argument('--publisher-cases', action='store_true', help='exercise experimental explicit-key RSA-PSS signatures with test-only keys')
 arguments = parser.parse_args()
 cli_source, evidence = arguments.cli.resolve(), arguments.output.resolve()
 if (evidence / 'result.json').exists():
@@ -186,11 +187,60 @@ case('neg-plain-http-url', ['--url', 'http://localhost:1/m.json', '--ca-file', g
 before = sha((out / 'artifact.bin').read_bytes())
 case('neg-existing-output-untouched', common('/artifact.bin', sha(ARTIFACT), len(ARTIFACT), output='artifact.bin'), expect_exit=2, expect_published=True, output='artifact.bin')
 after = sha((out / 'artifact.bin').read_bytes())
+
+if arguments.publisher_cases:
+    # These keys establish only a caller-selected test identity, never an official release trust anchor.
+    for name, bits in (('publisher', 2048), ('other-publisher', 2048), ('weak-publisher', 1024)):
+        sh('genpkey', '-algorithm', 'RSA', '-pkeyopt', f'rsa_keygen_bits:{bits}', '-out', f'{name}.key')
+        sh('pkey', '-in', f'{name}.key', '-pubout', '-out', f'{name}.pub')
+    sh('pkey', '-pubin', '-in', 'publisher.pub', '-outform', 'DER', '-out', 'publisher.der')
+    (pki / 'metadata.bin').write_bytes(META)
+    (pki / 'artifact.bin').write_bytes(ARTIFACT)
+    for name in ('metadata', 'artifact'):
+        sh('dgst', '-sha256', '-sign', 'publisher.key', '-sigopt', 'rsa_padding_mode:pss',
+           '-sigopt', 'rsa_pss_saltlen:32', '-out', f'{name}.sig', f'{name}.bin')
+    sh('dgst', '-sha256', '-sign', 'publisher.key', '-out', 'pkcs1.sig', 'metadata.bin')
+    sh('dgst', '-sha256', '-sign', 'publisher.key', '-sigopt', 'rsa_padding_mode:pss',
+       '-sigopt', 'rsa_pss_saltlen:20', '-out', 'salt20.sig', 'metadata.bin')
+    signature = (pki / 'metadata.sig').read_bytes()
+    (pki / 'corrupt.sig').write_bytes(bytes([signature[0] ^ 1]) + signature[1:])
+    (pki / 'short.sig').write_bytes(signature[:-1])
+    (pki / 'oversized.sig').write_bytes(b'x' * 513)
+    def auth(key='publisher.pub', sig='metadata.sig'):
+        return ['--publisher-key', str(pki / key), '--signature', str(pki / sig)]
+    for name, path, content in (('metadata', '/meta.json', META), ('artifact', '/artifact.bin', ARTIFACT)):
+        reply = case('signed-' + name, common(path, sha(content), len(content), output='signed-' + name,
+                     extra=auth(sig=name + '.sig')), expect_exit=0, expect_published=True, output='signed-' + name)
+        data = reply.get('data', {})
+        results[-1]['ok'] &= (data.get('publisher_authentication') == 'signature_verified' and
+            data.get('publisher', {}).get('public_key_spki_sha256') == sha((pki / 'publisher.der').read_bytes()) and
+            data.get('publisher', {}).get('trust') == 'explicit-public-key')
+    for label, key, sig, code, kind in (
+        ('wrong-key', 'other-publisher.pub', 'metadata.sig', 1, 'publisher_signature_invalid'),
+        ('corrupt-signature', 'publisher.pub', 'corrupt.sig', 1, 'publisher_signature_invalid'),
+        ('wrong-padding', 'publisher.pub', 'pkcs1.sig', 1, 'publisher_signature_invalid'),
+        ('wrong-pss-salt', 'publisher.pub', 'salt20.sig', 1, 'publisher_signature_invalid'),
+        ('malformed-key', 'garbage.pem', 'metadata.sig', 2, None),
+        ('private-key', 'publisher.key', 'metadata.sig', 2, None),
+        ('weak-key', 'weak-publisher.pub', 'metadata.sig', 2, None),
+        ('missing-key', 'absent.pub', 'metadata.sig', 2, None),
+        ('short-signature', 'publisher.pub', 'short.sig', 2, None),
+        ('oversized-signature', 'publisher.pub', 'oversized.sig', 2, None)):
+        case('neg-publisher-' + label, common('/meta.json', sha(META), len(META), extra=auth(key, sig)),
+             expect_exit=code, expect_code=kind)
+    # The caller pins the tampered bytes: the digest matches, so only the signature can reject them.
+    case('neg-publisher-tampered-metadata', common('/meta-tampered.json', sha(META_TAMPERED), len(META_TAMPERED),
+         extra=auth()), expect_exit=1, expect_code='publisher_signature_invalid')
+    for option, value in (('--publisher-key', pki / 'publisher.pub'), ('--signature', pki / 'metadata.sig')):
+        case('neg-publisher-unpaired-' + option[2:], common('/meta.json', sha(META), len(META),
+             extra=(option, str(value))), expect_exit=2)
+
 passed = all(r['ok'] for r in results) and before == after == sha(ARTIFACT)
 summary = dict(passed=passed, cli=str(cli_source), cli_sha256=sha(cli_source.read_bytes()), cases=results,
                pki=dict(ca_good_sha256=sha((pki / 'ca-good.pem').read_bytes()), openssl=subprocess.run([OPENSSL, 'version'], capture_output=True, text=True).stdout.strip()),
                metadata_sha256=sha(META), artifact_sha256=sha(ARTIFACT), host='127.0.0.1 (controlled loopback endpoint)', work=str(root),
                directory_after=sorted(p.name for p in out.iterdir()))
+summary['publisher_scope'] = 'test-only explicit public keys' if arguments.publisher_cases else 'not exercised'
 (evidence / 'result.json').write_text(json.dumps(summary, indent=2))
 print('passed' if passed else 'FAILED', len(results), 'cases')
 sys.exit(0 if passed else 1)
