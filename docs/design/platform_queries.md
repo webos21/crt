@@ -20,6 +20,12 @@ must not be duplicated in CLI command handlers or diagnosis.
   `USERPROFILE` on Windows, copied into caller storage. Missing, relative or
   overlong configuration fails; it never silently chooses `/`, a working
   directory, AppData or an XDG location. It is not a security identity lookup.
+- `crt_get_narrow_encoding()`: the encoding of the `char*` strings the process uses for
+  `argv`, the environment and paths, `"utf-8"` or `"ansi"`; never NULL. Every target
+  is UTF-8 except a Windows process without the UTF-8 active code page (see the
+  [Windows narrow-string model](windows_narrow_strings.md)). It reports the state and
+  never changes it; the SDK's `crt-narrow-encoding-1` capability promises the query
+  and, on Windows, the manifest policy.
 - `crt_is_native_executable(path)`: bounded ELF64/Mach-O64/universal/PE header
   and architecture screening before a native-tool launch. Scripts and other
   targets return 0, I/O/argument errors -1 with errno. The OS loader remains

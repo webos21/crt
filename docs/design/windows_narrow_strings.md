@@ -1,8 +1,11 @@
 # Windows Narrow-String Model
 
-Status: **proposed 2026-10-31**, validated by a prototype on native Windows/arm64
-and **not implemented** in the SDK. The owner decisions in the last section are
-open. Measurements and commands are in the CLI repository's
+Status: **adopted and implemented 2026-10-31** for CRT-built Windows executables
+(option B below), replayed on native Windows/arm64 only; Windows/x64 is not yet
+replayed. The wide-call rewrite (option C) stays the fallback. Decisions: B adopted;
+minimum Windows 10 1903; the query is `crt_get_narrow_encoding()` and CRT startup does
+not abort; no opt-out for CRT-built executables; UTF-8 validation belongs to callers
+that take untrusted names (the CLI validates on Windows). Measurements and commands are in the CLI repository's
 [acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#windows-narrow-string-model-prototype-2026-10-31).
 
 ## Problem
@@ -126,22 +129,28 @@ UTF-8 pieces consistent.
 The prototype links with a provider copy that appends the two manifest options before
 `@OBJECTS@`; the manifest file sits outside the SDK. It is not an SDK change.
 
-## Increments (none done)
+## Implementation status (2026-10-31)
 
-1. SDK: ship the manifest file and add the wrapper link option; the exporter then
-   carries it. Check the SDK inventory, the profile verification and the Dev consumer.
-2. CRT executables: apply the option in the build files; rerun `crt-c-test` and the
-   port tests (mksh, toybox, awk, make run in Unicode directories).
-3. Platform query and documentation in `platform_queries.md`.
-4. CLI: doctor check, UTF-8 validation of user-supplied paths on Windows, and the
-   Unicode fixture enabled in the native suite (done in the prototype).
-5. Replay on Windows/x64 and Windows/arm64; mention the minimum OS in the guides.
+Done in CRT `85546d9`, replayed on native Windows/arm64:
 
-## Open decisions
+1. The SDK ships `share/crt/windows/utf8.manifest`; the `crt-cc`/`crt-c++` executable
+   links embed it when the sysroot has the file; `create_dist.py` installs it,
+   `verify_dist.py` checks it, and the stage-source packages carry it. The Dev profile
+   gains the `crt-narrow-encoding-1` capability and the exporter requires it.
+2. In-tree executables take the same link option from the top-level CMake file
+   (`mksh.exe` and `toybox.exe` in the SDK carry the manifest). `crt-c-test` passes
+   167 of 167, including the new `windows_utf8_narrow_test` (argv, environment, file
+   names, a child process) and the extended `platform_test`.
+3. `crt_get_narrow_encoding()` is in `include/crt/platform.h` and documented in
+   `platform_queries.md`.
+4. The CLI checks the encoding in `doctor`, validates arguments and compiler-reported
+   dependency paths on Windows, and runs its native suite with a Unicode fixture.
 
-- Accept B (and C as fallback), or require C now.
-- Minimum Windows build: 1903 (18362). Older builds keep ASCII paths only.
-- Query name and shape, and whether any CRT entry point should reject a process
-  without the setting.
-- Whether the manifest may be opted out of (for example for a foreign host) and how.
+Not done: replay on Windows/x64; the port tests (mksh, toybox, awk, make) in Unicode
+directories; a mention of the Windows 10 1903 minimum in the user guides; behaviour
+under a Windows build before 1903 (the setting is ignored there, which the query reports).
+
+## Remaining decisions
+
 - Whether CRT adds UTF-8 validation to path-taking calls, or leaves it to callers.
+- Whether a foreign-host DLL scenario ever needs option C.
