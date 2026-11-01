@@ -9,6 +9,25 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-01
+
+### Cancel owned Windows spawn trees, including descendants of reaped leaders
+
+Windows PAL now attaches new owned spawn groups to private Job Objects before
+resuming either CRT or native children. Group SIGKILL terminates the owned
+tree; the separate registry and leader handle preserve identity after waitpid,
+while failed/empty entries are reclaimed. Foreign group joining and catchable
+signals remain unsupported rather than silently approximated.
+
+A fresh local development SDK passes 167 core tests with one skip, the focused
+ordinary/native/orphan/sibling/reuse regression, and static/shared transport
+consumers. SDK-only CLI replay passes 788 checks, including
+the original descendant timeout, and all 32 SDK-hidden HTTPS/signature cases.
+Exact source/artifact identities, commands, failed attempts and host limits:
+[Windows acceptance](docs/acceptance/sdk_split_acceptance.md#windowsx64-owned-spawn-cancellation-2026-11-01).
+The exercised producer delta was uncommitted at build time; no SDK promotion, release, applet enablement
+or STATUS change is claimed. Windows/arm64 replay remains open.
+
 ## 2026-10-31
 
 ### Extend CLI fetch cases for explicit-key signatures and record D1 limits

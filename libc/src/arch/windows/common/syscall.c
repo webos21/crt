@@ -388,6 +388,15 @@ __declspec(dllimport) BOOL CRT_WINAPI ResetEvent(HANDLE hEvent);
 __declspec(dllimport) BOOL CRT_WINAPI GetExitCodeProcess(HANDLE hProcess, DWORD* lpExitCode);
 __declspec(dllimport) DWORD CRT_WINAPI ResumeThread(HANDLE hThread);
 __declspec(dllimport) BOOL CRT_WINAPI TerminateProcess(HANDLE hProcess, unsigned int uExitCode);
+__declspec(dllimport) HANDLE CRT_WINAPI CreateJobObjectA(void* attributes, const char* name);
+__declspec(dllimport) BOOL CRT_WINAPI AssignProcessToJobObject(HANDLE job, HANDLE process);
+__declspec(dllimport) BOOL CRT_WINAPI TerminateJobObject(HANDLE job, unsigned int exit_code);
+__declspec(dllimport) BOOL CRT_WINAPI QueryInformationJobObject(
+    HANDLE job, int information_class, void* information, DWORD size, DWORD* returned);
+struct crt_job_accounting {
+  int64_t user_time, kernel_time, period_user_time, period_kernel_time;
+  DWORD page_faults, total_processes, active_processes, terminated_processes;
+};
 __declspec(dllimport) HANDLE CRT_WINAPI CreateFileA(
     const char* lpFileName,
     DWORD dwDesiredAccess,
@@ -772,6 +781,87 @@ static DWORD child_pid_table[CRT_FD_TABLE_SIZE];
 static unsigned char child_notified_table[CRT_FD_TABLE_SIZE];
 static HANDLE private_wait_process;
 static DWORD private_wait_pid;
+
+/* Only groups created by this process's spawn are cancellable here. A private, non-inheritable
+ * job captures descendants, including native host tools, before the leader can run. Keep it
+ * independently of waitpid's child registry: reaping a leader must not orphan its live tree.
+ * Jobs have no breakaway or kill-on-close policy; normal parent exit keeps POSIX children alive.
+ * This is owned-tree cancellation, not general setpgid/session or catchable-signal support. */
+static HANDLE owned_spawn_jobs[CRT_FD_TABLE_SIZE];
+static DWORD owned_spawn_pids[CRT_FD_TABLE_SIZE];
+/* Pin the leader's process object even after waitpid closes its handle, preventing Windows
+ * from reusing its PID while descendants still make that owned group addressable. */
+static HANDLE owned_spawn_leaders[CRT_FD_TABLE_SIZE];
+static crt_spinlock owned_spawn_lock = CRT_SPINLOCK_INIT;
+
+static int map_windows_error(DWORD error);
+
+static int owned_spawn_job_empty(HANDLE job) {
+  struct crt_job_accounting info;
+  return QueryInformationJobObject(job, 1 /* JobObjectBasicAccountingInformation */,
+      &info, sizeof(info), 0) && info.active_processes == 0;
+}
+
+static long reserve_owned_spawn_job(int* slot, HANDLE* job) {
+  int i;
+  HANDLE created = CreateJobObjectA(0, 0);
+  if (created == 0) return -map_windows_error(GetLastError());
+  crt_spin_lock(&owned_spawn_lock);
+  for (i = 0; i < CRT_FD_TABLE_SIZE; ++i) {
+    /* pid zero reserves an in-flight spawn; another thread must not reclaim its empty job. */
+    if (owned_spawn_jobs[i] != 0 && owned_spawn_pids[i] != 0 &&
+        owned_spawn_job_empty(owned_spawn_jobs[i])) {
+      CloseHandle(owned_spawn_jobs[i]);
+      CloseHandle(owned_spawn_leaders[i]);
+      owned_spawn_leaders[i] = 0;
+      owned_spawn_jobs[i] = 0;
+      owned_spawn_pids[i] = 0;
+    }
+    if (owned_spawn_jobs[i] == 0) {
+      owned_spawn_jobs[i] = created;
+      owned_spawn_pids[i] = 0;
+      *slot = i;
+      *job = created;
+      crt_spin_unlock(&owned_spawn_lock);
+      return 0;
+    }
+  }
+  crt_spin_unlock(&owned_spawn_lock);
+  CloseHandle(created);
+  return -EAGAIN;
+}
+
+static long attach_owned_spawn_job(int slot, HANDLE job, HANDLE process) {
+  HANDLE leader = 0;
+  if (!DuplicateHandle(GetCurrentProcess(), process, GetCurrentProcess(), &leader,
+                       0, 0, DUPLICATE_SAME_ACCESS)) return -map_windows_error(GetLastError());
+  if (!AssignProcessToJobObject(job, process)) {
+    long result = -map_windows_error(GetLastError());
+    CloseHandle(leader);
+    return result;
+  }
+  crt_spin_lock(&owned_spawn_lock);
+  owned_spawn_leaders[slot] = leader;
+  crt_spin_unlock(&owned_spawn_lock);
+  return 0;
+}
+
+static void finish_owned_spawn_job(int slot, long error, DWORD pid) {
+  if (slot < 0) return;
+  crt_spin_lock(&owned_spawn_lock);
+  if (error != 0) {
+    /* Includes assignment/resume/child-registry failure: never return an untracked live tree. */
+    TerminateJobObject(owned_spawn_jobs[slot], 127);
+    CloseHandle(owned_spawn_jobs[slot]);
+    if (owned_spawn_leaders[slot] != 0) CloseHandle(owned_spawn_leaders[slot]);
+    owned_spawn_leaders[slot] = 0;
+    owned_spawn_jobs[slot] = 0;
+    owned_spawn_pids[slot] = 0;
+  } else {
+    owned_spawn_pids[slot] = pid;
+  }
+  crt_spin_unlock(&owned_spawn_lock);
+}
 
 long __crt_sys_geteuid(void);
 static HANDLE get_fd_handle(int fd);
@@ -2528,6 +2618,16 @@ void __crt_fd_after_fork_child(void) {
   }
   private_wait_process = 0;
   private_wait_pid = 0;
+  for (i = 0; i < CRT_FD_TABLE_SIZE; ++i) {
+    if (windows_unregistered_clone) {
+      if (owned_spawn_jobs[i] != 0) CloseHandle(owned_spawn_jobs[i]);
+      if (owned_spawn_leaders[i] != 0) CloseHandle(owned_spawn_leaders[i]);
+    }
+    owned_spawn_leaders[i] = 0;
+    owned_spawn_jobs[i] = 0;
+    owned_spawn_pids[i] = 0;
+  }
+  crt_atomic_store_release(&owned_spawn_lock.state, 0);
 }
 
 int __crt_fd_get_cloexec(int fd) {
@@ -2974,7 +3074,10 @@ static long prepare_spawn_startup(
   }
   if (attr != 0 &&
       (attr->flags & (POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSID)) != 0) {
-    *creation_flags |= CRT_CREATE_NEW_PROCESS_GROUP;
+    if ((attr->flags & POSIX_SPAWN_SETPGROUP) != 0 && attr->pgroup != 0) {
+      return attr->pgroup < 0 ? -EINVAL : -ENOTSUP;
+    }
+    *creation_flags |= CRT_CREATE_NEW_PROCESS_GROUP | CRT_CREATE_SUSPENDED;
   }
   if (attr != 0 &&
       (attr->flags & (POSIX_SPAWN_SETSCHEDPARAM | POSIX_SPAWN_SETSCHEDULER)) != 0) {
@@ -8106,12 +8209,37 @@ long __crt_sys_fchown(int fd, unsigned int owner, unsigned int group) {
 
 /* kill(pid, sig) for a process other than the caller. Windows has no signals; what is honest to
  * offer is the existence probe (sig 0) and SIGKILL, which cannot be caught on any system and so is
- * exactly TerminateProcess(). Other signals and process groups remain ENOSYS (TODO.md, "Windows
- * process signals"): running a handler in another process needs the injection backend. */
+ * exactly TerminateProcess(). Negative group ids address only this process's owned spawn jobs;
+ * TerminateJobObject also cancels their descendants/nested jobs. Catchable signals, kill(0/-1)
+ * and arbitrary external groups remain unsupported; no process-name or PID-tree enumeration. */
 long __crt_sys_kill(long pid, int sig) {
   HANDLE process;
   DWORD error;
 
+  if (pid < -1 && (sig == 0 || sig == 9 /* SIGKILL */)) {
+    DWORD group = (DWORD)(0UL - (unsigned long)pid);
+    int i;
+    long result = -ESRCH;
+    crt_spin_lock(&owned_spawn_lock);
+    for (i = 0; i < CRT_FD_TABLE_SIZE; ++i) {
+      if (owned_spawn_jobs[i] == 0 || owned_spawn_pids[i] != group) continue;
+      if (owned_spawn_job_empty(owned_spawn_jobs[i])) {
+        CloseHandle(owned_spawn_jobs[i]);
+        CloseHandle(owned_spawn_leaders[i]);
+        owned_spawn_leaders[i] = 0;
+        owned_spawn_jobs[i] = 0;
+        owned_spawn_pids[i] = 0;
+      } else if (sig == 0) {
+        result = 0;
+      } else {
+        result = TerminateJobObject(owned_spawn_jobs[i], CRT_EXIT_SIGNAL_TAG | (unsigned int)sig)
+            ? 0 : -map_windows_error(GetLastError());
+      }
+      break;
+    }
+    crt_spin_unlock(&owned_spawn_lock);
+    return result;
+  }
   if (sig == 0 && pid == (long)GetCurrentProcessId()) {
     return 0;
   }
@@ -8496,6 +8624,8 @@ long __crt_sys_posix_spawn(
   DWORD process_error;
   long result;
   long remembered;
+  int owned_group_slot = -1;
+  HANDLE owned_group_job = 0;
 
   if (path == 0) {
     return -EINVAL;
@@ -8509,10 +8639,18 @@ long __crt_sys_posix_spawn(
 #define bootstrap_cwd (ctx->bootstrap_cwd)
 #define RETURN(value) do { long crt_spawn_return_value__ = (value); \
     if (crt_spawn_return_value__ != 0 && ctx->argv_spill_path[0] != 0) DeleteFileA(ctx->argv_spill_path); \
+    finish_owned_spawn_job(owned_group_slot, crt_spawn_return_value__, process.dwProcessId); \
     free(ctx); return crt_spawn_return_value__; } while (0)
   ctx = (struct crt_windows_spawn_context*)calloc(1, sizeof(*ctx));
   if (ctx == 0) {
     return -ENOMEM;
+  }
+  if (attr != 0 && (attr->flags & (POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSID)) != 0) {
+    if ((attr->flags & POSIX_SPAWN_SETPGROUP) != 0 && attr->pgroup != 0) {
+      RETURN(attr->pgroup < 0 ? -EINVAL : -ENOTSUP);
+    }
+    result = reserve_owned_spawn_job(&owned_group_slot, &owned_group_job);
+    if (result != 0) RETURN(result);
   }
   result = resolve_process_application_path(
       path, search_path, application_path, sizeof(application_path));
@@ -8624,6 +8762,16 @@ long __crt_sys_posix_spawn(
     if (!process_created) {
       SetLastError(process_error);
       RETURN(fail_last_error());
+    }
+    if (owned_group_job != 0) {
+      result = attach_owned_spawn_job(owned_group_slot, owned_group_job, process.hProcess);
+      if (result == 0 && ResumeThread(process.hThread) == (DWORD)0xffffffffUL) result = fail_last_error();
+      if (result != 0) {
+        TerminateProcess(process.hProcess, 127);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        RETURN(result);
+      }
     }
     CloseHandle(process.hThread);
     if (pid != 0 && *pid == CRT_SPAWN_PRIVATE_WAIT_PID) {
@@ -8794,6 +8942,17 @@ long __crt_sys_posix_spawn(
     RETURN(fail_last_error());
   }
   free(environment_block);
+  result = owned_group_job != 0
+      ? attach_owned_spawn_job(owned_group_slot, owned_group_job, process.hProcess) : 0;
+  if (result != 0) {
+    TerminateProcess(process.hProcess, 127);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    __crt_fd_snapshot_dispose(&fd_snapshot);
+    if (fd_snapshot_pipe_read != 0) CloseHandle(fd_snapshot_pipe_read);
+    if (fd_snapshot_pipe_write != 0) CloseHandle(fd_snapshot_pipe_write);
+    RETURN(result);
+  }
   if (fd_snapshot_pipe_mode) {
     uint32_t length;
 
@@ -8828,6 +8987,8 @@ long __crt_sys_posix_spawn(
       }
       RETURN(result);
     }
+  }
+  if ((creation_flags & CRT_CREATE_SUSPENDED) != 0) {
     if (ResumeThread(process.hThread) == (DWORD)0xffffffffUL) {
       result = fail_last_error();
       TerminateProcess(process.hProcess, 127);

@@ -101,7 +101,9 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
   All five native pairs pass at their recorded local/unpromoted snapshots.
   Linux/x86_64 replays the latest fetch/encoding sources with a fresh clean
-  Dev SDK (2026-10-31); Windows/x64, macOS and Linux/aarch64 need those changes.
+  Dev SDK (2026-10-31). Windows/x64 now passes with the owned-spawn fix
+  ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-owned-spawn-cancellation-2026-11-01)); latest
+  macOS/Linux/aarch64 and the Windows/arm64 process-fix replay remain open.
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
   review native consumer/ABI evidence before each initial pair's adoption
@@ -228,7 +230,7 @@ Independent hardening, not unfinished backend object-boundary acceptance.
 ### Windows process signals and Toybox `timeout`
 
 Positive-pid existence/access probes and `SIGKILL` already exist. Remaining
-work is catchable cross-process delivery, process groups and real child-exit
+work is catchable cross-process delivery, general process groups and real child-exit
 siginfo. This is non-interactive lifecycle work, not full POSIX job control
 ([signal dispatch](docs/design/signal_delivery.md),
 [Toybox applet status](docs/porting/toybox_applet_status.md)).
@@ -243,9 +245,10 @@ siginfo. This is non-interactive lifecycle work, not full POSIX job control
 - [ ] Design CRT-owned cooperative delivery for catchable signals, with PID-reuse,
   permissions, pending/coalescing and checkpoint rules. Do not equate SIGTERM
   with unconditional TerminateProcess; unsupported delivery must fail honestly.
-- [ ] Implement only the descendant/process-group subset needed by timeout,
-  evaluating documented Windows process groups/Job Objects against post-fork
-  setpgid. Do not introduce undocumented suspend/resume APIs.
+- [ ] Owned spawn group cancellation passes on Windows/x64
+  ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-owned-spawn-cancellation-2026-11-01)); replay on
+  Windows/arm64 and settle general/post-fork membership separately. Preserve
+  the narrow SIGKILL scope and documented OS APIs.
 - [ ] Accept through packaged timeout: deadline/status 124, preserve-status exit
   7, and TERM-to-KILL escalation; retain positive-pid/group and SIGCHLD
   pid/code/status tests. Re-run pselect, process stress, fd snapshots, fork,

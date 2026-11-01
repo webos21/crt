@@ -41,6 +41,47 @@ This is not full interactive job control. Later work still needs console
 Ctrl-C/Ctrl-Break delivery policy, process-group waits, stopped-child status,
 and terminal foreground arbitration.
 
+### Owned spawn cancellation (2026-11-01)
+
+Windows now has a bounded cancellation backend for the CLI's
+`POSIX_SPAWN_SETPGROUP` with `pgroup=0`. The existing spawn `SETSID` flag uses
+the same backend without extending the session approximation above. Each
+such spawn creates a private, unnamed Job Object. Both CRT and native-host
+children start suspended, join that job before executing user code, then
+resume. Descendants inherit job membership through Windows process creation.
+Assignment/resume errors terminate the suspended child and fail the spawn;
+there is no untracked-process fallback.
+
+Only the creating process can address these owned jobs through
+`kill(-leader_pid, 0)` or `kill(-leader_pid, SIGKILL)`. Probe returns `ESRCH`
+for an absent/empty owned job. Cancellation uses `TerminateJobObject`, which
+also terminates descendants and nested jobs. This deliberately cancels an
+owned tree, including nested logical groups; it does not implement the global
+POSIX group namespace, arbitrary group joining, or post-fork membership moves.
+A nonzero spawn `pgroup` fails synchronously (`EINVAL` if negative,
+`ENOTSUP` if positive). `kill(0/-1)` and catchable cross-process/group signals
+remain unsupported; `SIGTERM` is not silently converted into forced exit.
+
+The job registry is independent of `waitpid`: reaping the leader leaves a
+live descendant tree addressable. A non-inheritable duplicate of the leader
+process handle prevents PID reuse until the job is empty. A lock protects the
+64 slots and in-flight reservations; empty jobs/leader handles are reclaimed
+on subsequent spawn/probe, and exhaustion returns `EAGAIN`. Fork-child reset
+discards copied private registries. No kill-on-close/breakaway limit is set,
+so ordinary parent exit does not acquire an implicit terminate-children policy.
+No process-name scan, global kill, helper executable or CLI OS macro is used.
+
+The public API remains Bionic-shaped: [Bionic spawn attributes](https://raw.githubusercontent.com/aosp-mirror/platform_bionic/master/libc/bionic/spawn.cpp)
+apply `setpgid(0, pgroup)` before exec. This Windows subset is intentionally
+narrower. Its OS boundary follows Microsoft's
+[job assignment](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject),
+[nested jobs](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs),
+[termination](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-terminatejobobject)
+and [process-object lifetime](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-process_information)
+contracts. Native evidence and remaining host limits belong to SDK acceptance.
+
+[Windows/x64 evidence](../acceptance/sdk_split_acceptance.md#windowsx64-owned-spawn-cancellation-2026-11-01).
+
 ## Interactive Job Control: Decided Policy, Not Yet Implemented
 
 **Scope note first**: this project's own mksh build defines

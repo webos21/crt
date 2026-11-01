@@ -587,6 +587,9 @@ set_tests_properties(emutls_thread_churn_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "emutls_thread_churn_test: ok"
   TIMEOUT 120)
 if(CRT_TARGET_OS STREQUAL "windows")
+  add_crt_test(windows_owned_spawn_group_test windows_owned_spawn_group_test.c)
+  set_tests_properties(windows_owned_spawn_group_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "windows_owned_spawn_group_test: ok" TIMEOUT 45)
   # Narrow strings are UTF-8 (docs/design/windows_narrow_strings.md): argv, environment and paths round-trip.
   add_crt_test(windows_utf8_narrow_test windows_utf8_narrow_test.c)
   set_tests_properties(windows_utf8_narrow_test_runs PROPERTIES PASS_REGULAR_EXPRESSION "windows_utf8_narrow_test: ok")

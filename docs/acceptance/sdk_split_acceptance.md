@@ -945,3 +945,64 @@ not a new SDK/CLI wire contract: SDK manifest/profile format 1, port recipe
 version 1 and isolated-stage recipe version 2 remain unchanged. The general
 SDK development-contract v1 remains proposed. CLI/Studio live integration is
 **Not run**; artifact promotion precedes any later consumer lock update.
+
+## Windows/x64 Owned Spawn Cancellation (2026-11-01)
+
+**Pass, local development candidate; Windows/x64 only.** The CLI's owned-tree
+timeout regression failed against clean CRT `fa5dc30`: `kill(-pid, SIGKILL)`
+returned `ENOSYS` and a descendant wrote its marker after the timeout. This
+increment adds the [owned-spawn subset](../design/job_control.md#owned-spawn-cancellation-2026-11-01)
+in the Windows PAL, keeping public Bionic API signatures unchanged. It uses
+unnamed Job Objects attached before child execution, a separate locked group
+registry that survives leader reaping, and a retained leader handle preventing
+PID reuse. Unsupported group joining/catchable delivery still fails explicitly.
+
+Producer base is `fa5dc305efa3cf3c807786550dd727023cad8bd3`, plus the uncommitted
+PAL/test delta. Implementation SHA-256:
+`0bf953484cbad0152ed545966580905f2fc897db2069191415591d1f11339589`.
+The complete three-file manifest and tracked patch are retained as
+`producer-source-inputs.json` and `producer-tracked.patch`; the new test's hash
+is included separately because it was not yet tracked at build time.
+No clean-source or new committed-revision identity is claimed.
+
+The final fresh producer clone is
+`C:/Users/Lee/AppData/Local/Temp/crt-timeout-final-20261101/producer`, output
+`out/timeout-fix/build`. Configure uses `cmake --fresh --preset
+windows-host-ninja-debug -B <build> -DCRT_RELEASE_TAG=development`.
+`cmake --build <build> --target crt-development-sdk-test --parallel 8` and
+`crt-c-test` both exit 0. `development` explicitly allows dirty local source
+assets; no release tag is invented. LLVM is 22.1.8 and Windows SDK imports are
+`10.0.28000.0/um/x64`. Only pinned source/download caches are reused, not
+compiled libraries. The cache-copy long-path failure and preliminary candidate
+remain separate evidence; the latter predates leader-handle hardening.
+
+Core: **167 pass, one skip, no failures** in 168 tests. The skipped
+`fork_heap_snapshot_test_runs` remains a skip. The focused
+[Windows regression](../../libc/tests/windows_owned_spawn_group_test.c)
+also passes independently (12.37 seconds), covering ordinary/native spawn,
+live and reaped leaders, descendant termination, sibling survival, 80 failed/
+successful-spawn cycles, and unsupported group attributes. The ordinary Dev
+consumer passes static/shared HTTPS, inflate and trust negatives.
+
+SDK inventory SHA-256 is `252ff44b22ab222692f84c29522ce4f2f9b971d0f1d111baf9ac31e9b33441de`;
+consumer content selection is `7c04cfffe0b2faabe1cc149d0914f5ada6432b8cfae93a594ab1771f5d0b3b1e`;
+provider SHA-256 is `b8fa1e9ab171732add99d696d48ed9ded4d1c5c21946238e9dd6cc3e21fca48f`.
+Both original and relocated SDK inventories are unchanged after testing.
+This is a local immutable handoff, not a promoted SDK release or production pin.
+
+The SDK-only CLI replay passes **788 checks**, including the
+original timeout marker/control, under a restricted token and OS job process
+accounting. Self-build is cold 10/0 and warm
+0/10. Bare help/version/doctor and import audit
+pass with SDK/source/provider roots inaccessible. All 32 controlled HTTPS/
+signature cases pass with fresh disposable identities and the same visibility
+boundary. Consumer details remain owned by CLI's
+`docs/acceptance/bootstrap_acceptance.md#windowsx64-owned-descendant-timeout-fix-2026-11-01`.
+
+Raw evidence is in the sibling CLI's ignored
+`out/windows-timeout-fix-20261101/final/`, including `sdk-status.json`, `logs/`,
+`focused-test.log`, `replay/`, `https/` and aggregate `result.json`.
+Windows/arm64, general POSIX group/session membership, catchable cross-process
+signals and Toybox timeout acceptance remain open. No applet was enabled,
+upstream source patched, production lock adopted, release published or STATUS
+updated. Previous failed identities and binaries are preserved.
