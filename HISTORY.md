@@ -11,6 +11,21 @@ substantive update.
 
 ## 2026-11-01
 
+### Revalidate macOS/arm64 SDK and CLI boundaries at current sources
+
+A fresh clean `8db69f4` Development SDK passes 146 core tests, imported-C++
+static/shared smokes and static/shared transport consumers. Exporter/profile
+fixtures pass 36 with two Windows-only skips. Unchanged CLI `a9d43c6` passes
+732 isolated native checks, previous-binary self-bootstrap, import audits,
+32 SDK-hidden HTTPS/signature cases and pinned-repository HTTPS.
+
+No runtime implementation change was needed. Direct Xcode compiler use needs
+explicit producer SDKROOT; initial failures are retained. CRT tool probes
+retain the same direct make space-SHELL limitation as Linux and a passing
+explicit temporary symlink bridge. Exact commands, provenance and limits:
+[macOS producer acceptance](docs/acceptance/sdk_split_acceptance.md#macosarm64-latest-source-cli-replay-2026-11-01).
+No SDK promotion, consumer production lock, release or STATUS change is claimed.
+
 ### Cancel owned Windows spawn trees, including descendants of reaped leaders
 
 Windows PAL now attaches new owned spawn groups to private Job Objects before

@@ -103,14 +103,15 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   Linux/x86_64 replays the latest fetch/encoding sources with a fresh clean
   Dev SDK (2026-10-31). Windows/x64 now passes with the owned-spawn fix
   ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-owned-spawn-cancellation-2026-11-01)); latest
-  macOS/Linux/aarch64 and the Windows/arm64 process-fix replay remain open.
+  Linux/aarch64 and the Windows/arm64 process-fix replay remain open. Latest
+  macOS/arm64 passes with a fresh clean SDK ([evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-latest-source-cli-replay-2026-11-01)).
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
   review native consumer/ABI evidence before each initial pair's adoption
   ([CLI D0 acceptance baseline](https://github.com/webos21/crt-cli/blob/5fcdc995d231fe2f9dbab4292000a81e0b4fce93/docs/acceptance/bootstrap_acceptance.md)).
   Initial native pairs pass at their recorded snapshots; see the
   [current Linux replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#linux-latest-source-revalidation-2026-10-31) and
-  [macOS CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-macosarm64-2026-10-29).
+  [macOS CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#macos-latest-source-revalidation-2026-11-01).
 - [ ] **1.7** Select coherent exact assets before promotion/consumer locks;
   resolve the rehearsal's same-name source-asset variants without relabeling builds.
 
@@ -122,9 +123,10 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   validate native CRT tools/aliases, paths and bounded owned-process cleanup.
 - [ ] **2.3** Validate CLI SDK-free HTTP/TLS/trust and fail-closed negatives with
   the CLI-owned D1-07 gate; reuse the [SDK transport evidence](docs/acceptance/sdk_split_acceptance.md).
-  Linux explicit-key signature cases and real repository HTTPS are measured;
-  official signing/metadata policy, host-tools/env adapter and native Windows/macOS
-  gates remain open in the CLI-owned D1 audit.
+  Linux, Windows/x64 and macOS/arm64 controlled signature cases are measured;
+  macOS also passes SDK-hidden pinned-repository HTTPS ([evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-latest-source-cli-replay-2026-11-01)).
+  Official signing/metadata policy, host-tools/env adapter and remaining
+  native-host gates stay open in the CLI-owned D1 audit.
 
 #### Tranche 3. Immutable SDK installation and selection (D2)
 

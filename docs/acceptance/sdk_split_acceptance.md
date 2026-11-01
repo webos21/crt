@@ -1006,3 +1006,69 @@ Windows/arm64, general POSIX group/session membership, catchable cross-process
 signals and Toybox timeout acceptance remain open. No applet was enabled,
 upstream source patched, production lock adopted, release published or STATUS
 updated. Previous failed identities and binaries are preserved.
+
+## macOS/arm64 Latest-source CLI Replay (2026-11-01)
+
+**Pass, local/unpromoted producer gates and bounded native consumer.** Clean
+CRT `8db69f404dcfa70b5aa0569cae51a962fd0615d2`, native macOS 27.0.1 arm64,
+Apple Clang 21.0.0 (`clang-2100.4.1.1`), ld64 `ld-27106.1`, Xcode ar and
+macOS 27.2 vendor SDK. A fresh output at
+`out/cli-macos-revalidation-20261101` reuses only pinned LLVM source directories
+and hash-verified download archives, with no prior compiled libraries copied.
+`producer-inputs.json`, `producer-commands.json`, `tool-identities.json` and
+logs are retained in the sibling CLI's ignored
+`out/macos-revalidation-20261101/` (original orchestration root:
+`/private/tmp/crt-macos-revalidation-20261101`).
+
+```sh
+(
+export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+cmake -S /Users/jocheolmin/GitRepo/crt -B /Users/jocheolmin/GitRepo/crt/out/cli-macos-revalidation-20261101 -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DCMAKE_CXX_COMPILER=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -DCRT_TARGET_OS=macos -DCRT_TARGET_ARCH=host -DCRT_USE_IMPORTED_LIBCXX=ON -DCRTGFX_ENABLE_SKIA=OFF -DCRTMEDIA_ENABLE_FFMPEG=OFF -DCRTMEDIA_ENABLE_CURL=OFF -DCRTUI_ENABLE_LVGL=OFF -DCRT_RELEASE_TAG=v0.4.0-cli.20261101
+cmake --build /Users/jocheolmin/GitRepo/crt/out/cli-macos-revalidation-20261101 --target crt-development-sdk-test --parallel 6
+cmake --build /Users/jocheolmin/GitRepo/crt/out/cli-macos-revalidation-20261101 --target crt-c-test --parallel 6
+cmake --build /Users/jocheolmin/GitRepo/crt/out/cli-macos-revalidation-20261101 --target crt-cxx-test --parallel 6
+)
+```
+
+The producer job explicitly sets `SDKROOT` from `xcrun --sdk macosx
+--show-sdk-path` when invoking actual Xcode compiler paths. Without it the
+first Dev candidate's zlib link could not find libSystem; that failed candidate
+and log are retained, with no configure-capability override or upstream patch.
+An earlier external-output attempt exposed the port preset's source-relative
+`out/build` mapping; the fresh output above uses the existing supported layout.
+These are producer/test-host prerequisites, not a CLI runtime shell dependency.
+
+- Core **146/146**, no failures or skips. Imported libc++ static/shared
+  exception/allocation, string-ABI and iostream smokes pass.
+- Development profile consumer passes static/shared verified HTTPS+inflate
+  plus wrong/missing/malformed CA cases; Mach-O binding/closure audits pass.
+- Exporter/profile fixtures: **36 pass, two native-Windows-only skips**.
+- Profile version `v0.4.0-cli.20261101` is a local parameter, not a release tag.
+  Producer/base/compile provenance all name clean `8db69f4`; capability
+  `crt-narrow-encoding-1` is present. Installed root/runtime Apache license bytes
+  and both generated stage-source archives are checked against `LICENSE.md`.
+  No Dev SDK archive, promotion or publication is performed.
+
+The complete public SDK is handed off with symlinks outside the producer tree:
+`/private/var/folders/p3/z_1_279n4bq6kgrrs25d8bdc0000gn/T/crt-cli-contract-6cjvlogl/SDK space 한글/dev`.
+Its 2,587-entry inventory SHA-256 is
+`7e187c845a9bdc65166f697f08fe13642f8f0dd98c3e6e159c26102febab30c4`; provider content selection is
+`a438a4a08bc0bec98d53ad95d3cbc196525d655428086088508a3df9ea0f2f16` and native-policy digest is
+`489ebea23e8531cfdd57cd3ba526a163f18c42616e9a856961af49ace673a21d`. Original and relocated inventories remain unchanged
+after all consumer and host-tool probes.
+
+Unchanged CLI product sources at `a9d43c6` pass 732 native checks under
+Seatbelt, cold/warm self-build 10/0 and 0/10, the previous macOS binary's
+bootstrap loop, bare SDK-hidden help/version/doctor and single-import audit.
+All 32 SDK-hidden transport/signature cases and pinned-repository HTTPS pass.
+The consumer and exact executable identities remain owned by
+[CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#macos-latest-source-revalidation-2026-11-01).
+
+SDK-derived mksh/sh, enumerated toybox applets, separate awk and make execute
+with only declared CRT tools available. Direct make SHELL containing spaces
+fails; an explicit temporary real symlink to the same mksh passes. The failed
+result is retained, without claiming an independent Host Tools Bundle or CLI
+port-build adapter. No runtime implementation change, upstream patch, full
+WebKit build, STATUS update or release action was needed. The documentation
+commit records this measured snapshot without rebuilding or relabeling the SDK.
+Other-host latest-source gates and complete D1 remain separately scoped.
