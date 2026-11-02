@@ -6,6 +6,38 @@ identity policy belong to the [SDK contract](../design/sdk_development_contract.
 commands belong to the [distribution guide](../guides/distribution.md#development-sdk-producer-and-external-validation).
 Original B4/B5 results remain in [build-system acceptance](build_system_acceptance.md#development-sdk-windows-replay).
 
+## SDK/CLI technical bootstrap gate review (2026-11-02)
+
+The owner accepts work-queue gates **1.5 and 1.6 as complete at the recorded
+local/unpromoted combinations**. Startup/link policy, basic CLI diagnosis,
+one-executable feasibility, relocated SDK-only build/run and native ABI/import
+evidence have been reviewed across five native pairs:
+
+| Pair | Producer and consumer evidence |
+| --- | --- |
+| Linux/x86_64 | [Latest clean SDK/CLI review](../../HISTORY.md#revalidate-the-latest-cli-on-linuxx86_64-with-a-fresh-clean-dev-sdk), linking the original consumer acceptance |
+| Linux/aarch64 | [Native SDK/CLI replay](#linuxaarch64-latest-source-cli-replay-2026-11-02) |
+| macOS/arm64 | [Native SDK/CLI replay](#macosarm64-latest-source-cli-replay-2026-11-01) |
+| Windows/x64 | [Clean SDK replay including the spawn-environment fix](#windowsx64-latest-source-cli-replay-2026-11-02) |
+| Windows/arm64 | [Clean SDK replay including the spawn-environment fix](#windowsarm64-latest-source-cli-replay-and-spawn-environment-fix-2026-11-02) |
+
+This is a review of existing execution records, not five new executions on the
+reviewing Mac, one common latest SDK/CLI revision, or approval of untested
+combinations. Exact source/SDK/provider/tool identities, conditional skips,
+isolation mechanisms and per-host limitations remain in those records and the
+[CLI-owned ledger](https://github.com/webos21/crt-cli/blob/8fca58af136cfc50efed196529e23cf9b6572629/docs/compatibility.md),
+reviewed at CLI `8fca58a`. Windows process accounting is not relabeled as an
+execution-denial sandbox. Previously recorded failures remain retained.
+
+The stale-cache/source-asset finding does not undo these scoped runtime passes.
+**1.7 remains open** for canonical-source/cache repair, common asset/recipe
+generation, affected validation and final selection under the
+[adopted naming contract](../design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02).
+New or regenerated candidates need their own affected-scope validation; they
+do not inherit these exact artifact results automatically. Producer promotion,
+production consumer pins, public release and complete D1 acceptance are not
+granted by closing these two technical gates. STATUS is unchanged.
+
 ## Accepted native matrix
 
 | Pair | Development producer / ordinary consumer | Producer-tree-hidden consumer |

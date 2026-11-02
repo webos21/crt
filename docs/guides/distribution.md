@@ -342,6 +342,12 @@ that records, at minimum:
 - the required preceding binary stage and external tools;
 - configure/build/install/test entry points and expected installed artifacts.
 
+Source asset names are `crt-<version>-<os>-<stage>-source.tar.xz`, shared across
+target architectures under the [adopted common-source contract](../design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02).
+Use the same selected bytes and recipe size/hash for all architectures of that
+version/OS/stage; binary SDK names still include architecture. Do not merge
+same-named, different-hash per-host candidates into a release directory.
+
 All paths recorded in `redistributed_dependencies` are normalized portable
 relative paths. Verification rejects absolute, drive-relative, parent-
 traversing, non-normalized, or symlink-escaping entries before checking that

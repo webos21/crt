@@ -64,8 +64,9 @@ under an active tranche only to make its execution order legible.
 
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
-This whole initiative is active; the current focus is **Tranche 1 remaining
-native-pair replay and candidate coherence**. Numbered tranches 1-8 map to D0-D7.
+This whole initiative is active; the current focus is **Tranche 1.7 common-source
+asset repair and candidate coherence**. Technical bootstrap gates 1.5/1.6 are
+closed at their recorded combinations. Numbered tranches 1-8 map to D0-D7.
 SDK split and local assembly rehearsal are complete
 ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
 The SDK Producer Contract Gate P0 is the producer work within the early
@@ -97,28 +98,19 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   identities; record local handoff, producer/CLI snapshots, archive/content hashes and tools.
 - [x] **1.4** Implement CLI-owned bootstrap input/result records and experimental
   manifest/lock fixtures, without claiming the general SDK contract is implemented.
-- [ ] **1.5** Supply SDK-owned startup/link rules for minimal CLI help/version/bootstrap
-  diagnosis and single-executable link feasibility with the chosen CRT/C++/HTTP/TLS stack.
-  All five native pairs pass at their recorded local/unpromoted snapshots.
-  Linux/x86_64 replays the latest fetch/encoding sources with a fresh clean
-  Dev SDK (2026-10-31). Windows/x64 now passes with the owned-spawn fix
-  ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-owned-spawn-cancellation-2026-11-01)).
-  Latest Linux/aarch64 passes with a fresh clean SDK
-  ([evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-latest-source-cli-replay-2026-11-02));
-  Windows/arm64 passes the process-fix replay with a fresh clean SDK after one PAL fix
-  that stops CRT children from seeing the bootstrap transport variables
-  ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-latest-source-cli-replay-and-spawn-environment-fix-2026-11-02)).
-  Windows/x64 also passes it with a fresh clean `b4c5b5a` SDK ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-latest-source-cli-replay-2026-11-02)).
-  Latest macOS/arm64 passes with a fresh clean SDK ([evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-latest-source-cli-replay-2026-11-01)).
-- [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
-  from the relocated candidate with producer trees unavailable;
-  review native consumer/ABI evidence before each initial pair's adoption
-  ([CLI D0 acceptance baseline](https://github.com/webos21/crt-cli/blob/5fcdc995d231fe2f9dbab4292000a81e0b4fce93/docs/acceptance/bootstrap_acceptance.md)).
-  Initial native pairs pass at their recorded snapshots; see the
-  [current Linux replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#linux-latest-source-revalidation-2026-10-31) and
-  [macOS CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#macos-latest-source-revalidation-2026-11-01).
+- [x] **1.5** Validate SDK-owned startup/link rules, basic CLI diagnosis and
+  one-executable feasibility on the five recorded native pairs
+  ([technical gate review](docs/acceptance/sdk_split_acceptance.md#sdkcli-technical-bootstrap-gate-review-2026-11-02)).
+- [x] **1.6** Review relocated SDK-only build/run, producer-tree isolation and
+  native ABI/import evidence at those recorded combinations; not production adoption
+  ([technical gate review](docs/acceptance/sdk_split_acceptance.md#sdkcli-technical-bootstrap-gate-review-2026-11-02)).
 - [ ] **1.7** Select coherent exact assets before promotion/consumer locks;
   resolve the rehearsal's same-name source-asset variants without relabeling builds.
+  [Source comparison](docs/acceptance/release_qualification.md#source-asset-comparison-checkpoint-2026-11-02)
+  found different supplied baselines and stale libc++abi patch state.
+  [Common version/OS/stage naming is adopted](docs/design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02);
+  canonical-source/cache repair, asset/recipe regeneration, affected validation
+  and final selection remain open.
 
 #### Tranche 2. SDK-free CLI runtime and host environment (P0 + D1)
 

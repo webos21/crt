@@ -11,6 +11,45 @@ substantive update.
 
 ## 2026-11-02
 
+### Close SDK/CLI technical bootstrap gates 1.5 and 1.6
+
+The owner accepted the five native pairs' recorded SDK startup/link, basic
+diagnosis/one-executable and relocated SDK-only build/run/ABI/import evidence.
+Marked 1.5/1.6 complete and moved the detailed links to the
+[technical gate review](docs/acceptance/sdk_split_acceptance.md#sdkcli-technical-bootstrap-gate-review-2026-11-02).
+This is scoped completion at existing per-host combinations, not new runtime
+execution, a shared latest revision or production adoption. Tranche 1.7 stays
+open for canonical-source/cache repair, common asset/recipe generation and
+final selection; broader D1 and release/promotion gates stay separate. No
+runtime, SDK payload, consumer pin, committed CLI binary or STATUS change.
+
+### Adopt common source-stage assets across architectures
+
+The owner retained one source archive per version/OS/stage, with no architecture
+suffix; binary SDK archives remain architecture-specific. The
+[SDK contract](docs/design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02)
+owns the common byte/hash identity and preservation rule; the guide, comparison
+record and TODO now link it. This is a contract decision only: stale-cache
+repair, new asset/recipe generation, affected validation and final candidate
+selection remain open under Tranche 1.7. No archive, production recipe, runtime,
+consumer lock or STATUS file was changed by this decision.
+
+### Compare source-stage assets without conflating revisions or cache state
+
+Added a read-only archive comparison tool and CI fixtures separating compressed
+bytes, tar metadata/order, permissions, member payloads and embedded recipe
+pins. Four user-supplied Linux archives have different clean project revisions
+(`3741ea5` and `c4e19f3`), so they cannot resolve the original same-version
+collision. The newer arm64 libc++abi member contains 24 repeated Windows guards
+instead of the recipe's one; canonical upstream/recipe comparison and scratch
+driver probes confirm preserved stale-cache state, not a CPU requirement.
+Production recipes and old artifacts are unchanged. Focused tests: 93 pass,
+two conditional skips; a real retained macOS archive/release copy also matches.
+The existing CI tools selection also passes: 168 tests, seven conditional skips.
+Tranche 1.7 stays open pending repair and final selection; the subsequent
+common-source naming decision is recorded above.
+[Evidence and limits](docs/acceptance/release_qualification.md#source-asset-comparison-checkpoint-2026-11-02).
+
 ### Replay the latest CLI on Windows/x64 with the spawn-environment fix
 
 A fresh clean `b4c5b5a` Development SDK (contains `d12e210`; `crt-development-sdk-test` passes, `crt-c-test` 168 of 169 with one skip, 280 s) replays CLI `1499a7b` natively on Windows/x64 with 844 native checks, cold 11/0 and warm 0/11, bare PE and doctor audits, all 32 restricted-token HTTPS/signature cases and CRT host tools starting from a Unicode SDK path. Windows/x64 did not add `PROCESSOR_ARCHITECTURE` in a native Python probe, so the CLI's arm64 tolerance is unused there (one check fewer than arm64's 845). No CRT source change. [CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#windowsx64-latest-source-revalidation-and-spawn-environment-fix-2026-11-02).

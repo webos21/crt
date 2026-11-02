@@ -629,8 +629,10 @@ Each local collector checks its own recipe's exact size/hash; the two files
 cannot substitute for one another. This review does not claim a member-by-member
 comparison of the native ARM archive on this host, or change an existing recipe
 to hide the difference. Before public assembly/promotion, select a coherent
-exact asset set and rebuild/recollect affected candidates where required, or
-adopt an explicitly reviewed naming contract. This is retained under
+exact asset set and rebuild/recollect affected candidates where required.
+The owner subsequently retained common version/OS/stage naming; see the
+[adopted contract](../design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02).
+This is retained under
 [SDK Producer Contract Gate P0](../../TODO.md#crt-developer-experience-sdk---cli---studio).
 It does not reopen the completed source-hidden SDK split or invalidate an
 individually identified local collection.
@@ -639,3 +641,100 @@ Selecting the rehearsal version creates no Git tag. No assets were uploaded or
 promoted, no consumer lock changed and no CLI/Studio compatibility was accepted.
 The existing Web owner record is unchanged; current advisory/support-window,
 source-offer and exact artifact checks remain required for future publication.
+
+## Source-asset comparison checkpoint (2026-11-02)
+
+**Investigation, not closure of Tranche 1.7.** Four user-supplied Linux source
+archives were inspected read-only on macOS. The user identifies the rehearsal
+pair as x86_64 and the CLI pair as aarch64; archive metadata declares only the
+Linux OS, not the producing CPU. They are **different source baselines**, not
+the original same-version collision pair.
+
+| Supplied scope / stage | Source commit | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| x64 rehearsal / `02-cxx` | `3741ea5` | 8,561,756 | `c80622128c957c20479213ff455c410a8bf0f4a14d2a17ec0453d5a9a5b9b373` |
+| x64 rehearsal / `03-gfx-simple` | `3741ea5` | 834,220 | `8d74625ebf9db236960b5b5fb355f1d2714393710f89d3625af0656ca0705adf` |
+| arm64 CLI 20261102 / `02-cxx` | `c4e19f3` | 8,568,776 | `beb67b0d08613fd360e23f4f6f9d1aa3cef23f2f222f78fec2cb1bdfa5b08d67` |
+| arm64 CLI 20261102 / `03-gfx-simple` | `c4e19f3` | 838,616 | `b73501c9eb102439b3ca5954a5ec3276d2b6749cff85863e7dce59f0d6752411` |
+
+Names are respectively `crt-v0.4.0-rehearsal.20261027-linux-<stage>-source.tar.xz`
+and `crt-v0.4.0-cli.20261102-linux-<stage>-source.tar.xz`. All four declare clean
+project provenance. Each `02` archive's embedded `03` recipe matches its
+supplied `03` archive's size and hash. The `02` pair has nine modified members
+and one added member; `03` has seven modified and one added. Permissions and
+per-member tar metadata have no changes. The supplied `03` upstream subtree is
+identical across the two revisions. These are real payload differences, not
+just XZ encoding differences.
+
+Project-owned files match their recorded Git revisions, except for the two
+`.cmd` wrappers whose CRLF checkout encoding is explicitly required by
+`.gitattributes` at both commits. Revision changes explain the license,
+wrapper/profile/verifier and added UTF-8 manifest changes; no architecture-
+specific source requirement is inferred from those changes.
+
+### Confirmed stale patched-source state
+
+The only changed upstream member of the `02` pair is
+`sources/libcxxabi/src/cxa_exception_storage.cpp`. Its thread-local selector
+contains `&& !defined(_WIN32)` **once** in x64 and **24 times** in the supplied
+arm64 archive. Both recipes pin AOSP LLVM
+`37f38d1f3276b62fba09462ab4807dce846c732d` and declare the same single-selector
+replacement. Reading that upstream Git object locally and applying the recipe
+once reproduces the x64 member exactly (SHA-256
+`fcb5d0b4d32e27a8b9677f2731ee9c44cc9c3bd582f573203cf85dcc056b6223`).
+Collapsing only the repeated guard in memory makes the arm64 member identical.
+Original archives and source caches were not repaired or overwritten.
+
+The idempotence fix in `bd53cd5` prevents new repetitions, but its substring
+"replacement already present" check still accepts an already polluted cache;
+a scratch fixture using the real current driver preserves the supplied
+24-guard bytes. Thus clean project Git provenance alone does not prove canonical
+external source-cache contents. The repeated Boolean terms are logically
+equivalent, not a required aarch64 ABI difference; this finding does not
+invalidate the separately recorded native runtime passes.
+
+An **unadopted repair proposal** was tested only in scratch: include the newline
+in this recipe's find/replace strings so the whole selector line must match.
+That accepts the canonical member, rejects the 24-guard member, and remains
+stable across three applications from pristine upstream. The production
+recipe, build driver, SDK identities and release naming have not been changed
+by this investigation.
+
+### Adopted naming decision, remaining work and reproduction
+
+The supplied x64 `02` matches the original collision record. The historical
+arm64 rehearsal `02` (`8fdd7229...`, 8,557,328 bytes) was **not supplied**;
+the newer `beb67b0d...` archive cannot substitute for it. Historical records
+already give the same `8d74625e...` hash for both rehearsal `03` archives.
+Do not attribute the original `02` collision to compression, CPU or the new
+stale-cache observation without that missing original.
+
+The owner adopted common version/OS/stage source assets without an architecture
+suffix on 2026-11-02; the [SDK contract](../design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02)
+owns that decision. Canonical external-source/cache validation, production
+patch repair, fresh asset/recipe generation and affected replay remain open.
+Adding a CPU suffix is not the selected remedy for the cache defect. A final
+selected asset set and any affected recollection remain open; old evidence
+stays at its original hashes. Tranche 1.7 is not closed by the naming decision.
+
+The new diagnostic does not extract or execute archive content, distinguishes
+payload/permissions/container/compression changes, records source-baseline and
+embedded recipe differences, bounds archive reads and refuses to overwrite
+evidence:
+
+```sh
+python3 tools/compare_stage_sources.py /path/x64/02-source.tar.xz \
+  /path/arm64/02-source.tar.xz --output out/source-comparison.json
+```
+
+Default exit 0 means the comparison completed, not that archives match or are
+approved. `--require-identical` additionally fails on different archive hashes.
+Run it on the retained `03` pair too when investigating nested recipe pins.
+Focused comparison/source-closure/release/profile/libc++-fetch tests select
+**95**: **93 pass**, two Windows-only skips. A real retained macOS rehearsal
+archive and its release copy also compare identical (15,147 members).
+Evidence: `out/source-asset-audit-20261102/`, especially
+`linux-provided-{02,03}-baseline.json`, `provided-source-review-v3.json`,
+`check_provided_sources.py` and `provided-focused-tests.log`. No runtime rebuild,
+artifact promotion, consumer lock change, commit/push or STATUS update is
+claimed.

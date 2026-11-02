@@ -401,6 +401,39 @@ to [Web acceptance](../acceptance/crtweb_acceptance.md) and the
 recorded there; this SDK/CLI design does not independently approve a consumer
 product or publish artifacts. [TODO](../../TODO.md) owns the next producer work.
 
+### Common Source-stage Assets (Adopted 2026-11-02)
+
+The owner selected **one common source asset per version, target OS and stage**,
+without an architecture suffix:
+
+```text
+crt-<version>-<os>-<stage>-source.tar.xz
+```
+
+Different target architectures use the same selected archive bytes and exact
+recipe size/SHA-256 for that tuple. Architecture-specific source files may
+coexist in the archive; the stage build selects the appropriate implementation.
+Binary SDK archives remain architecture-specific. Target architecture, external
+tools and generated target configuration still belong to build/SDK identity;
+they are not alternative source-asset names.
+
+Freeze the CRT source revision, upstream pins, approved recipe patches,
+generated source inputs and successor recipe identities before selecting the
+common archive. A CPU, local cache history or compressor difference does not
+permit another public payload under the same asset name. Independently
+generated candidates must be compared; select and reuse the frozen common
+archive rather than silently accepting different hashes. Changed selected
+content requires a new version/asset identity and matching recipes, not
+overwriting an already accepted or published artifact.
+
+Old conflicting candidates retain their original provenance and hashes. They
+must not both enter one promoted asset set. This naming decision does not
+repair stale source caches, regenerate archives, promote a candidate or adopt
+a consumer lock. Those implementation/validation steps remain Tranche 1.7;
+the [comparison record](../acceptance/release_qualification.md#source-asset-comparison-checkpoint-2026-11-02)
+owns the measured evidence and limits. Existing stage recipe schema version 2
+and OS-only source target metadata do not change with this decision.
+
 ## 8. Cross-repository Contract Review
 
 `crt-cli` owns the shared adoption record at `docs/compatibility.md` in the
