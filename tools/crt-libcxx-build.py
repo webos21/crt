@@ -147,6 +147,7 @@ import tempfile
 from pathlib import Path
 
 from crt_file_ops import atomic_replace, copy_tree, filesystem_path
+from crt_libcxx_sources import apply_patches, validate_patch_inputs
 
 
 PREDECESSOR_FINGERPRINT_FILE = ".crt-predecessor-fingerprint.json"
@@ -395,6 +396,7 @@ def fetch_recipe(recipe, source_root, rebuild=False):
     # only after its copy succeeds.
     extra_destinations = [source_root / name for name in source.get('extra_checkout_dirs', [])]
     if checkout_dir.is_dir() and all(path.is_dir() for path in extra_destinations) and not rebuild:
+        validate_patch_inputs(recipe, checkout_dir)
         progress(f"{recipe['name']}: already fetched: {checkout_dir}")
         return
 
@@ -508,32 +510,6 @@ def fetch_recipe(recipe, source_root, rebuild=False):
         elif rebuild:
             run(["git", "fetch", "--depth", "1", "origin", ref], cwd=checkout_dir)
             run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=checkout_dir)
-
-
-def apply_patches(recipe, checkout_dir):
-    for extra in recipe.get("extra_files", []):
-        target = checkout_dir / extra["path"]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            target.write_text(extra["content"], encoding="utf-8")
-            progress(f"{recipe['name']}: wrote {extra['path']}")
-    for patch in recipe.get("patches", []):
-        target = checkout_dir / patch["file"]
-        text = target.read_text(encoding="utf-8")
-        find = patch["find"]
-        if patch["replace"] and patch["replace"] in text:
-            # Replacement may contain the original selector (for example an
-            # added && condition). Do not append that condition on every run.
-            continue
-        if find not in text:
-            if not patch["replace"]:
-                continue
-            raise SystemExit(
-                f"{recipe['name']}: patch target text not found in {patch['file']} "
-                f"(upstream source changed? patch: {patch.get('reason', '(no reason given)')})"
-            )
-        target.write_text(text.replace(find, patch["replace"], 1), encoding="utf-8")
-        progress(f"{recipe['name']}: patched {patch['file']}")
 
 
 _TOKEN_PATTERN = re.compile(r"@(SOURCE:([A-Za-z0-9_-]+)|INSTALL_PREFIX)@")
@@ -1005,6 +981,8 @@ def main():
     # fetched sources and shared install prefix remain intact.  The stamp is
     # written only after a successful phase, so an interrupted configure can
     # never bless a stale tree.
+    for recipe in order:
+        validate_patch_inputs(recipe, source_root / recipe["name"])
     predecessor = predecessor_fingerprint(sysroot)
     invalidate_stale_builds(build_root, order, predecessor)
 

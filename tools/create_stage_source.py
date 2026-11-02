@@ -11,7 +11,8 @@ import subprocess
 import tarfile
 from pathlib import Path, PurePosixPath
 
-from crt_stage_recipe import STAGE_SUCCESSORS
+from crt_stage_recipe import STAGE_SUCCESSORS, validate_recipe
+from crt_libcxx_sources import canonical_runtime_sources
 
 
 STAGE_VALIDATION_PROJECT_PATHS = (
@@ -49,6 +50,7 @@ STAGES = {
             "LICENSE.md",
             "tools/build_stage_02_cxx.py",
             "tools/crt-libcxx-build.py",
+            "tools/crt_libcxx_sources.py",
             "tools/install_libcxx_runtimes.py",
             "tools/test_libcxx_runtime.py",
             # verify_dist.py imports DIST_PORTING_TOOLS/DIST_PORTING_DIRS/
@@ -486,8 +488,10 @@ def git(root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def add_path(tar: tarfile.TarFile, source: Path, archive: PurePosixPath) -> None:
+def add_path(tar: tarfile.TarFile, source: Path, archive: PurePosixPath, overrides=None, modes=None) -> None:
     """Add one tree with stable ordering and metadata."""
+    overrides = overrides or {}
+    modes = modes or {}
     paths = [source]
     if source.is_dir():
         paths.extend(sorted(
@@ -496,6 +500,8 @@ def add_path(tar: tarfile.TarFile, source: Path, archive: PurePosixPath) -> None
                         for part in path.relative_to(source).parts)),
             key=lambda p: p.as_posix(),
         ))
+    paths.extend(path for path in overrides if path.is_relative_to(source) and path not in paths)
+    paths.sort(key=lambda path: path.as_posix())
     for path in paths:
         relative = path.relative_to(source)
         name = archive if relative == Path(".") else archive / PurePosixPath(relative.as_posix())
@@ -509,11 +515,12 @@ def add_path(tar: tarfile.TarFile, source: Path, archive: PurePosixPath) -> None
             info.type = tarfile.DIRTYPE
             info.mode = 0o755
             tar.addfile(info)
-        elif path.is_file():
-            info.size = path.stat().st_size
-            executable = bool(path.stat().st_mode & stat.S_IXUSR) or path.suffix in (".sh",)
-            info.mode = 0o755 if executable else 0o644
-            with path.open("rb") as stream:
+        elif path.is_file() or path in overrides:
+            payload = overrides.get(path)
+            info.size = len(payload) if payload is not None else path.stat().st_size
+            executable = (path.exists() and bool(path.stat().st_mode & stat.S_IXUSR)) or path.suffix in (".sh",)
+            info.mode = modes.get(path, 0o755 if executable else 0o644)
+            with io.BytesIO(payload) if payload is not None else path.open("rb") as stream:
                 tar.addfile(info, stream)
 
 
@@ -576,9 +583,30 @@ def main() -> None:
             raise SystemExit(f"--successor-recipe given but stage {args.stage!r} has no successor")
         if not args.successor_recipe.is_file():
             raise SystemExit(f"--successor-recipe file not found: {args.successor_recipe}")
+        successor = json.loads(args.successor_recipe.read_text(encoding="utf-8"))
+        validate_recipe(successor)
+        source = successor["source"]
+        expected_name = f"crt-{args.release_tag}-{args.target_os}-{successor_stage}-source.tar.xz"
+        if (successor["output_stage"] != successor_stage or successor["target"]["os"] != args.target_os
+                or source["source_commit"] != commit or source["archive"] != expected_name):
+            raise SystemExit("successor recipe does not match the candidate version/OS/stage/source commit")
+        successor_asset = args.successor_recipe.parent / source["archive"]
+        if (not successor_asset.is_file() or successor_asset.stat().st_size != source["size"]
+                or hashlib.sha256(successor_asset.read_bytes()).hexdigest() != source["sha256"]):
+            raise SystemExit("successor recipe does not match its actual local source archive")
 
     asset_name = f"crt-{args.release_tag}-{args.target_os}-{args.stage}-source.tar.xz"
     asset = output_dir / asset_name
+    recipe_path = output_dir / f"{args.stage}.json"
+    # A named candidate is immutable. Repetition belongs in a new output
+    # directory, where its bytes can be compared without replacing evidence.
+    if args.release_tag != "development" and (asset.exists() or recipe_path.exists()):
+        raise SystemExit(f"source candidate already exists: {asset} or {recipe_path}")
+    overrides, source_modes, source_inputs = {}, {}, None
+    if args.stage == "02-cxx":
+        canonical, source_inputs = canonical_runtime_sources(root, source_root, args.target_os)
+        overrides = {source_root / name: data for name, data in canonical.items()}
+        source_modes = {source_root / entry['path']: entry['mode'] for entry in source_inputs['files']}
     metadata = {
         "format": 2,
         "stage": args.stage,
@@ -596,10 +624,15 @@ def main() -> None:
             info.mode = 0o644
             info.mtime = 0
             tar.addfile(info, io.BytesIO(payload))
+            if source_inputs is not None:
+                payload = (json.dumps(source_inputs, indent=2, sort_keys=True) + "\n").encode("utf-8")
+                info = tarfile.TarInfo("source-inputs.json")
+                info.size, info.mode, info.mtime = len(payload), 0o644, 0
+                tar.addfile(info, io.BytesIO(payload))
             for relative in project_paths:
                 add_path(tar, root / relative, PurePosixPath(relative))
             for relative in source_paths:
-                add_path(tar, source_root / relative, PurePosixPath("sources") / relative)
+                add_path(tar, source_root / relative, PurePosixPath("sources") / relative, overrides, source_modes)
             if successor_stage is not None:
                 add_path(tar, args.successor_recipe,
                           PurePosixPath("stages") / "recipes" / f"{successor_stage}.json")
@@ -619,7 +652,6 @@ def main() -> None:
         },
         "build": {"entrypoint": spec["entrypoint"]},
     }
-    recipe_path = output_dir / f"{args.stage}.json"
     recipe_path.write_text(json.dumps(recipe, indent=2) + "\n", encoding="utf-8")
     print(f"CRT stage source asset: {asset}")
     print(f"CRT stage recipe: {recipe_path}")

@@ -73,6 +73,12 @@
       "content": "extern \"C\" void* __dso_handle = &__dso_handle;\n"
     }
   ],
+  "source_checks": {
+    "src/cxa_exception_storage.cpp": {
+      "original_sha256": "7de17cefbedbf94d7282fe3cde0e23e592b90c1d5e50db5d63009d7cfc877721",
+      "patched_sha256": "fcb5d0b4d32e27a8b9677f2731ee9c44cc9c3bd582f573203cf85dcc056b6223"
+    }
+  },
   "patches": [
     {
       "file": "src/CMakeLists.txt",
@@ -88,8 +94,8 @@
     },
     {
       "file": "src/cxa_exception_storage.cpp",
-      "find": "#elif __has_feature(cxx_thread_local)",
-      "replace": "#elif __has_feature(cxx_thread_local) && !defined(_WIN32)",
+      "find": "#elif __has_feature(cxx_thread_local)\n",
+      "replace": "#elif __has_feature(cxx_thread_local) && !defined(_WIN32)\n",
       "reason": "Confirmed for real (2026-08-22) on Windows: the shared libc++abi.dll link failed with `ld.lld: error: undefined symbol: _tls_index` (referenced by this file's own `static thread_local __cxa_eh_globals eh_globals;` in its __has_feature(cxx_thread_local) branch, confirmed by reading the fetched file directly). Clang always reports __has_feature(cxx_thread_local) as true (it is a language feature, not a platform capability), so this branch is taken on every target including Windows; on Windows PE, a real `thread_local` variable lowers to code that references the native _tls_index/_tls_used TLS-directory symbols, which are normally defined by a real CRT's tlssup.obj -- this project's own crt1.o has no such thing, since (confirmed by reading libc/src/tls.c and libc/include/private/crt_tls.h directly) this project implements its own TlsAlloc/TlsGetValue-based dynamic TLS instead of relying on compiler-native PE TLS anywhere else in the codebase. This file's own third (#else) branch already exists purely to serve platforms without a working `thread_local` (via std::__libcpp_tls_key, a portable pthread_key_create-shaped abstraction, confirmed by reading it) -- since LIBCXXABI_HAS_PTHREAD_API=ON/LIBCXX_HAS_PTHREAD_API=ON are already set for this project's own real pthread implementation (itself backed by the same TlsAlloc-based libc/src/tls.c), that fallback branch works correctly here and needs no further changes; only the branch selector itself needed excluding Windows. Scope-checked before patching: grepped the whole fetched libcxx/src and libcxxabi/src trees for `thread_local` -- this is the only file/line where it is a real, unconditional compiler-native `thread_local` variable declaration (the four other hits -- cxa_thread_atexit.cpp, thread.cpp, condition_variable.cpp, future.cpp -- are either comments or route through this project's own already-working __thread_specific_ptr/__libcpp_tls_key portable abstraction, not the raw keyword)."
     }
   ],

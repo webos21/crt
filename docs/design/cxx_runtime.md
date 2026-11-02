@@ -546,3 +546,33 @@ Windows cannot execute their shebangs directly. Static/shared runtime and
 import-library staging is verified on Windows and Linux as well as macOS.
 macOS `Availability.h` remains a host-private concern, not a Bionic public
 header.
+
+## Canonical Imported Source Caches
+
+The libc++abi TLS-selector patch matches its complete line, including the
+newline. Its recipe pins SHA-256 values for both the pristine upstream file
+and the single-guard result. Fetch, configure and build reject any other bytes
+before changing sources; a cache containing repeated guards is retained for
+diagnosis and must be regenerated in a new source root from the pinned Git
+commit. Reapplying the approved patches preserves both bytes and modification
+times. The Windows TLS rationale and removal condition remain in the recipe;
+this changes source handling, not its ABI policy.
+
+`create_stage_source.py` additionally compares every bundled runtime source
+file with its pinned Git blob or the complete approved recipe result. Unknown,
+missing, drifted or partially patched inputs fail. It emits the canonical
+patched bytes and Git file modes without rewriting the input cache, together
+with `source-inputs.json` recording recipe hashes, upstream pins and the full
+canonical file inventory. Pristine and already patched caches therefore yield
+the same source asset. This receipt describes build inputs, not publisher
+authentication or a new public SDK schema.
+
+Named source candidates are immutable: use a new version/output directory
+rather than overwrite an existing archive or recipe. The mutable `development`
+tag retains its local rebuild behavior. A predecessor asset embeds a successor
+recipe only after its version, OS, stage, source commit, archive size and digest
+match the actual local successor archive. Linux x86_64/aarch64 consume one
+selected version/OS/stage source asset under the common-source contract.
+
+Focused regressions: `python3 -m unittest tools/test_libcxx_fetch.py
+tools/test_stage_source_candidates.py tools/test_stage_source_closure.py`.

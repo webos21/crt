@@ -2,6 +2,8 @@
 """Focused tests for imported-libc++ sparse fetch recovery."""
 
 import importlib.util
+import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -79,6 +81,45 @@ class LongPathCopyTests(unittest.TestCase):
 
 
 class SourcePatchTests(unittest.TestCase):
+    def test_real_libcxxabi_pristine_patched_and_repeated_application(self):
+        project = SCRIPT.parent.parent
+        recipe = json.loads((project / 'libstdc++/third_party/libcxxabi/recipe.json').read_text())
+        patch = next(p for p in recipe['patches'] if p['file'] == 'src/cxa_exception_storage.cpp')
+        recipe = dict(recipe, patches=[patch], extra_files=[])
+        original = (SCRIPT.parent / 'fixtures/libcxxabi/cxa_exception_storage.cpp').read_bytes()
+        with tempfile.TemporaryDirectory() as folder:
+            checkout = Path(folder)
+            target = checkout / patch['file']
+            target.parent.mkdir()
+            target.write_bytes(original)
+            DRIVER.apply_patches(recipe, checkout)
+            result = target.read_bytes()
+            self.assertEqual(hashlib.sha256(result).hexdigest(),
+                             recipe['source_checks'][patch['file']]['patched_sha256'])
+            stamp = target.stat().st_mtime_ns
+            for _ in range(24):
+                DRIVER.apply_patches(recipe, checkout)
+            self.assertEqual(target.read_bytes(), result)
+            self.assertEqual(target.stat().st_mtime_ns, stamp)
+
+    def test_real_libcxxabi_polluted_and_unrelated_drift_rejected_before_writes(self):
+        project = SCRIPT.parent.parent
+        recipe = json.loads((project / 'libstdc++/third_party/libcxxabi/recipe.json').read_text())
+        original = (SCRIPT.parent / 'fixtures/libcxxabi/cxa_exception_storage.cpp').read_bytes()
+        for content in (original.replace(b'#elif __has_feature(cxx_thread_local)',
+                                         b'#elif __has_feature(cxx_thread_local)' + b' && !defined(_WIN32)' * 24),
+                        original + b'// unexpected cached change\n'):
+            with self.subTest(polluted=content.count(b'&& !defined(_WIN32)')):
+                with tempfile.TemporaryDirectory() as folder:
+                    checkout = Path(folder)
+                    target = checkout / 'src/cxa_exception_storage.cpp'
+                    target.parent.mkdir()
+                    target.write_bytes(content)
+                    with self.assertRaisesRegex(SystemExit, 'noncanonical source cache'):
+                        DRIVER.apply_patches(recipe, checkout)
+                    self.assertEqual(target.read_bytes(), content)
+                    self.assertFalse((checkout / 'src/__crt_dso_handle.cpp').exists())
+
     def test_replacement_containing_original_is_idempotent(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -209,6 +250,40 @@ class SparseFetchRecoveryTests(unittest.TestCase):
         self.assertTrue((self.source_root / 'cmake/Modules/HandleCompilerRT.cmake').is_file())
         self.assertTrue(run.called)
         self.assertFalse(any('fetch' in call.args[0] for call in run.call_args_list))
+
+    def test_existing_fetch_rejects_polluted_cache_without_touching_it(self):
+        DRIVER.fetch_recipe(self.recipe, self.source_root)
+        file = self.source_root / 'libunwind/CMakeLists.txt'
+        good = file.read_bytes()
+        self.recipe['source_checks'] = {'CMakeLists.txt': {'original_sha256': hashlib.sha256(good).hexdigest()}}
+        file.write_bytes(good + b'pollution')
+        with self.assertRaisesRegex(SystemExit, 'noncanonical source cache'):
+            DRIVER.fetch_recipe(self.recipe, self.source_root)
+        self.assertEqual(file.read_bytes(), good + b'pollution')
+
+    def test_canonical_packaging_verifies_whole_cache_and_normalizes_patch_state(self):
+        from crt_libcxx_sources import canonical_runtime_sources
+        DRIVER.fetch_recipe(self.recipe, self.source_root)
+        self.recipe['patches'] = [{'file': 'CMakeLists.txt', 'find': 'libunwind/', 'replace': 'patched/'}]
+        self.recipe['extra_files'] = [{'path': 'shim.cpp', 'content': 'owned shim\n'}]
+        recipe_path = self.root / 'project/libstdc++/third_party/libunwind/recipe.json'
+        recipe_path.parent.mkdir(parents=True)
+        recipe_path.write_text(json.dumps(self.recipe))
+        canonical, receipt = canonical_runtime_sources(self.root / 'project', self.source_root, 'linux')
+        DRIVER.apply_patches(self.recipe, self.source_root / 'libunwind')
+        second, second_receipt = canonical_runtime_sources(self.root / 'project', self.source_root, 'linux')
+        self.assertEqual((canonical, receipt), (second, second_receipt))
+        for relative in ('libunwind/CMakeLists.txt', 'cmake/Modules/HandleCompilerRT.cmake'):
+            file = self.source_root / relative
+            original = file.read_bytes()
+            file.write_bytes(original + b'polluted')
+            with self.assertRaisesRegex(SystemExit, 'noncanonical runtime source cache'):
+                canonical_runtime_sources(self.root / 'project', self.source_root, 'linux')
+            file.write_bytes(original)
+        unexpected = self.source_root / 'libunwind/untracked.cpp'
+        unexpected.write_bytes(b'not upstream')
+        with self.assertRaisesRegex(SystemExit, 'noncanonical runtime source inventory'):
+            canonical_runtime_sources(self.root / 'project', self.source_root, 'linux')
 
 
 if __name__ == "__main__":
