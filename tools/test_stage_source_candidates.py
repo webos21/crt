@@ -1,6 +1,7 @@
 """Source candidates are immutable and successor recipes bind actual archives."""
 
 import json
+import shutil
 import sys
 import tarfile
 import tempfile
@@ -26,6 +27,9 @@ class Stage02Manifest(unittest.TestCase):
                     'target': {'os': target_os, 'arch': arch}, 'external_prerequisites': []}))
                 for name in ('tools', 'libstdc++', 'sources'):
                     (asset / name).mkdir(parents=True)
+                project = Path(__file__).resolve().parent.parent
+                for name in ('third_party/crt-runtime', 'libstdc++/third_party'):
+                    shutil.copytree(project / name, asset / name)
                 args = ['build_stage_02_cxx', '--sdk-root', str(sdk), '--asset-root', str(asset),
                         '--work-root', str(root / 'work'), '--output', str(output),
                         '--recipe-location', 'file:///candidate.json', '--source-sha256', 'b' * 64]
@@ -37,6 +41,10 @@ class Stage02Manifest(unittest.TestCase):
                 self.assertEqual(result['target'], {'os': target_os, 'arch': arch})
                 loaders = [p['components'] for p in result['external_prerequisites'] if p['id'] == 'linux-elf-loader']
                 self.assertEqual(loaders, [[loader]] if loader else [])
+                llvm = next(p for p in result['redistributed_dependencies'] if p['name'] == 'llvm-runtimes')
+                self.assertTrue(llvm['notices'])
+                for name in llvm['notices'] + [llvm['provenance']]:
+                    self.assertTrue((output / name).is_file(), name)
 
 
 class SourceCandidates(unittest.TestCase):

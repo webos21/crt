@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
+from crt_runtime_notices import add_runtime_dependencies
 
 
 def run(command: list[str]) -> None:
@@ -190,6 +191,8 @@ def main() -> None:
 
     manifest["stage"] = "02-cxx"
     manifest["external_prerequisites"] = external_prerequisites_for(target_os, "02-cxx", target_arch)
+    manifest["redistributed_dependencies"] = add_runtime_dependencies(
+        asset, staged, "02-cxx", manifest.get("redistributed_dependencies", []))
     manifest["built_from"] = {
         "stage": "01-c",
         "source_recipe": args.recipe_location,
