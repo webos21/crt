@@ -34,8 +34,10 @@ class Stage02Manifest(unittest.TestCase):
                         '--work-root', str(root / 'work'), '--output', str(output),
                         '--recipe-location', 'file:///candidate.json', '--source-sha256', 'b' * 64]
                 with patch.object(sys, 'argv', args), patch.object(stage02, 'run'), \
+                        patch.object(stage02, 'copy_libcxx') as publish, \
                         patch.object(stage02, 'rewrite_stale_macho_rpaths'):
                     stage02.main()
+                self.assertEqual(publish.call_args.args[2], target_os)
                 result = json.loads((output / 'manifest.json').read_text())
                 self.assertEqual(result['stage'], '02-cxx')
                 self.assertEqual(result['target'], {'os': target_os, 'arch': arch})

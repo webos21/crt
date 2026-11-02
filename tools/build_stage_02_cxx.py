@@ -12,6 +12,7 @@ from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
 from crt_runtime_notices import add_runtime_dependencies
+from create_dist import copy_libcxx
 
 
 def run(command: list[str]) -> None:
@@ -184,10 +185,9 @@ def main() -> None:
         common += ["--host-cxx", os.environ["CRT_CXX"]]
     run(common + ["--phase", "configure"])
     run(common + ["--phase", "build"])
-    run([
-        sys.executable, str(integration / "tools" / "install_libcxx_runtimes.py"),
-        "--install-prefix", str(install_prefix), "--sysroot", str(staged),
-    ])
+    # Use the distribution publisher's symlink and loader-path policy, rather
+    # than the in-tree sysroot installer (whose absolute paths are temporary).
+    copy_libcxx(install_prefix, staged, target_os)
 
     manifest["stage"] = "02-cxx"
     manifest["external_prerequisites"] = external_prerequisites_for(target_os, "02-cxx", target_arch)
