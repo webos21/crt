@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 PT_LOAD = 1
 PT_DYNAMIC = 2
+PT_INTERP = 3
 DT_NULL = 0
 DT_NEEDED = 1
 DT_STRTAB = 5
@@ -111,6 +112,30 @@ def _read_elf(path: Path) -> bytes | None:
         if magic != b"\x7fELF":
             return None
         return magic + stream.read()
+
+
+def interpreter(path: Path) -> str | None:
+    """Return the actual ELF interpreter; DT_NEEDED alone omits this OS boundary."""
+    data = _read_elf(path)
+    if data is None:
+        return None
+    phoff, phentsize, phnum, ph_format, _, elf_class = _layout(data)
+    result = None
+    for index in range(phnum):
+        offset = phoff + index * phentsize
+        if offset + struct.calcsize(ph_format) > len(data):
+            raise ValueError("ELF program header is outside the file")
+        values = struct.unpack_from(ph_format, data, offset)
+        if values[0] != PT_INTERP:
+            continue
+        start, size = (values[1], values[4]) if elf_class == 1 else (values[2], values[5])
+        if result is not None or size < 2 or start + size > len(data):
+            raise ValueError("invalid ELF interpreter segment")
+        value = data[start:start + size]
+        if value[-1:] != b"\0" or b"\0" in value[:-1]:
+            raise ValueError("invalid ELF interpreter string")
+        result = value[:-1].decode("utf-8")
+    return result
 
 
 def machine_id(path: Path) -> int | None:

@@ -52,6 +52,18 @@ the internal stage IDs (`stage-config/libcxx.json`, `gfx-simple.json` and
 `gfx-media.json`). Older acceptance logs retain the commands used at their
 recorded source commits; apply this mapping when reproducing them in a newer tree.
 
+### Independent native host-tools candidate
+
+Independent native shell/build tools can also be assembled from a verified
+public `01-c` SDK via `crt-host-tools` / `crt-host-tools-test`. Configure
+`CRT_HOST_TOOLS_PREDECESSOR`, `CRT_HOST_TOOLS_VERSION` and a fresh
+`CRT_HOST_TOOLS_OUTPUT` explicitly for a local candidate. With no predecessor
+override the target first runs `crt-c-dist`. This separate bundle contains no
+target headers/libraries or LLVM; it does not replace existing cumulative SDK
+stages. The [host-tools contract](../design/host_tools_contract.md) and
+[producer procedure/evidence](../acceptance/host_tools_acceptance.md) define
+validation, immutable outputs and native replay limits.
+
 ### Development SDK producer and external validation
 
 The reduced Development SDK is produced from plain `02-cxx` and the media

@@ -1908,3 +1908,5 @@ if(Python3_Interpreter_FOUND)
         --dist "${CRT_DIST_ROOT}/05-ui" --stage 05-ui)
   endif()
 endif()
+
+include(cmake/crt_host_tools.cmake)

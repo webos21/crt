@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crt_elf import archive_machine_ids, machine_id, relocate_absolute_runtime_paths, remove_absolute_runtime_paths, runtime_paths, set_runtime_paths
+from crt_elf import archive_machine_ids, machine_id, relocate_absolute_runtime_paths, remove_absolute_runtime_paths, runtime_paths, set_runtime_paths, interpreter
 from verify_dist import validate_elf_runtime_paths
 
 
@@ -33,6 +33,30 @@ def write_elf(path: Path, runpath: str) -> None:
 
 
 class ElfRuntimePathTests(unittest.TestCase):
+    def test_interpreter_32be_and_64le_without_dynamic_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'program'
+            for elf_class, endian in ((1, '>'), (2, '<')):
+                data = bytearray(512); data[:6] = b'\x7fELF' + bytes((elf_class, 2 if endian == '>' else 1))
+                loader = b'/declared/os-loader\0'; data[256:256+len(loader)] = loader
+                if elf_class == 1:
+                    struct.pack_into('>I', data, 28, 64); struct.pack_into('>HH', data, 42, 32, 1)
+                    struct.pack_into('>IIIIIIII', data, 64, 3, 256, 0, 0, len(loader), len(loader), 0, 1)
+                else:
+                    struct.pack_into('<Q', data, 32, 64); struct.pack_into('<HH', data, 54, 56, 1)
+                    struct.pack_into('<IIQQQQQQ', data, 64, 3, 0, 256, 0, 0, len(loader), len(loader), 1)
+                path.write_bytes(data); self.assertEqual(interpreter(path), '/declared/os-loader')
+                data[256+len(loader)-1] = 1; path.write_bytes(data)
+                with self.assertRaisesRegex(ValueError, 'interpreter string'): interpreter(path)
+                path.write_bytes(data[:80])
+                with self.assertRaisesRegex(ValueError, 'program header'): interpreter(path)
+
+    def test_no_interpreter_for_static_or_non_elf_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'program'; path.write_bytes(b'not an ELF')
+            self.assertIsNone(interpreter(path))
+            write_elf(path, ''); self.assertIsNone(interpreter(path))
+
     def test_archive_checks_all_members_and_long_names(self):
         def member(name, data):
             header = (name.ljust(16) + "0".ljust(12) + "0".ljust(6) + "0".ljust(6) +

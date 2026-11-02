@@ -20,6 +20,10 @@ parser.add_argument('--cli', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--work', type=Path, help='fresh work directory (default: a new one under TEMP)')
 parser.add_argument('--publisher-cases', action='store_true', help='exercise experimental explicit-key RSA-PSS signatures with test-only keys')
+parser.add_argument('--isolate-linux', action='store_true', help='mask host interpreters/build drivers; share only the test server network namespace')
+parser.add_argument('--hide', type=Path, action='append', default=[], help='source/SDK/provider path denied to the isolated consumer')
+parser.add_argument('--test-ca-directory', type=Path, help='explicit disposable test CA directory containing ca-good.pem and ca-good.key (test host only)')
+parser.add_argument('--trusted-ca-file', type=Path, help='selected package CA file; must exactly match this test CA certificate')
 arguments = parser.parse_args()
 cli_source, evidence = arguments.cli.resolve(), arguments.output.resolve()
 if (evidence / 'result.json').exists():
@@ -65,7 +69,11 @@ def make_leaf(name, ca, san, *, not_before=None, not_after=None):
        '-extfile', ext.name, *extra)
 
 
-make_ca('ca-good')
+if arguments.test_ca_directory:
+    for name in ('ca-good.pem', 'ca-good.key'):
+        shutil.copy2(arguments.test_ca_directory / name, pki / name)
+else:
+    make_ca('ca-good')
 make_ca('ca-other')
 make_leaf('leaf-good', 'ca-good', 'DNS:localhost,IP:127.0.0.1')
 make_leaf('leaf-expired', 'ca-good', 'DNS:localhost,IP:127.0.0.1', not_before='20200101000000Z', not_after='20200102000000Z')
@@ -128,11 +136,31 @@ env = {'PATH': '', 'TEMP': str(bare), 'TMP': str(bare), 'TMPDIR': str(bare)}
 if os.name == 'nt':
     env['SystemRoot'] = os.environ['SystemRoot']
 results = []
+masked, hidden = [], [p.resolve() for p in arguments.hide]
+if arguments.isolate_linux:
+    if not sys.platform.startswith('linux') or not shutil.which('bwrap') or not shutil.which('strace'):
+        parser.error('--isolate-linux requires Linux, bwrap and strace')
+    from replay_cli_contract_linux import masked_executables
+    masked = masked_executables(None)
+    for name in ('clang', 'clang++', 'ld.lld', 'llvm-ar', 'gcc', 'g++'):
+        if shutil.which(name): masked.append(Path(shutil.which(name)).resolve())
+    if any(root.is_relative_to(p) for p in hidden): parser.error('test work must be outside hidden paths')
+    (root / 'traces').mkdir(exist_ok=True)
+elif arguments.hide:
+    parser.error('--hide requires --isolate-linux')
 
 
 def case(label, args, *, expect_exit, expect_code=None, expect_published=False, output='x.bin', cwd=None):
     target = out / output
     argv = [str(cli), 'fetch', '--json', *args]
+    if arguments.isolate_linux:
+        prefix = [shutil.which('bwrap'), '--unshare-all', '--share-net', '--die-with-parent', '--new-session', '--ro-bind', '/', '/',
+                  '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--clearenv']
+        for name, value in env.items(): prefix += ['--setenv', name, value]
+        for path in hidden: prefix += ['--tmpfs', str(path)] if path.is_dir() else ['--ro-bind', '/dev/null', str(path)]
+        prefix += ['--bind', str(root), str(root), '--ro-bind', str(cli), str(cli), '--chdir', str(bare)]
+        for path in sorted(set(masked)): prefix += ['--ro-bind', '/dev/null', str(path)]
+        argv = prefix + [shutil.which('strace'), '-f', '-qq', '-e', 'trace=execve', '-o', str(root / 'traces' / (label + '.log')), '--', *argv]
     started = time.time()
     r = subprocess.run(argv, cwd=bare, env=env, capture_output=True, timeout=120, stdin=subprocess.DEVNULL)
     text = r.stdout.decode('utf-8', 'replace')
@@ -160,7 +188,9 @@ def url(leaf, path):
     return f'https://localhost:{ports[leaf]}{path}'
 
 
-good = str(pki / 'ca-good.pem')
+good = str(arguments.trusted_ca_file.resolve() if arguments.trusted_ca_file else pki / 'ca-good.pem')
+if Path(good).read_bytes() != (pki / 'ca-good.pem').read_bytes():
+    parser.error('--trusted-ca-file must match the disposable test CA certificate')
 common = lambda path, digest, size, ca=good, leaf='leaf-good', output='x.bin', extra=(): [
     '--url', url(leaf, path), '--ca-file', ca, '--output', str(out / output), '--sha256', digest, '--size', str(size), *extra]
 
@@ -242,6 +272,20 @@ summary = dict(passed=passed, cli=str(cli_source), cli_sha256=sha(cli_source.rea
                metadata_sha256=sha(META), artifact_sha256=sha(ARTIFACT), host='127.0.0.1 (controlled loopback endpoint)', work=str(root),
                directory_after=sorted(p.name for p in out.iterdir()))
 summary['publisher_scope'] = 'test-only explicit public keys' if arguments.publisher_cases else 'not exercised'
+summary['selected_trust_file'] = good
+summary['consumer_isolation'] = {'linux_bwrap': arguments.isolate_linux, 'hidden': list(map(str, hidden)),
+                                 'masked': list(map(str, sorted(set(masked)))), 'network': 'shared with controlled loopback test server'}
+if arguments.isolate_linux:
+    import re
+    executed = set()
+    for trace in (root / 'traces').iterdir():
+        shutil.copy2(trace, evidence / trace.name)
+        for line in trace.read_text().splitlines():
+            match = re.search(r'execve\("([^"]+)"', line)
+            if match and re.search(r'= 0$', line): executed.add(match.group(1))
+    summary['consumer_isolation']['executed'] = sorted(executed)
+    summary['consumer_isolation']['only_cli_executed'] = executed == {str(cli)}
+    passed = summary['passed'] = passed and executed == {str(cli)}
 (evidence / 'result.json').write_text(json.dumps(summary, indent=2))
 print('passed' if passed else 'FAILED', len(results), 'cases')
 sys.exit(0 if passed else 1)

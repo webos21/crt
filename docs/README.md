@@ -9,6 +9,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 
 - [Build-system Consolidation](acceptance/build_system_acceptance.md)
 - [Full / Development SDK Split](acceptance/sdk_split_acceptance.md)
+- [Independent Host Tools](acceptance/host_tools_acceptance.md)
 - [Release Qualification and Assembly Rehearsal](acceptance/release_qualification.md)
 - [Allocator Baseline Decision Record](acceptance/allocator_baseline.md)
 - [Encode & Capture Acceptance](acceptance/crtmedia_encode_capture_acceptance.md)
@@ -24,6 +25,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 
 - [C++ Runtime](design/cxx_runtime.md)
 - [CRT SDK Development Contract](design/sdk_development_contract.md)
+- [Independent Host Tools Contract](design/host_tools_contract.md)
 - [CRT-CLI Development Environment and Source-first Ports](design/crt_cli.md)
 - [CRT Studio Native IDE](design/crt_studio.md)
 - [Dynamic Loading](design/dynamic_loading.md)

@@ -445,6 +445,13 @@ and OS-only source target metadata do not change with this decision.
 
 ## 8. Cross-repository Contract Review
 
+The local Tranche 2 increment implements a separate
+[host-tools contract](host_tools_contract.md), `crt.experimental.host-tools`,
+format 1. This is independent of the target SDK/native-provider formats and
+has no production adoption. Producer assembly/notice evidence belongs to
+[host-tools acceptance](../acceptance/host_tools_acceptance.md); CLI adoption
+and native execution remain in its compatibility/acceptance ledger.
+
 `crt-cli` owns the shared adoption record at `docs/compatibility.md` in the
 [CLI repository](https://github.com/webos21/crt-cli). It links original evidence;
 it does not replace producer SDK acceptance or Studio's native UX acceptance.

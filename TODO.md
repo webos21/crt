@@ -65,8 +65,9 @@ under an active tranche only to make its execution order legible.
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
 This whole initiative is active. **Tranche 1 is complete for the selected local
-technical candidates**; the next increment is Tranche 2's independent host-tools
-contract and SDK-free environment/resource gates. Numbered tranches 1-8 map to D0-D7.
+technical candidates**. Tranche 2's independent host-tools and SDK-free
+environment/resource increment is implemented and verified on Linux; new native
+Windows/macOS replay remains. Numbered tranches 1-8 map to D0-D7.
 SDK split and local assembly rehearsal are complete
 ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
 The SDK Producer Contract Gate P0 is the producer work within the early
@@ -111,16 +112,13 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
 #### Tranche 2. SDK-free CLI runtime and host environment (P0 + D1)
 
-- [ ] **2.1** Prove the single-executable CLI on SDK-free native hosts through actual
-  imports, self-diagnosis and declared OS dependencies; review trust/resource/helper policy.
-- [ ] **2.2** Separate host-tools/rootfs identity and closure from target sysroots;
-  validate native CRT tools/aliases, paths and bounded owned-process cleanup.
-- [ ] **2.3** Validate CLI SDK-free HTTP/TLS/trust and fail-closed negatives with
-  the CLI-owned D1-07 gate; reuse the [SDK transport evidence](docs/acceptance/sdk_split_acceptance.md).
-  Linux, Windows/x64 and macOS/arm64 controlled signature cases are measured;
-  macOS also passes SDK-hidden pinned-repository HTTPS ([evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-latest-source-cli-replay-2026-11-01)).
-  Official signing/metadata policy, host-tools/env adapter and remaining
-  native-host gates stay open in the CLI-owned D1 audit.
+- [ ] **2.1** Replay the new single-executable/scoped-doctor/resource candidate
+  on native Windows/x64 and macOS/arm64; Linux proof is [CLI-owned](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md).
+- [ ] **2.2** Replay the [independent host-tools contract](docs/acceptance/host_tools_acceptance.md)
+  and CLI shell on those hosts: private imports/aliases, paths and owned-process cleanup.
+- [ ] **2.3** Repeat D1-07 with their selected package/trust bytes. Linux's new
+  package passes; earlier host transport records retain their own identities.
+  Official release signing/metadata policy stays separate from this local test-identity gate.
 
 #### Tranche 3. Immutable SDK installation and selection (D2)
 

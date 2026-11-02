@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-11-02
 
+### Implement independent host-tools for the Linux Tranche 2 increment
+
+Added the separate local-only host-tools format/assembler and `crt-host-tools`
+plus `crt-host-tools-test` entry points. A public native C SDK supplies mksh,
+toybox, separate awk and make; the bundle preserves aliases and notices while
+requiring no target SDK/C++ stack at runtime. Added pinned GNU make COPYING
+and recipe provenance. Actual PT_INTERP inspection closes the C-only metadata's
+missing loader declaration without changing runtime bytes or target SDKs.
+
+21 producer/ELF tests and cold/cached CMake assembly pass. The consumer now has
+scoped doctor, SDK-independent port-build/shell and one-executable resource
+verification. Linux's 767 native checks, 31 isolated tools/resource cases and
+32 package-trust HTTPS/signature cases are CLI-owned. Exact candidate identities,
+source/notice provenance and remaining native Windows/macOS replay belong to
+[host-tools acceptance](docs/acceptance/host_tools_acceptance.md). Tranche 2 stays
+open for that new native matrix; no upstream/runtime ABI change, producer
+promotion, production lock, public release or STATUS update was made.
+
 ### Close Tranche 1.7 with canonical common-source candidates
 
 Fixed imported-libc++ cache handling in `9b5fab2`: the real TLS-selector file

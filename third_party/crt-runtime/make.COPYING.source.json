@@ -1,0 +1,6 @@
+{
+  "repository": "https://android.googlesource.com/toolchain/make",
+  "commit": "44fc4fe66a484b91844c302f03eaa8438e065d17",
+  "path": "COPYING",
+  "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+}
