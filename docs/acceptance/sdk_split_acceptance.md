@@ -1072,3 +1072,62 @@ port-build adapter. No runtime implementation change, upstream patch, full
 WebKit build, STATUS update or release action was needed. The documentation
 commit records this measured snapshot without rebuilding or relabeling the SDK.
 Other-host latest-source gates and complete D1 remain separately scoped.
+
+## Linux/aarch64 Latest-source CLI Replay (2026-11-02)
+
+**Pass, local/unpromoted producer and bounded CLI gates.** Native Linux/aarch64
+`u2404`, kernel `7.0.0-42-generic`, LLVM Clang/LLD/llvm-ar 21.1.8. Fresh clean
+CRT `c4e19f3e47f6fd37f3d0d03c027bec5cfe251677` is built in
+`out/cli-linux-aarch64-20261102`; unchanged CLI product sources are
+`9e0110ff2bc9f7030ab66c726bac2286e5526cc2`. No runtime or consumer implementation
+change was required. Existing immutable contract/design baselines are retained.
+
+```sh
+cmake -S /home/cmjo/GitLocal/crt -B /home/cmjo/GitLocal/crt/out/cli-linux-aarch64-20261102 -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCRT_TARGET_OS=linux -DCRT_TARGET_ARCH=host -DCRT_USE_IMPORTED_LIBCXX=ON -DCRTGFX_ENABLE_SKIA=OFF -DCRTMEDIA_ENABLE_FFMPEG=OFF -DCRTMEDIA_ENABLE_CURL=OFF -DCRTUI_ENABLE_LVGL=OFF -DCRT_RELEASE_TAG=v0.4.0-cli.20261102 -DCRT_LIBCXX_FETCH_ROOT=/home/cmjo/GitLocal/crt-cli/out/linux-arm64-revalidation-20261102/llvm-sources -DCRT_DEV_WORK_ROOT=/home/cmjo/GitLocal/crt-cli/out/linux-arm64-revalidation-20261102/dev-work
+cmake --build /home/cmjo/GitLocal/crt/out/cli-linux-aarch64-20261102 --target crt-development-sdk-test --parallel 4
+ctest --test-dir /home/cmjo/GitLocal/crt/out/cli-linux-aarch64-20261102 --output-on-failure -E '^(crtgfx_|crtmedia_|crtui_|crtweb_|.*cxx)' -j 3
+cmake --build /home/cmjo/GitLocal/crt/out/cli-linux-aarch64-20261102 --target crt-cxx-test --parallel 4
+```
+
+Only pinned LLVM source directories and cached download archives were reused;
+no previously compiled libraries were copied. Download consumers verify recipe
+hashes. Profile producer/base/compile provenance all identify clean `c4e19f3`,
+local version `v0.4.0-cli.20261102`, and `crt-narrow-encoding-1`. This version
+parameter is not a Git tag, release or promoted candidate.
+
+- Fresh core CTest **147/147**, no skips, including aarch64 open/no-follow and
+  owned process cleanup regressions. No stale upper-runtime tests are included.
+- Imported libc++ static/shared allocation/exception, string ABI and iostream
+  smokes pass through `crt-cxx-test`.
+- `crt-development-sdk-test` passes profile verification and static/shared
+  HTTPS+inflate, plus wrong/missing/malformed CA cases.
+- Exporter/profile fixtures: **36 pass, two Windows-only skips**. Fixture
+  outcomes are distinct from the actual native consumer replay.
+
+The full public SDK is copied with real symlinks outside this producer checkout
+to the sibling CLI's ignored output:
+`out/linux-arm64-revalidation-20261102/work/crt-cli-contract-wqk8w3hx/SDK space 한글/dev`.
+The 2,597-entry inventory SHA-256 is
+`ae32504f7b1e7439275f867d4e7ee199a31bafa7767f20d20584fe3a2ca0b560`;
+provider content is `a1d2028cd734743ebb76190066f7225759a74a7bcf783197574095670e317874`
+and native policy digest is
+`d256ccab539f4b9b65d1057e29a326119c499a58d4053b07e9fb5b11f339c306`.
+No Development-profile archive was cut. Original and relocated SDK inventories
+are unchanged after consumer verification.
+
+CLI passes **766 native checks**, cold/warm self-build 11/0 and 0/11,
+producer/source/interpreter-hidden Bubblewrap and execve audits, bare ELF/import
+and mapped-image audits, SDK-free control/redaction and **32/32** disposable-key
+HTTPS/integrity/signature cases. The existing aarch64 CLI also builds current
+sources against the clean SDK; the new CLI rebuild reaches a byte-identical
+fixed point. Consumer records and binary identities belong to
+[CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#linuxaarch64-latest-source-revalidation-2026-11-02).
+
+Raw logs, original input/tool hashes, CMake cache, producer consumer receipt,
+fixture logs and replay scripts are retained in the sibling CLI's ignored
+`out/linux-arm64-revalidation-20261102/`. The source/build inputs were clean
+through SDK production; later evidence edits do not relabel compiled artifacts.
+No source patch, full media/WebKit/device replay, SDK promotion, production
+lock adoption, public release or STATUS update is implied. This closes the
+Linux/aarch64 latest-source gap within Tranche 1; Windows/arm64 process-fix
+replay and coherent exact asset selection remain separate open gates.

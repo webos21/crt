@@ -102,8 +102,10 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   All five native pairs pass at their recorded local/unpromoted snapshots.
   Linux/x86_64 replays the latest fetch/encoding sources with a fresh clean
   Dev SDK (2026-10-31). Windows/x64 now passes with the owned-spawn fix
-  ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-owned-spawn-cancellation-2026-11-01)); latest
-  Linux/aarch64 and the Windows/arm64 process-fix replay remain open. Latest
+  ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-owned-spawn-cancellation-2026-11-01)).
+  Latest Linux/aarch64 passes with a fresh clean SDK
+  ([evidence](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-latest-source-cli-replay-2026-11-02));
+  Windows/arm64 process-fix replay remains open. Latest
   macOS/arm64 passes with a fresh clean SDK ([evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-latest-source-cli-replay-2026-11-01)).
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;

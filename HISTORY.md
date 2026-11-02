@@ -9,6 +9,23 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-02
+
+### Revalidate Linux/aarch64 SDK and latest CLI source boundaries
+
+A fresh clean `c4e19f3` Development SDK passes 147 core tests, imported-libc++
+static/shared smokes, profile checks and static/shared HTTPS/inflate consumers.
+Exporter/profile fixtures pass 36 with two Windows-only skips. Unchanged CLI
+`9e0110f` passes 766 isolated native checks, old-binary bootstrap to a
+byte-identical fixed point, SDK-hidden ELF/mapping/env audits and all 32
+controlled HTTPS/integrity/signature cases. No implementation change was needed.
+
+Exact inputs, commands, artifact identities and native limits:
+[Linux/aarch64 acceptance](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-latest-source-cli-replay-2026-11-02).
+This closes this pair's latest-source replay, while Windows/arm64 process-fix
+replay and coherent exact assets remain open. No SDK promotion, production
+lock, public release or STATUS update is claimed.
+
 ## 2026-11-01
 
 ### Revalidate macOS/arm64 SDK and CLI boundaries at current sources
