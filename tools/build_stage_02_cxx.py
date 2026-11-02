@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from crt_dist_prerequisites import external_prerequisites_for
+
 
 def run(command: list[str]) -> None:
     print("+", " ".join(command), flush=True)
@@ -187,6 +189,7 @@ def main() -> None:
     ])
 
     manifest["stage"] = "02-cxx"
+    manifest["external_prerequisites"] = external_prerequisites_for(target_os, "02-cxx", target_arch)
     manifest["built_from"] = {
         "stage": "01-c",
         "source_recipe": args.recipe_location,

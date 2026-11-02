@@ -10,6 +10,33 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 import create_stage_source as creator
+import build_stage_02_cxx as stage02
+
+
+class Stage02Manifest(unittest.TestCase):
+    def test_stage_advance_declares_the_actual_target_loader(self):
+        for target_os, arch, loader in (('linux', 'x86_64', 'ld-linux-x86-64.so.2'),
+                                       ('linux', 'aarch64', 'ld-linux-aarch64.so.1'),
+                                       ('macos', 'aarch64', None), ('windows', 'aarch64', None)):
+            with self.subTest(os=target_os, arch=arch), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                sdk, asset, output = root / 'sdk', root / 'asset', root / 'output'
+                sdk.mkdir()
+                (sdk / 'manifest.json').write_text(json.dumps({'stage': '01-c',
+                    'target': {'os': target_os, 'arch': arch}, 'external_prerequisites': []}))
+                for name in ('tools', 'libstdc++', 'sources'):
+                    (asset / name).mkdir(parents=True)
+                args = ['build_stage_02_cxx', '--sdk-root', str(sdk), '--asset-root', str(asset),
+                        '--work-root', str(root / 'work'), '--output', str(output),
+                        '--recipe-location', 'file:///candidate.json', '--source-sha256', 'b' * 64]
+                with patch.object(sys, 'argv', args), patch.object(stage02, 'run'), \
+                        patch.object(stage02, 'rewrite_stale_macho_rpaths'):
+                    stage02.main()
+                result = json.loads((output / 'manifest.json').read_text())
+                self.assertEqual(result['stage'], '02-cxx')
+                self.assertEqual(result['target'], {'os': target_os, 'arch': arch})
+                loaders = [p['components'] for p in result['external_prerequisites'] if p['id'] == 'linux-elf-loader']
+                self.assertEqual(loaders, [[loader]] if loader else [])
 
 
 class SourceCandidates(unittest.TestCase):
