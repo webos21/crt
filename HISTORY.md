@@ -2,14 +2,45 @@
 
 Reverse-chronological record of completed work on the CRT shell/rootfs/porting
 loop and PAL, one dated entry per resolved item (grouped by the commit(s) that
-landed it). Current/open work lives in `TODO.md`. This file retains October
-2026; earlier months are summarized in [docs/history](docs/history/README.md),
+landed it). Current/open work lives in `TODO.md`. This file retains October 2026 and current November entries; earlier months are summarized in [docs/history](docs/history/README.md),
 with a pinned Git source and recovery instructions for the complete original log. Dates are the git author date of the commit that introduced or last
 substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
 ## 2026-11-02
+
+### Close Tranche 1.7 with canonical common-source candidates
+
+Fixed imported-libc++ cache handling in `9b5fab2`: the real TLS-selector file
+accepts only pinned pristine/single-guard bytes, rejects repeated guards before
+mutation, and remains unchanged under repeated application. Source packaging
+validates whole upstream caches against pinned Git objects plus approved recipe
+patches, emits canonical bytes/modes and input inventories, refuses named
+candidate replacement and checks successor recipes against actual archives.
+
+Fresh isolated builds exposed missing 02 loader/notices publication and
+absolute RPATH handling; `c60bdeb`, `75f5340`, `cf646f0` reuse the ordinary
+publisher contract without relaxing verification. `49879bf` repairs 03's
+optional protocol-archive example dependency, target loader declaration and
+owned ELF paths. That clean commit freezes the selected local
+`v0.4.0-sourcefix.20261102.5` inputs. Earlier failed candidates remain retained.
+
+77 focused tests, 147 core tests, actual 01->02->03 builds, static/shared C++
+smokes, the packaged 03 example and Development consumers pass. The same 02
+archive builds/links for aarch64 from this x86_64 host; it is cross-build evidence,
+not ARM execution. Pristine/patched cache regeneration and full source/recipe
+checks pass. Exact asset hashes, reproduction and scope belong to
+[producer acceptance](docs/acceptance/release_qualification.md#common-source-candidate-selection-2026-11-02).
+The original isolated CLI replay, bootstrap loop, exact SDK/provider/binary/tool
+identities and local adoption are [CLI-owned](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#common-source-candidate-selection-2026-11-02).
+
+Marked 1.7 complete and retained the checked Tranche 1 prerequisites. Next is
+Tranche 2's independent host-tools/environment contract. This is technical
+candidate selection, not production promotion, a lock update, a Git tag or
+public release. STATUS is untouched; the code/input commits are local and have
+not been pushed by this work.
+
 
 ### Close SDK/CLI technical bootstrap gates 1.5 and 1.6
 

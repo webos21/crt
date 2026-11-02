@@ -738,3 +738,140 @@ Evidence: `out/source-asset-audit-20261102/`, especially
 `check_provided_sources.py` and `provided-focused-tests.log`. No runtime rebuild,
 artifact promotion, consumer lock change, commit/push or STATUS update is
 claimed.
+
+## Common-source candidate selection (2026-11-02)
+
+This record supersedes the unresolved source-asset selection above for the
+bounded Linux `02-cxx` / `03-gfx-simple` technical candidate. It does not
+replace historical archives, promote a production SDK, or publish a release.
+The consumer-owned combination and CLI measurements are linked from
+[CLI compatibility](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#common-source-candidate-selection-2026-11-02).
+
+### Frozen inputs and cache repair
+
+Producer: clean CRT `49879bf82e2742baeb1878e492d42c7d561b6f7a`;
+local version **`v0.4.0-sourcefix.20261102.5`**. The LLVM recipes retain AOSP
+`37f38d1f3276b62fba09462ab4807dce846c732d`; xkbcommon retains
+`dd642359f8d43c09968e34ca7f1eb1121b2dfd70`. `frozen-inputs.json` under
+`out/tranche17-20261102/` records producer/consumer commits, recipe/driver/input
+hashes, Python, XZ/liblzma and external toolchain identities. The Clang/LLD/LLVM
+ar version is 21.1.8. No Git tag or remote upload is implied by the version.
+
+The TLS-selector recipe now matches the whole line. `source_checks` accepts
+only the pristine file SHA-256 `7de17cefbedbf94d7282fe3cde0e23e592b90c1d5e50db5d63009d7cfc877721`
+or the canonical single-guard result
+`fcb5d0b4d32e27a8b9677f2731ee9c44cc9c3bd582f573203cf85dcc056b6223`.
+Fetch reuse, configure and build reject other bytes before writing extras or
+patches; the 24-guard case is rejected, never silently blessed or collapsed.
+Sources for this run were fetched into a new root. The retained upstream test
+fixture has its license header and pin/hash provenance.
+
+The packager compares every bundled runtime source against the pinned Git
+objects or the complete approved recipe result, rejects unknown/missing/drifted
+files, and emits canonical patched bytes and Git file modes. It does not rewrite
+the cache. The embedded `source-inputs.json` records **12,855** canonical Linux
+files, their modes/sizes/hashes and recipe identities. A second generation from
+the now-patched cache is byte-identical to the generation from pristine inputs.
+`pristine5-audit.json` also compares the selected asset with a newly reconstructed
+pristine cache under a clean clone of the frozen producer revision. The 03 audit
+independently compares all **400** xkbcommon upstream files with
+the pinned Git blobs. Its fetch metadata is a separately generated input.
+
+**77 focused tests pass**: actual pinned-file pristine/patched/polluted/repeated
+application, fetch rejection, full-cache and sibling drift, extra files,
+immutable candidate outputs, successor/archive binding, all-OS packaging
+fixtures, per-architecture loader declarations/notices, include/import closure,
+ELF handling, exporter and Wayland graph regressions. Reproduction:
+
+```sh
+python3 -m unittest tools/test_libcxx_fetch.py tools/test_stage_source_candidates.py \
+  tools/test_stage_source_closure.py tools/test_export_cli_toolchain.py \
+  tools/test_binary_dependencies.py tools/test_crt_runtime_notices.py \
+  tools/test_crt_elf.py tools/test_wayland_build_graph.py
+```
+
+### Selected common Linux assets
+
+Both recipes declare only `target.os = linux`, format 2. For the selected
+version/OS/stage, x86_64 and aarch64 use the same file, size and digest:
+
+| Stage | Archive (prefix `crt-v0.4.0-sourcefix.20261102.5-linux-`) | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| 02 | `02-cxx-source.tar.xz` | 9,113,052 | `d6182de7557ad646105d431592aaca32e630c66fba61e0100a357f2e91359478` |
+| 03 | `03-gfx-simple-source.tar.xz` | 838,656 | `f6c688e248ad3a83aaa8614e40de523cd046b26e4b2e317306584afaeae834d0` |
+
+Selected files/recipes are in `build5/stage-sources/` under the evidence root.
+The 02 archive's embedded 03 recipe equals the generated recipe and the actual
+03 archive's size/hash; the installed successor recipes retain that binding.
+`candidate-audit5.json` and `check_candidates5.py` record full archive inventory
+and nested-recipe comparisons, independent Linux regeneration, and bounded
+macOS/Windows source-asset generation/checking on this Linux host. These latter
+checks are not native macOS/Windows SDK builds or execution acceptance.
+
+CPU-specific compilation and loader data are selected **inside the common
+entry point**, from the predecessor SDK's target identity. Sharing source bytes
+does not imply sharing startup objects or binary runtimes. The loader is
+`ld-linux-x86-64.so.2` for x86_64 and `ld-linux-aarch64.so.1` for aarch64.
+Different Boolean guard counts were never an architecture requirement.
+
+### Actual builds and retained failures
+
+A fresh native C build passes **147/147** core tests (`core5.log`). The official
+`crt-stage-build.py` path consumes the selected source assets for both
+`01-c -> 02-cxx` and `02-cxx -> 03-gfx-simple`:
+
+- 02 compiles the imported runtimes and passes static/shared exception/container,
+  string-ABI and iostream execution plus the strict distribution verifier.
+- 03 passes both window/synthetic tests, rebuilds the packaged example,
+  presents one frame, and passes the strict distribution verifier.
+- The Development SDK is built from that isolated 02 output, not an unrelated
+  in-tree C++ installation. Its ordinary static/shared HTTPS+inflate and trust
+  negatives pass (`dev5.log`, `dev-consumer5/result.json`). Producer, base and
+  compile provenance all identify clean `49879bf`; this is a local candidate.
+
+The real isolated path exposed older publication omissions. The 02 entry point
+now advances external prerequisites, installs the LLVM runtime notices and
+provenance, and reuses `create_dist.copy_libcxx` for symlinks and portable loader
+paths. The 03 entry point supplies its target architecture and rewrites only its
+new ELF images' runtime paths; its example requires the protocol archive only
+when the selected SDK includes native-Wayland glue. Verifiers were not relaxed.
+
+Earlier `sourcefix` candidates and logs remain separate: r1 missed the loader
+prerequisite, r2 the LLVM notice/dependency record, r3 retained an absolute C++
+runtime path, and r4's 02 passed but its 03 example required an absent optional
+protocol archive. Separate diagnostic copies were used; failed assets and SDKs
+were not patched or relabeled as passing candidates.
+
+The x86_64-host/aarch64-target procedure verifies and extracts the **same** 02
+archive, builds its runtimes against a fresh target 01 SDK, verifies the output,
+and links static/shared consumers; ELF inspection confirms AArch64. Its SDK
+also carries the exact selected 03 recipe. `cross/r5/result.json`,
+`cross/consume02-r5.py`, command receipts and ELF reports retain this scope.
+Target compiler-rt builtins were built from the same owned LLVM pin; native
+headers were used only for initial compiler discovery, not as the target C/C++
+runtime. **No aarch64 executable was run on this x86_64 host.** Previous native
+ARM results keep their original SDK identities and do not become execution
+proof for this new candidate. There was no full Web/Media/GPU rebuild.
+
+Reproduce the native stages from the selected 01 SDK and local assets:
+
+```sh
+python3 tools/crt-stage-build.py --sdk-root <sdk01> --recipe <sources>/02-cxx.json \
+  --asset <sources>/crt-v0.4.0-sourcefix.20261102.5-linux-02-cxx-source.tar.xz \
+  --work-root <new-work02> --output <new-sdk02>
+python3 tools/crt-stage-build.py --sdk-root <new-sdk02> --recipe <sources>/03-gfx-simple.json \
+  --asset <sources>/crt-v0.4.0-sourcefix.20261102.5-linux-03-gfx-simple-source.tar.xz \
+  --work-root <new-work03> --output <new-sdk03>
+```
+
+Technical selection is distinct from production adoption. Old same-name rehearsal
+variants are superseded for new candidate selection, not overwritten or assigned
+new hashes. Public URLs in generated recipes are future locators; no asset was
+uploaded. The CLI root lock stays unresolved. Producer promotion must precede
+any future production consumer pin. Official release trust, remaining D1 work
+and new native-host qualification retain their own gates. STATUS is unchanged.
+
+`final-review.json` rechecks the selected source inventories, pristine-cache
+comparison, cross-build receipt and consumer identities after documentation.
+The consumer owns the product-input/binary reconciliation and original CLI
+execution receipts; no compiled artifact is relabeled by these later documents.

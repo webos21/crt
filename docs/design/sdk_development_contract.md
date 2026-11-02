@@ -417,6 +417,15 @@ Binary SDK archives remain architecture-specific. Target architecture, external
 tools and generated target configuration still belong to build/SDK identity;
 they are not alternative source-asset names.
 
+The common entry point reads the predecessor SDK's target OS/architecture to
+select startup objects, compiler options, source implementations and loader
+declarations. CPU-specific code remains explicitly selected inside the archive;
+sharing an archive does not make binary SDKs interchangeable. A cache containing
+repeated patch guards is invalid source state, not a CPU variant. The
+[canonical-cache policy](cxx_runtime.md#canonical-imported-source-caches) and
+[selected Linux candidate](../acceptance/release_qualification.md#common-source-candidate-selection-2026-11-02)
+record enforcement and affected-scope evidence.
+
 Freeze the CRT source revision, upstream pins, approved recipe patches,
 generated source inputs and successor recipe identities before selecting the
 common archive. A CPU, local cache history or compressor difference does not

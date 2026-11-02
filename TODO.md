@@ -64,9 +64,9 @@ under an active tranche only to make its execution order legible.
 
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
-This whole initiative is active; the current focus is **Tranche 1.7 common-source
-asset repair and candidate coherence**. Technical bootstrap gates 1.5/1.6 are
-closed at their recorded combinations. Numbered tranches 1-8 map to D0-D7.
+This whole initiative is active. **Tranche 1 is complete for the selected local
+technical candidates**; the next increment is Tranche 2's independent host-tools
+contract and SDK-free environment/resource gates. Numbered tranches 1-8 map to D0-D7.
 SDK split and local assembly rehearsal are complete
 ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
 The SDK Producer Contract Gate P0 is the producer work within the early
@@ -104,13 +104,10 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 - [x] **1.6** Review relocated SDK-only build/run, producer-tree isolation and
   native ABI/import evidence at those recorded combinations; not production adoption
   ([technical gate review](docs/acceptance/sdk_split_acceptance.md#sdkcli-technical-bootstrap-gate-review-2026-11-02)).
-- [ ] **1.7** Select coherent exact assets before promotion/consumer locks;
-  resolve the rehearsal's same-name source-asset variants without relabeling builds.
-  [Source comparison](docs/acceptance/release_qualification.md#source-asset-comparison-checkpoint-2026-11-02)
-  found different supplied baselines and stale libc++abi patch state.
-  [Common version/OS/stage naming is adopted](docs/design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02);
-  canonical-source/cache repair, asset/recipe regeneration, affected validation
-  and final selection remain open.
+- [x] **1.7** Repair canonical source/cache handling and select coherent common
+  Linux 02/03 assets plus the exercised SDK/provider/CLI candidate
+  ([selection and limits](docs/acceptance/release_qualification.md#common-source-candidate-selection-2026-11-02)).
+  Production adoption/public release remain separate; existing evidence is not relabeled.
 
 #### Tranche 2. SDK-free CLI runtime and host environment (P0 + D1)
 

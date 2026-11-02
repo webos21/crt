@@ -30,13 +30,25 @@ reviewed at CLI `8fca58a`. Windows process accounting is not relabeled as an
 execution-denial sandbox. Previously recorded failures remain retained.
 
 The stale-cache/source-asset finding does not undo these scoped runtime passes.
-**1.7 remains open** for canonical-source/cache repair, common asset/recipe
+**At that review, 1.7 remained open** for canonical-source/cache repair, common asset/recipe
 generation, affected validation and final selection under the
 [adopted naming contract](../design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02).
 New or regenerated candidates need their own affected-scope validation; they
 do not inherit these exact artifact results automatically. Producer promotion,
 production consumer pins, public release and complete D1 acceptance are not
 granted by closing these two technical gates. STATUS is unchanged.
+
+### Tranche 1.7 local technical closure (2026-11-02)
+
+The [common-source selection](release_qualification.md#common-source-candidate-selection-2026-11-02)
+now closes 1.7 for the selected Linux 02/03 source assets and the SDK/CLI
+technical candidate. It records canonical-cache repair, fresh isolated source
+builds, native C++/Development consumers and the same-asset aarch64 cross
+compile/package scope. The [CLI-owned selection](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#common-source-candidate-selection-2026-11-02)
+records the external handoff, exact provider/CLI/toolchain and original consumer
+results. Earlier five-pair native evidence above keeps its own identities;
+new ARM execution or macOS/Windows SDK acceptance is not inferred. No production
+promotion/pin or public release is performed. Tranche 2/D1 remains open.
 
 ## Accepted native matrix
 
