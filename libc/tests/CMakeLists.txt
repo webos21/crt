@@ -593,6 +593,9 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # Narrow strings are UTF-8 (docs/design/windows_narrow_strings.md): argv, environment and paths round-trip.
   add_crt_test(windows_utf8_narrow_test windows_utf8_narrow_test.c)
   set_tests_properties(windows_utf8_narrow_test_runs PROPERTIES PASS_REGULAR_EXPRESSION "windows_utf8_narrow_test: ok")
+  # A CRT child sees the environment its parent passed, not the PAL's bootstrap transport variables.
+  add_crt_test(windows_spawn_environment_test windows_spawn_environment_test.c)
+  set_tests_properties(windows_spawn_environment_test_runs PROPERTIES PASS_REGULAR_EXPRESSION "windows_spawn_environment_test: ok")
   foreach(module IN ITEMS a b)
     add_library(emutls_module_${module} SHARED
       emutls_multi_module_${module}.c

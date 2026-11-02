@@ -2798,7 +2798,7 @@ static int bootstrap_read_fd_snapshot_from_pipe(char* buffer, DWORD size) {
   return 0;
 }
 
-void __crt_child_bootstrap(void) {
+static void child_bootstrap_apply(void) {
   const char* marker = getenv(CRT_CHILD_BOOTSTRAP_ENV);
   const char* encoded = getenv(CRT_FD_SNAPSHOT_ENV);
   const char* cwd = getenv(CRT_BOOTSTRAP_CWD_ENV);
@@ -2837,6 +2837,23 @@ void __crt_child_bootstrap(void) {
       __crt_fd_snapshot_dispose(&snapshot);
     }
   }
+}
+
+/* The bootstrap variables are a transport between a CRT parent and this process, not part of the environment its
+ * parent asked for. They are consumed above, so drop them from this process's environment table: a program (and the
+ * CLI's "exactly the environment I passed" contract) must not see CRT_CHILD_BOOTSTRAP, CRT_BOOTSTRAP_*, or the
+ * snapshot variables, and a stale CRT_FD_SNAPSHOT_PIPE handle value must not outlive its pipe. Only this process's
+ * table changes: the operating-system block that a fork-capable relaunch inherits is untouched, and the relaunched
+ * image runs this same function. CRT_ROOTFS, derived from CRT_BOOTSTRAP_ROOTFS above, deliberately stays. */
+void __crt_child_bootstrap(void) {
+  child_bootstrap_apply();
+  (void)unsetenv(CRT_CHILD_BOOTSTRAP_ENV);
+  (void)unsetenv(CRT_FD_SNAPSHOT_ENV);
+  (void)unsetenv(CRT_FD_SNAPSHOT_PIPE_ENV);
+  (void)unsetenv(CRT_BOOTSTRAP_CWD_ENV);
+  (void)unsetenv(CRT_BOOTSTRAP_ROOTFS_ENV);
+  (void)unsetenv(CRT_BOOTSTRAP_SIGMASK_ENV);
+  (void)unsetenv(CRT_BOOTSTRAP_SIGDEFAULT_ENV);
 }
 
 static long open_spawn_action_handle(
