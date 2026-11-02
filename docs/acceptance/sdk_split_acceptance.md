@@ -1131,3 +1131,101 @@ No source patch, full media/WebKit/device replay, SDK promotion, production
 lock adoption, public release or STATUS update is implied. This closes the
 Linux/aarch64 latest-source gap within Tranche 1; Windows/arm64 process-fix
 replay and coherent exact asset selection remain separate open gates.
+
+## Windows/arm64 Latest-source CLI Replay and Spawn-environment Fix (2026-11-02)
+
+**Pass, local/unpromoted producer and bounded CLI gates; Windows/arm64.** Native Windows 11
+Arm64, LLVM 22.1.8, Windows SDK imports `10.0.28000.0/um/arm64`, Developer Mode on (not changed).
+This closes the "Windows/arm64 process-fix replay" gap of Tranche 1.5 with one producer fix.
+Fresh clean worktrees under a short profile path; only pinned source/download caches are fetched,
+no compiled libraries are copied; no tag, archive, release or promoted SDK is created.
+
+### Baseline Producer Gate and the Failure It Exposed
+
+Clean CRT [`ee0b5e3`](https://github.com/webos21/crt/commit/ee0b5e35ba91e8acd1a96ab9f2136243ac1b9adf)
+(contains the owned-spawn fix `8db69f4`), local version `v0.4.0-cli.20261102`:
+`crt-development-sdk-test` (profile verification, static/shared HTTPS and inflate, wrong/missing/malformed CA) and
+`crt-c-test` pass, **167 of 168 with `fork_heap_snapshot_test_runs` skipped**; `windows_owned_spawn_group_test`
+(16.4 s), `windows_utf8_narrow_test` and `platform_test` pass. The Python fixtures pass
+(`create_dist` 15 with 6 conditional skips, `verify_dist` 16, exporter 6, Development profile 32, stage-source closure 10).
+
+The CLI replay against that SDK **fails** in the native suite at `spawn environment exactly matches shared builder`,
+a CLI check added after the last Windows replay. Two causes, separated by minimal reproducers:
+
+1. **The OS adds `PROCESSOR_ARCHITECTURE=ARM64`** to any new ARM64 process whose environment lacks it. A
+   kernel32-only program that includes no CRT (`probes/envdump.c`) given `LC_ALL`, `PATH` and `SystemRoot` receives it
+   too, as does a native ARM64 Python. Neither CRT nor the CLI adds it, so the CLI's test now tolerates that one name,
+   with the value for the host architecture, and nothing else. Whether native Windows/x64 does the same was not measured.
+2. **A CRT child saw the PAL's bootstrap transport variables** (`CRT_CHILD_BOOTSTRAP`, `CRT_BOOTSTRAP_CWD`,
+   `CRT_BOOTSTRAP_SIGMASK`, `CRT_BOOTSTRAP_SIGDEFAULT`, `CRT_FD_SNAPSHOT_PIPE`, and `CRT_BOOTSTRAP_ROOTFS` when the parent has a
+   rootfs) in its `environ`. `__crt_child_bootstrap()` consumed them and left them in the child's table. Any program started
+   through `posix_spawn` from a CRT parent could read them, and a stale snapshot pipe handle value outlived its pipe.
+   A grandchild never inherited them (the PAL filters the parent's `envp` and adds fresh ones), so this was an observable
+   leak, not a functional fault. `probes/prefix-runtime-test.txt` is the pre-fix reproducer's output (`leaked: CRT_CHILD_BOOTSTRAP=1`, exit 51).
+
+The first two replay attempts (the second with the `PROCESSOR_ARCHITECTURE` tolerance) both stop at this check and are retained
+(`replay/`, `replay2/`). A scratch copy of the suite that also tolerated the `CRT_*` names, run on the unfixed runtime,
+passes **845** checks, so nothing else was hiding behind the first failure.
+
+### Fix and Final Producer Gate
+
+[`d12e210`](https://github.com/webos21/crt/commit/d12e21013c1da6eed0d9238100df93c8febdba1c) removes the seven transport
+variables from the process's own environment table after `__crt_child_bootstrap()` has applied them
+(`libc/src/arch/windows/common/syscall.c`); `CRT_ROOTFS`, derived from `CRT_BOOTSTRAP_ROOTFS`, stays. Only the table
+changes: the operating-system block that a fork-capable relaunch inherits is untouched and the relaunched image runs the same
+function, so `fork` still passes. The regression `libc/tests/windows_spawn_environment_test.c` checks that the child's
+environment holds the parent's variables and none of the transport names, and that the parent's working directory still
+arrives; it **fails against the pre-fix runtime** and passes after the fix. The Windows PAL only; Linux and macOS are
+unaffected and not replayed.
+
+Fresh clean `d12e210` (producer, base and compile provenance all clean): `crt-development-sdk-test` passes; `crt-c-test`
+passes **168 of 169, one skip** (`fork_heap_snapshot_test_runs`), including `windows_spawn_environment_test`,
+`windows_owned_spawn_group_test` (18.1 s), `windows_utf8_narrow_test`, `fork_test`, `fork_signal_test`,
+`fork_runtime_reset_test` and `malloc_fork_regions_test`; total test time 122 s. The same Python fixtures pass.
+
+### Consumer Replay
+
+Driver `tools/replay_cli_contract_windows.py` with `PYTHONUTF8=1`, a Hangul/accented/space work path and
+`--hidden <original CRT>` against the relocated SDK, CLI base `f36e858972c3342292a6bb09dc5fc18cb55eb8ef` plus one test
+edit (the tolerance above; source digest `1f4729d9c02064fa6811c28e8f8fe5667763f3ebd8c0139b2783783c03e9c43c`):
+
+| Identity | SHA-256 |
+| --- | --- |
+| SDK inventory (relocated; unchanged after the run) | `8a44f8a72511915a7da49b9a98ba085ffe20cc15c02aaa67c9e97696b2c6950b` |
+| SDK content selection | `f86084868afe3e1e349f9407975cb4ebc20fdeaa49826fc0e5e7cdcd63b5ca71` |
+| Provider | `86786a22aa555b67bb6e71b6c5041df683daeca2154dd615fbf50fd842c8becb` |
+| Final executable (20,286,976 bytes) | `6fce97e028c9956716ad1729d8655532282944f8dfd7f9ec33f44d92cf0e787c` |
+| `replay3/result.json` | `e911ffcdc8083564d1c8718b8333066bae714b374ea583aa505d5d5f0a6727db` |
+
+Every step exits 0: provider and boundary probe, ten seed compiles and link, configure, build, cold self-build
+**11 executed / 0 reused**, warm **0 / 11**, and **845 native checks**, including the original owned-descendant timeout control
+and marker assertion, the shared child-environment and `env` diagnostics, publisher-signature argument cases and the Unicode
+workflows. The job-based accounting records 404 declared native/OS processes (compiler, linker, archiver, the seed and CLI, generated
+programs, the probe, `conhost.exe`) and no forbidden image; it is accounting, not launch denial. Bare help/version/doctor and the PE audit pass with
+SDK, source and provider unreadable: imports are only `kernel32.dll` and `api-ms-win-core-synch-l1-2-0.dll`, doctor reports
+`narrow_encoding: utf-8` with C++, zlib and HTTP/TLS checks passing, integrity `not_verified`, network `not_run`.
+
+**HTTPS and signatures.** `tools/test_cli_fetch_https_windows.py` (new) runs the unchanged cases of `test_cli_fetch_https.py
+--publisher-cases` with every CLI call under a restricted token naming a per-run SID, an empty `PATH` and a job object, in a
+private Hangul/accented/space work directory. A native probe built with the SDK proves under the same SID that eight roots
+(this checkout, the CLI checkout, both producer worktrees, the SDK build, the exported source, the relocated SDK and the provider)
+are unreadable. **All 32 cases pass** with fresh disposable CA, server and RSA publisher identities; 32 CLI calls, 64 process
+records (the CLI and `conhost.exe`), no Python, OpenSSL or shell started by product fetch. `test_cli_fetch_https.py` now passes `-extfile`
+relative to the PKI directory, because the OpenSSL used here cannot open a non-ASCII absolute path. `https-final/cases/result.json`
+SHA-256 `08b7fb946440e828b79964cbf85b028edfef41b24cf29ded23bae7af10509efa`; CA certificate SHA-256
+`261bc7c481ece920cdd0e8e21a38f3e1aafd797d9a9011fb1fdb96fbe0ab15bc`.
+
+**CRT host tools.** From the relocated Unicode SDK path with an empty `PATH`, `mksh -c 'echo'`, `toybox echo`, `awk 'BEGIN{…}'` and
+`make --version` each start and exit 0; all four are ARM64 PE images. `make` reports "Built for x86_64-pc-linux-gnu", the triple
+text its recipe passed to configure; the image is ARM64. These are startup checks, not configure/make port acceptance.
+
+### Evidence and Limits
+
+Raw evidence is in the sibling checkout's ignored `out/cli-windows-arm64-20261102/`: baseline and fixed build logs, `replay/`,
+`replay2/` (failures), `replay3/` (pass), `https-final/`, `probes/`, fixture and host-tool results. The earlier 2026-10-30/31 evidence
+directories are separate and unchanged. Consumer details are in the CLI's
+[acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#windowsarm64-latest-source-revalidation-and-spawn-environment-fix-2026-11-02).
+
+Windows/arm64 only. Not run: native Windows/x64 with the spawn-environment fix and the OS-injected variable (the x64 pass of
+2026-11-01 predates the check), Linux and macOS, ports in Unicode directories, Windows before 10 version 1903, a promoted
+SDK or release, official publisher keys, host-tools contract. No production lock, tag, release or STATUS change.

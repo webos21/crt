@@ -187,6 +187,12 @@ descriptors, and imports fd/cwd/rootfs/signal mask state in CRT startup before
 sufficient by themselves: fork must also restore register/stack/runtime state
 so the child returns from the original `fork()` call with value `0`.
 
+The `CRT_*` transport variables are consumed in startup and then removed from the
+child's own environment table (2026-11-02, `d12e210`): their effects (fd table,
+cwd, rootfs, signal state) stay, but a program must see exactly the environment its
+parent passed. The operating-system block, which a fork-capable relaunch inherits,
+is not edited.
+
 (This is exactly what the memory-copy `fork()` implementation that shipped
 later actually does -- see `docs/design/windows_fork_emulation.md`.)
 

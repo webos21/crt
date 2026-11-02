@@ -61,7 +61,8 @@ def make_leaf(name, ca, san, *, not_before=None, not_after=None):
     else:
         extra += ['-days', '30']
     sh('x509', '-req', '-in', f'{name}.csr', '-CA', f'{ca}.pem', '-CAkey', f'{ca}.key', '-CAcreateserial', '-out', f'{name}.pem',
-       '-extfile', str(ext), *extra)
+       # Relative to the PKI working directory: an OpenSSL build that cannot open a non-ASCII absolute path still works.
+       '-extfile', ext.name, *extra)
 
 
 make_ca('ca-good')

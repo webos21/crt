@@ -11,6 +11,18 @@ substantive update.
 
 ## 2026-11-02
 
+### Replay the latest CLI on Windows/arm64 and stop CRT children seeing the bootstrap variables
+
+Clean `ee0b5e3` (167 of 168 core tests, one skip) built a Development SDK, but the latest CLI suite failed on the child-environment
+check: the OS adds `PROCESSOR_ARCHITECTURE=ARM64` to ARM64 processes (a CRT-free kernel32-only program shows it too), and the Windows
+PAL left `CRT_CHILD_BOOTSTRAP`, `CRT_BOOTSTRAP_*` and `CRT_FD_SNAPSHOT_PIPE` in every CRT child's `environ`. `d12e210` removes them from the
+child's own table after `__crt_child_bootstrap()` applies them (effects stay; the OS block that a fork relaunch inherits is untouched);
+`windows_spawn_environment_test` fails before the fix and passes after, with the fork, owned-spawn and UTF-8 tests. A clean `d12e210` SDK
+passes 168 of 169 core tests (one skip), and the CLI replays with 845 native checks, cold 11/0 and warm 0/11, bare PE and doctor audits,
+and all 32 restricted-token HTTPS/signature cases, using the new `tools/test_cli_fetch_https_windows.py`. CRT host tools start from a
+Unicode SDK path. Windows/x64 has not replayed the fix.
+[Acceptance](docs/acceptance/sdk_split_acceptance.md#windowsarm64-latest-source-cli-replay-and-spawn-environment-fix-2026-11-02).
+
 ### Revalidate Linux/aarch64 SDK and latest CLI source boundaries
 
 A fresh clean `c4e19f3` Development SDK passes 147 core tests, imported-libc++
