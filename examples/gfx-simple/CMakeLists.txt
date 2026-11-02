@@ -84,9 +84,13 @@ if(NOT WIN32 AND NOT APPLE)
   # xdg_surface_ack_configure, ...) -- a separate redistributed archive
   # from libcrtgfx.a itself, same as examples/gfx-gpu/CMakeLists.txt's own
   # identical link list.
-  target_link_libraries(crtgfx_window_example PRIVATE
-    "${CMAKE_SYSROOT}/lib/libxdg-shell-protocol.a"
-    "${CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB}")
+  # The isolated default stage uses the legacy backend; only an SDK that
+  # includes native-Wayland glue carries this extra protocol archive.
+  if(EXISTS "${CMAKE_SYSROOT}/lib/libxdg-shell-protocol.a")
+    target_link_libraries(crtgfx_window_example PRIVATE
+      "${CMAKE_SYSROOT}/lib/libxdg-shell-protocol.a")
+  endif()
+  target_link_libraries(crtgfx_window_example PRIVATE "${CRTGFX_EXAMPLE_WAYLAND_CLIENT_LIB}")
 
   target_link_options(crtgfx_window_example PRIVATE -Wl,--exclude-libs,ALL)
 endif()

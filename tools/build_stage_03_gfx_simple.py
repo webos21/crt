@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from crt_dist_prerequisites import external_prerequisites_for
+from crt_elf import set_runtime_paths
 
 
 def run(command: list[str], env: dict[str, str] | None = None) -> None:
@@ -288,13 +289,18 @@ def main() -> None:
 
     manifest["stage"] = "03-gfx-simple"
     manifest["external_prerequisites"] = external_prerequisites_for(
-        target_os, "03-gfx-simple")
+        target_os, "03-gfx-simple", manifest["target"]["arch"])
     manifest["built_from"] = {
         "stage": "02-cxx",
         "source_recipe": args.recipe_location,
         "source_sha256": args.source_sha256,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    if target_os == "linux":
+        # These are this stage's two new ELF images, not inherited runtimes.
+        # The wrapper's temporary SDK RPATH must not survive publication.
+        set_runtime_paths(staged / "lib/libcrtgfx.so", "$ORIGIN")
+        set_runtime_paths(staged / "examples/bin/crtgfx_window_demo", "$ORIGIN/../../lib")
 
     example_build = temp_root / "example-build"
     run([
