@@ -11,6 +11,10 @@ substantive update.
 
 ## 2026-11-02
 
+### Replay the latest CLI on Windows/x64 with the spawn-environment fix
+
+A fresh clean `b4c5b5a` Development SDK (contains `d12e210`; `crt-development-sdk-test` passes, `crt-c-test` 168 of 169 with one skip, 280 s) replays CLI `1499a7b` natively on Windows/x64 with 844 native checks, cold 11/0 and warm 0/11, bare PE and doctor audits, all 32 restricted-token HTTPS/signature cases and CRT host tools starting from a Unicode SDK path. Windows/x64 did not add `PROCESSOR_ARCHITECTURE` in a native Python probe, so the CLI's arm64 tolerance is unused there (one check fewer than arm64's 845). No CRT source change. [CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#windowsx64-latest-source-revalidation-and-spawn-environment-fix-2026-11-02).
+
 ### Replay the latest CLI on Windows/arm64 and stop CRT children seeing the bootstrap variables
 
 Clean `ee0b5e3` (167 of 168 core tests, one skip) built a Development SDK, but the latest CLI suite failed on the child-environment

@@ -1226,6 +1226,22 @@ Raw evidence is in the sibling checkout's ignored `out/cli-windows-arm64-2026110
 directories are separate and unchanged. Consumer details are in the CLI's
 [acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#windowsarm64-latest-source-revalidation-and-spawn-environment-fix-2026-11-02).
 
-Windows/arm64 only. Not run: native Windows/x64 with the spawn-environment fix and the OS-injected variable (the x64 pass of
-2026-11-01 predates the check), Linux and macOS, ports in Unicode directories, Windows before 10 version 1903, a promoted
+Windows/arm64 only. Native Windows/x64 later replayed this fix: see the [Windows/x64 section](#windowsx64-latest-source-cli-replay-2026-11-02). Not run: Linux and macOS, ports in Unicode directories, Windows before 10 version 1903, a promoted
 SDK or release, official publisher keys, host-tools contract. No production lock, tag, release or STATUS change.
+
+## Windows/x64 Latest-source CLI Replay (2026-11-02)
+
+**Pass, local/unpromoted producer and bounded CLI gates; Windows/x64.** Native Windows 11 x64 (10.0.26100), LLVM 22.1.8, Windows SDK imports `10.0.28000.0/um/x64`.
+Fresh clean clone of CRT [`b4c5b5a`](https://github.com/webos21/crt/commit/b4c5b5a63196c48ea21a35bad8e73423488dd046) (contains `d12e210`), preset `windows-host-ninja-debug`,
+local version `v0.4.0-cli.20261102` (not a tag). Only pinned LLVM-runtime sources and download archives were reused; no compiled libraries. Producer, base and compile provenance are clean.
+
+`crt-development-sdk-test` exits 0 and `crt-c-test` passes 168 of 169 with `fork_heap_snapshot_test_runs` skipped (280 s), including `windows_spawn_environment_test`.
+The unchanged CLI driver replays CLI `1499a7b` against the relocated SDK (inventory `c3def6cc25f3d4cf0c6522f0292a04fba55014e8fc1a8b3f2c9ebb9ff33d26c3`, content
+`0361a7494e1c98f0a81ff58eae2280a6f9e328ae19671cbd91204ee82b364380`, provider `ce07aac6f3b68d79de1c0b52bb92f8f11ef862f530c53f39d0012098722e25c2`): cold self-build 11/0, warm 0/11,
+**844 native checks**, 460 recorded processes with no forbidden image, bare help/version/doctor with PE imports `kernel32.dll` and `api-ms-win-core-synch-l1-2-0.dll` only.
+`tools/test_cli_fetch_https_windows.py --publisher-cases` passes all 32 cases (64 process records). CRT `mksh`, `toybox` (`system/bin`), `awk` and `make` start from the Unicode SDK path
+as x86-64 PE images. A native x64 Python given only `LC_ALL`, `PATH` and `SystemRoot` received no `PROCESSOR_ARCHITECTURE`, unlike Windows/arm64, so the CLI test's tolerance is unused here;
+a CRT-free kernel32 probe was not run.
+
+Consumer details and the executable hash: [CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#windowsx64-latest-source-revalidation-and-spawn-environment-fix-2026-11-02). Raw evidence is in the CLI checkout's ignored `out/windows-x64-20261102/`.
+Not run: bootstrap loop for the refreshed binary, ports in Unicode directories, Windows before 10 version 1903, a promoted SDK or release, official publisher keys. No tag, release or STATUS change.

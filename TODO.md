@@ -108,6 +108,7 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   Windows/arm64 passes the process-fix replay with a fresh clean SDK after one PAL fix
   that stops CRT children from seeing the bootstrap transport variables
   ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-latest-source-cli-replay-and-spawn-environment-fix-2026-11-02)).
+  Windows/x64 also passes it with a fresh clean `b4c5b5a` SDK ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-latest-source-cli-replay-2026-11-02)).
   Latest macOS/arm64 passes with a fresh clean SDK ([evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-latest-source-cli-replay-2026-11-01)).
 - [ ] **1.6** Validate the external Development-SDK CLI build/run and actual ABI/imports
   from the relocated candidate with producer trees unavailable;
