@@ -14,6 +14,7 @@ Usage: test_cli_fetch_https_windows.py --cli <crt-cli.exe> --output <fresh dir> 
 Run with PYTHONUTF8=1 when any path contains non-ASCII characters.
 """
 import argparse
+import hashlib
 import json
 import os
 import runpy
@@ -27,8 +28,25 @@ import crt_windows_external as sandbox
 import crt_windows_trace as trace
 
 TOOLS = Path(__file__).resolve().parent
-FORBIDDEN = ('cmd.exe', 'powershell.exe', 'pwsh.exe', 'python.exe', 'python3.exe', 'py.exe', 'openssl.exe', 'sh.exe',
-             'bash.exe', 'mksh.exe', 'perl.exe', 'clang.exe', 'clang++.exe', 'ld.lld.exe', 'cmake.exe', 'ninja.exe')
+
+
+def case_arguments(arguments, evidence, work):
+    argv = [str(TOOLS / 'test_cli_fetch_https.py'), '--cli', str(arguments.cli),
+            '--output', str(evidence / 'cases'), '--work', str(work / 'cases-work')]
+    if arguments.publisher_cases:
+        argv.append('--publisher-cases')
+    for name in ('test_ca_directory', 'trusted_ca_file'):
+        value = getattr(arguments, name)
+        if value is not None:
+            argv.extend(['--' + name.replace('_', '-'), str(value)])
+    return argv
+
+
+def allowed_image(image, cli, system_root):
+    if not image:
+        return False
+    path = Path(image).resolve()
+    return path in {cli.resolve(), (system_root / 'System32/conhost.exe').resolve()}
 
 
 def main():
@@ -39,12 +57,26 @@ def main():
     parser.add_argument('--probe', type=Path, required=True, help='SDK-built executable that must fail to read every --hidden root')
     parser.add_argument('--hidden', type=Path, action='append', default=[], required=True)
     parser.add_argument('--publisher-cases', action='store_true')
+    parser.add_argument('--test-ca-directory', type=Path,
+                        help='disposable matching CA issuer, test-host access only')
+    parser.add_argument('--trusted-ca-file', type=Path,
+                        help='selected package CA; existing cases require exact issuer-certificate bytes')
     arguments = parser.parse_args()
     if os.name != 'nt':
         parser.error('this adapter requires native Windows')
     evidence = arguments.output.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
     work, sid = sandbox.create_work(arguments.work)
+    selected_trust = None
+    if arguments.trusted_ca_file is not None:
+        original_ca = arguments.trusted_ca_file.resolve(strict=True)
+        selected_ca = work / 'selected-package-ca.pem'
+        shutil.copy2(original_ca, selected_ca)
+        selected_trust = {'source': str(original_ca), 'consumer_copy': str(selected_ca),
+                          'sha256': hashlib.sha256(original_ca.read_bytes()).hexdigest()}
+        if hashlib.sha256(selected_ca.read_bytes()).hexdigest() != selected_trust['sha256']:
+            raise ValueError('selected package CA changed while copying')
+        arguments.trusted_ca_file = selected_ca
     logs = work / 'logs'
     logs.mkdir()
     records = []
@@ -61,7 +93,8 @@ def main():
         result = trace.run(argv, work=work, sid=sid, env=keywords['env'], cwd=keywords['cwd'], stdout=out, stderr=err,
                            timeout=keywords.get('timeout', 600))
         records.extend(result['processes'])
-        stray = [p for p in result['processes'] if p['image'] is None or Path(p['image']).name.lower() in FORBIDDEN]
+        selected_cli = work / 'cases-work/bare' / cli_name
+        stray = [p for p in result['processes'] if not allowed_image(p['image'], selected_cli, Path(os.environ['SystemRoot']))]
         if stray:
             raise ValueError(f'undeclared or forbidden process started by {argv[1:3]}: {stray[:3]}')
         return types.SimpleNamespace(returncode=result['exit_code'], stdout=out.read_bytes(), stderr=err.read_bytes())
@@ -83,10 +116,7 @@ def main():
     shutil.copy2(out, evidence / 'visibility.stdout')
     if outcome['exit_code'] != 0:
         raise SystemExit(f'visibility probe failed: {visibility}')
-    sys.argv = [str(TOOLS / 'test_cli_fetch_https.py'), '--cli', str(arguments.cli), '--output', str(evidence / 'cases'),
-                '--work', str(work / 'cases-work')]
-    if arguments.publisher_cases:
-        sys.argv.append('--publisher-cases')
+    sys.argv = case_arguments(arguments, evidence, work)
     code = 0
     try:
         runpy.run_path(str(TOOLS / 'test_cli_fetch_https.py'), run_name='__main__')
@@ -94,7 +124,7 @@ def main():
         code = exit_request.code or 0
     seen = sorted({Path(p['image']).name.lower() for p in records if p['image']})
     summary = {'cases_exit': code, 'cli_calls': counter[0], 'process_records': len(records), 'process_images': seen,
-               'sid_work': str(work), 'visibility': visibility}
+               'processes': records, 'sid_work': str(work), 'visibility': visibility, 'selected_trust': selected_trust}
     (evidence / 'adapter-result.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     print(json.dumps({k: summary[k] for k in ('cases_exit', 'cli_calls', 'process_records', 'process_images')}))
     sys.exit(code)
