@@ -65,9 +65,11 @@ under an active tranche only to make its execution order legible.
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
 This whole initiative is active. **Tranche 1 is complete for the selected local
-technical candidates**. Tranche 2's independent host-tools and SDK-free
-environment/resource increment is implemented and verified on Linux and
-macOS/arm64; new native Windows/x64 replay remains. Numbered tranches 1-8 map to D0-D7.
+technical candidates**, and Tranche 2's independent host-tools and SDK-free
+environment/resource increment is verified on Linux, macOS/arm64 and Windows/x64. The current focus is
+**Tranche 3: the Development-SDK `xz` port and installation metadata (3.1), the local installer it enables in
+`crt-cli` D2 first** (network acquisition, updates and self-upgrade are not in this increment).
+Numbered tranches 1-8 map to D0-D7.
 SDK split and local assembly rehearsal are complete
 ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
 The SDK Producer Contract Gate P0 is the producer work within the early
@@ -129,6 +131,8 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
 - [ ] **3.1** Supply exact stage/profile artifacts and contract metadata for CLI
   installation/selection/update; promote producer artifacts before consumer locks.
+  Linux: `xz` port + install metadata format 1 (dev release manifest) implemented, consumed by `crt-cli sdk install`
+  ([HISTORY](HISTORY.md)); `crt-dev-release` rehearsed end to end on Linux; remaining: rerun from a committed tree, Full-stage metadata, macOS/Windows replay, promotion.
 - [ ] **3.2** Review three-host consumer transactions, tamper/interruption recovery
   and path/DLL collisions; keep project-lock updates explicit.
 - [ ] **3.3** Support CLI-owned self-upgrade staging, candidate diagnosis, OS-specific

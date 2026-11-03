@@ -1,5 +1,6 @@
 #include <curl/curl.h>
 #include <zlib.h>
+#include <lzma.h>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -16,6 +17,38 @@ static int image_seen(const crt_dl_image* image, size_t size, void* data) {
   return 0;
 }
 
+// xz (liblzma): the archive format of the Linux/macOS SDKs. A fixed 84-byte CRC64 stream of "crt-xz-fixture:ok\n";
+// a flipped payload byte must be rejected by the integrity check, not decoded.
+static bool xz_decodes(const unsigned char* data, size_t size, std::string& out) {
+  lzma_stream stream = LZMA_STREAM_INIT;
+  if (lzma_stream_decoder(&stream, UINT64_MAX, LZMA_CONCATENATED) != LZMA_OK) return false;
+  unsigned char buffer[256];
+  stream.next_in = data; stream.avail_in = size;
+  lzma_ret status = LZMA_OK;
+  while (status == LZMA_OK) {
+    stream.next_out = buffer; stream.avail_out = sizeof(buffer);
+    status = lzma_code(&stream, LZMA_FINISH);
+    out.append(reinterpret_cast<char*>(buffer), sizeof(buffer) - stream.avail_out);
+  }
+  lzma_end(&stream);
+  return status == LZMA_STREAM_END;
+}
+
+static bool xz_utility() {
+  static const unsigned char fixture[] = {
+    0xfd,0x37,0x7a,0x58,0x5a,0x00,0x00,0x04,0xe6,0xd6,0xb4,0x46,0x04,0xc0,0x16,0x12,0x21,0x01,0x1c,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x6e,0xc1,0x55,0x89,0x01,0x00,0x11,0x63,0x72,0x74,0x2d,0x78,0x7a,0x2d,0x66,0x69,0x78,0x74,0x75,0x72,
+    0x65,0x3a,0x6f,0x6b,0x0a,0x00,0x00,0x00,0x70,0x77,0xf8,0x60,0xc1,0x7f,0x33,0x91,0x00,0x01,0x32,0x12,0x12,0x90,0x4f,0x3e,
+    0x1f,0xb6,0xf3,0x7d,0x01,0x00,0x00,0x00,0x00,0x04,0x59,0x5a};
+  std::string plain;
+  if (!xz_decodes(fixture, sizeof(fixture), plain) || plain != "crt-xz-fixture:ok\n") return false;
+  unsigned char damaged[sizeof(fixture)];
+  std::memcpy(damaged, fixture, sizeof(fixture));
+  damaged[36] ^= 0x01;  // inside the compressed payload
+  std::string rejected;
+  return !xz_decodes(damaged, sizeof(damaged), rejected) && lzma_version_number() > 0;
+}
+
 static bool utilities(const char* program) {
   nlohmann::json value = {{"integer", 18446744073709551615ULL}, {"text", "space \uD55C\uAE00"}};
   if (nlohmann::json::parse(value.dump()) != value) return false;
@@ -28,7 +61,7 @@ static bool utilities(const char* program) {
                                     0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad};
   if (mbedtls_sha256(reinterpret_cast<const unsigned char*>("abc"), 3, digest, 0) || std::memcmp(digest, expected, 32)) return false;
   char home[65536]; int images = 0;
-  return json_ok && crt_get_platform_info()->arch[0] && crt_is_native_executable(program) == 1 &&
+  return json_ok && xz_utility() && crt_get_platform_info()->arch[0] && crt_is_native_executable(program) == 1 &&
          crt_get_user_home(home, sizeof(home)) == 0 && crt_dl_iterate_images(image_seen, &images) == 0 && images > 0;
 }
 

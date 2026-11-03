@@ -77,12 +77,12 @@ def main(argv=None):
         shutil.copytree(base, staged, symlinks=True)
         copy_porting_sdk(ROOT, staged)
         env = runtime_env(staged, manifest)
-        sources = media.fetch_port_sources(ROOT, staged, temp, env, ports=("curl", "cjson", "nlohmann-json"), download_cache=work / "downloads")
+        sources = media.fetch_port_sources(ROOT, staged, temp, env, ports=("curl", "cjson", "nlohmann-json", "xz"), download_cache=work / "downloads")
         media.build_curl_ports(ROOT, sources, staged, temp, manifest, env, args.jobs)
         run([sys.executable, staged / "tools/crt-port-build.py", "--sdk-root", staged,
              "--target-os", manifest["target"]["os"], "--target-arch", manifest["target"]["arch"],
              "--source-root", sources, "--work-root", temp / "port-build-utilities",
-             "--install-prefix", staged, "--jobs", str(args.jobs), "--port", "cjson", "--port", "nlohmann-json", "--test"], env=env, cwd=ROOT)
+             "--install-prefix", staged, "--jobs", str(args.jobs), "--port", "cjson", "--port", "nlohmann-json", "--port", "xz", "--test"], env=env, cwd=ROOT)
         run([sys.executable, staged / "tools/crt-port-build.py", "--sdk-root", staged,
              "--target-os", manifest["target"]["os"], "--target-arch", manifest["target"]["arch"],
              "--source-root", sources, "--work-root", temp / "port-build-curl",
@@ -91,7 +91,10 @@ def main(argv=None):
     for name, notice, headers, links, patterns in (
             ("cjson", "LICENSE", ["include/cJSON.h"], ["lib/libcjson.a"],
              ("lib/libcjson*.so*", "lib/libcjson*.dylib", "lib/cjson.dll")),
-            ("nlohmann-json", "LICENSE.MIT", ["include/nlohmann"], [], ())):
+            ("nlohmann-json", "LICENSE.MIT", ["include/nlohmann"], [], ()),
+            # liblzma only (the recipe disables the xz tool family): the decoder behind the tar.xz SDK archives.
+            ("xz", "COPYING", ["include/lzma.h", "include/lzma"], ["lib/liblzma.a"],
+             ("lib/liblzma*.so*", "lib/liblzma*.dylib", "lib/lzma.dll", "lib/lzma.dll.lib"))):
         source = next(sources.glob(name + "-*"))
         entry = media.copy_dependency_record(staged, name, ROOT / "porting/recipes" / (name + ".json"),
                                             source / notice, headers, links, media.existing_relative_files(staged, patterns))

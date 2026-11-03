@@ -103,8 +103,8 @@ def main():
             compile_env = dict(env, CRT_CXX_RUNTIME_LINKAGE=mode)
             program = work / ("consumer-" + mode + (".exe" if windows else ""))
             libraries = [str(sdk / "lib" / name) for name in (
-                "libcurl.a", "libmbedtls.a", "libmbedx509.a", "libmbedcrypto.a", "libz.a", "libcjson.a")] if mode == "static" else [
-                "-L" + str(sdk / "lib"), "-lcurl", "-lmbedtls", "-lmbedx509", "-lmbedcrypto", "-lz", "-lcjson"]
+                "libcurl.a", "libmbedtls.a", "libmbedx509.a", "libmbedcrypto.a", "libz.a", "libcjson.a", "liblzma.a")] if mode == "static" else [
+                "-L" + str(sdk / "lib"), "-lcurl", "-lmbedtls", "-lmbedx509", "-lmbedcrypto", "-lz", "-lcjson", "-llzma"]
             if mode == "shared" and windows:
                 libraries = [str(sdk / "lib" / name) for name in (
                     "libcurl.dll.a", "libmbedtls.dll.a", "libmbedx509.dll.a", "libmbedcrypto.dll.a", "libz.so", "cjson.dll")]

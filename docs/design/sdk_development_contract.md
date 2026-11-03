@@ -315,6 +315,19 @@ The other Full stage archives remain available through their existing
 procedures; this target does not weaken isolated `04` release checks. Neither
 target uploads, signs, changes a tag, or grants new owner approval.
 
+#### Install metadata (format 1, CRT 3.1)
+
+Each SDK archive entry of `release-manifest-dev-<os>-<arch>.json` carries an `install` object computed from the
+*extracted* archive (`tools/crt_sdk_install_metadata.py`): `archive_format`, `root` (the single top-level directory,
+`dev`), `version`, `stage`, `profile`, `target`, `content_sha256`, `entries`/`files`/`directories`/`symlinks` (the root
+counts as a directory), `uncompressed_bytes`, `max_file_bytes`, `max_path_bytes` and `max_depth` (paths relative to the
+archive top). `content_sha256` is the same value as the toolchain provider's `sdk_content_sha256`: SHA-256 of the compact
+inventory of files (SHA-256) and symlinks (link text), sorted component-wise and case-sensitively; directories and modes
+are not part of the identity. The metadata is not a signature. A consumer pins the manifest's digest, takes the archive
+digest and size from it, bounds extraction by the numbers before starting, and proves afterwards that exactly this tree
+arrived (`crt-cli sdk install --release-manifest`). Format changes bump `format`; consumers refuse unknown formats.
+Only the Development profile emits it so far; Full stage archives are not installable by the CLI yet.
+
 This is an implemented producer candidate, not consumer adoption. The review
 baselines are CRT `1033c86`, CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and
 Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`. The consumer ledger was read;

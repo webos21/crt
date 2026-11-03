@@ -10,6 +10,7 @@ import tarfile
 import tempfile
 
 import crt_dev_profile as dev
+import crt_sdk_install_metadata as install_metadata
 import prepare_release_assets as release
 from crt_web_stage import run
 
@@ -120,6 +121,7 @@ def assemble(args, development, full):
             archive = release.archive_directory(canonical, "dev", args.version, target["os"], target["arch"], args.output_dir)
         with tempfile.TemporaryDirectory(prefix="crt dev extracted ") as temp:
             shutil.unpack_archive(str(archive), temp)
+            install = install_metadata.install_metadata(Path(temp) / "dev", "zip" if archive.suffix == ".zip" else "tar.xz")
             run([sys.executable, ROOT / "tools/verify_dist.py", "--dist", Path(temp) / "dev",
                  "--stage", "02-cxx", "--profile", "dev"])
         files = [archive]
@@ -128,6 +130,7 @@ def assemble(args, development, full):
             shutil.copy2(source, destination)
             files.append(destination)
         assets = [{"name": p.name, "size": p.stat().st_size, "sha256": dev.digest(p)} for p in files]
+        assets[0]["install"] = install  # describes the tree the archive extracts to (crt_sdk_install_metadata.py)
         suffix = target["os"] + "-" + target["arch"]
         (args.output_dir / ("SHA256SUMS-dev-" + suffix)).write_text(release.format_sha256sums(
             [(entry["name"], entry["sha256"]) for entry in assets]), encoding="utf-8")

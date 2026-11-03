@@ -13,7 +13,11 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import crt_sdk_install_metadata as install_metadata  # noqa: E402
 
 
 def digest(path):
@@ -102,15 +106,8 @@ def main():
         parser.error('expected development packaging profile format 1')
     if not {'crt-platform-queries-1', 'json-sha2-1', 'crt-narrow-encoding-1'} <= set(profile.get('capabilities', [])):
         parser.error('SDK lacks platform-query/JSON/SHA-2/narrow-encoding capabilities; produce a new candidate')
-    inventory = []
-    # Component-wise, case-sensitive: the order of the CLI's std::filesystem::path sort on every host. Python's own
-    # Path ordering is case-insensitive on Windows and would make the same SDK hash differently there.
-    for path in sorted(sdk.rglob('*'), key=lambda item: item.relative_to(sdk).parts):
-        if path.is_symlink():
-            path.resolve(strict=True).relative_to(sdk)
-            inventory.append([path.relative_to(sdk).as_posix(), 'symlink', os.readlink(path)])
-        elif path.is_file():
-            inventory.append([path.relative_to(sdk).as_posix(), 'file', digest(path)])
+    # The identity rule is shared with the release install metadata (tools/crt_sdk_install_metadata.py).
+    inventory = install_metadata.inventory(sdk)
     compact = json.dumps(inventory, ensure_ascii=False, separators=(',', ':'))
     result = dict(schema='crt.experimental.native-toolchain', format=1,
                   target=target, policy='native-targets-exceptions-rtti',

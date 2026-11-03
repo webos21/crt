@@ -526,7 +526,9 @@ run_cxx() {
   if [ -n "${CRT_LINK_RPATH_FIRST:-}" ] && [ "$compile_only" -eq 0 ]; then
     set -- "-Wl,-rpath,${CRT_LINK_RPATH_FIRST}" "$@"
   fi
-  if [ -n "${CRT_PORT_LIBRARY_DIR:-}" ]; then
+  # -L is a link-time search path; clang reports it as an unused argument on a compile-only call, which an
+  # autoconf "-Werror" probe (xz's configure) turns into a failure.
+  if [ -n "${CRT_PORT_LIBRARY_DIR:-}" ] && [ "$compile_only" -eq 0 ]; then
     set -- "-L${CRT_PORT_LIBRARY_DIR}" "$@"
   fi
   if [ -n "${CRT_PORT_INCLUDE_DIR:-}" ]; then

@@ -8,13 +8,16 @@ import struct
 SIDECAR = "share/crt/contracts/development.json"
 # crt-narrow-encoding-1: crt_get_narrow_encoding() exists and Windows executables linked through the wrappers embed the
 # UTF-8 active-code-page manifest (docs/design/windows_narrow_strings.md).
-CAPABILITIES = ["crt-platform-queries-1", "json-sha2-1", "crt-narrow-encoding-1"]
-PORTS = {"zlib", "mbedtls", "curl", "cjson"}
+# archive-xz-1: liblzma (static and shared, xz format with CRC64/SHA-256 checks and concatenated streams) beside zlib, so
+# a consumer can unpack the tar.xz SDK archives with only SDK-provided code.
+CAPABILITIES = ["crt-platform-queries-1", "json-sha2-1", "crt-narrow-encoding-1", "archive-xz-1"]
+PORTS = {"zlib", "mbedtls", "curl", "cjson", "xz"}
 HEADER_PORTS = {"nlohmann-json": "include/nlohmann/json.hpp"}
 STATIC = {"zlib": ("lib/libz.a",), "curl": ("lib/libcurl.a",),
-          "mbedtls": ("lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a"), "cjson": ("lib/libcjson.a",)}
+          "mbedtls": ("lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a"), "cjson": ("lib/libcjson.a",),
+          "xz": ("lib/liblzma.a",)}
 SHARED = {"zlib": ("libz",), "curl": ("libcurl",),
-          "mbedtls": ("libmbedtls", "libmbedx509", "libmbedcrypto"), "cjson": ("libcjson",)}
+          "mbedtls": ("libmbedtls", "libmbedx509", "libmbedcrypto"), "cjson": ("libcjson",), "xz": ("liblzma",)}
 
 
 def consumer_options(target_os):
@@ -71,7 +74,7 @@ def check(sdk, manifest):
     if profile.get("tls_trust") != {"mode": "explicit-ca-file", "bundled": False}:
         problems.append("Development SDK must require consumer-supplied explicit CA trust")
     if profile.get("capabilities") != CAPABILITIES:
-        problems.append("Development SDK missing platform-query/JSON/SHA-2 capabilities")
+        problems.append("Development SDK missing platform-query/JSON/SHA-2/xz capabilities")
     if profile.get("consumer_compile_options") != consumer_options(manifest.get("target", {}).get("os")):
         problems.append("Development SDK missing the SDK-owned portable networking compile options")
     observed = runtime_digests(sdk)
@@ -95,7 +98,7 @@ def check(sdk, manifest):
         if not (sdk / header).is_file() or not entry.get("headers") or entry.get("kind") != "header-only-port":
             problems.append(f"Development SDK missing header-only dependency {name}")
     for header in ("include/cJSON.h", "include/mbedtls/sha256.h", "include/mbedtls/sha512.h",
-                   "include/crt/platform.h", "include/crt/dl.h"):
+                   "include/crt/platform.h", "include/crt/dl.h", "include/lzma.h"):
         if not (sdk / header).is_file():
             problems.append(f"Development SDK missing public utility/PAL header {header}")
     for name in ("ffmpeg", "skia", "freetype", "lvgl", "webkit"):

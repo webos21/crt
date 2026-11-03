@@ -244,7 +244,7 @@ class DevelopmentProfile(unittest.TestCase):
         for name, header in profile.HEADER_PORTS.items():
             self.put(header)
             self.manifest["redistributed_dependencies"].append({"name": name, "kind": "header-only-port", "headers": [header]})
-        for header in ("include/cJSON.h", "include/mbedtls/sha256.h", "include/mbedtls/sha512.h", "include/crt/platform.h", "include/crt/dl.h"):
+        for header in ("include/cJSON.h", "include/mbedtls/sha256.h", "include/mbedtls/sha512.h", "include/crt/platform.h", "include/crt/dl.h", "include/lzma.h"):
             self.put(header)
         self.data = {"format": 1, "profile": "dev", "capabilities": profile.CAPABILITIES, "version": "v1.0.0", "target": self.manifest["target"],
                      "producer_source_commit": "a" * 40, "base_source_commit": "a" * 40,

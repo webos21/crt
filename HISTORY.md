@@ -10,6 +10,22 @@ substantive update.
 
 ## 2026-11-03
 
+### Tranche 3.1: Development-SDK `xz` port and install metadata (Linux/x86_64)
+
+The Development SDK now ships liblzma (`xz` port, capability `archive-xz-1`; round-trip and damaged-input tests in the
+consumer fixture, 147/147 core CTest) so `crt-cli` decodes tar.xz itself. To get there the `crt-cc`/`crt-c++` wrappers
+add `-L$CRT_PORT_LIBRARY_DIR` only to link commands: on compile-only calls clang's unused-argument warning broke
+`-Werror` autoconf probes (regression test in `test_link_rpath_first.py`). `tools/crt_sdk_install_metadata.py` defines
+install metadata format 1 (see the [contract](docs/design/sdk_development_contract.md#install-metadata-format-1-crt-31)),
+`crt_sdk_release.py` writes it into the dev release manifest, and `export_cli_toolchain.py` shares its identity rule
+(on the real dev SDK the identity equals the provider's `sdk_content_sha256`). Verified: 5 metadata tests (counts agree
+with real tar.xz and zip archives), prepare-release and export tests, and a CLI install of the real 186 MB dev SDK from
+a manifest (2797 entries, 5.5 s, identical reinstall idempotent, `sdk verify` ok). A full `crt-dev-release` rehearsal (tag `v0.0.1-rehearsal.1`, scratch clone with the working-tree diff committed locally,
+never pushed, cold build ~1 h) ended with `Release assets prepared locally; nothing uploaded`: the dev archive entry of
+`release-manifest-dev-linux-x86_64.json` carries `install` (2797 entries, identity 143c10cd...), and
+`crt-cli sdk install --release-manifest` installs and verifies that archive. It is a rehearsal of uncommitted code, not a
+release candidate. Not verified: macOS/Windows replay, Windows `lzma` import-library name, Full-stage metadata.
+
 ### Close the Windows/x64 Tranche 2 replay
 
 Replayed the single-executable CLI, the independently pinned host-tools bundle and the selected package CA on native

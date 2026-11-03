@@ -66,6 +66,22 @@ class LinkRpathFirstTests(unittest.TestCase):
                 args = self.arguments(wrapper, ["-c"], "/a/lib")
                 self.assertFalse([a for a in args if a.startswith("-Wl,-rpath,")])
 
+    def arguments_with_library_dir(self, wrapper: str, extra: list) -> list:
+        env = {"PATH": os.environ["PATH"], "CRT_SYSROOT": str(self.sysroot), "CRT_TARGET_OS": "linux",
+               "CRT_HOST_CC": str(self.fake), "CRT_HOST_CXX": str(self.fake), "CRT_CXX_RUNTIME_LINKAGE": "shared",
+               "CRT_PORT_LIBRARY_DIR": "/port/lib"}
+        source = str(self.root / ("t.cc" if wrapper == "crt-c++" else "t.c"))
+        done = subprocess.run([str(TOOLS / wrapper), source, *extra, "-o", str(self.root / "t.out")],
+                              env=env, capture_output=True, text=True)
+        return done.stdout.splitlines()
+
+    def test_port_library_directory_is_a_link_option_only(self) -> None:
+        # xz's configure probes "-c -Werror"; clang reports an unused -L as an error there.
+        for wrapper in ("crt-cc", "crt-c++"):
+            with self.subTest(wrapper=wrapper):
+                self.assertNotIn("-L/port/lib", self.arguments_with_library_dir(wrapper, ["-c"]))
+                self.assertIn("-L/port/lib", self.arguments_with_library_dir(wrapper, []))
+
 
 if __name__ == "__main__":
     unittest.main()
