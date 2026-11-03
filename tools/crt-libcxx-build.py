@@ -262,6 +262,10 @@ def detect_target_arch(target_arch_arg):
 def run(args, cwd=None, env=None, label=None):
     if label:
         progress(f"start {label}")
+    if args and args[0] == "git":
+        # Source-stage validation compares actual upstream bytes to pinned Git
+        # blobs. User/system checkout newline settings must not rewrite them.
+        args = [args[0], "-c", "core.autocrlf=false", "-c", "core.eol=lf", *args[1:]]
     if os.name == "nt" and args and args[0] == "git":
         # libc++'s sparse tree (libcxx/test/...) has paths beyond Windows' 260
         # character limit; without core.longpaths a fresh checkout fails with

@@ -202,6 +202,20 @@ class SparseFetchRecoveryTests(unittest.TestCase):
         self.temporary.name = DRIVER.filesystem_path(self.root)
         self.temporary.cleanup()
 
+    def test_fetch_preserves_pinned_bytes_under_ambient_crlf_policy(self):
+        import os
+        from unittest.mock import patch
+        environment = dict(os.environ, GIT_CONFIG_COUNT='2',
+                           GIT_CONFIG_KEY_0='core.autocrlf', GIT_CONFIG_VALUE_0='true',
+                           GIT_CONFIG_KEY_1='core.eol', GIT_CONFIG_VALUE_1='crlf')
+        with patch.dict(os.environ, environment, clear=True):
+            DRIVER.fetch_recipe(self.recipe, self.source_root)
+        for relative in ('libunwind/CMakeLists.txt', 'cmake/Modules/HandleCompilerRT.cmake',
+                         'runtimes/cmake/Modules/HandleFlags.cmake'):
+            pinned = subprocess.check_output(['git', 'show', self.ref + ':' + relative], cwd=self.repository)
+            self.assertEqual(pinned, (self.source_root / relative).read_bytes())
+            self.assertNotIn(b'\r\n', (self.source_root / relative).read_bytes())
+
     def test_sparse_fetch_copies_deep_primary_and_extra_paths(self) -> None:
         relative = Path(*['deep upstream ' + str(i) + 'x' * 42 for i in range(5)]) / 'original.cpp'
         for name in ('libunwind', 'cmake', 'runtimes/cmake'):
