@@ -577,6 +577,20 @@ All port recipes can be built and tested with
 `cmake --build --preset <preset> --target port-test-recipes`; this is a separate,
 potentially long-running operation, not part of a configuration preflight.
 
+An independently pinned native host-tools bundle is separate from target SDKs:
+
+```sh
+cmake --build --preset <preset> --target crt-host-tools
+cmake --build --preset <preset> --target crt-host-tools-test
+```
+
+By default it assembles from `crt-c-dist`; `CRT_HOST_TOOLS_PREDECESSOR` can
+select an existing public native C SDK. `CRT_HOST_TOOLS_OUTPUT` and
+`CRT_HOST_TOOLS_VERSION` select a new immutable local candidate. The test target
+verifies inventory, aliases and native images, not shell execution acceptance.
+See the [host-tools guide](docs/guides/distribution.md#independent-native-host-tools-candidate)
+and [native evidence](docs/acceptance/host_tools_acceptance.md).
+
 Tagged release assembly uses two local-only targets:
 
 ```sh

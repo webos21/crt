@@ -109,6 +109,16 @@
         "what": "test, verify and archive 06-web locally; no publication"
       }
     ],
+    "host tools": [
+      {
+        "target": "crt-host-tools",
+        "what": "assemble an independent native mksh/toybox/awk/make bundle from a public C SDK (skipped when unchanged)"
+      },
+      {
+        "target": "crt-host-tools-test",
+        "what": "verify the independent host-tools inventory, aliases and native executable images"
+      }
+    ],
     "ports": [
       {
         "target": "port-test-recipes",

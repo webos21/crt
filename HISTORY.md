@@ -57,12 +57,55 @@ Fresh Windows/x64 Tranche 2 production correctly rejected CRLF-rewritten
 upstream caches. Scope LF-preserving Git settings to imported-libc++ fetch
 commands, retaining long-path support and all pin/cache guards. Preserve failed
 copies and recover 12,855 canonical files from retained pinned Git stores;
-no upstream or global Git configuration is changed. All 16 fetch regressions
+no upstream or global Git configuration is changed. An equivalent fix landed independently on `main` (`a8a4cb7`) while this
+replay ran; the merged code keeps that version. All 16 fetch regressions
 pass, including an actual ambient-CRLF primary/sibling checkout fixture.
 The new local Development SDK and independent tools retain dirty provenance;
 168 core tests plus the Development static/shared consumers pass, with one
 conditional core skip. Exact inputs, failures and producer receipts belong to
 [Windows host-tools acceptance](docs/acceptance/host_tools_acceptance.md#windowsx64-independent-bundle-replay-2026-11-03).
+
+### Preserve pinned runtime bytes under Windows Git checkout defaults
+
+CI run [41579703211](https://github.com/webos21/crt/actions/runs/41579703211/job/125731402511)
+at `de4777d` passes Linux and macOS, but both Windows jobs reject
+`cmake/Modules/HandleCompilerRT.cmake` in the canonical packaging fixture.
+Reproduced on macOS with `core.autocrlf=true` / `core.eol=crlf`: fetch copies
+CRLF bytes while the pinned Git object is LF. The fixture also now writes its
+intended upstream LF explicitly, independent of Python's native newline mode.
+
+Runtime-driver Git commands disable host CRLF conversion through command-local
+`core.autocrlf=false` / `core.eol=lf`, preserving Windows long-path support and
+leaving user/repository settings alone. Regression coverage proves exact LF,
+genuine pinned CRLF and binary preservation, canonical packaging, and continued
+rejection/preservation of CRLF drift. The canonical validator is unchanged;
+old noncanonical caches still require a fresh source root, not relaxed hashes.
+
+All 16 fetch tests pass both normally and with inherited CRLF defaults; 32
+canonical fetch/source-stage tests pass. The existing CI tools selection runs
+174 tests (167 pass, seven conditional skips), and the macOS target catalog
+check passes. Original Windows logs, before/after reproduction and local test
+logs are in `out/ci-windows-41579703211/`. This is macOS-hosted validation, not
+new Windows native execution or a regenerated SDK/source-asset acceptance.
+Remote Windows CI has not been rerun with this local fix. No runtime ABI,
+upstream source, old artifact, consumer lock or STATUS change.
+
+### Register independent host-tools targets in the public build catalog
+
+CI run [41569195444](https://github.com/webos21/crt/actions/runs/41569195444/job/125697882509)
+at `9d8be12` passes macOS's 146 core tests, then rejects the unlisted
+`crt-host-tools-test`; all five jobs fail the documented-target check. Both
+host-tools targets were already registered by CMake, but absent from the
+catalog/README. Added them to the public list and Build commands, with a fixture
+requiring both on Linux/macOS/Windows and preserving missing-target rejection.
+
+Reproduced the original error locally, then passed the exact preset target
+check and the separate producer-tree check. Twenty focused tests pass; the
+unchanged CI offline selection runs 173 tests (166 pass, seven conditional
+skips). Logs live in `out/ci-host-tools-catalog-20261103/`; target reports are
+under `out/tranche2-macos-20261103/ci-target-catalog*-fixed.json`.
+No runtime, classifier/check suppression, SDK or native replay status change.
+Remote CI has not been rerun with this local fix.
 
 ### Replay Tranche 2 independent host tools and CLI on macOS/arm64
 

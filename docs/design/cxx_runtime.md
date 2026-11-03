@@ -549,6 +549,15 @@ header.
 
 ## Canonical Imported Source Caches
 
+The runtime fetch driver's Git commands use command-local
+`core.autocrlf=false` and `core.eol=lf` on every host; Windows additionally
+retains `core.longpaths=true`. Host checkout defaults must not turn pinned LF
+blobs into CRLF cache files. No global/repository Git setting is changed and
+no blanket newline rewrite is applied: CRLF and binary bytes actually present
+in a pinned blob remain intact. Previously converted caches are not approved
+by this fix; retain them for diagnosis and fetch a new source root if their
+bytes fail canonical validation.
+
 The libc++abi TLS-selector patch matches its complete line, including the
 newline. Its recipe pins SHA-256 values for both the pristine upstream file
 and the single-guard result. Fetch, configure and build reject any other bytes
