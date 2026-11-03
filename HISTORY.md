@@ -10,6 +10,31 @@ substantive update.
 
 ## 2026-11-03
 
+### Preserve pinned runtime bytes under Windows Git checkout defaults
+
+CI run [41579703211](https://github.com/webos21/crt/actions/runs/41579703211/job/125731402511)
+at `de4777d` passes Linux and macOS, but both Windows jobs reject
+`cmake/Modules/HandleCompilerRT.cmake` in the canonical packaging fixture.
+Reproduced on macOS with `core.autocrlf=true` / `core.eol=crlf`: fetch copies
+CRLF bytes while the pinned Git object is LF. The fixture also now writes its
+intended upstream LF explicitly, independent of Python's native newline mode.
+
+Runtime-driver Git commands disable host CRLF conversion through command-local
+`core.autocrlf=false` / `core.eol=lf`, preserving Windows long-path support and
+leaving user/repository settings alone. Regression coverage proves exact LF,
+genuine pinned CRLF and binary preservation, canonical packaging, and continued
+rejection/preservation of CRLF drift. The canonical validator is unchanged;
+old noncanonical caches still require a fresh source root, not relaxed hashes.
+
+All 16 fetch tests pass both normally and with inherited CRLF defaults; 32
+canonical fetch/source-stage tests pass. The existing CI tools selection runs
+174 tests (167 pass, seven conditional skips), and the macOS target catalog
+check passes. Original Windows logs, before/after reproduction and local test
+logs are in `out/ci-windows-41579703211/`. This is macOS-hosted validation, not
+new Windows native execution or a regenerated SDK/source-asset acceptance.
+Remote Windows CI has not been rerun with this local fix. No runtime ABI,
+upstream source, old artifact, consumer lock or STATUS change.
+
 ### Register independent host-tools targets in the public build catalog
 
 CI run [41569195444](https://github.com/webos21/crt/actions/runs/41569195444/job/125697882509)

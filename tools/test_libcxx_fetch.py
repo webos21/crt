@@ -4,6 +4,7 @@
 import importlib.util
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -174,7 +175,7 @@ class SparseFetchRecoveryTests(unittest.TestCase):
         ):
             path = self.repository / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(relative + "\n", encoding="utf-8")
+            path.write_text(relative + "\n", encoding="utf-8", newline="\n")
         subprocess.run(["git", "add", "."], cwd=self.repository, check=True)
         subprocess.run(["git", "commit", "--quiet", "-m", "fixture"], cwd=self.repository, check=True)
         self.ref = subprocess.run(
@@ -222,6 +223,48 @@ class SparseFetchRecoveryTests(unittest.TestCase):
             self.assertGreater(len(str(target)), 260)
             self.assertEqual(name.encode(), Path(DRIVER.filesystem_path(target)).read_bytes())
         self.assertFalse((self.source_root / 'libunwind/.git').exists())
+
+    def test_host_crlf_defaults_do_not_change_pinned_source_bytes(self):
+        from unittest.mock import patch
+        from crt_libcxx_sources import canonical_runtime_sources
+        raw_files = {'libunwind/pinned-crlf.txt': b'preserve pinned CRLF\r\n',
+                     'cmake/pinned-binary.bin': b'\x00preserve binary\r\n\xff'}
+        for relative, data in raw_files.items():
+            (self.repository / relative).write_bytes(data)
+        subprocess.run(['git', '-c', 'core.autocrlf=false', 'add', '.'], cwd=self.repository, check=True)
+        subprocess.run(['git', 'commit', '--quiet', '-m', 'pinned raw bytes'], cwd=self.repository, check=True)
+        self.recipe['source']['ref'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=self.repository, text=True).strip()
+        config = {
+            'GIT_CONFIG_COUNT': '2',
+            'GIT_CONFIG_KEY_0': 'core.autocrlf', 'GIT_CONFIG_VALUE_0': 'true',
+            'GIT_CONFIG_KEY_1': 'core.eol', 'GIT_CONFIG_VALUE_1': 'crlf',
+        }
+        with patch.dict(os.environ, config):
+            DRIVER.fetch_recipe(self.recipe, self.source_root)
+            for relative in ('libunwind/CMakeLists.txt', 'cmake/Modules/HandleCompilerRT.cmake',
+                             'runtimes/cmake/Modules/HandleFlags.cmake'):
+                expected = subprocess.check_output(['git', 'show', f'{self.ref}:{relative}'], cwd=self.repository)
+                self.assertEqual((relative + '\n').encode(), expected)
+                self.assertEqual(expected, (self.source_root / relative).read_bytes())
+            for relative, data in raw_files.items():
+                self.assertEqual(data, (self.source_root / relative).read_bytes())
+            recipe_path = self.root / 'project/libstdc++/third_party/libunwind/recipe.json'
+            recipe_path.parent.mkdir(parents=True)
+            recipe_path.write_text(json.dumps(self.recipe), encoding='utf-8', newline='\n')
+            canonical, _ = canonical_runtime_sources(self.root / 'project', self.source_root, 'linux')
+            self.assertEqual(b'cmake/Modules/HandleCompilerRT.cmake\n', canonical['cmake/Modules/HandleCompilerRT.cmake'])
+            for relative, data in raw_files.items():
+                self.assertEqual(data, canonical[relative])
+            sibling = self.source_root / 'cmake/Modules/HandleCompilerRT.cmake'
+            drift = sibling.read_bytes().replace(b'\n', b'\r\n')
+            sibling.write_bytes(drift)
+            with self.assertRaisesRegex(SystemExit, 'noncanonical runtime source cache'):
+                canonical_runtime_sources(self.root / 'project', self.source_root, 'linux')
+            self.assertEqual(drift, sibling.read_bytes())
+            # Fetch overrides are command-local, not persistent user/cache config edits.
+            clone = self.source_root / '.clone-libunwind'
+            self.assertEqual('true', subprocess.check_output(['git', 'config', 'core.autocrlf'], cwd=clone, text=True).strip())
+            self.assertEqual('crlf', subprocess.check_output(['git', 'config', 'core.eol'], cwd=clone, text=True).strip())
 
     def test_missing_sparse_worktree_recovers_from_cached_commit(self) -> None:
         DRIVER.fetch_recipe(self.recipe, self.source_root)
