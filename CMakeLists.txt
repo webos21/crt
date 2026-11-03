@@ -1113,6 +1113,13 @@ add_subdirectory(libc/tests)
 add_subdirectory(libstdc++/tests)
 
 install(DIRECTORY include/ DESTINATION include COMPONENT crt-c)
+if(CRT_TARGET_OS STREQUAL "windows")
+  # The first source-built make links through the lightweight sysroot before
+  # create_dist.py runs. Its wrapper needs the same UTF-8 manifest already
+  # installed here, not only in the eventual packaged SDK.
+  install(FILES "${CMAKE_SOURCE_DIR}/tools/crt-windows-utf8.manifest"
+    DESTINATION share/crt/windows RENAME utf8.manifest COMPONENT crt-c)
+endif()
 
 add_custom_target(sysroot
   COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}" --prefix "${CRT_SYSROOT}" --component crt-c

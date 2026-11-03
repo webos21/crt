@@ -594,6 +594,10 @@ exchild(struct op *t, int flags,
 #ifdef MKSH_CRT_SHELL_CHILD_SPEC
 	rv = crt_mksh_spawn_exec_child(&cldpid, t, flags, close_fd);
 	if (rv == -1) {
+		/* -1 selects the real-fork path; it is not a job status.
+		 * Foreground jobs overwrite rv in j_waitj(), but an async
+		 * launch must retain the upstream initial success value. */
+		rv = 0;
 #endif
 	while ((cldpid = fork()) < 0 && errno == EAGAIN && forksleep < 32) {
 		if (intrsig)

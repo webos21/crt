@@ -200,6 +200,16 @@ int main(void) {
       "echo started; wait; echo after-wait",
       "started\nbg-done\nafter-wait\n", 0
     },
+    /* Launching an asynchronous subshell succeeds independently of the
+     * child's eventual status. In particular, set -e must not exit on an
+     * internal Windows spawn-adapter sentinel before wait observes exit 7. */
+    {
+      "background launch under errexit",
+      "set -e; (exit 7) & p=$!; echo \"async=$?\"; "
+      "if wait \"$p\"; then echo unexpected; else echo \"child=$?\"; fi; "
+      "echo after-wait",
+      "async=0\nchild=7\nafter-wait\n", 0
+    },
     /* $! captures the backgrounded job's pid, and `wait $!` retrieves
      * its real exit status -- not always 0, confirming actual job
      * tracking rather than just "wait returned". */

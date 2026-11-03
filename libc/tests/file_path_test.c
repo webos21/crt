@@ -124,6 +124,28 @@ int main(void) {
   if (stat("file_path_test.dir", &st) != 0 || !S_ISDIR(st.st_mode)) {
     return fail("stat dir");
   }
+  /* Bionic/POSIX X_OK means search permission for directories, not a PE
+   * executable-file test. mksh uses W_OK|X_OK to select its TMPDIR. */
+  if (access("file_path_test.dir", X_OK) != 0 ||
+      access("file_path_test.dir", W_OK | X_OK) != 0 ||
+      faccessat(AT_FDCWD, "file_path_test.dir", X_OK, 0) != 0) {
+    return fail("directory search access");
+  }
+  {
+    int result, error;
+    /* Windows' executable .exe fallback must not turn a nonexistent path
+     * into a directory search. The directory itself is searchable above. */
+    if (mkdir("file_path_test.dir/shadow.exe", 0777) != 0) {
+      return fail("mkdir directory with executable suffix");
+    }
+    errno = 0;
+    result = access("file_path_test.dir/shadow", X_OK);
+    error = errno;
+    if (rmdir("file_path_test.dir/shadow.exe") != 0 || result != -1 ||
+        (error != ENOENT && error != EACCES)) {
+      return fail("missing directory is not an executable alias");
+    }
+  }
   if (S_ISREG(st.st_mode) || S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode) ||
       S_ISFIFO(st.st_mode) || S_ISLNK(st.st_mode) || S_ISSOCK(st.st_mode)) {
     return fail("stat type macros");
@@ -146,6 +168,11 @@ int main(void) {
   if (access("sample.tmp", F_OK | R_OK | W_OK) != 0) {
     close(fd);
     return fail("access sample");
+  }
+  errno = 0;
+  if (access("sample.tmp", X_OK) != -1 || errno != EACCES) {
+    close(fd);
+    return fail("ordinary data file is not executable");
   }
   if (fchmod(fd, 0600) != 0) {
     close(fd);

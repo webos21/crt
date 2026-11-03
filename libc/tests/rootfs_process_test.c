@@ -34,6 +34,11 @@ int main(int argc, char** argv) {
     return 7;
   }
 #if defined(CRT_TARGET_OS_WINDOWS)
+  if (argc == 3 && strcmp(argv[1], "rootfs-env-child") == 0) {
+    const char* selected = getenv("CRT_ROOTFS");
+    return strcmp(argv[2], "absent") == 0 ? (selected == 0 ? 0 : 91) :
+        (selected != 0 && strcmp(selected, argv[2]) == 0 ? 0 : 92);
+  }
   if (argc == 2 && strcmp(argv[1], "bootstrap-child") == 0) {
     sigset_t current_mask = 0;
 
@@ -165,6 +170,20 @@ int main(int argc, char** argv) {
   }
   if (chdir(cwd) != 0) {
     return fail("chdir back");
+  }
+  {
+    char* selected_env[] = {"CRT_ROOTFS=C:/explicit-child-rootfs", 0};
+    char* empty_env[] = {"CRT_BOOTSTRAP_ROOTFS=stale-private-rootfs", 0};
+    char* selected_argv[] = {"/proc/self/exe", "rootfs-env-child", "C:/explicit-child-rootfs", 0};
+    char* empty_argv[] = {"/proc/self/exe", "rootfs-env-child", "absent", 0};
+    if (posix_spawn(&pid, "/proc/self/exe", 0, 0, selected_argv, selected_env) != 0 ||
+        waitpid(pid, &status, 0) != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      return fail("spawn preserves explicit child rootfs");
+    }
+    if (posix_spawn(&pid, "/proc/self/exe", 0, 0, empty_argv, empty_env) != 0 ||
+        waitpid(pid, &status, 0) != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      return fail("spawn does not inject parent rootfs into explicit environment");
+    }
   }
   if (posix_spawn(&pid, "/proc/self/exe", 0, 0, child_argv, environ) != 0) {
     return fail("posix_spawn");

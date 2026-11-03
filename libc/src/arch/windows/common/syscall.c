@@ -2304,6 +2304,23 @@ static int envp_has_name(char* const envp[], const char* name) {
   return 0;
 }
 
+static const char* spawn_environment_value(char* const envp[], const char* name) {
+  size_t i;
+  size_t length = strlen(name);
+
+  /* Bionic spawn uses envp verbatim, or environ only when envp is null.
+   * Private bootstrap transport must not reintroduce a filtered parent value. */
+  if (envp == 0) {
+    return getenv(name);
+  }
+  for (i = 0; envp[i] != 0; ++i) {
+    if (strncmp(envp[i], name, length) == 0 && envp[i][length] == '=') {
+      return envp[i] + length + 1;
+    }
+  }
+  return 0;
+}
+
 static long fd_snapshot_remove(struct crt_fd_snapshot* snapshot, int fd);
 
 static long fd_snapshot_prepare_child_duplicates(
@@ -4692,6 +4709,12 @@ long __crt_sys_access(const char* path, int mode) {
     return 0;
   }
   attrs = GetFileAttributesA(host_path);
+  /* Bionic/POSIX X_OK means search for an existing directory. Match it
+   * before the executable-only .exe fallback: a missing path must not
+   * become a directory alias merely because name.exe is a directory. */
+  if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    return 0;
+  }
   if (attrs == INVALID_FILE_ATTRIBUTES && (mode & X_OK) != 0) {
     char with_exe[4096];
     const char* fallback = windows_exe_suffix_fallback(host_path, with_exe, sizeof(with_exe));
@@ -8906,7 +8929,8 @@ long __crt_sys_posix_spawn(
     add_env_extra(extras, &extra_count, CRT_FD_SNAPSHOT_ENV, fd_snapshot_text);
   }
   add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_CWD_ENV, bootstrap_cwd);
-  add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_ROOTFS_ENV, getenv("CRT_ROOTFS"));
+  add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_ROOTFS_ENV,
+                spawn_environment_value(envp, "CRT_ROOTFS"));
   add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_SIGMASK_ENV, sigmask_text);
   add_env_extra(extras, &extra_count, CRT_BOOTSTRAP_SIGDEFAULT_ENV, sigdefault_text);
   add_env_extra(extras, &extra_count, CRT_ARGV_FILE_ENV, ctx->argv_spill_path);

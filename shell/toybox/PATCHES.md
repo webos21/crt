@@ -182,6 +182,27 @@ Removal/upstream condition:
 This patch can be dropped if upstream toybox probes `confstr` availability
 instead of assuming all Bionic-like environments lack it.
 
+## mksh Windows Asynchronous Launch Status
+
+Status: active CRT-local adapter correction (2026-11-03).
+
+Touched files: `mksh/src/jobs.c`, with the real-shell regression in
+`libc/tests/mksh_shell_smoke_test.c`.
+
+The Windows-only `MKSH_CRT_SHELL_CHILD_SPEC` hook returns `-1` to select
+the existing real-fork fallback. That sentinel remained in `rv`: foreground
+jobs replaced it with `j_waitj()`'s result, while asynchronous jobs returned it
+as status 255. Thus `set -e; (exit 7) & ...` exited before the parent could
+wait for the child's actual status. Restore upstream's initial success value
+when choosing the fallback, retaining the real child status for `wait`.
+The regression fails before the correction and passes afterwards. Linux/macOS
+do not compile this adapter branch; no Bionic public ABI or upstream generic
+job-control behavior changes.
+
+Removal condition: retire this reset only with the sentinel-based adapter or
+the real-fork fallback itself; asynchronous launch must still return success
+independently of the child's later exit status.
+
 ## mksh Windows Drive-Letter Absolute Path Recognition
 
 Status: active CRT-local patch.
