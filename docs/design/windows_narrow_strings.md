@@ -1,8 +1,10 @@
 # Windows Narrow-String Model
 
 Status: **adopted and implemented 2026-10-31** for CRT-built Windows executables
-(option B below), replayed on native Windows/arm64 only; Windows/x64 is not yet
-replayed. The wide-call rewrite (option C) stays the fallback. Decisions: B adopted;
+(option B below). Native Windows/arm64 prototype evidence is linked below;
+Windows/x64 producer/tool evidence belongs to
+[host-tools acceptance](../acceptance/host_tools_acceptance.md#windowsx64-independent-bundle-replay-2026-11-03).
+The wide-call rewrite (option C) stays the fallback. Decisions: B adopted;
 minimum Windows 10 1903; the query is `crt_get_narrow_encoding()` and CRT startup does
 not abort; no opt-out for CRT-built executables; UTF-8 validation belongs to callers
 that take untrusted names (the CLI validates on Windows). Measurements and commands are in the CLI repository's
@@ -146,9 +148,12 @@ Done in CRT `85546d9`, replayed on native Windows/arm64:
 4. The CLI checks the encoding in `doctor`, validates arguments and compiler-reported
    dependency paths on Windows, and runs its native suite with a Unicode fixture.
 
-Not done: replay on Windows/x64; the port tests (mksh, toybox, awk, make) in Unicode
-directories; a mention of the Windows 10 1903 minimum in the user guides; behaviour
-under a Windows build before 1903 (the setting is ignored there, which the query reports).
+The later Windows/x64 core/CLI/independent-tool replay is recorded separately in
+[host-tools acceptance](../acceptance/host_tools_acceptance.md#windowsx64-independent-bundle-replay-2026-11-03)
+and its linked CLI record. It does not relabel the original ARM prototype or
+qualify general source-port recipes; compiler/recipe bridges remain D3 work.
+The user guide states the Windows 10 1903 minimum. Behavior under an older
+Windows build remains untested (the setting is ignored there, which the query reports).
 
 ## Remaining decisions
 

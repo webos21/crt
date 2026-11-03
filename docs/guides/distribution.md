@@ -314,6 +314,12 @@ Windows packages are emitted as `.zip`; Linux and macOS packages as
 scripts, wrappers, and `crt-toolchain.cmake` in addition to the cumulative
 CRT and required redistributable dependency headers and libraries.
 
+CRT-built Windows executables require Windows 10 version 1903 or later for the
+[UTF-8 narrow-string policy](../design/windows_narrow_strings.md). The same
+UTF-8 application manifest is installed in the lightweight C sysroot before
+the first wrapper-built make, and in packaged SDKs. To use the UTF-8 narrow
+surface, a foreign process loading CRT DLLs supplies that process manifest itself.
+
 Windows build and source-stage hosts must have Developer Mode enabled. The
 supported Windows contract uses real filesystem symbolic links for the
 Bionic/POSIX `symlink()` surface, upstream source-archive links, and GNU-style

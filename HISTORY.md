@@ -10,6 +10,60 @@ substantive update.
 
 ## 2026-11-03
 
+### Close the Windows/x64 Tranche 2 replay
+
+Replayed the single-executable CLI, the independently pinned host-tools bundle and the selected package CA on native
+Windows/x64 against a dirty-local Development SDK (`9d8be12` base), after four producer repairs recorded below. The CLI
+self-builds (13 executed, then 13 reused) and passes 857 native checks with only `kernel32` and one API-set DLL imported;
+32 host-environment cases and 32 D1-07 HTTPS/signature cases pass under a restricted token with job process accounting;
+the selected-project and previous-CLI bootstrap loops pass (stage binaries differ, no reproducibility claim). CLI product
+inputs are unchanged from Linux/macOS. Receipts, hashes and the retained failures are in
+[Windows host-tools acceptance](docs/acceptance/host_tools_acceptance.md#final-combined-replay-2026-11-03); the consumer ledger
+is the [CLI Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsx64-independent-host-environment-replay-2026-11-03).
+Private-DLL acceptance, Windows/arm64 and production adoption remain open.
+
+### Respect explicit child environments in Windows rootfs bootstrap
+
+The D1 hostile-environment replay showed private spawn bootstrap overwriting
+an explicit child `CRT_ROOTFS` with the parent's value. Select the private
+transport value from the supplied envp, falling back to the caller only when
+envp is null, matching Bionic spawn's selection rule. Existing filtering still
+removes stale private bootstrap entries. No public API or general environment
+inheritance policy is added. The new native selected/omitted-rootfs regression
+fails before the fix and passes afterwards; all 168 core cases pass with the
+existing conditional fork skip. New C/tool and static/shared C++ candidates
+verify independently; the final Development/CLI replay remains Tranche 2 work.
+
+### Repair Windows shell async status and directory search for independent tools
+
+The native D1 replay exposed two independent producer defects. The existing
+Windows mksh adapter leaked its real-fork selection sentinel as background
+status 255, incorrectly triggering `set -e`; restore its initial success status
+without changing real `wait` results. The Windows PAL also rejected directory
+`X_OK` as a non-executable PE image, causing mksh to discard its selected
+TMPDIR and fail heredocs. Separate directory search from regular-file image
+checks, preserving ordinary data-file execution rejection and public ABI.
+
+Both new native C regressions fail before their fixes and pass afterwards;
+all 168 core tests pass again with one existing conditional skip. The
+[adapter patch record](shell/toybox/PATCHES.md#mksh-windows-asynchronous-launch-status)
+owns its reason/removal condition. New tool candidates retain separate
+identities; original CLI/Development artifacts and failed replay evidence are
+preserved in [Windows acceptance](docs/acceptance/host_tools_acceptance.md#windowsx64-independent-bundle-replay-2026-11-03).
+
+### Preserve pinned LLVM source bytes under Windows Git newline policies
+
+Fresh Windows/x64 Tranche 2 production correctly rejected CRLF-rewritten
+upstream caches. Scope LF-preserving Git settings to imported-libc++ fetch
+commands, retaining long-path support and all pin/cache guards. Preserve failed
+copies and recover 12,855 canonical files from retained pinned Git stores;
+no upstream or global Git configuration is changed. All 16 fetch regressions
+pass, including an actual ambient-CRLF primary/sibling checkout fixture.
+The new local Development SDK and independent tools retain dirty provenance;
+168 core tests plus the Development static/shared consumers pass, with one
+conditional core skip. Exact inputs, failures and producer receipts belong to
+[Windows host-tools acceptance](docs/acceptance/host_tools_acceptance.md#windowsx64-independent-bundle-replay-2026-11-03).
+
 ### Replay Tranche 2 independent host tools and CLI on macOS/arm64
 
 Assembled a new independent bundle at clean producer `518953f` from the retained

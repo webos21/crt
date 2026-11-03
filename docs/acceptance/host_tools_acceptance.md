@@ -153,6 +153,164 @@ Python/Clang/OpenSSL remain test-host tools outside that product boundary.
 No runtime, upstream source, SDK payload, production pin, promotion or STATUS
 change was required.
 
+## Windows/x64 independent bundle replay (2026-11-03)
+
+Reviewed producer `9d8be12e27802b87e0bca61fa562a281b1c7319b` and consumer
+`0b40a7087e567e8b7bfae2aa880d9f4f2e1abdb3`. A fresh producer directory at
+`out/tranche2-windows-20261103/build` builds C/C++, the Development ports and
+the SDK. Later PAL/shell corrections produce the separate C and Development
+candidates below. Unchanged pinned imported C++ artifacts are reused through
+the official cumulative publisher and rechecked with static/shared C++ smokes;
+their shared images import the new `libc.dll`, rather than embedding old libc.
+This does not claim another C++ compilation. Upper graphics/media/UI/Web
+features are disabled; no old SDK is relabeled as a new build. The local edits
+are truthfully recorded as `working_tree_dirty: true`, version `development`,
+with the separate original compile/base provenance retained.
+
+| Input / output | Identity |
+| --- | --- |
+| Public native C SDK | `c-sdk-rootfs-fix`, manifest `3390ca1f9dc1bf881b92032ca629c2b982484fff1cbe8cb5973bbbbd4908abd5` |
+| Development SDK | `dev-rootfs-fix`, manifest `31bcc5d0b2874bda33c17198f0c391c588ad9be32b9a59bbd57cf6f6a194b421` |
+| Development profile | `aaf7fdaa079ad7f8a8de2d324a0cbbd530001bb83a0450289076467a085b53bd` |
+| Selected host tools | `host-tools-r5`, `v0.1.0-hosttools.20261103.windows.5` |
+| Host-tools manifest | `513eab805ed0753b67d00939fd8b00e03a577f6f14cbe74b2ad4e3862691b1cf` |
+| Payload inventory | `69a725081e93134cdd2b16d7a9a6a08f14d5a4d061d883fc430f7609a87f8b16` |
+| Assembler script | `9599fad6b3749d034f0034eabc6cd20eb8c867d05281e0e04d53a291d6d06e0f` |
+
+The bundle has **209 inventory entries, 179 executable paths and 175 aliases**.
+All four primary images are native x86_64 PE and import only `KERNEL32.dll`
+and `api-ms-win-core-synch-l1-2-0.dll`. Alias copies retain their primary
+dispatcher's bytes. There are **no private runtime DLLs** in this selected
+closure; private-DLL initial-load/collision acceptance cannot be inferred from
+it. The explicit Windows OS boundary remains declared. Runtime use requires
+neither a target SDK nor the Python producer. Real job-directory links require
+Developer Mode; the UTF-8 executable policy requires Windows 10 1903 or later.
+
+Fresh CMake `host-producer-r5-exact` explicitly selects this C SDK as
+`CRT_HOST_TOOLS_PREDECESSOR`. First and repeated `crt-host-tools-test` pass,
+reporting first-run assembly and `up to date` respectively. Its entire manifest
+and payload bytes match r5. Earlier `host-producer-r5` has the same payload but
+version `v0`. That candidate is retained; the exact replay uses a fully quoted
+PowerShell version argument.
+The C-stage suite passes **168 tests with one existing
+conditional fork skip (169 selected)**, including the native UTF-8 narrow-string
+test. Both Development candidates pass static/shared HTTPS+inflate and trust negatives.
+The focused producer/fetch/cache/provider/replay selection passes **71 of 73,
+two host-conditional skips**. The exact updated existing CI tooling selection
+passes **174 of 178, four conditional skips**; the two new adapter modules join
+that same step, with no second CI build or skip-CI change.
+
+### Preserved failures and LF recovery
+
+The first CLI replay rejects the retained clean `d054a66` SDK before seed
+compilation because it lacks the adopted `crt-narrow-encoding-1` capability.
+Its independent-tool candidate `host-tools-r1` stays historical. Initial new
+C/Development candidates and `host-tools-r2` also retain their pre-correction
+bytes; they are not the final selected r5 combination.
+
+The fresh producer then exposes system Git `core.autocrlf=true` rewriting
+LLVM worktree bytes: `cmake/README.rst` becomes 1,923 bytes/59 CRLFs instead
+of the pinned 1,864 LF bytes. Strict source-stage validation correctly rejects
+it. `crt-libcxx-build.py` now scopes `core.autocrlf=false` and `core.eol=lf`
+to its Git commands, retaining command-scoped Windows long-path handling.
+No global Git setting, upstream patch or validation exception is introduced.
+The regression uses actual Git repositories with an ambient CRLF policy and
+compares both primary and sibling source bytes to pinned blobs; all 16 fetch
+tests pass.
+
+`failed-crlf-sources` and `failed-crlf-recovery` retain the failed copies and
+Git stores. Reusing existing index timestamps did not rewrite every CRLF
+file; cloning a partial repository through the local upload protocol also
+failed. New empty worktrees from copies of the retained `.git` stores recover
+**12,855 canonical files** without network ref changes. Whole-cache/pin/recipe
+checks pass before production resumes. The original non-development tag
+attempt also correctly refuses later dirty inputs; the successful local retry
+uses `development`, never a falsely clean release. The frozen 02 source archive
+SHA-256 is `9710b089ac5872b759b73e859379d91e913e690c80e5913bc07fd6ab9dbe66a3`.
+
+### Native shell/PAL boundaries found by the replay
+
+The original fixture compared Windows' mixed native-root/manifest `system/bin`
+spelling to a POSIX-only PATH expectation. The driver now checks the declared
+PATH resolves to the **one selected directory**, then compares the child's
+exact spelling with that declaration. ASCII grep is exercised separately;
+Unicode remains in tool/script/cwd/job paths. Product environment filtering
+and the no-host-shell-fallback policy are unchanged.
+
+Three producer defects have actual fail-before/pass-after C regressions:
+
+- The Windows-only mksh adapter retained `-1` (select real fork) as an async
+  launch status. `set -e; (exit 7) & ...` exited 255 before waiting. Reset the
+  sentinel to upstream's initial success; the regression also requires `wait`
+  to report the child's actual exit 7. The existing adapter's
+  [patch record](../../shell/toybox/PATCHES.md#mksh-windows-asynchronous-launch-status)
+  explains ownership/removal conditions. Generic upstream logic is unchanged.
+- Windows `access(directory, X_OK)` incorrectly required a PE image, so mksh
+  discarded its physical TMPDIR and failed a heredoc. Recognize an existing
+  directory before executable-only suffix fallback. Retain ordinary-data
+  rejection and reject missing `name` when only a `name.exe` directory exists.
+  `file_path_test` covers access/faccessat search and those boundaries. The
+  [Bionic public modes](https://raw.githubusercontent.com/aosp-mirror/platform_bionic/master/libc/include/unistd.h)
+  and [kernel-delegating faccessat](https://raw.githubusercontent.com/aosp-mirror/platform_bionic/master/libc/bionic/faccessat.cpp)
+  are the interface reference; this is not a full Windows ACL model.
+- Private Windows spawn bootstrap used the parent's `CRT_ROOTFS` even when
+  envp selected or omitted it. A hostile ambient root overrode the CLI job
+  root, so make could not find `/system/bin/sh.exe`. Select the transport value
+  from the effective child environment, following
+  [Bionic's envp-or-environ rule](https://raw.githubusercontent.com/aosp-mirror/platform_bionic/master/libc/bionic/spawn.cpp).
+  `rootfs_process_test` proves explicit selection and no parent/private-marker
+  leakage when omitted. Existing bootstrap-variable filtering stays intact.
+
+The initial make also lacked its UTF-8 manifest: lightweight sysroot installed
+headers/libraries, while only later `create_dist.py` installed the manifest.
+Install the same file with Windows' `crt-c` component before the first make
+link. Fresh `manifest-preflight` CMake builds actual sysroot/port-build-make:
+installed manifest bytes match the source, and the first make PE contains the
+UTF-8 resource. Final r5 explicitly recompiles make with the existing official
+recipe engine/new public C SDK. General packaged-port mode intentionally skips
+SDK-owned make; the initial empty-prefix attempt stays failed evidence, not a
+claimed rebuild. No target recipe/upstream source patch is introduced.
+All four final primary tools carry the UTF-8 manifest.
+
+Receipts include `core-ctest-rootfs-final.log`, each C regression's
+`*-before.log`/`*-after.log`, and `rootfs-producer-status.json` (successful
+C/tool/C++ gates, then a missing-tool-environment preflight failure).
+`rootfs-producer-dev-status.json` passes after declaring Clang/Clang++/AR/RANLIB.
+`rootfs-producer*.log`, `dev-rootfs-*-r2.log`, `manifest-preflight-*.log` and
+`host-producer-r5-exact-*.log` retain commands. Old CLI/Development artifacts and
+failed tools stay historical. Final CLI replay must use the new Development
+SDK so its statically linked runtime also includes the bootstrap correction.
+
+Evidence is retained under `out/tranche2-windows-20261103/`: producer logs
+`producer-build.log`, `source-recovery{,-r2,-r3}.log`, `producer-build-r{2,3}.log`,
+the failed directories, `host-tools-r{1,2}`, `host-producer-{configure,build,cached}.log`,
+`core-ctest.log`, `utf8-runtime.log`, `focused-tests-final.log`,
+`ci-tooling-final.log` and the CLI replay receipts. Original candidate identities
+and failed states are preserved. Consumer execution and final D1 closure are
+recorded separately in the CLI-owned acceptance ledger.
+
+### Final combined replay (2026-11-03)
+
+The selected combination is the dirty-local Development SDK `dev-rootfs-fix`, tools `host-tools-r5` and the new CLI
+(`a9d922ef71fb042a8b2ed7419db7da3d5b078700937b661f14dd63d4c1bb223c`, 24,328,192 bytes), all rechecked by
+`out/tranche2-windows-20261103/final_review.py` (`final-result.json`, `passed: true`). CLI product inputs are unchanged
+(21 pre-configure inputs, `2aa32f07...0155`), so the Linux/macOS increment and this Windows build compile the same
+product sources; only two portable Python fixtures changed in the CLI repository.
+
+| Receipt | Result |
+| --- | --- |
+| `cli-replay-r3` (restricted token, job accounting, producer trees hidden) | seed + self-build **13 executed/0 reused**, cached **0/13**, **857** native checks, bare help/version/doctor with source/SDK/provider denied; imports `kernel32` and one API-set DLL; 472 process records |
+| `host-environment-r4` (independent r5 tools, copied package/CLI) | **32** cases: self/environment doctor, tools workflow, normal and timeout cleanup, child exit/limit, wrong pin/host, tamper and signature rejections |
+| `https-r2` (selected package CA, empty PATH, hidden trees) | **32** D1-07 cases, 32 CLI calls, 64 process records (copied CLI and OS conhost only) |
+| `selected-project-r4` (explicit copied SDK) | project doctor/environment/shell pass; SDK inventory and project pins unchanged |
+| `bootstrap-loop-r2` (previous committed Windows CLI to stage 1 to stage 2) | passes; stage binaries are **not** byte-identical, no reproducibility claim |
+
+Receipt SHA-256: `cli-replay-r3/result.json` `b2cf8577...b7bf`, `host-environment-r4/result.json` `3c17daaa...d5f9`,
+`https-r2/cases/result.json` `8d47dd21...c4c`, `selected-project-r4/result.json` `eae3fc38...1e7a0`,
+`bootstrap-loop-r2/result.json` `a26c49c2...3918`, `final-result.json` `3135b478...ec2e`. The consumer-owned record is the
+[CLI Windows ledger](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsx64-independent-host-environment-replay-2026-11-03). Isolation is Windows accounting (restricted token plus job process records), not
+per-executable launch denial.
+
 ## Native scope and remaining gates
 
 Linux consumes the independently copied artifact with source/SDK/provider/LLVM
@@ -162,11 +320,11 @@ make/awk/alias, process cleanup, bootstrap-resource and HTTPS results are
 No global PATH/security setting, upstream source, runtime ABI or target SDK was
 changed. PAL rootfs mapping and environment filtering are not a security sandbox.
 
-Linux and the [macOS replay](#macosarm64-independent-bundle-replay-2026-11-03)
-have their own exact combinations. Replay the new bundle/adapter on **native
-Windows/x64** before closing Tranche 2/D1. Verify actual private DLL initial-load
-resolution, aliases, Unicode paths and real Windows directory links/owned-child cleanup.
-Earlier SDK tool probes remain historical and do not qualify this independent
+Linux, the [macOS replay](#macosarm64-independent-bundle-replay-2026-11-03) and the
+[Windows/x64 replay](#windowsx64-independent-bundle-replay-2026-11-03) have their own exact
+combinations. The Windows closure covers aliases, Unicode paths, real directory links and owned-child cleanup; the
+selected closure has **no private runtime DLLs**, so private-DLL initial-load and collision acceptance, Windows/arm64 and
+any production adoption stay open. Earlier SDK tool probes remain historical and do not qualify this independent
 artifact. Interactive terminal/job control, source-port/compiler adapters,
 cross-target execution, official trust/metadata policy and public release are
 separate work; no new production consumer lock is adopted here.

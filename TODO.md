@@ -112,13 +112,17 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
 #### Tranche 2. SDK-free CLI runtime and host environment (P0 + D1)
 
-- [ ] **2.1** Replay the new single-executable/scoped-doctor/resource candidate
-  on native Windows/x64; Linux and macOS/arm64 proof is [CLI-owned](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md).
-- [ ] **2.2** Replay the [independent host-tools contract](docs/acceptance/host_tools_acceptance.md)
+- [x] **2.1** Replay the new single-executable/scoped-doctor/resource candidate
+  on native Windows/x64 ([Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsx64-independent-host-environment-replay-2026-11-03));
+  Linux and macOS/arm64 proof is [CLI-owned](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md).
+- [x] **2.2** Replay the [independent host-tools contract](docs/acceptance/host_tools_acceptance.md)
   and CLI shell on Windows/x64: private imports/aliases, paths and owned-process cleanup.
-  [macOS/arm64 replay passes](docs/acceptance/host_tools_acceptance.md#macosarm64-independent-bundle-replay-2026-11-03).
-- [ ] **2.3** Repeat D1-07 with Windows/x64's selected package/trust bytes.
-  Linux and macOS/arm64 pass; earlier host transport records retain their own identities.
+  [macOS/arm64 replay passes](docs/acceptance/host_tools_acceptance.md#macosarm64-independent-bundle-replay-2026-11-03);
+  [Windows/x64 passes](docs/acceptance/host_tools_acceptance.md#final-combined-replay-2026-11-03) after four producer
+  repairs (LF-preserving LLVM fetch, mksh async status, directory `X_OK`, explicit child rootfs). Private-DLL and
+  Windows/arm64 acceptance stay open.
+- [x] **2.3** Repeat D1-07 with Windows/x64's selected package/trust bytes.
+  Linux, macOS/arm64 and Windows/x64 pass; earlier host transport records retain their own identities.
   Official release signing/metadata policy stays separate from this local test-identity gate.
 
 #### Tranche 3. Immutable SDK installation and selection (D2)
