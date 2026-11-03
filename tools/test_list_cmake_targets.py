@@ -70,6 +70,21 @@ class StageTestDependencies(unittest.TestCase):
 
 
 class Classify(unittest.TestCase):
+    def test_host_tools_targets_are_public_and_required_on_every_os(self):
+        catalog = lt.load_catalog()
+        tools = {entry['target'] for entry in catalog['groups'].get('host tools', [])}
+        self.assertEqual({'crt-host-tools', 'crt-host-tools-test'}, tools)
+        public = [entry['target'] for entries in catalog['groups'].values() for entry in entries]
+        for target_os in ('linux', 'macos', 'windows'):
+            with self.subTest(target_os=target_os):
+                classified = lt.classify(public, catalog, target_os)
+                self.assertEqual([], classified['missing'])
+                self.assertEqual([], classified['unlisted_stage_like'])
+                for target in tools:
+                    self.assertEqual('host tools', classified['user'][target])
+                    missing = lt.classify([name for name in public if name != target], catalog, target_os)
+                    self.assertIn(target, missing['missing'])
+
     def test_stage_names_are_complete_and_disjoint_from_internal_helpers(self):
         catalog = lt.load_catalog()
         stages = ['01-c', '02-cxx', '03-gfx-simple', '04-gfx-media', '05-ui', '06-web']

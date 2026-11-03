@@ -10,6 +10,23 @@ substantive update.
 
 ## 2026-11-03
 
+### Register independent host-tools targets in the public build catalog
+
+CI run [41569195444](https://github.com/webos21/crt/actions/runs/41569195444/job/125697882509)
+at `9d8be12` passes macOS's 146 core tests, then rejects the unlisted
+`crt-host-tools-test`; all five jobs fail the documented-target check. Both
+host-tools targets were already registered by CMake, but absent from the
+catalog/README. Added them to the public list and Build commands, with a fixture
+requiring both on Linux/macOS/Windows and preserving missing-target rejection.
+
+Reproduced the original error locally, then passed the exact preset target
+check and the separate producer-tree check. Twenty focused tests pass; the
+unchanged CI offline selection runs 173 tests (166 pass, seven conditional
+skips). Logs live in `out/ci-host-tools-catalog-20261103/`; target reports are
+under `out/tranche2-macos-20261103/ci-target-catalog*-fixed.json`.
+No runtime, classifier/check suppression, SDK or native replay status change.
+Remote CI has not been rerun with this local fix.
+
 ### Replay Tranche 2 independent host tools and CLI on macOS/arm64
 
 Assembled a new independent bundle at clean producer `518953f` from the retained
