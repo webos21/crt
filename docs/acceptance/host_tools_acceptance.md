@@ -96,6 +96,63 @@ endian/ELF64 little endian, malformed strings/truncated headers, absent
 interpreters and foreign-loader rejection. Fixture passes are not native tool
 execution proof; that belongs to the linked CLI replay.
 
+## macOS/arm64 independent bundle replay (2026-11-03)
+
+Reviewed clean producer `518953f4d9ecc48c1d082644414e0a409a5a49ad` and
+consumer `095afbcde4b0501267520381b24ba8114315d89a`. Assembled a **new**
+independent bundle using the already verified public macOS C SDK; this is not
+a rebuild of the SDK at `518953f` or adoption of Linux's `49879bf` artifacts.
+The SDK input and its historical validation keep their original identities.
+
+| Input / output | Identity |
+| --- | --- |
+| Public native C SDK | `out/cli-macos-revalidation-20261101/dist/01-c`, clean `8db69f404dcfa70b5aa0569cae51a962fd0615d2`, `v0.4.0-cli.20261101` |
+| C SDK manifest SHA-256 | `63f04e670e97e167b955f645a8a1b9235f25026b0a6a9198bf770d258059930c` |
+| Selected host tools | `out/tranche2-macos-20261103/host-tools-r1`, `v0.1.0-hosttools.20261103.macos.1` |
+| Manifest SHA-256 | `0a81db3eacb89b54c106d8f57bfd5a0e6bb57a24977e124f583e7c81751f1160` |
+| Payload SHA-256 | `6e6984bb1edd573132ad2bbff01ea8828485be4a7fb239c029f686f53b58608e` |
+| Assembler SHA-256 | `9599fad6b3749d034f0034eabc6cd20eb8c867d05281e0e04d53a291d6d06e0f` |
+
+The selected bundle was assembled before test/document edits, so its assembler
+records clean `518953f`. It has 120 inventory entries, 90 executable paths and
+86 aliases, with the original relative links/copies preserved. License/recipe
+checks, including the pinned GNU make COPYING, pass. All four primary tools
+are native arm64 Mach-O, own their CRT allocator, have **no LC_RPATH**, and
+import only `/usr/lib/libSystem.B.dylib`. The binding audit reports no CRT-owned
+undefined symbols bound to a foreign runtime. There are **no private dylibs**
+in this selected closure: no private-dylib load/collision success is inferred
+from this static-tool case. The OS runtime boundary remains declared.
+
+Producer checks:
+
+```sh
+python3 -m unittest tools.test_host_tools tools.test_crt_elf
+python3 tools/create_host_tools.py \
+  --sdk-root out/cli-macos-revalidation-20261101/dist/01-c \
+  --output out/new-macos-host-tools --version <new-local-version>
+cmake --build out/tranche2-macos-20261103/producer --target crt-host-tools-test
+```
+
+21 focused tests pass; the expanded producer/cache/binding selection passes
+56 tests. The fresh producer configuration explicitly selects
+the public C SDK as `CRT_HOST_TOOLS_PREDECESSOR`; it builds no target runtime
+or upper stage. First and repeated `crt-host-tools-test` pass, respectively
+reporting `running (first run)` and `up to date`. The separate CMake candidate
+`host-tools-cmake` has the **same payload hash**, but a different manifest
+(`4010094bbe0bea0f06845a37fbdda33cf52786674ebccd90d45269e0b243b02d`)
+because its version and truthful assembler dirty state differ; it is not
+relabeled as the selected clean r1 manifest.
+
+Evidence is under `out/tranche2-macos-20261103/`: `producer-{configure,build,cached}.log`,
+`host-tools-bindings.json`, `selected-inputs-final.json`, bundle manifests and CLI
+replay logs. The CLI-owned
+[macOS D1 replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#macosarm64-independent-host-environment-replay-2026-11-03)
+owns actual Seatbelt-denied SDK/source/toolchain access, shell/make/awk/alias
+execution, paths, cleanup, resource/signature and packaged-CA HTTPS results.
+Python/Clang/OpenSSL remain test-host tools outside that product boundary.
+No runtime, upstream source, SDK payload, production pin, promotion or STATUS
+change was required.
+
 ## Native scope and remaining gates
 
 Linux consumes the independently copied artifact with source/SDK/provider/LLVM
@@ -105,9 +162,10 @@ make/awk/alias, process cleanup, bootstrap-resource and HTTPS results are
 No global PATH/security setting, upstream source, runtime ABI or target SDK was
 changed. PAL rootfs mapping and environment filtering are not a security sandbox.
 
-Replay the new bundle/adapter on **native Windows/x64 and macOS/arm64** before
-closing Tranche 2/D1. Verify actual private DLL/dylib initial-load resolution,
-aliases, Unicode paths and real Windows directory links/owned-child cleanup.
+Linux and the [macOS replay](#macosarm64-independent-bundle-replay-2026-11-03)
+have their own exact combinations. Replay the new bundle/adapter on **native
+Windows/x64** before closing Tranche 2/D1. Verify actual private DLL initial-load
+resolution, aliases, Unicode paths and real Windows directory links/owned-child cleanup.
 Earlier SDK tool probes remain historical and do not qualify this independent
 artifact. Interactive terminal/job control, source-port/compiler adapters,
 cross-target execution, official trust/metadata policy and public release are

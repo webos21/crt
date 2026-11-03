@@ -21,14 +21,19 @@ parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--work', type=Path, help='fresh work directory (default: a new one under TEMP)')
 parser.add_argument('--publisher-cases', action='store_true', help='exercise experimental explicit-key RSA-PSS signatures with test-only keys')
 parser.add_argument('--isolate-linux', action='store_true', help='mask host interpreters/build drivers; share only the test server network namespace')
+parser.add_argument('--isolate-macos', action='store_true', help='use Seatbelt to deny hidden inputs and all non-CLI execution')
 parser.add_argument('--hide', type=Path, action='append', default=[], help='source/SDK/provider path denied to the isolated consumer')
 parser.add_argument('--test-ca-directory', type=Path, help='explicit disposable test CA directory containing ca-good.pem and ca-good.key (test host only)')
 parser.add_argument('--trusted-ca-file', type=Path, help='selected package CA file; must exactly match this test CA certificate')
 arguments = parser.parse_args()
+if arguments.isolate_linux and arguments.isolate_macos:
+    parser.error('select only one native isolation backend')
+if arguments.isolate_macos and sys.platform != 'darwin':
+    parser.error('--isolate-macos requires native macOS Seatbelt')
 cli_source, evidence = arguments.cli.resolve(), arguments.output.resolve()
 if (evidence / 'result.json').exists():
     parser.error('the evidence directory already holds a result; use a fresh one')
-root = arguments.work.resolve() if arguments.work else Path(tempfile.mkdtemp(prefix='crt-cli-fetch-'))
+root = arguments.work.resolve() if arguments.work else Path(tempfile.mkdtemp(prefix='crt-cli-fetch-')).resolve()
 pki = root / 'pki'
 bare = root / 'bare'
 out = bare / 'out'
@@ -146,8 +151,17 @@ if arguments.isolate_linux:
         if shutil.which(name): masked.append(Path(shutil.which(name)).resolve())
     if any(root.is_relative_to(p) for p in hidden): parser.error('test work must be outside hidden paths')
     (root / 'traces').mkdir(exist_ok=True)
+elif arguments.isolate_macos:
+    if any(root.is_relative_to(p) for p in hidden):
+        parser.error('test work must be outside hidden paths')
+    policy = '(version 1)\n(allow default)\n'
+    for path in hidden:
+        policy += '(deny file-read* file-write* (subpath ' + json.dumps(str(path), ensure_ascii=False) + '))\n'
+    policy += '(deny process-exec (require-not (literal ' + json.dumps(str(cli), ensure_ascii=False) + ')))\n'
+    (root / 'consumer.sb').write_text(policy, encoding='utf-8')
+    shutil.copy2(root / 'consumer.sb', evidence / 'consumer.sb')
 elif arguments.hide:
-    parser.error('--hide requires --isolate-linux')
+    parser.error('--hide requires a native isolation backend')
 
 
 def case(label, args, *, expect_exit, expect_code=None, expect_published=False, output='x.bin', cwd=None):
@@ -161,6 +175,8 @@ def case(label, args, *, expect_exit, expect_code=None, expect_published=False, 
         prefix += ['--bind', str(root), str(root), '--ro-bind', str(cli), str(cli), '--chdir', str(bare)]
         for path in sorted(set(masked)): prefix += ['--ro-bind', '/dev/null', str(path)]
         argv = prefix + [shutil.which('strace'), '-f', '-qq', '-e', 'trace=execve', '-o', str(root / 'traces' / (label + '.log')), '--', *argv]
+    elif arguments.isolate_macos:
+        argv = ['/usr/bin/sandbox-exec', '-f', str(root / 'consumer.sb'), *argv]
     started = time.time()
     r = subprocess.run(argv, cwd=bare, env=env, capture_output=True, timeout=120, stdin=subprocess.DEVNULL)
     text = r.stdout.decode('utf-8', 'replace')
@@ -273,8 +289,12 @@ summary = dict(passed=passed, cli=str(cli_source), cli_sha256=sha(cli_source.rea
                directory_after=sorted(p.name for p in out.iterdir()))
 summary['publisher_scope'] = 'test-only explicit public keys' if arguments.publisher_cases else 'not exercised'
 summary['selected_trust_file'] = good
-summary['consumer_isolation'] = {'linux_bwrap': arguments.isolate_linux, 'hidden': list(map(str, hidden)),
+summary['consumer_isolation'] = {'linux_bwrap': arguments.isolate_linux, 'macos_seatbelt': arguments.isolate_macos,
+                                 'hidden': list(map(str, hidden)),
                                  'masked': list(map(str, sorted(set(masked)))), 'network': 'shared with controlled loopback test server'}
+if arguments.isolate_macos:
+    summary['consumer_isolation']['permitted_executable'] = str(cli)
+    summary['consumer_isolation']['policy_sha256'] = sha((root / 'consumer.sb').read_bytes())
 if arguments.isolate_linux:
     import re
     executed = set()

@@ -56,5 +56,6 @@ adapters remain D3; this increment does not implement a recipe engine.
 
 Producer procedures, exercised native scope and original receipts belong to
 [host-tools acceptance](../acceptance/host_tools_acceptance.md); CLI command/JSON
-adoption belongs to its compatibility ledger. Windows and macOS native replay
-of this new bundle/adapter remains required; old SDK tool probes do not qualify it.
+adoption belongs to its compatibility ledger. Every execution host needs its
+own native bundle/adapter evidence; old SDK tool probes do not qualify a new
+independent artifact. Current replay outcomes belong to acceptance, not this contract.

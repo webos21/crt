@@ -8,6 +8,27 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-03
+
+### Replay Tranche 2 independent host tools and CLI on macOS/arm64
+
+Assembled a new independent bundle at clean producer `518953f` from the retained
+clean `8db69f4` public macOS C SDK; this does not relabel it as a new SDK build.
+56 producer/cache/binding fixtures and first/cached CMake host-tools assembly
+pass. The four tool images own their CRT allocator, import only libSystem and
+have no RPATH/private dylibs. Exact provenance and limits belong to
+[host-tools acceptance](docs/acceptance/host_tools_acceptance.md#macosarm64-independent-bundle-replay-2026-11-03).
+
+Consumer `095afbc` passes fresh isolated self-build, previous-binary bootstrap,
+807 native checks, 31 independent environment/resource cases, explicit selected-SDK
+diagnosis/shell and 32 packaged-CA HTTPS/signature cases. Added macOS Seatbelt
+test-host replay support; canonicalized the HTTPS work path after an initial
+`/var` versus `/private/var` execution-policy failure. Failed evidence is retained.
+Execution receipts and exact SDK/provider/package/binary identities are
+[CLI-owned](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#macosarm64-independent-host-environment-replay-2026-11-03).
+The Windows/x64 replay keeps Tranche 2 open. No product/runtime ABI, upstream,
+SDK payload, production lock, release, committed CLI binary or STATUS change.
+
 ## 2026-11-02
 
 ### Implement independent host-tools for the Linux Tranche 2 increment
