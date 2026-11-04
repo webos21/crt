@@ -10,6 +10,16 @@ substantive update.
 
 ## 2026-11-04
 
+### Fix `access()` mode on Linux/aarch64
+
+`__crt_sys_access` (`libc/src/arch/linux/aarch64/syscall.S`) forwards to `faccessat(AT_FDCWD, path, mode)` because aarch64
+has no `access(2)`, but it cleared the third argument instead of carrying `mode` over, so every `access(path, R_OK|W_OK|X_OK)`
+behaved as `F_OK` there. The bug was latent until the Windows `access` work added `access(<0666 data file>, X_OK) ==
+EACCES` to `file_path_test`, which then failed only on the `linux-arm64` CI runner (from `b6bf52b`, 147 tests, one failure).
+x86_64 uses `SYS_access` directly and was never affected. The other aarch64 wrappers with a shuffled argument list were
+checked and are correct. Verified here only by assembling and disassembling the wrapper for `aarch64-linux`; the runtime
+check is the existing `file_path_test` on the `linux-arm64` CI job.
+
 ### Tranche 3.1 on macOS/arm64: Development-SDK `xz` port and install metadata
 
 Ran the real `crt-development-sdk-test` and `crt-dev-release` natively from the committed `53b1a80` in a detached

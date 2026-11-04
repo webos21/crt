@@ -125,7 +125,9 @@ __crt_sys_fstatfs:
 .type __crt_sys_access, %function
 .p2align 2
 __crt_sys_access:
-  mov x2, #0
+  /* faccessat(AT_FDCWD, path, mode): aarch64 has no access(2). The mode must be carried over; clearing it made every
+   * access(path, R_OK|W_OK|X_OK) behave as F_OK. */
+  mov x2, x1
   mov x1, x0
   mov x0, #-100
   mov x8, #48
