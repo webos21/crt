@@ -8,6 +8,61 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-04
+
+### Tranche 3.1 on Windows/arm64: unwind tables for stack-probed frames, replay of the D2 installer
+
+Replayed Tranche 3.1 and the CLI's D2 installer natively on the Windows/arm64 VM. The first producer (clean `e3deb32`) passed its gates, but the CLI's own archive and SDK-store
+tests aborted on uncaught `crtcli::Error` exceptions that they expect to catch. Cause: with `-fhosted`, clang enables asynchronous unwind tables by default for aarch64-w64-mingw32 and
+LLVM 22.1.8 then emits no CFA adjustment after the `__chkstk` probe of a large frame, so an exception unwinding through a ~149 KB frame (`extract_archive`) read its return address from
+the wrong slot. The CRT wrappers now compile Windows/aarch64 with `-fno-asynchronous-unwind-tables` (`b20a460`, with a test pinning the flag per target); x86_64 and Linux/aarch64 were
+not affected. With the clean `b20a460` producer (`rehearsal.6`: `crt-development-sdk-test`, `crt-c-test` 169/169 with one skip, `crt-dev-release`) the CLI self-builds from the SDK alone
+(870 native, 151 archive and 66 SDK-store checks, cold 16/0, warm 0/16) and the installer replay passes 62/62. Full-stage metadata and promotion remain open.
+[Record](docs/acceptance/sdk_split_acceptance.md#windowsarm64-tranche-31-and-d2-installer-replay-2026-11-04).
+
+### Tranche 3.1 on Linux/aarch64: the `xz` port and install metadata, replayed natively
+
+Detached worktree of clean `ffd0405`, rehearsal `crt-dev-release` with tag parameter `v0.0.1-rehearsal.4` (nothing uploaded): `crt-development-sdk-test` and `crt-dev-release`
+pass, `crt-c-test` 147/147; the manifest carries install metadata format 1 (`tar.xz`, 2,797 entries including 17 symlinks, identity `0d11df55...8c48`). No producer change was
+needed on this host. The CLI built itself from that SDK alone (cold 16/0, warm 0/16, no `DT_NEEDED`) and its installer replay passes 48/48 in bubblewrap. Evidence:
+[this repository](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-tranche-31-and-d2-installer-replay-2026-11-04) and the CLI's
+[D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#linuxaarch64-isolated-replay-2026-11-04).
+
+### Tranche 3.1 on Windows/x64: Development-SDK `xz` port and install metadata
+
+The first Windows Development SDK build from `a48000c` failed in three places that no earlier host exercised: `tools/build_dev_sdk.py` listed
+`lib/lzma.dll` (which does not exist) instead of `bin/liblzma-5.dll` as the xz runtime artifact, so `verify_dist` rejected the SDK; the Windows shared
+consumer in `crt-development-sdk-test` never linked `liblzma.dll.a`; and `crt_sdk_install_metadata.inventory` let Windows raise `OSError` rather than `ValueError`
+for an escaping symlink target (its unit test failed only there). Fixed in [`f9dc911`](https://github.com/webos21/crt/commit/f9dc911) and [`1ee0379`](https://github.com/webos21/crt/commit/1ee037923ef6a3460c6f99c6e426d294fe5b7025). From clean `1ee0379`,
+`crt-development-sdk-test` and `crt-dev-release` (tag parameter `v0.0.1-rehearsal.3`, nothing uploaded) pass natively with `crt-c-test` 168 of 169
+(one skip); the manifest carries install metadata format 1 (2,917 entries, 0 symlinks, identity `075d5eb3...2c4d`). The self-built SDK-only CLI installs the zip and its isolated replay passes 62/62
+(restricted token, hostile Windows names, kill during extraction, concurrency, `kill(pid, 0)` lock-owner liveness). Evidence is in the CLI repository's
+[D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-isolated-replay-2026-11-04) and [this repository's record](docs/acceptance/sdk_split_acceptance.md#windowsx64-tranche-31-and-d2-installer-replay-2026-11-04).
+Not verified: Windows/arm64 and Linux/aarch64 replay, Full-stage metadata, promotion.
+
+### Fix `access()` mode on Linux/aarch64
+
+`__crt_sys_access` (`libc/src/arch/linux/aarch64/syscall.S`) forwards to `faccessat(AT_FDCWD, path, mode)` because aarch64
+has no `access(2)`, but it cleared the third argument instead of carrying `mode` over, so every `access(path, R_OK|W_OK|X_OK)`
+behaved as `F_OK` there. The bug was latent until the Windows `access` work added `access(<0666 data file>, X_OK) ==
+EACCES` to `file_path_test`, which then failed only on the `linux-arm64` CI runner (from `b6bf52b`, 147 tests, one failure).
+x86_64 uses `SYS_access` directly and was never affected. The other aarch64 wrappers with a shuffled argument list were
+checked and are correct. Verified here only by assembling and disassembling the wrapper for `aarch64-linux`; the runtime
+check is the existing `file_path_test` on the `linux-arm64` CI job.
+
+### Tranche 3.1 on macOS/arm64: Development-SDK `xz` port and install metadata
+
+Ran the real `crt-development-sdk-test` and `crt-dev-release` natively from the committed `53b1a80` in a detached
+worktree (tag parameter `v0.0.1-rehearsal.2`; no Git tag, nothing uploaded). The macOS Dev SDK ships `liblzma` (static and
+shared) and the dev release manifest carries install metadata format 1 (2,786 entries: 2,598 files, 178 directories, 10
+symlinks; identity `80bfe046...e1da`); all `SHA256SUMS` entries verify. The consumer is the self-built SDK-only CLI of the
+same SDK (16 sources, cold 16 executed / 0 reused, 807 native checks, 158 archive and 66 SDK-store checks), and its isolated
+`sdk install|list|verify|recover` replay passes 48/48 under Seatbelt, including refusal of case-colliding names on the
+case-insensitive default volume. The rehearsal from a committed tree closes that part of the Linux gap. Evidence and
+details are in the CLI repository's
+[D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#macosarm64-isolated-replay-2026-11-04).
+No CRT code change was needed. Not verified: Windows replay and `lzma` import-library name, Full-stage metadata, promotion.
+
 ## 2026-11-03
 
 ### Tranche 3.1: Development-SDK `xz` port and install metadata (Linux/x86_64)

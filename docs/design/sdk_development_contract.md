@@ -327,6 +327,7 @@ are not part of the identity. The metadata is not a signature. A consumer pins t
 digest and size from it, bounds extraction by the numbers before starting, and proves afterwards that exactly this tree
 arrived (`crt-cli sdk install --release-manifest`). Format changes bump `format`; consumers refuse unknown formats.
 Only the Development profile emits it so far; Full stage archives are not installable by the CLI yet.
+On Windows the Development archive is a zip and the xz runtime is `bin/liblzma-5.dll` with the import libraries `lib/lzma.lib`/`lib/liblzma.dll.a` ("lzma" link name).
 
 This is an implemented producer candidate, not consumer adoption. The review
 baselines are CRT `1033c86`, CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and
