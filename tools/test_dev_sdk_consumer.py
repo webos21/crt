@@ -107,7 +107,7 @@ def main():
                 "-L" + str(sdk / "lib"), "-lcurl", "-lmbedtls", "-lmbedx509", "-lmbedcrypto", "-lz", "-lcjson", "-llzma"]
             if mode == "shared" and windows:
                 libraries = [str(sdk / "lib" / name) for name in (
-                    "libcurl.dll.a", "libmbedtls.dll.a", "libmbedx509.dll.a", "libmbedcrypto.dll.a", "libz.so", "cjson.dll")]
+                    "libcurl.dll.a", "libmbedtls.dll.a", "libmbedx509.dll.a", "libmbedcrypto.dll.a", "libz.so", "cjson.dll", "liblzma.dll.a")]
             command = [str(sdk / ("tools/crt-c++.cmd" if windows else "tools/crt-c++")),
                        "-std=c++17", *profile["consumer_compile_options"], str(source), *libraries, "-o", str(program)]
             compiled = subprocess.run(command, env=compile_env, capture_output=True, text=True,
