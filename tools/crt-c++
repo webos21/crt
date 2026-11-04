@@ -490,6 +490,19 @@ case "$target_os" in
     # unresolvable `_tls_index` reference (`ld.lld: error: undefined
     # symbol: _tls_index`).
     common_flags="$common_flags -femulated-tls"
+    # Windows/aarch64: no asynchronous unwind tables. clang turns them on by default for
+    # aarch64-w64-mingw32 once -fhosted is given (the CLI's native driver compiles `main`
+    # programs that way), and LLVM 22.1.8 then emits a CFA that ignores the stack allocated
+    # after the `bl __chkstk; sub sp, sp, x15, lsl #4` probe of every frame larger than the
+    # guard page (the x86_64 and Linux/aarch64 lowerings are not affected). An exception that
+    # unwinds through such a frame reads its return address at the wrong place and
+    # terminates ("terminating due to uncaught exception") although a handler exists --
+    # crt-cli's archive extractor (a ~150 KB frame) failed this way. Synchronous tables, which
+    # are all DWARF exception handling needs, take the correct CFI path. Found by the
+    # Windows/arm64 D2 installer replay; remove once LLVM is fixed and the toolchain pin moves.
+    if [ "$target_arch" = aarch64 ]; then
+      common_flags="$common_flags -fno-asynchronous-unwind-tables"
+    fi
     # libcxx/include/__config's _LIBCPP_DLL_VIS only has two states on
     # Windows: __declspec(dllexport) when _LIBCPP_BUILDING_LIBRARY is
     # defined (building the library itself -- CRT_CXX_BUILDING_RUNTIME=1,
