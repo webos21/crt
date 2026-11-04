@@ -1354,3 +1354,48 @@ replay `tools/replay_sdk_install_linux.py` (bubblewrap, no network, read-only ro
 
 Raw evidence is in the CLI checkout's ignored `out/linux-arm64-d2-20261104/` and the producer worktree's `out/d2-linux-aarch64-20261104/` (not committed). Linux/aarch64 only; Windows/arm64
 installer replay, Full-stage install metadata, a published release asset and promotion are not run. No tag, release, production lock or STATUS change.
+
+
+## Windows/arm64 Tranche 3.1 and D2 Installer Replay (2026-11-04)
+
+**Pass, local/unpromoted producer gate and consumer replay; Windows/arm64.** Native Windows 11 arm64 VM (10.0.26300, 4 vCPUs, no GPU), LLVM 22.1.8, Windows SDK imports
+`10.0.28000.0/um/arm64`, Developer Mode on (not changed), native arm64 shell and Python (an x64 Git Bash would configure the x86_64 sources). Detached worktree of clean CRT
+`b20a460` at a short ASCII path, preset `windows-host-ninja-debug`, `CRT_RELEASE_TAG=v0.0.1-rehearsal.6` (not a tag, nothing uploaded).
+
+### What the replay found
+
+**One producer defect, in the compile policy (`b20a460`).** The first producer (clean `e3deb32`, `rehearsal.5`) passed `crt-development-sdk-test` (2,305 s), `crt-c-test` (169 of 169, one
+skip) and `crt-dev-release`. The CLI's contract replay then self-built the CLI and passed 858 native checks, but `archive-test` and `sdk-store-test` aborted with exit 134 and
+`libc++abi: terminating due to uncaught exception of type crtcli::Error` where the tests expect to catch it. lldb showed the unwinder leaving `extract_archive` for a bogus caller:
+the function allocates about 149 KB through `bl __chkstk; sub sp, sp, x15, lsl #4`, and its eh_frame CFI still said `CFA=sp+96` afterwards, so the return address was read from the
+wrong stack slot. clang turns asynchronous unwind tables on by default for aarch64-w64-mingw32 once `-fhosted` is given, which the CLI's native driver needs for `main`; LLVM 22.1.8 then
+emits no CFA adjustment for the stack-probed frame. With the same argv plus `-fno-asynchronous-unwind-tables` it does, with `-fno-omit-frame-pointer` it uses `w29`, and x86_64
+emits `.cfi_def_cfa_offset 150048` for the same 150 KB reproducer (Linux/aarch64 does not use `__chkstk`). The `-ffreestanding` wrapper builds of CRT (libc++, ports, tests) do not enable them, which is why
+CRT's own suites passed. `tools/crt-cc` and `tools/crt-c++` now pass `-fno-asynchronous-unwind-tables` for Windows/aarch64, so the policy the exporter records from the
+wrappers carries it to the CLI; `tools/test_wrapper_unwind_tables.py` (in the CI-selected tooling list) pins that the flag is present there and absent for Windows/x86_64 and Linux. The
+condition is a compiler defect: remove the flag when the toolchain pin moves to a fixed LLVM.
+
+A first attempt to re-run `crt-dev-release` after the fix was refused because the earlier release output existed (`release already exists; choose a fresh output root`); that output was
+moved aside, not replaced. The libc++ and port sources of the first producer were removed (`stage-sources`, `stage-cache`) because the producer commit changed, as in the Windows/x64 record.
+
+### Producer Gate and Release
+
+Clean `b20a460`: `crt-development-sdk-test` exit 0 (1,669 s: libc++ and the Development ports rebuilt with the wrapper change), `crt-c-test` 169 of 169 with `fork_heap_snapshot_test_runs`
+skipped (91 s), `crt-dev-release` exit 0 (75 s). Asset `crt-v0.0.1-rehearsal.6-windows-aarch64-dev.zip` (141,785,359 bytes, SHA-256
+`7b63ccdde3f4e53602a7608d3c833181e0befcc42906a25d28f931f4d0c17bec`); manifest `release-manifest-dev-windows-aarch64.json` SHA-256 `488c2ac6e90730fc4dfb9ec76fd31e6c28abd42dc10997a1ac4963de3a725f95`;
+install metadata format 1: `zip`, root `dev`, 2,917 entries (2,736 files, 181 directories, 0 symlinks), 398,216,734 bytes, identity
+`1239f18c392cc53630f2fb3d8d3116b663ac4388201d2133764178eeec043b37`. Producer, base and compile provenance all name `b20a460` with `working_tree_dirty: false`.
+
+### Consumer
+
+The CLI's contract replay (`tools/replay_cli_contract_windows.py`, unchanged) self-builds from the SDK alone (16 sources, cold 16/0, warm 0/16) with 870 native, 151 archive and 66 SDK-store
+checks (all three test executables exit 0), 471 recorded processes (only the declared native tools, the CLI and its generated executables), SDK-hidden help/version/doctor and unchanged SDK
+inventories; the bare CLI is 29,425,664 bytes, PE machine `0xAA64`, importing only `kernel32.dll` and `api-ms-win-core-synch-l1-2-0.dll`. The installer replay
+`tools/replay_sdk_install_windows.py` (restricted token, job-object accounting) passes **62/62**, including fifteen hostile archives. Details are in the CLI's
+[D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsarm64-isolated-replay-2026-11-04).
+
+### Evidence and Limits
+
+Raw evidence is in the CLI checkout's ignored `out/windows-arm64-d2-20261104/` (producer logs for both attempts, the failed first contract replay, the final replays) and the producer worktree's
+`out/` (not committed). Windows/arm64 only; no network denial (Windows has none for this driver), Full-stage install metadata, a published release asset and promotion are not run. No tag, release,
+production lock or STATUS change.

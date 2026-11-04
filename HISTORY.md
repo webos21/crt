@@ -10,6 +10,16 @@ substantive update.
 
 ## 2026-11-04
 
+### Tranche 3.1 on Windows/arm64: unwind tables for stack-probed frames, replay of the D2 installer
+
+Replayed Tranche 3.1 and the CLI's D2 installer natively on the Windows/arm64 VM. The first producer (clean `e3deb32`) passed its gates, but the CLI's own archive and SDK-store
+tests aborted on uncaught `crtcli::Error` exceptions that they expect to catch. Cause: with `-fhosted`, clang enables asynchronous unwind tables by default for aarch64-w64-mingw32 and
+LLVM 22.1.8 then emits no CFA adjustment after the `__chkstk` probe of a large frame, so an exception unwinding through a ~149 KB frame (`extract_archive`) read its return address from
+the wrong slot. The CRT wrappers now compile Windows/aarch64 with `-fno-asynchronous-unwind-tables` (`b20a460`, with a test pinning the flag per target); x86_64 and Linux/aarch64 were
+not affected. With the clean `b20a460` producer (`rehearsal.6`: `crt-development-sdk-test`, `crt-c-test` 169/169 with one skip, `crt-dev-release`) the CLI self-builds from the SDK alone
+(870 native, 151 archive and 66 SDK-store checks, cold 16/0, warm 0/16) and the installer replay passes 62/62. Full-stage metadata and promotion remain open.
+[Record](docs/acceptance/sdk_split_acceptance.md#windowsarm64-tranche-31-and-d2-installer-replay-2026-11-04).
+
 ### Tranche 3.1 on Linux/aarch64: the `xz` port and install metadata, replayed natively
 
 Detached worktree of clean `ffd0405`, rehearsal `crt-dev-release` with tag parameter `v0.0.1-rehearsal.4` (nothing uploaded): `crt-development-sdk-test` and `crt-dev-release`
