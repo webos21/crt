@@ -23,8 +23,9 @@ with real tar.xz and zip archives), prepare-release and export tests, and a CLI 
 a manifest (2797 entries, 5.5 s, identical reinstall idempotent, `sdk verify` ok). A full `crt-dev-release` rehearsal (tag `v0.0.1-rehearsal.1`, scratch clone with the working-tree diff committed locally,
 never pushed, cold build ~1 h) ended with `Release assets prepared locally; nothing uploaded`: the dev archive entry of
 `release-manifest-dev-linux-x86_64.json` carries `install` (2797 entries, identity 143c10cd...), and
-`crt-cli sdk install --release-manifest` installs and verifies that archive. It is a rehearsal of uncommitted code, not a
-release candidate. Not verified: macOS/Windows replay, Windows `lzma` import-library name, Full-stage metadata.
+`crt-cli sdk install --release-manifest` installs and verifies that archive. A second rehearsal from the committed tree
+(`53b1a80`, tag `v0.0.1-rehearsal.2`, identity 202303ca..., 2797 entries) also ended with `Release assets prepared locally; nothing
+uploaded`; the CLI installed it from the manifest and the bubblewrap replay passed 48/48. Neither is a published release. Not verified: macOS/Windows replay, Windows `lzma` import-library name, Full-stage metadata.
 
 ### Close the Windows/x64 Tranche 2 replay
 
