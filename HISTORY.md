@@ -8,6 +8,21 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-04
+
+### Tranche 3.1 on macOS/arm64: Development-SDK `xz` port and install metadata
+
+Ran the real `crt-development-sdk-test` and `crt-dev-release` natively from the committed `53b1a80` in a detached
+worktree (tag parameter `v0.0.1-rehearsal.2`; no Git tag, nothing uploaded). The macOS Dev SDK ships `liblzma` (static and
+shared) and the dev release manifest carries install metadata format 1 (2,786 entries: 2,598 files, 178 directories, 10
+symlinks; identity `80bfe046...e1da`); all `SHA256SUMS` entries verify. The consumer is the self-built SDK-only CLI of the
+same SDK (16 sources, cold 16 executed / 0 reused, 807 native checks, 158 archive and 66 SDK-store checks), and its isolated
+`sdk install|list|verify|recover` replay passes 48/48 under Seatbelt, including refusal of case-colliding names on the
+case-insensitive default volume. The rehearsal from a committed tree closes that part of the Linux gap. Evidence and
+details are in the CLI repository's
+[D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#macosarm64-isolated-replay-2026-11-04).
+No CRT code change was needed. Not verified: Windows replay and `lzma` import-library name, Full-stage metadata, promotion.
+
 ## 2026-11-03
 
 ### Tranche 3.1: Development-SDK `xz` port and install metadata (Linux/x86_64)

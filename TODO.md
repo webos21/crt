@@ -132,7 +132,7 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 - [ ] **3.1** Supply exact stage/profile artifacts and contract metadata for CLI
   installation/selection/update; promote producer artifacts before consumer locks.
   Linux: `xz` port + install metadata format 1 (dev release manifest) implemented, consumed by `crt-cli sdk install`
-  ([HISTORY](HISTORY.md)); `crt-dev-release` rehearsed end to end on Linux; remaining: rerun from a committed tree, Full-stage metadata, macOS/Windows replay, promotion.
+  ([HISTORY](HISTORY.md)); `crt-dev-release` rehearsed end to end on Linux; macOS/arm64 rehearsal `crt-dev-release` from the committed `53b1a80` (2026-11-04) installs and verifies natively; remaining: Full-stage metadata, Windows replay, promotion.
 - [ ] **3.2** Review three-host consumer transactions, tamper/interruption recovery
   and path/DLL collisions; keep project-lock updates explicit.
 - [ ] **3.3** Support CLI-owned self-upgrade staging, candidate diagnosis, OS-specific
