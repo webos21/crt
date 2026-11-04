@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-04
 
+### Tranche 3.1 on Linux/aarch64: the `xz` port and install metadata, replayed natively
+
+Detached worktree of clean `ffd0405`, rehearsal `crt-dev-release` with tag parameter `v0.0.1-rehearsal.4` (nothing uploaded): `crt-development-sdk-test` and `crt-dev-release`
+pass, `crt-c-test` 147/147; the manifest carries install metadata format 1 (`tar.xz`, 2,797 entries including 17 symlinks, identity `0d11df55...8c48`). No producer change was
+needed on this host. The CLI built itself from that SDK alone (cold 16/0, warm 0/16, no `DT_NEEDED`) and its installer replay passes 48/48 in bubblewrap. Evidence:
+[this repository](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-tranche-31-and-d2-installer-replay-2026-11-04) and the CLI's
+[D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#linuxaarch64-isolated-replay-2026-11-04).
+
 ### Tranche 3.1 on Windows/x64: Development-SDK `xz` port and install metadata
 
 The first Windows Development SDK build from `a48000c` failed in three places that no earlier host exercised: `tools/build_dev_sdk.py` listed

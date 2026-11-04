@@ -1327,3 +1327,30 @@ limits (no network denial, no mode bits) are in the CLI's [D2 acceptance](https:
 
 Raw evidence is in the CLI checkout's ignored `out/windows-d2-20261104/` (producer build logs, replays, the failed attempts). Windows/x64 only; Windows/arm64 and Linux/aarch64
 installer replays, Full-stage install metadata, a published release asset and promotion are not run. No tag, release, production lock or STATUS change.
+
+## Linux/aarch64 Tranche 3.1 and D2 Installer Replay (2026-11-04)
+
+**Pass, local/unpromoted producer gate and consumer replay; Linux/aarch64.** Native Ubuntu 26.04 aarch64 QEMU guest (Linux 7.0.0-42, 4 CPU), Clang/LLD/llvm-ar 21.1.8.
+Detached worktree of clean CRT `ffd0405` (it contains the 3.1 producer work, the Windows fixes `f9dc911`/`1ee0379` and the aarch64 `faccessat` access-mode fix `a48000c`),
+preset `linux-host-ninja-debug`, build directory under the worktree's `out/`, `CRT_RELEASE_TAG=v0.0.1-rehearsal.4` (not a tag, nothing uploaded).
+
+### Producer Gate and Release
+
+`crt-development-sdk-test` exit 0 (xz round trip static and shared, mbedTLS, `verify_dist`, static/shared consumer); `crt-c-test` **147/147**, no skips; `crt-dev-release` exit 0.
+`SHA256SUMS-dev-linux-aarch64` verifies all three assets. Asset `crt-v0.0.1-rehearsal.4-linux-aarch64-dev.tar.xz` (9,065,788 bytes, SHA-256
+`4058bcaea679311c73505f1efe4c7e4ba24388b8dc56d7a926f3c0a2115eb9dd`); manifest `release-manifest-dev-linux-aarch64.json` SHA-256
+`0cd62bf7939cf15147f79835530f7ad1a9da3d5e097166f09aabf034cbc59cbe`; install metadata format 1: `tar.xz`, root `dev`, 2,797 entries (2,602 files, 178 directories,
+17 symlinks), 206,258,306 bytes, identity `0d11df55b226b50e09dfd7bb59c0bea0e94ad9ff2f4faed428563f8b998c8c48`. Producer, base and compile provenance all name `ffd0405`
+with `working_tree_dirty: false`. No producer change was needed on this host.
+
+### Consumer
+
+The CLI's contract replay (`tools/replay_cli_contract_linux.py`, unchanged) self-builds from the SDK alone (16 sources, cold 16/0, warm 0/16) with 779 native, 158 archive and
+66 SDK-store checks, 24 distinct executed paths under the strace audit (none forbidden), SDK-hidden help/version/doctor, no `DT_NEEDED`, and an unchanged SDK inventory. The installer
+replay `tools/replay_sdk_install_linux.py` (bubblewrap, no network, read-only root) passes **48/48**, including the 17 symlinks of the SDK. Details are in the CLI's
+[D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#linuxaarch64-isolated-replay-2026-11-04).
+
+### Evidence and Limits
+
+Raw evidence is in the CLI checkout's ignored `out/linux-arm64-d2-20261104/` and the producer worktree's `out/d2-linux-aarch64-20261104/` (not committed). Linux/aarch64 only; Windows/arm64
+installer replay, Full-stage install metadata, a published release asset and promotion are not run. No tag, release, production lock or STATUS change.
