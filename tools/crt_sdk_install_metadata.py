@@ -44,7 +44,10 @@ def inventory(sdk: Path) -> list[list[str]]:
     for path in sorted(sdk.rglob("*"), key=lambda item: item.relative_to(sdk).parts):
         relative = path.relative_to(sdk).as_posix()
         if path.is_symlink():
-            path.resolve(strict=True).relative_to(sdk.resolve())
+            try:
+                path.resolve(strict=True).relative_to(sdk.resolve())
+            except OSError as error:  # Windows rejects a foreign-root or dangling target outright instead of resolving it
+                raise ValueError(f"symlink {relative} does not resolve inside the SDK: {error}") from error
             items.append([relative, "symlink", os.readlink(path)])
         elif path.is_file():
             items.append([relative, "file", file_digest(path)])

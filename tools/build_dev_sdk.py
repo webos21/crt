@@ -94,7 +94,7 @@ def main(argv=None):
             ("nlohmann-json", "LICENSE.MIT", ["include/nlohmann"], [], ()),
             # liblzma only (the recipe disables the xz tool family): the decoder behind the tar.xz SDK archives.
             ("xz", "COPYING", ["include/lzma.h", "include/lzma"], ["lib/liblzma.a"],
-             ("lib/liblzma*.so*", "lib/liblzma*.dylib", "lib/lzma.dll", "lib/lzma.dll.lib"))):
+             ("lib/liblzma*.so*", "lib/liblzma*.dylib", "bin/liblzma-*.dll", "lib/lzma.dll.lib"))):
         source = next(sources.glob(name + "-*"))
         entry = media.copy_dependency_record(staged, name, ROOT / "porting/recipes" / (name + ".json"),
                                             source / notice, headers, links, media.existing_relative_files(staged, patterns))
