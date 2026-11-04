@@ -10,6 +10,18 @@ substantive update.
 
 ## 2026-11-04
 
+### Tranche 3.1 on Windows/x64: Development-SDK `xz` port and install metadata
+
+The first Windows Development SDK build from `a48000c` failed in three places that no earlier host exercised: `tools/build_dev_sdk.py` listed
+`lib/lzma.dll` (which does not exist) instead of `bin/liblzma-5.dll` as the xz runtime artifact, so `verify_dist` rejected the SDK; the Windows shared
+consumer in `crt-development-sdk-test` never linked `liblzma.dll.a`; and `crt_sdk_install_metadata.inventory` let Windows raise `OSError` rather than `ValueError`
+for an escaping symlink target (its unit test failed only there). Fixed in [`f9dc911`](https://github.com/webos21/crt/commit/f9dc911) and [`1ee0379`](https://github.com/webos21/crt/commit/1ee037923ef6a3460c6f99c6e426d294fe5b7025). From clean `1ee0379`,
+`crt-development-sdk-test` and `crt-dev-release` (tag parameter `v0.0.1-rehearsal.3`, nothing uploaded) pass natively with `crt-c-test` 168 of 169
+(one skip); the manifest carries install metadata format 1 (2,917 entries, 0 symlinks, identity `075d5eb3...2c4d`). The self-built SDK-only CLI installs the zip and its isolated replay passes 62/62
+(restricted token, hostile Windows names, kill during extraction, concurrency, `kill(pid, 0)` lock-owner liveness). Evidence is in the CLI repository's
+[D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-isolated-replay-2026-11-04) and [this repository's record](docs/acceptance/sdk_split_acceptance.md#windowsx64-tranche-31-and-d2-installer-replay-2026-11-04).
+Not verified: Windows/arm64 and Linux/aarch64 replay, Full-stage metadata, promotion.
+
 ### Fix `access()` mode on Linux/aarch64
 
 `__crt_sys_access` (`libc/src/arch/linux/aarch64/syscall.S`) forwards to `faccessat(AT_FDCWD, path, mode)` because aarch64

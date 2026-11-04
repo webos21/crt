@@ -1289,3 +1289,41 @@ a CRT-free kernel32 probe was not run.
 
 Consumer details and the executable hash: [CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#windowsx64-latest-source-revalidation-and-spawn-environment-fix-2026-11-02). Raw evidence is in the CLI checkout's ignored `out/windows-x64-20261102/`.
 Not run: bootstrap loop for the refreshed binary, ports in Unicode directories, Windows before 10 version 1903, a promoted SDK or release, official publisher keys. No tag, release or STATUS change.
+
+## Windows/x64 Tranche 3.1 and D2 Installer Replay (2026-11-04)
+
+**Pass, local/unpromoted producer gate and consumer replay; Windows/x64.** Native Windows 11 x64 (10.0.26100), LLVM 22.1.8, Windows SDK imports
+`10.0.28000.0/um/x64`, Developer Mode on (not changed). Fresh clone of CRT `a48000c` plus the producer fixes below, preset `windows-host-ninja-debug`, build
+directory under the checkout's `out/` (the documented `CRT_BUILD_PRESET_NAME` limitation), `CRT_RELEASE_TAG=v0.0.1-rehearsal.3` (not a tag).
+
+### What the first Windows build exposed
+
+1. **xz runtime artifact (`f9dc911`).** `tools/build_dev_sdk.py` matched `lib/lzma.dll` for the xz runtime artifacts, but the Windows build installs
+   `bin/liblzma-5.dll` (the import libraries `lib/lzma.lib`, `lib/lzma.dll.lib`, `lib/liblzma.dll.a` and the static `lib/liblzma.a` are in `lib/`). The manifest therefore listed
+   only `lib/lzma.dll.lib`, and `verify_dist` failed with "Development SDK missing xz shared runtime: liblzma". The pattern is now `bin/liblzma-*.dll`;
+   Linux and macOS patterns are unchanged.
+2. **Windows shared consumer (`1ee0379`).** `libstdc++/tests/development_sdk_consumer.cc` has decoded xz since 3.1, but the Windows shared lane in
+   `tools/test_dev_sdk_consumer.py` listed no liblzma import library (undefined `lzma_*`). It now links `liblzma.dll.a`.
+3. **Install-metadata inventory (`f9dc911`).** For an escaping symlink target Windows' `Path.resolve(strict=True)` raises `OSError` (invalid name) instead of
+   `ValueError`; `tools/test_sdk_install_metadata.py` failed there before this work. The inventory now converts it to `ValueError`.
+
+A first producer build that reused the LLVM runtime source trees of an older build was rejected by CRT ("noncanonical source cache"); the sources were fetched again.
+Immutable stage source candidates must be removed from the build directory (`stage-sources`, `stage-cache`) when the producer commit changes between attempts.
+
+### Final Producer Gate and Release
+
+Clean `1ee0379`: `crt-development-sdk-test` exit 0 (xz round trip static and shared, mbedTLS, `verify_dist`, static/shared consumer), `crt-c-test` 168 of 169 pass with
+`fork_heap_snapshot_test_runs` skipped (317 s), `crt-dev-release` exit 0. Asset `crt-v0.0.1-rehearsal.3-windows-x86_64-dev.zip` (146,453,507 bytes, SHA-256
+`fc3eeb74...810b`); manifest SHA-256 `fe86e1d1...5886`; install metadata: `zip`, root `dev`, 2,917 entries (2,736 files, 181 directories, 0 symlinks), 402,317,041
+bytes, identity `075d5eb3...2c4d`. `liblzma` ships static and shared; the SDK-only CLI links `-llzma` through the `lzma.lib` alias.
+
+### Consumer
+
+The CLI's contract replay (driver unchanged) self-builds from the SDK alone (16 sources, cold 16/0, warm 0/16) with 857 native, 151 archive and 66 SDK-store checks; the
+installer replay `tools/replay_sdk_install_windows.py` (restricted token, job-object accounting) passes **62/62**. Details, Windows-specific hostile names, the two CLI fixes and
+limits (no network denial, no mode bits) are in the CLI's [D2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-isolated-replay-2026-11-04).
+
+### Evidence and Limits
+
+Raw evidence is in the CLI checkout's ignored `out/windows-d2-20261104/` (producer build logs, replays, the failed attempts). Windows/x64 only; Windows/arm64 and Linux/aarch64
+installer replays, Full-stage install metadata, a published release asset and promotion are not run. No tag, release, production lock or STATUS change.

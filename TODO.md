@@ -69,6 +69,9 @@ technical candidates**, and Tranche 2's independent host-tools and SDK-free
 environment/resource increment is verified on Linux, macOS/arm64 and Windows/x64. The current focus is
 **Tranche 3: the Development-SDK `xz` port and installation metadata (3.1), the local installer it enables in
 `crt-cli` D2 first** (network acquisition, updates and self-upgrade are not in this increment).
+Tranche 3 progress (local rehearsal assets, not releases): 3.1 metadata and the `xz` port are produced and consumed on Linux/x86_64, macOS/arm64 and Windows/x64
+(Windows needed three producer fixes, `1ee0379`); 3.2 consumer transaction replays pass on those three hosts ([Windows/x64](docs/acceptance/sdk_split_acceptance.md#windowsx64-tranche-31-and-d2-installer-replay-2026-11-04));
+Linux/aarch64 and Windows/arm64 replays, Full-stage metadata and promotion are open; 3.3 self-upgrade is not started.
 Numbered tranches 1-8 map to D0-D7.
 SDK split and local assembly rehearsal are complete
 ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
@@ -132,7 +135,7 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 - [ ] **3.1** Supply exact stage/profile artifacts and contract metadata for CLI
   installation/selection/update; promote producer artifacts before consumer locks.
   Linux: `xz` port + install metadata format 1 (dev release manifest) implemented, consumed by `crt-cli sdk install`
-  ([HISTORY](HISTORY.md)); `crt-dev-release` rehearsed end to end on Linux; macOS/arm64 rehearsal `crt-dev-release` from the committed `53b1a80` (2026-11-04) installs and verifies natively; remaining: Full-stage metadata, Windows replay, promotion.
+  ([HISTORY](HISTORY.md)); `crt-dev-release` rehearsed end to end on Linux; macOS/arm64 rehearsal `crt-dev-release` from the committed `53b1a80` (2026-11-04) installs and verifies natively; Windows/x64 rehearsal `crt-dev-release` from the committed `1ee0379` (2026-11-04) installs and verifies natively ([record](docs/acceptance/sdk_split_acceptance.md#windowsx64-tranche-31-and-d2-installer-replay-2026-11-04)); remaining: Full-stage metadata, Windows/arm64 and Linux/aarch64 replay, promotion.
 - [ ] **3.2** Review three-host consumer transactions, tamper/interruption recovery
   and path/DLL collisions; keep project-lock updates explicit.
 - [ ] **3.3** Support CLI-owned self-upgrade staging, candidate diagnosis, OS-specific
