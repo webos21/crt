@@ -135,10 +135,20 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
 - [ ] **3.1** Supply exact stage/profile artifacts and contract metadata for CLI
   installation/selection/update; promote producer artifacts before consumer locks.
-  Linux: `xz` port + install metadata format 1 (dev release manifest) implemented, consumed by `crt-cli sdk install`
-  ([HISTORY](HISTORY.md)); `crt-dev-release` rehearsed end to end on Linux; macOS/arm64 rehearsal `crt-dev-release` from the committed `53b1a80` (2026-11-04) installs and verifies natively; Windows/x64 rehearsal `crt-dev-release` from the committed `1ee0379` (2026-11-04) installs and verifies natively ([record](docs/acceptance/sdk_split_acceptance.md#windowsx64-tranche-31-and-d2-installer-replay-2026-11-04)); Linux/aarch64 rehearsal `crt-dev-release` from the committed `ffd0405` (2026-11-04) installs and verifies natively ([record](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-tranche-31-and-d2-installer-replay-2026-11-04)); Windows/arm64 rehearsal `crt-dev-release` from the committed `b20a460` (2026-11-04) installs and verifies natively ([record](docs/acceptance/sdk_split_acceptance.md#windowsarm64-tranche-31-and-d2-installer-replay-2026-11-04)); remaining: Full-stage metadata, promotion.
+  - [x] `xz` port and install metadata format 1 in the Development-SDK release manifest, produced by
+    `crt-dev-release` and consumed by `crt-cli sdk install` on all five native pairs
+    (details: [HISTORY](HISTORY.md), [acceptance](docs/acceptance/sdk_split_acceptance.md)).
+  - [ ] Full-stage (`06-web`) install metadata and its size/performance limits.
+  - [ ] Promote a release candidate from a committed tree and record only the exercised combinations
+    (CLI `docs/compatibility.md`) before any consumer lock moves.
+  - [ ] Metadata the CLI needs for stage/profile selection and explicit updates.
 - [ ] **3.2** Review three-host consumer transactions, tamper/interruption recovery
   and path/DLL collisions; keep project-lock updates explicit.
+  - [x] Transactions, tamper and interruption recovery, hostile archives and concurrent installs replayed
+    on all five native pairs ([CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
+  - [ ] Path/DLL collisions between an installed SDK and the host (archive case collisions only so far);
+    replay on the Windows pairs once project SDK selection exists.
+  - [ ] Project-lock updates stay explicit: needs the CLI project SDK selection (D2), not yet implemented.
 - [ ] **3.3** Support CLI-owned self-upgrade staging, candidate diagnosis, OS-specific
   activation and rollback; upgrading the CLI must preserve project SDK/port pins.
 
