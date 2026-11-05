@@ -86,8 +86,44 @@ def project_local_shared_rpath(vector, mode, operation, target_os):
     return result
 
 
+OS_SDK_KINDS = {'macos': 'macos-xcode-sdk', 'windows': 'windows-um-import-libraries'}
+
+
+def make_portable(result):
+    """Replace the host's OS SDK location in every recorded argv with @OS_SDK@.
+
+    The result then holds no machine path: the consumer finds the OS SDK again on its own host (Xcode SDK, Windows SDK
+    import libraries) and substitutes it. ``os_sdk.kind`` says how. A Linux contract has no OS SDK and is unchanged."""
+    location = result.pop('external_os_sdk', None)
+    if location is None:
+        return result
+    groups = [result['commands'], *result['modes'].values()]
+    for group in groups:
+        for name, vector in group.items():
+            group[name] = [replace_location(value, location) for value in vector]
+    result['os_sdk'] = {'kind': OS_SDK_KINDS[result['target']['os']]}
+    leaked = sorted({spelling for group in groups for vector in group.values() for value in vector
+                     for spelling in location_spellings(location) if spelling in value})
+    if leaked:
+        raise RuntimeError('portable contract still names the OS SDK location: ' + ', '.join(leaked))
+    return result
+
+
+def location_spellings(location):
+    """The forward-slash form this tool records and the native backslash form a Windows wrapper may emit."""
+    return sorted({*spellings(location), location.replace('/', '\\')}, key=len, reverse=True)
+
+
+def replace_location(value, location):
+    for spelling in location_spellings(location):
+        value = value.replace(spelling, '@OS_SDK@')
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--portable', action='store_true',
+                        help='record @OS_SDK@ instead of this host\'s OS SDK path (the form shipped with a release)')
     parser.add_argument('--sdk-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--clang', default='clang')
@@ -217,6 +253,8 @@ with open(os.environ['CAPTURE_ARGV'], 'w') as stream:
                     commands[operation + '_' + language] = vector
                 if mode == 'executable-static':
                     result['commands'].update(commands)
+    if args.portable:
+        make_portable(result)
     result['exporter_sha256'] = digest(Path(__file__))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # No overwrite: a candidate is a new input identity, never an in-place update.

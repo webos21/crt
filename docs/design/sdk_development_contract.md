@@ -329,6 +329,21 @@ arrived (`crt-cli sdk install --release-manifest`). Format changes bump `format`
 Only the Development profile emits it so far; Full stage archives are not installable by the CLI yet.
 On Windows the Development archive is a zip and the xz runtime is `bin/liblzma-5.dll` with the import libraries `lib/lzma.lib`/`lib/liblzma.dll.a` ("lzma" link name).
 
+#### Portable toolchain contract (CRT 3.1, Stage 2)
+
+The same archive entry names, in `contract`, another asset of the release: `crt-<version>-<os>-<arch>-dev-toolchain.json`,
+the `crt.experimental.native-toolchain` format 1 document produced by `tools/export_cli_toolchain.py --portable` from the
+*extracted* archive. It binds the SDK's content identity (`sdk_content_sha256` equals `install.content_sha256`; the
+collector refuses a mismatch) to the compile/link argv policy and holds no machine path. On Linux it is identical to the
+unflagged export. On macOS and Windows the Xcode SDK / Windows SDK import-library location is recorded as `@OS_SDK@` and
+`os_sdk.kind` (`macos-xcode-sdk`, `windows-um-import-libraries`) says how a consumer finds it on its own host
+(`xcrun --sdk macosx --show-sdk-path`, `CRT_WINDOWS_SDK_LIBPATH`); `external_os_sdk` is absent. The unflagged export keeps
+the host-specific form for the existing replay scripts. The asset's digest and size are the manifest's; a consumer stores
+the document beside the installed SDK (`.contracts/<directory>.json`) and never changes it. Collecting a macOS or Windows
+release needs the same OS SDK inputs as the export (Xcode, `CRT_WINDOWS_SDK_LIBPATH`). Unit-tested on Linux (the macOS and
+Windows path substitution is tested with synthetic paths only) and exercised end to end on Linux/x86_64 only; not yet on
+macOS or Windows.
+
 This is an implemented producer candidate, not consumer adoption. The review
 baselines are CRT `1033c86`, CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and
 Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`. The consumer ledger was read;

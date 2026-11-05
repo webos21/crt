@@ -138,6 +138,8 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   - [x] `xz` port and install metadata format 1 in the Development-SDK release manifest, produced by
     `crt-dev-release` and consumed by `crt-cli sdk install` on all five native pairs
     (details: [HISTORY](HISTORY.md), [acceptance](docs/acceptance/sdk_split_acceptance.md)).
+  - [x] Portable toolchain contract (`@OS_SDK@`) shipped as a release asset and kept by `sdk install` (Linux/x86_64;
+    macOS/Windows collection and discovery not yet exercised).
   - [ ] Full-stage (`06-web`) install metadata and its size/performance limits.
   - [ ] Promote a release candidate from a committed tree and record only the exercised combinations
     (CLI `docs/compatibility.md`) before any consumer lock moves.

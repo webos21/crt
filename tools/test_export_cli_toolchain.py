@@ -37,6 +37,31 @@ class NativePolicy(unittest.TestCase):
                          [value.replace(r'@RESOURCE@\include', '@RESOURCE@/include') for value in
                           exporter.normalize_argv(captured, sdk, r'C:\Program Files\LLVM\lib\clang\22', 'cpp')])
 
+    def test_portable_contract_replaces_the_os_sdk_location_and_keeps_no_machine_path(self):
+        location = '/Applications/Xcode.app/SDKs/MacOSX.sdk'
+        result = {'target': {'os': 'macos', 'arch': 'aarch64'}, 'external_os_sdk': location,
+                  'commands': {'compile_c': ['-isysroot', location, '@SOURCE@']},
+                  'modes': {'executable-static': {'compile_c': ['-isysroot', location, '-c'], 'archive': ['rcs']}}}
+        exporter.make_portable(result)
+        self.assertNotIn('external_os_sdk', result)
+        self.assertEqual({'kind': 'macos-xcode-sdk'}, result['os_sdk'])
+        self.assertEqual(['-isysroot', '@OS_SDK@', '@SOURCE@'], result['commands']['compile_c'])
+        self.assertEqual(['-isysroot', '@OS_SDK@', '-c'], result['modes']['executable-static']['compile_c'])
+        self.assertNotIn(location, str(result))
+
+    def test_portable_windows_contract_handles_both_path_spellings(self):
+        location = 'C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64'
+        result = {'target': {'os': 'windows', 'arch': 'x86_64'}, 'external_os_sdk': location, 'commands': {},
+                  'modes': {'executable-static': {'link_c': ['-Wl,/libpath:' + location, '-Wl,/libpath:' + location.replace('/', '\\')]}}}
+        exporter.make_portable(result)
+        self.assertEqual({'kind': 'windows-um-import-libraries'}, result['os_sdk'])
+        self.assertEqual(['-Wl,/libpath:@OS_SDK@'] * 2, result['modes']['executable-static']['link_c'])
+
+    def test_a_linux_contract_has_no_os_sdk_and_is_unchanged(self):
+        result = {'target': {'os': 'linux', 'arch': 'x86_64'}, 'commands': {'a': ['x']}, 'modes': {}}
+        before = str(result)
+        self.assertEqual(before, str(exporter.make_portable(result)))
+
     def test_linux_shared_executables_find_a_project_library_beside_them(self):
         link = ['-nostdlib', '-Wl,-rpath,@SDK@/lib', '@OBJECTS@', '@LIBRARIES@', '-o', '@OUTPUT@']
         fixed = exporter.project_local_shared_rpath(link, 'executable-shared', 'link', 'linux')

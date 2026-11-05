@@ -82,6 +82,18 @@ never pushed, cold build ~1 h) ended with `Release assets prepared locally; noth
 (`53b1a80`, tag `v0.0.1-rehearsal.2`, identity 202303ca..., 2797 entries) also ended with `Release assets prepared locally; nothing
 uploaded`; the CLI installed it from the manifest and the bubblewrap replay passed 48/48. Neither is a published release. Not verified: macOS/Windows replay, Windows `lzma` import-library name, Full-stage metadata.
 
+### Tranche 3.1 Stage 2: portable toolchain contract in the Development-SDK release (Linux/x86_64)
+
+`tools/export_cli_toolchain.py --portable` writes the contract without any machine path: on macOS and Windows the OS SDK
+location becomes `@OS_SDK@` with `os_sdk.kind`, on Linux the output is identical to the unflagged export (checked on the
+real SDK; only `exporter_sha256` differs). The unflagged export is unchanged for the replay scripts. `crt_sdk_release.py`
+now exports it from the extracted archive, refuses an identity that differs from `install.content_sha256`, adds it as a
+release asset (`crt-<v>-<os>-<arch>-dev-toolchain.json`) and names it in the archive entry (`contract`). Documented in the
+[contract](docs/design/sdk_development_contract.md). Verified: 9 exporter tests (3 new, synthetic macOS/Windows paths), a
+`crt-dev-release` rehearsal (`v0.0.1-rehearsal.3`, scratch clone with the diff committed locally, nothing uploaded) and
+the CLI flow in the [crt-cli HISTORY](https://github.com/webos21/crt-cli/blob/main/HISTORY.md). Not verified: macOS/Windows
+collection (needs Xcode / `CRT_WINDOWS_SDK_LIBPATH` at collection time) and a release from committed code.
+
 ### Close the Windows/x64 Tranche 2 replay
 
 Replayed the single-executable CLI, the independently pinned host-tools bundle and the selected package CA on native

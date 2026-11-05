@@ -97,6 +97,26 @@ def main(argv=None):
     return 0
 
 
+def toolchain_contract(extracted, archive, install):
+    """Export the host-independent native toolchain contract of the tree the archive extracts to.
+
+    It is made from the extracted bytes (not the build tree) and bound to the archive by its content identity, so a
+    consumer that installs the archive can store it beside the SDK and select the SDK without any other input."""
+    name = archive.name
+    for suffix in (".tar.xz", ".zip"):
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+    contract = archive.parent / (name + "-toolchain.json")
+    run([sys.executable, ROOT / "tools/export_cli_toolchain.py", "--portable", "--sdk-root", extracted,
+         "--output", contract])
+    document = json.loads(contract.read_text(encoding="utf-8"))
+    if document.get("sdk_content_sha256") != install["content_sha256"]:
+        raise release.ReleaseError("toolchain contract identity differs from the archive's install metadata")
+    if "external_os_sdk" in document:
+        raise release.ReleaseError("toolchain contract names a machine path; it must be portable")
+    return contract
+
+
 def assemble(args, development, full):
     run([sys.executable, ROOT / "tools/verify_dist.py", "--dist", development, "--stage", "02-cxx", "--profile", "dev"])
     if args.profile == "full":
@@ -124,13 +144,15 @@ def assemble(args, development, full):
             install = install_metadata.install_metadata(Path(temp) / "dev", "zip" if archive.suffix == ".zip" else "tar.xz")
             run([sys.executable, ROOT / "tools/verify_dist.py", "--dist", Path(temp) / "dev",
                  "--stage", "02-cxx", "--profile", "dev"])
-        files = [archive]
+            contract = toolchain_contract(Path(temp) / "dev", archive, install)
+        files = [archive, contract]
         for source in sources:
             destination = args.output_dir / source.name
             shutil.copy2(source, destination)
             files.append(destination)
         assets = [{"name": p.name, "size": p.stat().st_size, "sha256": dev.digest(p)} for p in files]
         assets[0]["install"] = install  # describes the tree the archive extracts to (crt_sdk_install_metadata.py)
+        assets[0]["contract"] = contract.name  # the asset holding the host-independent toolchain contract of that tree
         suffix = target["os"] + "-" + target["arch"]
         (args.output_dir / ("SHA256SUMS-dev-" + suffix)).write_text(release.format_sha256sums(
             [(entry["name"], entry["sha256"]) for entry in assets]), encoding="utf-8")
