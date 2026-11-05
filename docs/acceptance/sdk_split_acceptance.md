@@ -1581,3 +1581,53 @@ Native Windows receipt replay, installed-SDK path/tool/DLL collisions and the
 automatic first-build/acquisition workflow remain separate work. No SDK
 identity/schema, public artifact, default selection, committed CLI binary,
 project lock or STATUS was changed or promoted by this replay.
+
+## Windows/x64 installation receipt and repair replay (2026-11-05)
+
+**Receipt/repair boundaries pass; the whole Windows installer gate remains
+open after a native concurrent-install crash.** Reviewed CRT `dc62e8d` and CLI
+`51f1dc0`, whose product/test input snapshot matches receipt implementation
+`502992e` and the Linux/macOS replay. Reused the retained clean CRT
+`436b4f2e18db4ce2ac5d1eb56d6f2c7b37606296` Development SDK and its original
+`v0.0.1-rehearsal.8` archive, portable contract and independently pinned
+manifest from the [earlier Windows producer run](#windowsx64-portable-toolchain-contract-release-replay-2026-11-05).
+All three input hashes still match that record. No new runtime build,
+dirty-SDK opt-in, release fixture or artifact promotion is involved.
+
+The scoped restricted-token CLI replay passes SDK-only cold **16/0**, warm
+**0/16**, **113 store checks**, bare doctor/import/ownership checks and unchanged
+original/copied SDK inventories. Windows intentionally excludes one symlink
+receipt unit case; a separate real Windows symlink fixture passes **3/3**
+(regular receipt accepted, symlink refused, restored receipt accepted), leaving
+payload and target bytes unchanged. Producer metadata/exporter fixtures pass
+**14/14**; unchanged full native/archive/runtime suites retain their baselines.
+
+The isolated installer records **93 passing checks** before the concurrent
+phase: valid-looking policy tampering, fresh-configure lock preservation,
+original-release repair, legacy receipt recovery, payload-preserving refusal,
+hostile archives and interrupted-install recovery all pass. One concurrent
+child then returns no JSON and reports `0xc0000005`/SIGSEGV. The old checker
+raises `TypeError` while sorting a missing `already_installed` value, leaving
+its result incomplete. A fresh, bounded continuation of phases 7–9 passes
+**9/9**, including concurrent installs, read-only store rejection and tar.xz
+identity. One boundary probe overlaps the first run; this covers 101 distinct
+cases across attempts, **not a single 101/101 acceptance**. CLI reporting is
+fixed to retain native exits and count empty replies as failures (four local
+reporting fixtures pass). The native crash itself is not fixed or excused.
+
+Five small missing/empty/malformed/dead/live lock-owner diagnostic fixtures
+behave as expected, without reproducing the crash. A later image-base sample
+of the same failed executable suggests `free_unlocked` as an address candidate;
+the fault-time base/stack were not captured, so allocator ownership, caller and
+root cause remain unproven. Next work is a bounded concurrent-install repro
+with fault-time module/stack evidence before changing CLI or PAL behavior.
+
+The [CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#installation-receipts-and-explicit-repair-windowsx64-2026-11-05)
+owns exact identities, commands and per-case evidence. Raw files remain in
+ignored `out/d2-receipts-windows-20261105/`: `candidate.json`, `status.json`,
+`build/`, failed `isolated/`, passing `remaining-r2/`, `receipt-symlink/`,
+`lock-owner-probe/` and reporting fixtures. The failed run and first local
+continuation harness error are preserved. Windows/x64 concurrency closure,
+Windows/arm64 receipt replay, collisions and first-build/acquisition remain
+open. No STATUS, SDK, committed CLI binary, default, project lock, tag or
+release was changed.

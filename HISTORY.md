@@ -10,6 +10,19 @@ substantive update.
 
 ## 2026-11-05
 
+### Replay Windows/x64 receipt boundaries and retain a native concurrency blocker
+
+Reused the clean `436b4f2` Development SDK and original rehearsal.8 release
+inputs with CLI `51f1dc0` (receipt implementation `502992e`). SDK-only cold/warm
+self-build, 113 Windows store checks, 14 producer fixtures and a real symlink
+receipt probe pass. The isolated run records 93 passes before one concurrent
+installer exits with SIGSEGV; a bounded continuation passes its remaining nine
+checks. These are separate outcomes, not a clean full replay. Recorded the
+[evidence and open investigation](docs/acceptance/sdk_split_acceptance.md#windowsx64-installation-receipt-and-repair-replay-2026-11-05);
+CLI failure reporting now retains empty/crashed child results without raising
+a Python sorting exception. No runtime/SDK, committed binary, lock or STATUS
+change. Windows concurrency closure and Windows/arm64 delta replay remain open.
+
 ### Replay installation receipts and pinned repair on macOS/arm64
 
 Validated the CLI receipt increment `502992e` against the producer handoff

@@ -142,7 +142,10 @@ owning acceptance records; this list contains the remaining producer work.
   existing producer format-1 assets, preserving SDK identity/schema. The
   [Linux consumer slice passes](docs/acceptance/sdk_split_acceptance.md#installation-time-contract-pin-handoff-2026-11-05)
   and [macOS receipt replay passes](docs/acceptance/sdk_split_acceptance.md#macosarm64-installation-receipt-and-repair-replay-2026-11-05);
-  native Windows receipt replay remains CLI-owned.
+  [Windows/x64 receipt boundaries also pass](docs/acceptance/sdk_split_acceptance.md#windowsx64-installation-receipt-and-repair-replay-2026-11-05),
+  but its first concurrent-install replay hit a native SIGSEGV. Keep the
+  coordinated CLI/producer crash investigation and Windows/arm64 delta replay
+  open; a passing continuation does not close the failed Windows gate.
 - [ ] **3.2** Review targeted installed-SDK path/tool/DLL collisions and lock
   preservation using the implemented project selection. Finish affected-store
   regressions without reopening unchanged whole-stack builds.
