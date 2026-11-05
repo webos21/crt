@@ -7,6 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crt_dev_profile as profile
+import crt_sdk_install_metadata as install_metadata
 import crt_sdk_release as release
 import test_dev_sdk_external as external
 import test_sdk_split_s5 as s5
@@ -446,16 +447,40 @@ class DevelopmentProfile(unittest.TestCase):
                 "--full-sdk", str(self.full), "--source-assets", str(self.root / "sources"),
                 "--output-dir", str(self.root / "release")]
         git_output = lambda args, **kwargs: "" if "status" in args else "a" * 40
+        # The exporter needs a real SDK and host compiler; the fixture stands in with a contract bound to the same tree.
+        def fake_run(command, **kwargs):
+            command = [str(part) for part in command]
+            if command[1].endswith("export_cli_toolchain.py"):
+                self.assertIn("--portable", command)
+                sdk = Path(command[command.index("--sdk-root") + 1])
+                identity = install_metadata.install_metadata(sdk, "zip")["content_sha256"]
+                Path(command[command.index("--output") + 1]).write_text(json.dumps(
+                    {"schema": "crt.experimental.native-toolchain", "format": 1, "sdk_content_sha256": self.contract_identity or identity}))
+        self.contract_identity = None
         with patch.object(release.subprocess, "check_output", side_effect=git_output), \
-             patch.object(release, "run"), patch.object(release.release, "check_sdk", return_value=({}, [])):
+             patch.object(release, "run", side_effect=fake_run), patch.object(release.release, "check_sdk", return_value=({}, [])):
             self.assertEqual(0, release.main(args))
             target = self.root / "release"
             checksums = (target / "SHA256SUMS-dev-windows-x86_64").read_text()
             self.assertIn("crt-v1.0.0-windows-x86_64-dev.zip", checksums)
-            self.assertTrue((target / "release-manifest-dev-windows-x86_64.json").is_file())
+            self.assertIn("crt-v1.0.0-windows-x86_64-dev-toolchain.json", checksums)
+            manifest = json.loads((target / "release-manifest-dev-windows-x86_64.json").read_text())
+            archive_entry = manifest["assets"][0]
+            self.assertEqual("crt-v1.0.0-windows-x86_64-dev-toolchain.json", archive_entry["contract"])
+            self.assertIn(archive_entry["contract"], [asset["name"] for asset in manifest["assets"]])
+            self.assertEqual(json.loads((target / archive_entry["contract"]).read_text())["sdk_content_sha256"],
+                             archive_entry["install"]["content_sha256"])
             with self.assertRaisesRegex(release.release.ReleaseError, "already exists"):
                 release.main(args)
             self.assertEqual(checksums, (target / "SHA256SUMS-dev-windows-x86_64").read_text())
+        # A contract for another tree is never published next to this archive.
+        self.contract_identity = "f" * 64
+        mismatched = [*args[:-1], str(self.root / "mismatched-release")]
+        with patch.object(release.subprocess, "check_output", side_effect=git_output), \
+             patch.object(release, "run", side_effect=fake_run), patch.object(release.release, "check_sdk", return_value=({}, [])):
+            with self.assertRaisesRegex(release.release.ReleaseError, "contract identity differs"):
+                release.main(mismatched)
+        self.assertFalse((self.root / "mismatched-release").exists())
         second = [*args[:-1], str(self.root / "failed-release")]
         with patch.object(release.subprocess, "check_output", side_effect=git_output), \
              patch.object(release, "run", side_effect=ValueError("injected verifier failure")):
