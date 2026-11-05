@@ -1524,3 +1524,21 @@ lock with the OS SDK kind but no machine path, build/test/run, damaged or missin
 
 Raw evidence is in the producer worktree's ignored `out/s2-windows-x64-20261105/` (`producer-status.json`, `logs/`, `contract/`, `d2/`, the previous CLI under `previous/`; not committed). Windows/x64 only; Full-stage
 install metadata, a published release asset and promotion are not run. The Windows Development SDK contains no symlinks and the driver has no network denial or read-only root. No tag, release, production lock or STATUS change.
+
+## Installation-time contract pin handoff (2026-11-05)
+
+The next CRT 3.1/CLI D2 increment reuses the existing format-1 install metadata
+and referenced portable-contract digest/size. The
+[contract handoff](../design/sdk_development_contract.md#installation-time-contract-pin-handoff-crt-31)
+specifies CLI-owned receipts outside SDK identity and explicit recovery from
+original pinned release inputs. No new producer asset/schema, runtime API or
+SDK bytes are required. The existing metadata/exporter suite passes 14 checks.
+
+Original native clean-release/Stage 2 records above are unchanged. The new
+[CLI Linux receipt/repair proof](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#installation-receipts-and-explicit-repair-linuxx86_64-2026-11-05)
+uses a copied, explicitly dirty `b6bf52b` local SDK and labeled archive/manifest
+fixtures, not a new clean collector result. It owns exact source/binary hashes,
+114 store checks, 834 native checks, the 84-case isolated transaction replay
+and three focused payload-preservation cases.
+The receipt delta still needs native Windows/macOS replay; source/runtime
+rebuilding or public artifact promotion is not inferred from these results.

@@ -10,6 +10,17 @@ substantive update.
 
 ## 2026-11-05
 
+### Support the CLI installation receipt/pinned-repair handoff
+
+CRT 3.1 reuses the existing release manifest's archive/install identity and
+referenced portable-contract pin; CLI-owned receipts remain outside SDK bytes.
+Recorded the [handoff and scoped proof](docs/acceptance/sdk_split_acceptance.md#installation-time-contract-pin-handoff-2026-11-05),
+with unchanged metadata/exporter tests passing. The consumer now rejects
+silent contract re-pinning and repairs only from verified original release
+inputs. Linux tests use a labeled dirty-local SDK fixture; no runtime rebuild,
+clean-release qualification, new producer schema or promotion is claimed.
+Native macOS/Windows receipt replay and installed-SDK collisions stay open.
+
 ### Align SDK/CLI priorities and explicitly refresh the public snapshot
 
 Reviewed CRT `433a7d6` and CLI `3978ced` with the owner. Retained the exercised

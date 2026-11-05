@@ -340,9 +340,28 @@ unflagged export. On macOS and Windows the Xcode SDK / Windows SDK import-librar
 (`xcrun --sdk macosx --show-sdk-path`, `CRT_WINDOWS_SDK_LIBPATH`); `external_os_sdk` is absent. The unflagged export keeps
 the host-specific form for the existing replay scripts. The asset's digest and size are the manifest's; a consumer stores
 the document beside the installed SDK (`.contracts/<directory>.json`) and never changes it. Collecting a macOS or Windows
-release needs the same OS SDK inputs as the export (Xcode, `CRT_WINDOWS_SDK_LIBPATH`). Unit-tested on Linux (the macOS and
-Windows path substitution is tested with synthetic paths only) and exercised end to end on Linux/x86_64 only; not yet on
-macOS or Windows.
+release needs the same OS SDK inputs as the export (Xcode, `CRT_WINDOWS_SDK_LIBPATH`). The original Linux-first tests are
+followed by [five-pair native release/consumer records](../acceptance/sdk_split_acceptance.md), including Windows/x64;
+each keeps its own producer/CLI snapshot and artifacts.
+
+#### Installation-time contract pin handoff (CRT 3.1)
+
+The existing pinned release manifest already supplies the archive identity,
+install bounds and referenced contract size/SHA-256. No new producer asset,
+SDK payload file or metadata format is needed for the CLI's installation
+receipt. CLI owns `crt-cli.sdk-install-receipt`, format 1, in its store's
+`.receipts/<directory>.json`: exact SDK identity and either no contract or the
+required contract's original digest. It is outside the SDK content identity.
+The [consumer reference](https://github.com/webos21/crt-cli/blob/main/docs/reference/bootstrap_contract.md#installation-receipt-cli-owned-format-1)
+owns its validation, lifetime and explicit repair command.
+
+Store-based verify/fresh configure must check this installation-time pin, not
+silently pin current bytes. Legacy missing-receipt stores require an explicit
+repair using the original archive plus independently pinned release manifest
+and its contract asset; SDK payload/identity and project locks stay unchanged.
+A known pin cannot change behind that SDK identity. Producer receipt support
+therefore reuses the existing format-1 assets and identity rule; it requires
+focused consumer proof, not a new Full/Web build or production promotion.
 
 This is an implemented producer candidate, not consumer adoption. The review
 baselines are CRT `1033c86`, CLI `5fcdc995d231fe2f9dbab4292000a81e0b4fce93` and

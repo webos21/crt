@@ -138,9 +138,10 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 The existing local dev/install/portable-contract baseline is retained in the
 owning acceptance records; this list contains the remaining producer work.
 
-- [ ] **3.1** Support the CLI's installation-time contract digest/required-presence
-  record and explicit recovery from verified release metadata; preserve the
-  installed SDK's identity and existing format semantics unless jointly reviewed.
+- [x] **3.1** Define the installation-time contract pin/repair handoff using
+  existing producer format-1 assets, preserving SDK identity/schema. The
+  [Linux consumer slice passes](docs/acceptance/sdk_split_acceptance.md#installation-time-contract-pin-handoff-2026-11-05);
+  new native macOS/Windows receipt replay remains CLI-owned.
 - [ ] **3.2** Review targeted installed-SDK path/tool/DLL collisions and lock
   preservation using the implemented project selection. Finish affected-store
   regressions without reopening unchanged whole-stack builds.
