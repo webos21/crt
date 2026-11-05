@@ -10,6 +10,13 @@ substantive update.
 
 ## 2026-11-05
 
+### Portable toolchain contract release on macOS/arm64
+
+Replayed the committed `784389b` natively: rehearsal `crt-dev-release` `v0.0.1-rehearsal.6` produces the archive, the portable toolchain contract (`os_sdk.kind` `macos-xcode-sdk`), the manifest
+and checksums, all of which verify; `crt-c-test` 146/146. The CLI built itself from that SDK and its Seatbelt D2 replay, including the contract and project-selection cases, passes 69/69
+(a first driver run failed only on a working directory its own profile hid). No producer change was needed.
+[Record](docs/acceptance/sdk_split_acceptance.md#macosarm64-portable-toolchain-contract-release-replay-2026-11-05).
+
 ### Portable toolchain contract release on Linux/aarch64
 
 Replayed the committed `78ed80f` (the release now publishes the portable toolchain contract next to the Development SDK) natively on the aarch64 guest: rehearsal `crt-dev-release`

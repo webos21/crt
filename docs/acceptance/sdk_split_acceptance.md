@@ -1426,3 +1426,34 @@ missing contract, release without or with a damaged contract asset refused). Det
 
 Raw evidence is in the CLI checkout's ignored `out/linux-arm64-s2-20261105/` and the producer worktree's `out/s2-linux-aarch64-20261105/` (not committed). Linux/aarch64 only; the macOS and Windows contract
 collection (`@OS_SDK@` discovery), Full-stage install metadata, a published release asset and promotion are not run. No tag, release, production lock or STATUS change.
+
+## macOS/arm64 Portable Toolchain Contract Release Replay (2026-11-05)
+
+**Pass, local/unpromoted producer gate and consumer replay; macOS/arm64.** Native arm64, macOS 27.2. Detached worktree of **committed** CRT `784389b`
+(the portable-contract export `01a208d` and the release-fixture stand-in), preset `macos-host-ninja-debug`, `CRT_RELEASE_TAG=v0.0.1-rehearsal.6` (not a tag,
+nothing uploaded), built from a fresh output root with no source cache.
+
+### Producer Gate and Release
+
+`crt-development-sdk-test` exit 0, `crt-c-test` **146/146** (Linux counts 147; one test is host-conditional) and `crt-dev-release` exit 0.
+`SHA256SUMS-dev-macos-aarch64` verifies four assets: the archive `crt-v0.0.1-rehearsal.6-macos-aarch64-dev.tar.xz` (6,675,764 bytes, SHA-256
+`bf0d92a1948e8eb44b674bdf0cd6cf1c120fe2d2ede0735b231ad5712c26c1a9`), the **portable toolchain contract** `crt-v0.0.1-rehearsal.6-macos-aarch64-dev-toolchain.json` (402,864 bytes, SHA-256
+`200d9a105283deaa6c23b31e451555208a930de23aaa4990efc246d5f070faec`) and the 02/03 stage-source assets. Manifest `release-manifest-dev-macos-aarch64.json` SHA-256
+`c08c25e8abd3ba71d90db89690db40f5ccec8001402675f9d82a9991213d156b`; the archive entry names its contract and carries install metadata format 1: `tar.xz`, root `dev`, 2,786 entries,
+identity `72d1b37593abb2f5dd9d58a8338f44191b0b2023d6cbf2621cf7cd688ce80b4c`. Source commit in the manifest: `784389b`. Unlike Linux, the macOS contract declares
+`os_sdk.kind` = `macos-xcode-sdk`: the collector recorded that an Xcode OS SDK is needed, not where it is. No producer change was needed on this host.
+
+### Consumer
+
+The CLI's contract replay (`tools/replay_cli_contract_macos.py`) self-builds the latest CLI sources (`da3f3a9`) from the SDK alone (16 sources, cold 16/0, warm 0/16) with 869 native, 158 archive
+and 83 SDK-store checks, an import audit that finds only `libSystem`, a bootstrap loop from the previous committed binary and an unchanged SDK inventory. The CLI's D2 replay
+(`tools/replay_sdk_install_macos.py`, Seatbelt) passes **69/69**: the 48 installer cases plus the 21 contract and project-selection cases, with `xcrun` discovery of the OS SDK inside the
+sandbox. Details: the CLI's
+[Stage 2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#toolchain-contract-and-project-sdk-selection-replay-stage-2-macosarm64-2026-11-05).
+
+### Evidence and Limits
+
+Raw evidence is in the producer worktree's ignored `out/s2-macos-20261105/` and the CRT checkout's `out/s2-macos/` (not committed); a first driver invocation failed on a hidden working
+directory and is retained beside the passing one. macOS/arm64 only; the Windows contract collection (`@OS_SDK@` discovery), Full-stage install metadata, a published release asset and promotion
+are not run. No tag, release, production lock or STATUS change.
+
