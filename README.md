@@ -221,7 +221,10 @@ workflow is SDK -> CLI -> Studio, starting with the
 [producer contract gate](docs/design/sdk_development_contract.md). The separate
 [crt-cli repository](https://github.com/webos21/crt-cli) now owns the minimal
 native JSON/LLVM bootstrap; app builds do not require CMake, Python or shell.
-Full developer workflows and Studio integration remain planned.
+Its SDK install, store and project-selection path has been replayed on all five
+native pairs from rehearsal releases (unpromoted; no new public binary release).
+Explicit updates, Full-stage metadata, self-upgrade and Studio integration remain
+planned.
 
 See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
 

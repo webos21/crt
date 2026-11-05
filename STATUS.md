@@ -5,7 +5,9 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-10-28**.
+Last synchronized with the source tree and git history: **2026-11-05**
+(the SDK -> CLI paragraph below and "Next Priorities" were refreshed then; the
+other sections were last reviewed on 2026-10-28).
 Reviewed commits through `2ceba30` and the final local assembly review recorded
 in [release qualification](docs/acceptance/release_qualification.md). Its frozen
 producer is clean `3741ea5`; later documentation does not relabel those artifacts.
@@ -319,6 +321,19 @@ and curl. It has no graphics/media/UI/Web content. Its profile, external
 source-hidden consumers and S5 handoffs are distinct from release qualification
 and future CLI adoption. Windows/arm64 uses Full `05-ui` as its reference.
 
+**SDK -> CLI contract.** Development-SDK releases carry install metadata and a
+portable toolchain contract (`@OS_SDK@`, the host OS SDK is recorded as a kind
+only). The separate [crt-cli](https://github.com/webos21/crt-cli) installs such
+an SDK into an immutable shared store, keeps the contract beside it and lets a
+project select the SDK by identity (`crt.lock` format 1). That path was replayed
+natively on all five pairs (Linux x86_64/aarch64, macOS/arm64, Windows
+x64/arm64) from rehearsal releases of committed CRT trees, with a self-built
+SDK-only CLI; every record is in
+[SDK split acceptance](docs/acceptance/sdk_split_acceptance.md) and the CLI's
+`docs/acceptance/sdk_install_acceptance.md`. These are unpromoted rehearsal
+assets: no published release, no explicit SDK updates or self-upgrade, and no
+Full-stage (`06-web`) install metadata yet.
+
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
 record accepts only the recorded native/cross-packaging scope. Failed
@@ -531,6 +546,10 @@ rehearsal closure. The next planned producer increment is the
 [TODO](TODO.md#crt-developer-experience-sdk---cli---studio); CLI/Studio
 implementation and consumer compatibility acceptance have not started here.
 
+- The open SDK -> CLI work is the Full-stage install metadata and size limits,
+  promoting a release candidate from a committed tree (recorded in the CLI's
+  compatibility ledger before any consumer lock moves), explicit SDK updates and
+  CLI self-upgrade; see [TODO](TODO.md#crt-developer-experience-sdk---cli---studio).
 - Keep SDK identity/capability/startup/link/runtime contracts with CRT and use
   immutable public artifacts for external consumers. The separate CLI/Studio
   repositories remain documentation/bootstrap plans, not implemented products.
