@@ -1457,3 +1457,39 @@ Raw evidence is in the producer worktree's ignored `out/s2-macos-20261105/` and 
 directory and is retained beside the passing one. macOS/arm64 only; the Windows contract collection (`@OS_SDK@` discovery), Full-stage install metadata, a published release asset and promotion
 are not run. No tag, release, production lock or STATUS change.
 
+
+## Windows/arm64 Portable Toolchain Contract Release Replay (2026-11-05)
+
+**Pass, local/unpromoted producer gate and consumer replay; Windows/arm64.** Native Windows 11 arm64 VM (10.0.26300, 4 vCPUs, no GPU), LLVM 22.1.8, Windows SDK imports `10.0.28000.0/um/arm64`, Developer Mode
+on (not changed), native arm64 shell and Python. Detached worktree of **committed** CRT `0631131` (the portable-contract export `01a208d` and the release-fixture stand-in) at a short ASCII path, preset
+`windows-host-ninja-debug`, `CRT_RELEASE_TAG=v0.0.1-rehearsal.7` (not a tag, nothing uploaded), built from a fresh output root.
+
+### Producer Gate and Release
+
+`crt-development-sdk-test` exit 0 (2,339 s), `crt-c-test` **169/169** with `fork_heap_snapshot_test_runs` skipped (100 s) and `crt-dev-release` exit 0 (78 s). `SHA256SUMS-dev-windows-aarch64` lists the archive
+`crt-v0.0.1-rehearsal.7-windows-aarch64-dev.zip` (141,785,345 bytes, SHA-256 `976150ba98d3e5d6dc609a6218a5d4e4ad9ab0f4746e1447694765fdbd316294`), the **portable toolchain contract**
+`crt-v0.0.1-rehearsal.7-windows-aarch64-dev-toolchain.json` (441,104 bytes, SHA-256 `08ae2c51559704ea6791dab7e4555448d9fbeeef29f7f92bdd66bfa8a6301d68`) and the 02/03 stage-source assets. Manifest
+`release-manifest-dev-windows-aarch64.json` (1,701 bytes) SHA-256 `167f326094539ec92cd86a7aed723cc8a23b191d7fdcf38a0ee8f7de43232b4e`; the archive entry names its contract and carries install metadata
+format 1: `zip`, root `dev`, 2,917 entries (2,736 files, 181 directories, 0 symlinks), 398,216,734 bytes, identity `c4b352012b426c60e2d4d666febf565e17239f8f534714e7b67d89430f051233`. Source commit in the
+manifest: `0631131`. This is the first Windows collection of the contract: it declares `os_sdk.kind` = `windows-um-import-libraries`, i.e. the collector recorded that the Windows SDK import libraries
+are needed (found through `CRT_WINDOWS_SDK_LIBPATH`), not where they are. No producer change was needed on this host.
+
+### Consumer
+
+The CLI's contract replay (`tools/replay_cli_contract_windows.py`, unchanged) self-builds the latest CLI sources (`b03d127`) from the SDK alone (16 sources, cold 16/0, warm 0/16) with 932 native, 151 archive and
+83 SDK-store checks (all three test executables exit 0), 487 recorded processes (only the declared native tools, the CLI and its generated executables) and an unchanged SDK inventory; the bare CLI is
+30,089,728 bytes, PE machine `0xAA64`, importing only `kernel32.dll` and `api-ms-win-core-synch-l1-2-0.dll`. The CLI's D2 replay (`tools/replay_sdk_install_windows.py`, restricted token) passes **83/83**
+on its first run of the corrected sources: the 62 installer cases plus the 21 contract and project-selection cases (contract stored beside the SDK, `configure` with no `--sdk-contract`, lock with the OS SDK
+kind but no machine path, build/test/run, damaged or missing contract, release without or with a damaged contract asset refused). Details: the CLI's
+[Stage 2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#toolchain-contract-and-project-sdk-selection-replay-stage-2-windowsarm64-2026-11-05).
+
+### What the replay found
+
+No CRT defect. One CLI test defect (`b03d127` in crt-cli): the first contract replay failed `an SDK without a contract installs` in `sdk-store-test` because the test read the new SDK as `list()[1]` while the store
+sorts by a target-dependent content hash; the test now looks the SDK up by identity and the corrected sources pass all 83 store checks. The Windows `@OS_SDK@` collection and discovery, the open item of the other
+hosts' records, worked as designed.
+
+### Evidence and Limits
+
+Raw evidence is in the CLI checkout's ignored `out/windows-arm64-s2-20261105/` (producer logs, the failed first contract replay, the final replays) and the producer worktree's `out/` (not committed). Windows/arm64
+only; the Windows/x64 run of the same replay, Full-stage install metadata, a published release asset and promotion are not run. No tag, release, production lock or STATUS change.

@@ -10,6 +10,13 @@ substantive update.
 
 ## 2026-11-05
 
+### Portable toolchain contract release on Windows/arm64
+
+Replayed the committed `0631131` natively: rehearsal `crt-dev-release` `v0.0.1-rehearsal.7` produces the archive, the portable toolchain contract (`os_sdk.kind` `windows-um-import-libraries`; this is the first Windows
+collection of it), the manifest and checksums, all of which verify; `crt-c-test` 169/169. The CLI built itself from that SDK and its restricted-token D2 replay, including the contract and project-selection cases,
+passes 83/83 (62 installer plus 21 contract cases). No producer change was needed; one CLI test assumed the new SDK was `list()[1]` although the store sorts by a target-dependent hash, and was fixed in crt-cli.
+[Record](docs/acceptance/sdk_split_acceptance.md#windowsarm64-portable-toolchain-contract-release-replay-2026-11-05).
+
 ### Portable toolchain contract release on macOS/arm64
 
 Replayed the committed `784389b` natively: rehearsal `crt-dev-release` `v0.0.1-rehearsal.6` produces the archive, the portable toolchain contract (`os_sdk.kind` `macos-xcode-sdk`), the manifest
