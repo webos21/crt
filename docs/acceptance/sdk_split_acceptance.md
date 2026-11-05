@@ -1399,3 +1399,30 @@ inventories; the bare CLI is 29,425,664 bytes, PE machine `0xAA64`, importing on
 Raw evidence is in the CLI checkout's ignored `out/windows-arm64-d2-20261104/` (producer logs for both attempts, the failed first contract replay, the final replays) and the producer worktree's
 `out/` (not committed). Windows/arm64 only; no network denial (Windows has none for this driver), Full-stage install metadata, a published release asset and promotion are not run. No tag, release,
 production lock or STATUS change.
+
+## Linux/aarch64 Portable Toolchain Contract Release Replay (2026-11-05)
+
+**Pass, local/unpromoted producer gate and consumer replay; Linux/aarch64.** Native Ubuntu 26.04 aarch64 QEMU guest (Linux 7.0.0-42, 4 CPU), Clang/LLD/llvm-ar 21.1.8. Detached worktree of
+**committed** CRT `78ed80f` (the portable-contract export `01a208d` and the release-fixture stand-in), preset `linux-host-ninja-debug`, `CRT_RELEASE_TAG=v0.0.1-rehearsal.5` (not a tag, nothing uploaded).
+
+### Producer Gate and Release
+
+`crt-development-sdk-test` exit 0; `crt-c-test` **147/147**, no skips; `crt-dev-release` exit 0. `SHA256SUMS-dev-linux-aarch64` verifies four assets: the archive
+`crt-v0.0.1-rehearsal.5-linux-aarch64-dev.tar.xz` (9,059,308 bytes, SHA-256 `89f6437e92acf2eae502f765831277956f06ba8f04dfd659f42cc80c923baa70`), the **portable toolchain contract**
+`crt-v0.0.1-rehearsal.5-linux-aarch64-dev-toolchain.json` (403,527 bytes, SHA-256 `8dbb76b961ba783b029e373829ddc38afb169186ddd5b3721bc2e68b2fece9df`) and the 02/03 stage-source assets. Manifest
+`release-manifest-dev-linux-aarch64.json` SHA-256 `cf246f85f4a8f918b20b01acb0a3d3f3eab8f318db69b17623eb897b53457ca5`; the archive entry names its contract and carries install metadata format 1: `tar.xz`,
+root `dev`, 2,797 entries (2,602 files, 178 directories, 17 symlinks), 206,260,348 bytes, identity `9f8f07ac0cb19084b26868bf414ae5611be217ec1af0fac5eb433c0a5f448191`. Source commit in the manifest:
+`78ed80f`. No producer change was needed on this host; the Linux contract has no `os_sdk` entry (no OS SDK is needed), as on x86_64.
+
+### Consumer
+
+The CLI's contract replay (`tools/replay_cli_contract_linux.py`, unchanged) self-builds the latest CLI sources (`9d711d2`) from the SDK alone (16 sources, cold 16/0, warm 0/16) with 841 native, 158 archive and
+83 SDK-store checks, no `DT_NEEDED`, 24 distinct executed paths (none forbidden) and an unchanged SDK inventory. The CLI's D2 replay (`tools/replay_sdk_install_linux.py`, bubblewrap) passes **69/69** on its first
+run: the 48 installer cases plus the 21 contract and project-selection cases (contract stored beside the SDK, `configure` with no `--sdk-contract`, lock without machine paths, build/test/run, damaged or
+missing contract, release without or with a damaged contract asset refused). Details: the CLI's
+[Stage 2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#toolchain-contract-and-project-sdk-selection-replay-stage-2-linuxaarch64-2026-11-05).
+
+### Evidence and Limits
+
+Raw evidence is in the CLI checkout's ignored `out/linux-arm64-s2-20261105/` and the producer worktree's `out/s2-linux-aarch64-20261105/` (not committed). Linux/aarch64 only; the macOS and Windows contract
+collection (`@OS_SDK@` discovery), Full-stage install metadata, a published release asset and promotion are not run. No tag, release, production lock or STATUS change.

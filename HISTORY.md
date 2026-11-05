@@ -8,6 +8,15 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-05
+
+### Portable toolchain contract release on Linux/aarch64
+
+Replayed the committed `78ed80f` (the release now publishes the portable toolchain contract next to the Development SDK) natively on the aarch64 guest: rehearsal `crt-dev-release`
+`v0.0.1-rehearsal.5` produces archive, contract, manifest and checksums that verify; `crt-c-test` 147/147. The CLI built itself from that SDK and its D2 replay, including the contract and project-selection
+cases, passes 69/69 on the first run. No producer change was needed.
+[Record](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-portable-toolchain-contract-release-replay-2026-11-05).
+
 ## 2026-11-04
 
 ### Tranche 3.1 on Windows/arm64: unwind tables for stack-probed frames, replay of the D2 installer
