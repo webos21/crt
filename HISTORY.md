@@ -10,6 +10,19 @@ substantive update.
 
 ## 2026-11-05
 
+### Replay installation receipts and pinned repair on macOS/arm64
+
+Validated the CLI receipt increment `502992e` against the producer handoff
+`c3daf08`, reusing the clean `784389b` Development SDK and its original
+`v0.0.1-rehearsal.6` release inputs. SDK-only CLI cold/warm self-builds,
+114 store checks, 87 isolated installation/repair/project cases and the
+14 producer metadata/exporter fixtures pass. No runtime or SDK change was
+needed. The [scoped producer record](docs/acceptance/sdk_split_acceptance.md#macosarm64-installation-receipt-and-repair-replay-2026-11-05)
+links CLI-owned identities and evidence, including a test-harness log-FD
+failure retained before the passing run. Native Windows receipt replay and
+installed-SDK collisions remain open; no binaries, locks, release or STATUS
+were refreshed.
+
 ### Support the CLI installation receipt/pinned-repair handoff
 
 CRT 3.1 reuses the existing release manifest's archive/install identity and

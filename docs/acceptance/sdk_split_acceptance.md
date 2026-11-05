@@ -1540,5 +1540,44 @@ uses a copied, explicitly dirty `b6bf52b` local SDK and labeled archive/manifest
 fixtures, not a new clean collector result. It owns exact source/binary hashes,
 114 store checks, 834 native checks, the 84-case isolated transaction replay
 and three focused payload-preservation cases.
-The receipt delta still needs native Windows/macOS replay; source/runtime
-rebuilding or public artifact promotion is not inferred from these results.
+The subsequent [macOS replay](#macosarm64-installation-receipt-and-repair-replay-2026-11-05)
+passes; native Windows receipt replay remains open. Source/runtime rebuilding
+or public artifact promotion is not inferred from these results.
+
+## macOS/arm64 installation receipt and repair replay (2026-11-05)
+
+**Pass for the bounded receipt/repair increment.** Reviewed CRT handoff
+`c3daf0888882a70883b713b38728c8e54d8a8f9d` and CLI
+`502992e76e58f271114dc4abf97930cd5979d17d` on native macOS 27.2/arm64.
+Reused the earlier clean CRT `784389b0aaad10545598eda4d2b7e3134e640a71`
+Development SDK (`v0.0.1-rehearsal.6`, content
+`72d1b37593abb2f5dd9d58a8338f44191b0b2023d6cbf2621cf7cd688ce80b4c`)
+and its original archive, portable toolchain contract and pinned manifest.
+This is a new consumer replay, not a rebuild or requalification of current
+CRT runtime HEAD. No dirty-SDK opt-in or new producer assets are needed.
+
+The existing metadata/exporter suite passes **14/14**. The new CLI builds
+from a relocated, read-only public SDK with original CRT/CLI/producer trees
+hidden (cold 16/0, warm 0/16), passes **114 store checks**, and passes the
+Seatbelt installation/contract/project replay **87/87**. This includes
+valid-looking policy changes rejected at verify/fresh configure, immutable
+installation pins, explicit original-release repair, legacy metadata recovery,
+payload-preserving repair refusal, interrupted/concurrent installation and
+actual project build/test/run. Store unit checks cover live/dead receipt and
+contract temporary-file owners. Original and copied SDK inventories stay
+unchanged; the bare CLI imports only the declared libSystem PAL dependency.
+
+The [CLI acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#installation-receipts-and-explicit-repair-macosarm64-2026-11-05)
+owns exact source/binary/tool/contract identities, isolation, commands and
+limitations; CLI compatibility records this specific adopted combination.
+Raw evidence is retained in ignored `out/d2-receipts-macos-20261105/`
+(`candidate.json`, `build-r2/`, `isolated/result.json`, invocation and logs).
+Initial build-harness attempts connected log FDs directly into the hidden
+producer tree and failed the compiler resource query. Pipe-capturing output
+in the host checker, with the same policy, passes; the comparisons and failed
+attempts remain alongside the accepted run. No product/PAL workaround was used.
+
+Native Windows receipt replay, installed-SDK path/tool/DLL collisions and the
+automatic first-build/acquisition workflow remain separate work. No SDK
+identity/schema, public artifact, default selection, committed CLI binary,
+project lock or STATUS was changed or promoted by this replay.

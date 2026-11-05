@@ -140,8 +140,9 @@ owning acceptance records; this list contains the remaining producer work.
 
 - [x] **3.1** Define the installation-time contract pin/repair handoff using
   existing producer format-1 assets, preserving SDK identity/schema. The
-  [Linux consumer slice passes](docs/acceptance/sdk_split_acceptance.md#installation-time-contract-pin-handoff-2026-11-05);
-  new native macOS/Windows receipt replay remains CLI-owned.
+  [Linux consumer slice passes](docs/acceptance/sdk_split_acceptance.md#installation-time-contract-pin-handoff-2026-11-05)
+  and [macOS receipt replay passes](docs/acceptance/sdk_split_acceptance.md#macosarm64-installation-receipt-and-repair-replay-2026-11-05);
+  native Windows receipt replay remains CLI-owned.
 - [ ] **3.2** Review targeted installed-SDK path/tool/DLL collisions and lock
   preservation using the implemented project selection. Finish affected-store
   regressions without reopening unchanged whole-stack builds.
