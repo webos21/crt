@@ -1493,3 +1493,34 @@ hosts' records, worked as designed.
 
 Raw evidence is in the CLI checkout's ignored `out/windows-arm64-s2-20261105/` (producer logs, the failed first contract replay, the final replays) and the producer worktree's `out/` (not committed). Windows/arm64
 only; the Windows/x64 run of the same replay, Full-stage install metadata, a published release asset and promotion are not run. No tag, release, production lock or STATUS change.
+
+## Windows/x64 Portable Toolchain Contract Release Replay (2026-11-05)
+
+**Pass, local/unpromoted producer gate and consumer replay; Windows/x64.** Native Windows 11 x64 (10.0.26100), LLVM 22.1.8, Windows SDK imports `10.0.28000.0/um/x64`, Developer Mode on (not changed).
+Detached worktree of **committed** CRT `436b4f2` (the portable-contract export `01a208d`, the release-fixture stand-in and the Windows/arm64 record) at a short ASCII path under the user profile, preset
+`windows-host-ninja-debug`, build directory under the worktree's `out/` (the documented `CRT_BUILD_PRESET_NAME` limitation), `CRT_RELEASE_TAG=v0.0.1-rehearsal.8` (not a tag, nothing uploaded). Source-only caches (LLVM runtime
+source trees and their clone stores, the cJSON, nlohmann/json, curl, mbedTLS, zlib and make archives) were copied from the Tranche 2 build and accepted by CRT's canonical-source checks; `xz-5.8.3.tar.gz`
+(2,771,455 bytes, SHA-256 `3d3a1b97...74a0`, equal to the recipe pin) was downloaded with the owner's permission.
+
+### Producer Gate and Release
+
+`crt-development-sdk-test` exit 0 (1,154 s), `crt-c-test` **169/169** with `fork_heap_snapshot_test_runs` skipped (297 s) and `crt-dev-release` exit 0 (88 s). `SHA256SUMS-dev-windows-x86_64` lists the archive
+`crt-v0.0.1-rehearsal.8-windows-x86_64-dev.zip` (146,110,051 bytes, SHA-256 `2575deb4cacc3144dbd9ad03165a5a2b85f9a1e597abd61525bfeb44d42cf304`), the **portable toolchain contract**
+`crt-v0.0.1-rehearsal.8-windows-x86_64-dev-toolchain.json` (440,297 bytes, SHA-256 `e9758d599f359949274ef69bd378b84a4973190970adfaf1fdf5984adbc9aeab`) and the 02/03 stage-source assets. Manifest
+`release-manifest-dev-windows-x86_64.json` (1,696 bytes) SHA-256 `2ce6c779b83a0174cd57e7cd2b5539b592278a38cfd28578067df8b9070730f3`; the archive entry names its contract and carries install metadata format 1:
+`zip`, root `dev`, 2,917 entries (2,736 files, 181 directories, 0 symlinks), 396,523,706 bytes, identity `e80fa143094eae0338716e0d1419bda07ea455ceadc21e0309c7e88622487159`. Source commit in the manifest:
+`436b4f2`. The contract declares `os_sdk.kind` = `windows-um-import-libraries` (found through `CRT_WINDOWS_SDK_LIBPATH` at collection; the location is not recorded). No producer change was needed on this host.
+
+### Consumer
+
+The CLI's contract replay (`tools/replay_cli_contract_windows.py`, unchanged) self-builds the latest CLI sources (`f984387`) from the SDK alone (16 sources, cold 16/0, warm 0/16) with 919 native, 151 archive and
+83 SDK-store checks, 559 recorded processes (only the declared native tools, the CLI and its generated executables) and an unchanged SDK inventory; the bare CLI is 30,184,448 bytes, importing only
+`kernel32.dll` and `api-ms-win-core-synch-l1-2-0.dll` (`result.json` SHA-256 `7fd87be4...5e73`). The CLI's D2 replay (`tools/replay_sdk_install_windows.py`, restricted token, work directory with Hangul and spaces)
+passes **83/83** on its first run: the 62 installer cases plus the 21 contract and project-selection cases (contract stored beside the SDK as `.contracts/v0.0.1-rehearsal.8-e80fa143094e.json`, `configure` with no `--sdk-contract`,
+lock with the OS SDK kind but no machine path, build/test/run, damaged or missing contract, release without or with a damaged contract asset refused). Details: the CLI's
+[Stage 2 acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#toolchain-contract-and-project-sdk-selection-replay-stage-2-windowsx64-2026-11-05).
+
+### Evidence and Limits
+
+Raw evidence is in the producer worktree's ignored `out/s2-windows-x64-20261105/` (`producer-status.json`, `logs/`, `contract/`, `d2/`, the previous CLI under `previous/`; not committed). Windows/x64 only; Full-stage
+install metadata, a published release asset and promotion are not run. The Windows Development SDK contains no symlinks and the driver has no network denial or read-only root. No tag, release, production lock or STATUS change.

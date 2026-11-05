@@ -10,6 +10,13 @@ substantive update.
 
 ## 2026-11-05
 
+### Portable toolchain contract release on Windows/x64
+
+Replayed the committed `436b4f2` natively: rehearsal `crt-dev-release` `v0.0.1-rehearsal.8` produces the archive, the portable toolchain contract (`os_sdk.kind` `windows-um-import-libraries`), the manifest and
+checksums, all of which verify; `crt-c-test` 169/169. The CLI built itself from that SDK (919 native, 151 archive and 83 SDK-store checks) and its restricted-token D2 replay, including the contract and
+project-selection cases, passes 83/83. No producer or CLI change was needed; the only download was the pinned `xz` source. This closes the Windows/x64 gap in the portable-contract record: every one of the five
+native pairs has now run it. [Record](docs/acceptance/sdk_split_acceptance.md#windowsx64-portable-toolchain-contract-release-replay-2026-11-05).
+
 ### Portable toolchain contract release on Windows/arm64
 
 Replayed the committed `0631131` natively: rehearsal `crt-dev-release` `v0.0.1-rehearsal.7` produces the archive, the portable toolchain contract (`os_sdk.kind` `windows-um-import-libraries`; this is the first Windows

@@ -138,8 +138,8 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   - [x] `xz` port and install metadata format 1 in the Development-SDK release manifest, produced by
     `crt-dev-release` and consumed by `crt-cli sdk install` on all five native pairs
     (details: [HISTORY](HISTORY.md), [acceptance](docs/acceptance/sdk_split_acceptance.md)).
-  - [x] Portable toolchain contract (`@OS_SDK@`) shipped as a release asset and kept by `sdk install` (Linux/x86_64, Linux/aarch64 from committed `78ed80f`, macOS/arm64 from committed `784389b` and Windows/arm64 from committed `0631131`; records: [Linux/aarch64](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-portable-toolchain-contract-release-replay-2026-11-05),
-    [macOS/arm64](docs/acceptance/sdk_split_acceptance.md#macosarm64-portable-toolchain-contract-release-replay-2026-11-05), [Windows/arm64](docs/acceptance/sdk_split_acceptance.md#windowsarm64-portable-toolchain-contract-release-replay-2026-11-05); Windows collection and discovery work on arm64, the Windows/x64 run is open).
+  - [x] Portable toolchain contract (`@OS_SDK@`) shipped as a release asset and kept by `sdk install` (Linux/x86_64, Linux/aarch64 from committed `78ed80f`, macOS/arm64 from committed `784389b` Windows/arm64 from committed `0631131` and Windows/x64 from committed `436b4f2`; records: [Linux/aarch64](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-portable-toolchain-contract-release-replay-2026-11-05),
+    [macOS/arm64](docs/acceptance/sdk_split_acceptance.md#macosarm64-portable-toolchain-contract-release-replay-2026-11-05), [Windows/arm64](docs/acceptance/sdk_split_acceptance.md#windowsarm64-portable-toolchain-contract-release-replay-2026-11-05); [Windows/x64](docs/acceptance/sdk_split_acceptance.md#windowsx64-portable-toolchain-contract-release-replay-2026-11-05); Windows collection and discovery work on both Windows pairs).
   - [ ] Full-stage (`06-web`) install metadata and its size/performance limits.
   - [ ] Promote a release candidate from a committed tree and record only the exercised combinations
     (CLI `docs/compatibility.md`) before any consumer lock moves.
