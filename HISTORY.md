@@ -10,6 +10,19 @@ substantive update.
 
 ## 2026-11-05
 
+### Align SDK/CLI priorities and explicitly refresh the public snapshot
+
+Reviewed CRT `433a7d6` and CLI `3978ced` with the owner. Retained the exercised
+local install/portable-contract baselines, corrected stale project-selection
+dependencies and moved Full metadata/general updates/self-upgrade outside the
+first Linux user flow. The producer supports bounded local-store closure,
+first-build acquisition and a parallel zlib adapter under
+[change-impact gates](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05).
+Shared schema changes still require coordinated review and existing safety/ABI
+requirements remain pre-merge. README and STATUS were explicitly refreshed;
+this is planning/documentation work, with no new SDK build, runtime qualification,
+artifact promotion or publication. Original native evidence stays in acceptance.
+
 ### Portable toolchain contract release on Windows/x64
 
 Replayed the committed `436b4f2` natively: rehearsal `crt-dev-release` `v0.0.1-rehearsal.8` produces the archive, the portable toolchain contract (`os_sdk.kind` `windows-um-import-libraries`), the manifest and

@@ -371,6 +371,14 @@ runtime은 다음 계층으로 나누어 설계한다.
 
 ## Cross-repository contract changes
 
+Validation follows the SDK contract's
+[change-impact policy](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05).
+Run affected safety/ABI/native regressions before merge; unchanged unrelated
+stages are not automatic gates. Retain recorded host baselines and repeat
+passed checks only for changed inputs, failures or unresolved concerns.
+Capability prerequisites, not every checkbox in an earlier tranche, govern
+parallel producer/consumer increments. Shared format changes need one coordinated review.
+
 For SDK/host-tool/recipe/CLI/Studio boundary changes, follow the
 [SDK contract review procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review).
 Review affected owners and pinned baseline commits, distinguish proposed from

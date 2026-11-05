@@ -236,7 +236,7 @@ same sources, stage outputs and port recipes:
 | Artifact | For | Content |
 | --- | --- | --- |
 | **Full SDK** | End users and CRT application developers (installed by the CLI) | The existing validated cumulative stage archives `01-c` .. `06-web`; unchanged. "Full" is `06-web` |
-| **Development SDK** | `crt-cli` developers and CI | The `02-cxx` stage plus zlib, Mbed TLS (including SHA-2), libcurl, cJSON (static/shared), and nlohmann/json (header-only), with startup, toolchain files and notices. No graphics, media, UI or Web content |
+| **Development SDK** | `crt-cli` developers and CI | The `02-cxx` stage plus zlib, Mbed TLS (including SHA-2), libcurl, cJSON (static/shared), nlohmann/json (header-only), and xz/liblzma (`archive-xz-1`), with startup, toolchain files and notices. No graphics, media, UI or Web content |
 | **CLI executable/runtime closure** | End users, no SDK installed | Single-executable distribution is the goal; CRT supplies static/shared libraries and the closure contract, while CLI owns linking, resources and packaging policy |
 
 The Development SDK is a reduced packaging of verified `01-c`/`02-cxx` and port
@@ -429,6 +429,47 @@ to [Web acceptance](../acceptance/crtweb_acceptance.md) and the
 [release guide](../guides/release_preview.md). Tranche 10's owner approval is
 recorded there; this SDK/CLI design does not independently approve a consumer
 product or publish artifacts. [TODO](../../TODO.md) owns the next producer work.
+
+### Change Impact and First User Workflow (Adopted 2026-11-05)
+
+Existing local Development-SDK install/portable-contract/project-selection
+evidence on the five native pairs is a bounded technical baseline. Preserve
+the original per-host revisions/artifacts and the later Linux-only verify
+increment; documentation agreement is not a new common-latest-commit replay.
+CLI owns the [execution sequence and validation gates](https://github.com/webos21/crt-cli/blob/main/docs/design/crt_cli.md#execution-priorities-adopted-2026-11-05).
+
+Prioritize the remaining local-store contract pin/collision checks, then a
+first Linux app build using an installed SDK, then explicitly pinned remote
+metadata/archive/contract acquisition through the existing installer. External
+LLVM and required OS SDKs remain declared user prerequisites. Dev is the current
+consumer profile; generic cxx/Full selection needs its own producer/consumer
+increment. Full 06-web install metadata, general updates and CLI self-upgrade
+are not prerequisites for this flow or the parallel D3 zlib adapter.
+
+CRT supplies pinned artifacts, portable compiler/recipe policy and notice/
+trust metadata; CLI owns store receipts, first-build binding, downloads and
+project locks. Review any changed shared format before parallel streams
+implement it. The Dev SDK already ships zlib: D3 must distinguish SDK-provided
+reuse from actual isolated source-build/store consumption without overwriting
+SDK bytes or mixing duplicate ABIs. Its native Windows CRT-shell/make static/
+shared gate remains required for full D3 closure.
+
+Use focused module/regression checks per change, relevant consumer integration
+before feature merge and native matrix gates for feature bundles/release
+candidates. Parser, transaction, contract-trust, PAL/filesystem and ABI changes
+still require their affected hostile-input, tamper, interruption/recovery and
+native-boundary checks before merge. Other changes do not automatically reopen
+an unchanged Web/GFX stack. Repeat passed gates only for changed inputs,
+failures or unresolved concerns, retaining original evidence and exact identities.
+
+A first Linux-only preview candidate qualifies its declared native scope;
+existing results on other architectures are preserved rather than promoted to
+new-feature support or discarded. Wider releases must qualify each advertised
+pair. Current CRT CI is push/PR/manual and CLI has no CI workflow: periodic/
+nightly automation needs separate implementation. General default downloads
+need approved official trust inputs and actual producer promotion before
+consumer adoption/publication. This planning update defines no new schema,
+production pin, compatible artifact combination or release authorization.
 
 ### Common Source-stage Assets (Adopted 2026-11-02)
 

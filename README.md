@@ -216,15 +216,22 @@ Web Runtime
 WebRTC, WebGPU, EME/DRM and other large Web capabilities are consumer-driven
 follow-ups, not prerequisites of the accepted Web embedding baseline.
 
-The SDK producer supports Full and Development profiles. The next developer
-workflow is SDK -> CLI -> Studio, starting with the
-[producer contract gate](docs/design/sdk_development_contract.md). The separate
-[crt-cli repository](https://github.com/webos21/crt-cli) now owns the minimal
-native JSON/LLVM bootstrap; app builds do not require CMake, Python or shell.
-Its SDK install, store and project-selection path has been replayed on all five
-native pairs from rehearsal releases (unpromoted; no new public binary release).
-Explicit updates, Full-stage metadata, self-upgrade and Studio integration remain
-planned.
+The SDK producer supports Full and Development profiles. The separate
+[crt-cli](https://github.com/webos21/crt-cli) implements native JSON/LLVM project
+builds, local pinned SDK installation, immutable storage and installed-SDK/
+portable-contract selection. The local dev path has records on all five native
+pairs at their exact rehearsal baselines; app builds need no CMake, Python or
+shell. External LLVM/OS SDKs remain prerequisites. CLI currently accepts native
+dev profiles, not general cxx/Full installation, and still needs explicit
+configure and local assets.
+
+The [next user flow](TODO.md#crt-developer-experience-sdk---cli---studio) closes
+bounded store-integrity/collision gaps, then connects installed-SDK first build
+and pinned remote acquisition on Linux. A zlib source-port adapter can proceed
+in parallel against fixed contracts. Full-stage metadata, general updates,
+self-upgrade and Studio are outside that first flow. Exact scope is in
+[STATUS](STATUS.md); no new public binary release or artifact promotion is
+claimed by these local results.
 
 See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
 
@@ -469,7 +476,7 @@ CRT is built as cumulative SDK stages.
 A later stage is expected to contain everything from the preceding stage.
 
 The Full SDK follows that cumulative chain. The smaller Development SDK is
-`02-cxx` plus static/shared zlib, Mbed TLS and curl for native developer tools;
+`02-cxx` plus zlib, Mbed TLS, curl, JSON/SHA-2 and xz/liblzma for native developer tools;
 it excludes graphics, media, UI and Web. Build and validate it with
 `cmake --build --preset <preset> --target crt-development-sdk-test`.
 Profile contents and external-consumer validation belong to the

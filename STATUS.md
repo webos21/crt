@@ -6,11 +6,14 @@ open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
 Last synchronized with the source tree and git history: **2026-11-05**
-(the SDK -> CLI paragraph below and "Next Priorities" were refreshed then; the
-other sections were last reviewed on 2026-10-28).
-Reviewed commits through `2ceba30` and the final local assembly review recorded
-in [release qualification](docs/acceptance/release_qualification.md). Its frozen
-producer is clean `3741ea5`; later documentation does not relabel those artifacts.
+(SDK/CLI status and priorities reviewed through CRT
+`433a7d65b34ee25d71eb9d7c96976c817f5936cd` and CLI
+`3978cedbefa2abda7c4cd0c11ca1649912d7943a`; other subsystem statements retain
+their linked original acceptance scope, last reviewed here on 2026-10-28).
+The earlier local assembly review remains in
+[release qualification](docs/acceptance/release_qualification.md), with frozen
+clean producer `3741ea5`; later SDK/CLI records do not relabel that artifact.
+This documentation refresh executes no new native test or release promotion.
 Updated only on explicit request from here on, not as part of routine
 documentation passes -- see `TODO.md`'s Notice section. It may lag behind
 `HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
@@ -316,10 +319,11 @@ as new test results here.
 
 The [Full / Development SDK split](docs/acceptance/sdk_split_acceptance.md) is
 complete across the five native pairs at their recorded baselines. Full follows
-the cumulative stages; Development is `02-cxx` plus static/shared zlib, Mbed TLS
-and curl. It has no graphics/media/UI/Web content. Its profile, external
+the cumulative stages; Development is `02-cxx` plus declared CLI dependencies,
+including zlib, Mbed TLS, curl, JSON/SHA-2 and now xz/liblzma. It has no
+graphics/media/UI/Web content. Its profile, external
 source-hidden consumers and S5 handoffs are distinct from release qualification
-and future CLI adoption. Windows/arm64 uses Full `05-ui` as its reference.
+and later CLI adoption. Windows/arm64 uses Full `05-ui` as its reference.
 
 **SDK -> CLI contract.** Development-SDK releases carry install metadata and a
 portable toolchain contract (`@OS_SDK@`, the host OS SDK is recorded as a kind
@@ -334,6 +338,15 @@ SDK-only CLI; every record is in
 assets: no published release, no explicit SDK updates or self-upgrade, and no
 Full-stage (`06-web`) install metadata yet.
 
+The CLI's installer/selection currently supports native `dev` only. Its latest
+stored-contract verify guard has Linux developer/unit evidence, without new
+other-host replay or binary refresh; installation-time contract digest/
+required-presence recording and installed-SDK host collisions remain open.
+First-build automatic configure, remote acquisition and generic profile
+selection are not implemented. External LLVM/OS SDKs remain prerequisites.
+See the [CLI snapshot](https://github.com/webos21/crt-cli/blob/main/STATUS.md)
+and original installation acceptance; this is not a new five-pair latest-HEAD run.
+
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
 record accepts only the recorded native/cross-packaging scope. Failed
@@ -342,8 +355,11 @@ still prevent publication. Existing development SDKs keep their recorded
 candidate decisions; new artifacts must embed the approval and pass current
 release checks. The [local assembly rehearsal](docs/acceptance/release_qualification.md)
 records the clean frozen producer, native Dev/Full collectors and separate ARM
-cross scope at WebKit 2.54.2. These local candidates are unpromoted; same-name
-source-asset variants must be resolved before selecting a public upload set.
+cross scope at WebKit 2.54.2. The later
+[Tranche 1.7 selection](docs/acceptance/release_qualification.md#common-source-candidate-selection-2026-11-02)
+repairs cache validation and selects new canonical Linux 02/03 source candidates;
+older variants remain historical. Neither that selection nor later D2 rehearsal
+assets constitute a newly promoted public upload set.
 No replacement binary release or CLI/Studio adoption has been published.
 See the [release guide](docs/guides/release_preview.md#05-ui-and-06-web).
 
@@ -540,19 +556,22 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-No implementation tranche is active after the SDK split and local assembly
-rehearsal closure. The next planned producer increment is the
-**SDK Producer Contract Gate P0** in
-[TODO](TODO.md#crt-developer-experience-sdk---cli---studio); CLI/Studio
-implementation and consumer compatibility acceptance have not started here.
+The SDK -> CLI initiative is active. Local installation, stored portable
+contracts and project selection have native records on all five pairs; the
+next producer/consumer increment is the bounded local-store integrity/collision
+closure, installed-SDK first build and pinned acquisition on Linux. D3 zlib's
+public adapter may proceed in parallel against fixed contracts. Detailed order
+is in [TODO](TODO.md#crt-developer-experience-sdk---cli---studio).
 
-- The open SDK -> CLI work is the Full-stage install metadata and size limits,
-  promoting a release candidate from a committed tree (recorded in the CLI's
-  compatibility ledger before any consumer lock moves), explicit SDK updates and
-  CLI self-upgrade; see [TODO](TODO.md#crt-developer-experience-sdk---cli---studio).
-- Keep SDK identity/capability/startup/link/runtime contracts with CRT and use
-  immutable public artifacts for external consumers. The separate CLI/Studio
-  repositories remain documentation/bootstrap plans, not implemented products.
+- CRT supplies exact public artifacts and compiler/recipe policy; the implemented
+  CRT-native CLI owns installation, first-build binding, external-tool diagnosis
+  and acquisition. Studio remains a later consumer.
+- Full-stage install metadata/limits, general updates and CLI self-upgrade stay
+  tracked beyond the first workflow; they do not block the first source port.
+- [Change-impact gates](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05)
+  select focused/integration/native scope. Relevant archive, transaction, trust,
+  PAL and ABI regressions remain pre-merge requirements; no unchanged unrelated
+  Web/GFX rebuild or new five-pair matrix is automatic for every small change.
 - A new public release still needs a coherent exact asset set, current artifact
   checks and an explicitly authorized publication action. Local rehearsal and
   the existing Web owner approval do not publish or promote it.

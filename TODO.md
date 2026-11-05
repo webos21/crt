@@ -64,15 +64,17 @@ under an active tranche only to make its execution order legible.
 
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
-This whole initiative is active. **Tranche 1 is complete for the selected local
-technical candidates**, and Tranche 2's independent host-tools and SDK-free
-environment/resource increment is verified on Linux, macOS/arm64 and Windows/x64. The current focus is
-**Tranche 3: the Development-SDK `xz` port and installation metadata (3.1), the local installer it enables in
-`crt-cli` D2 first** (network acquisition, updates and self-upgrade are not in this increment).
-Tranche 3 progress (local rehearsal assets, not releases): 3.1 metadata and the `xz` port are produced and consumed on Linux/x86_64, Linux/aarch64, macOS/arm64, Windows/x64 and Windows/arm64
-(Windows needed three producer fixes, `1ee0379`, and Windows/arm64 one more, `b20a460`); 3.2 consumer transaction replays pass on all five host pairs ([Windows/x64](docs/acceptance/sdk_split_acceptance.md#windowsx64-tranche-31-and-d2-installer-replay-2026-11-04),
-[Linux/aarch64](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-tranche-31-and-d2-installer-replay-2026-11-04), [Windows/arm64](docs/acceptance/sdk_split_acceptance.md#windowsarm64-tranche-31-and-d2-installer-replay-2026-11-04));
-Full-stage metadata and promotion are open; 3.3 self-upgrade is not started.
+This whole initiative is active. Tranches 1/2 retain their scoped technical
+closure. Local Development-SDK installation and stored-contract/project
+selection have evidence on all five native pairs, including Windows/x64
+([producer evidence](docs/acceptance/sdk_split_acceptance.md),
+[CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
+The next focus is the bounded local-store integrity/collision closure and the
+first Linux user workflow: installed SDK -> first build -> pinned acquisition.
+The zlib public adapter can proceed in parallel against fixed contracts.
+Full-stage metadata, general updates and self-upgrade are outside that first
+workflow; keep them in Planned below. Scope/replay policy is in the
+[SDK contract](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05).
 Numbered tranches 1-8 map to D0-D7.
 SDK split and local assembly rehearsal are complete
 ([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
@@ -133,31 +135,30 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
 #### Tranche 3. Immutable SDK installation and selection (D2)
 
-- [ ] **3.1** Supply exact stage/profile artifacts and contract metadata for CLI
-  installation/selection/update; promote producer artifacts before consumer locks.
-  - [x] `xz` port and install metadata format 1 in the Development-SDK release manifest, produced by
-    `crt-dev-release` and consumed by `crt-cli sdk install` on all five native pairs
-    (details: [HISTORY](HISTORY.md), [acceptance](docs/acceptance/sdk_split_acceptance.md)).
-  - [x] Portable toolchain contract (`@OS_SDK@`) shipped as a release asset and kept by `sdk install` (Linux/x86_64, Linux/aarch64 from committed `78ed80f`, macOS/arm64 from committed `784389b` Windows/arm64 from committed `0631131` and Windows/x64 from committed `436b4f2`; records: [Linux/aarch64](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-portable-toolchain-contract-release-replay-2026-11-05),
-    [macOS/arm64](docs/acceptance/sdk_split_acceptance.md#macosarm64-portable-toolchain-contract-release-replay-2026-11-05), [Windows/arm64](docs/acceptance/sdk_split_acceptance.md#windowsarm64-portable-toolchain-contract-release-replay-2026-11-05); [Windows/x64](docs/acceptance/sdk_split_acceptance.md#windowsx64-portable-toolchain-contract-release-replay-2026-11-05); Windows collection and discovery work on both Windows pairs).
-  - [ ] Full-stage (`06-web`) install metadata and its size/performance limits.
-  - [ ] Promote a release candidate from a committed tree and record only the exercised combinations
-    (CLI `docs/compatibility.md`) before any consumer lock moves.
-  - [ ] Metadata the CLI needs for stage/profile selection and explicit updates.
-- [ ] **3.2** Review three-host consumer transactions, tamper/interruption recovery
-  and path/DLL collisions; keep project-lock updates explicit.
-  - [x] Transactions, tamper and interruption recovery, hostile archives and concurrent installs replayed
-    on all five native pairs ([CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
-  - [ ] Path/DLL collisions between an installed SDK and the host (archive case collisions only so far);
-    replay on the Windows pairs once project SDK selection exists.
-  - [ ] Project-lock updates stay explicit: needs the CLI project SDK selection (D2), not yet implemented.
-- [ ] **3.3** Support CLI-owned self-upgrade staging, candidate diagnosis, OS-specific
-  activation and rollback; upgrading the CLI must preserve project SDK/port pins.
+The existing local dev/install/portable-contract baseline is retained in the
+owning acceptance records; this list contains the remaining producer work.
+
+- [ ] **3.1** Support the CLI's installation-time contract digest/required-presence
+  record and explicit recovery from verified release metadata; preserve the
+  installed SDK's identity and existing format semantics unless jointly reviewed.
+- [ ] **3.2** Review targeted installed-SDK path/tool/DLL collisions and lock
+  preservation using the implemented project selection. Finish affected-store
+  regressions without reopening unchanged whole-stack builds.
+- [ ] **3.4** Supply an exact Linux metadata/archive/portable-contract handoff
+  for first-build acquisition. Keep developer pins explicit; approved official
+  trust and actual producer promotion precede default public acquisition/adoption.
+  Existing Dev is the initial consumer profile; broader profile metadata is deferred.
+
+**3.3** remains the self-upgrade work item, deferred in Planned; identifiers
+and historical evidence are not renumbered. CLI owns first-build binding,
+external-tool selection/diagnosis and download/install orchestration.
 
 #### Tranche 4. First source-built port (D3)
 
-- [ ] **4.1** Expose the existing zlib recipe/driver through a versioned public
-  adapter, retaining SDK-owned configure/build and ABI policy.
+- [ ] **4.1** Expose the reviewed zlib recipe/compiler adapter against pinned
+  SDK/host-tool contracts; this can proceed with the first-build work. Dev already
+  includes zlib: distinguish SDK-provided reuse from an explicit isolated source
+  build into the CLI port store, preserving source/SDK bytes and ABI policy.
 - [ ] **4.2** Review Windows CRT-shell/make static/shared zlib build/link/run;
   require unchanged SDK/source inputs and a separate CLI-owned port store.
 
@@ -175,8 +176,9 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   Development and supported Full stages; keep technical policy in the SDK.
 - [ ] **6.2** Validate CLI-owned templates and external C/C++/GFX/Media/UI/Web
   consumers, including runtime/worker resources and CLI self-build/run.
-- [ ] **6.3** Support project-local SDK selection by version/profile/target/content
-  identity; CLI owns storage mode, acquisition timing and failure/offline behavior.
+- [ ] **6.3** Support broader profile/capability metadata for project-specific SDK
+  pins. Existing native-dev store selection is implemented; basic first-build
+  acquisition proceeds with 3.4, while general profile/offline behavior stays here.
 
 #### Tranche 7. Deployment and automation contracts (D6)
 
@@ -185,7 +187,9 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 - [ ] **7.2** Review CLI test/package, versioned JSON/job events, cancellation,
   locked/offline behavior and recovery through original consumer evidence.
   Include the one-executable release goal and self/environment/project doctor scopes.
-- [ ] **7.3** Coordinate SDK/CLI publication from the exercised combination:
+- [ ] **7.3** Prepare a bounded Linux preview candidate after the first user flow;
+  include CLI/SDK notices, trust and external LLVM setup. Coordinate publication
+  from the exercised combination:
   promote the SDK first, verify the actual promoted artifact, then adopt its exact
   pin and release the CLI; independent versions need no simultaneous publication.
 
@@ -201,6 +205,15 @@ applicable D5/D6 capabilities, not completion of every tranche or D7 approval
 ([feature prerequisites](docs/design/crt_studio.md#5-staged-goals)).
 
 ## Planned
+
+### SDK workflow beyond the first preview
+
+- [ ] **3.3** Support CLI self-upgrade staging, diagnosis, native activation and
+  rollback without changing project SDK/port pins; it does not block D3.
+- [ ] Complete Full-stage (`06-web`) install metadata/size limits and general
+  stage/profile/version/update selection contracts when their consumer increment starts.
+- [ ] Expand the new workflow to additional native pairs before advertising it;
+  retain existing five-pair results at their original artifact/source identities.
 
 The following sections are independent follow-ups, not prerequisites for the
 active SDK/CLI/Studio initiative or a reopening of accepted SDK stages;
