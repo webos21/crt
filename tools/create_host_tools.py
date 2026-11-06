@@ -65,6 +65,39 @@ def payload_inventory(root):
     return result
 
 
+def macho_private_name(dependency, system_components):
+    """The flat private closure must load beside its image, never from a producer path."""
+    if dependency in {'/usr/lib/' + name for name in system_components}:
+        return None
+    name = Path(dependency).name
+    if dependency not in ('@rpath/' + name, '@loader_path/' + name):
+        raise ValueError('non-relocatable host-tool Mach-O dependency: ' + dependency)
+    if name.lower() in {component.lower() for component in system_components}:
+        raise ValueError('OS runtime cannot be shadowed by a private dependency: ' + dependency)
+    return name
+
+
+def link_macho_alias_runtimes(root, aliases, tools, dependencies):
+    private = [Path(name) for name in dependencies if name.endswith('.dylib')]
+    for alias in aliases:
+        if alias['kind'] != 'file':
+            continue
+        primary = tools[alias['role']]
+        if not any(name.startswith(('@rpath/', '@loader_path/')) for name in dependencies.get(primary, [])):
+            continue
+        directory = root / Path(alias['path']).parent
+        for library in private:
+            target = directory / library.name
+            if target == root / library:
+                continue
+            relative = os.path.relpath(root / library, directory)
+            if target.exists() or target.is_symlink():
+                if not target.is_symlink() or os.readlink(target) != relative:
+                    raise ValueError('conflicting private alias runtime: ' + str(target))
+            else:
+                target.symlink_to(relative)
+
+
 def assemble(sdk, output, version, make_source=None, project=ROOT):
     sdk, output = sdk.resolve(), output.absolute()
     manifest = json.loads((sdk / 'manifest.json').read_text(encoding='utf-8'))
@@ -129,6 +162,8 @@ def assemble(sdk, output, version, make_source=None, project=ROOT):
                 continue
             seen.add(relative)
             path = temporary / relative
+            if not native_image(path, host):
+                raise ValueError('non-native host-tool runtime dependency: ' + relative)
             imports = binary_dependencies(path, host['os'])
             dependencies[relative] = imports
             if host['os'] == 'linux':
@@ -144,7 +179,11 @@ def assemble(sdk, output, version, make_source=None, project=ROOT):
                 raise ValueError('host tool carries a runtime search path: ' + relative)
             for dependency in imports:
                 name = Path(dependency).name
-                if name.lower() in allowed:
+                if host['os'] == 'macos':
+                    name = macho_private_name(dependency, [c for item in external for c in item['components']])
+                    if name is None:
+                        continue
+                elif name.lower() in allowed:
                     continue
                 target = 'system/bin/' + name
                 if target in seen or target in pending:
@@ -158,6 +197,10 @@ def assemble(sdk, output, version, make_source=None, project=ROOT):
                 matches[0].resolve(strict=True).relative_to(sdk)
                 shutil.copy2(matches[0], temporary / target)
                 pending.append(target)
+        if host['os'] == 'macos':
+            # Copied aliases have their own @loader_path; preserve their bytes
+            # and expose the same canonical private closure beside each copy.
+            link_macho_alias_runtimes(temporary, aliases, tools, dependencies)
         if interpreters:
             external.append({'id': 'linux-elf-loader', 'kind': 'os-runtime', 'required_for': ['host-tools-executable-startup'],
                              'components': [Path(expected_loader).name], 'paths': [expected_loader], 'bundled': False})

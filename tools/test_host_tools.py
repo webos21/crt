@@ -101,4 +101,37 @@ class HostTools(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertFalse(self.output.exists())
 
+    def test_private_runtime_must_match_execution_host(self):
+        (self.sdk/'lib').mkdir(); (self.sdk/'lib/libfixture.so').write_bytes(b'foreign runtime')
+        with patch.object(producer,'binary_dependencies',return_value=['libfixture.so']):
+            with self.assertRaisesRegex(ValueError,'non-native.*runtime'):
+                self.assemble()
+        self.assertFalse(self.output.exists())
+        self.assertEqual([],list(self.root.glob('.host-tools-*')))
+
+    def test_macho_private_load_names_are_flat_and_relocatable(self):
+        allowed=['libSystem.B.dylib']
+        self.assertIsNone(producer.macho_private_name('/usr/lib/libSystem.B.dylib',allowed))
+        for prefix in ('@rpath/','@loader_path/'):
+            self.assertEqual('libfixture.dylib',producer.macho_private_name(prefix+'libfixture.dylib',allowed))
+        for path in ('/producer/libfixture.dylib','libfixture.dylib','@rpath/../libfixture.dylib',
+                     '@executable_path/libfixture.dylib','/producer/libSystem.B.dylib','@rpath/libSystem.B.dylib'):
+            with self.subTest(path=path),self.assertRaises(ValueError):
+                producer.macho_private_name(path,allowed)
+
+    def test_macho_copied_aliases_find_one_canonical_private_closure(self):
+        root=self.root/'links'; (root/'system/bin').mkdir(parents=True); (root/'bin').mkdir()
+        library=root/'system/bin/libfixture.dylib'; library.write_bytes(b'private')
+        aliases=[{'path':'bin/awk','kind':'file','role':'awk'}]
+        dependencies={'system/bin/awk':['@rpath/libfixture.dylib'],'system/bin/libfixture.dylib':[]}
+        tools={'awk':'system/bin/awk'}
+        producer.link_macho_alias_runtimes(root,aliases,tools,dependencies)
+        link=root/'bin/libfixture.dylib'
+        self.assertTrue(link.is_symlink()); self.assertEqual(library.resolve(),link.resolve())
+        producer.link_macho_alias_runtimes(root,aliases,tools,dependencies)
+        link.unlink(); link.write_bytes(b'collision')
+        with self.assertRaisesRegex(ValueError,'conflicting'):
+            producer.link_macho_alias_runtimes(root,aliases,tools,dependencies)
+        self.assertEqual(b'collision',link.read_bytes())
+
 if __name__=='__main__':unittest.main()
