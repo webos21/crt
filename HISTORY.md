@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-11-06
 
+### Fix the Windows/x64 concurrent-install SIGSEGV: libunwind dropped XMM6-XMM15 on catch
+
+Root cause of the crash recorded at the first Windows receipt replay: the pinned libunwind copied only general registers into
+its cursor, so a catch resumed with indeterminate callee-saved XMM6-XMM15; a zeroed XMM6 that clang hoists for
+`std::basic_string` initialisation then produced a string with a garbage size, and path conversion wrote past the stack or freed
+a wild pointer. The wait loop of `sdk install --lock-wait` throws and catches per poll, hence the intermittent, layout-dependent
+failure. Evidence: a live lldb stop at the access violation (write at stack top + 4 inside `wstring::resize` from
+`path::path<char[6]>`); the cursor's XMM6 slot garbage at `jumpto` while the live register was intact at `__unw_getcontext`;
+a minimal probe losing XMM6 in 400/400 catches before and 0/400 after; a probe crashing 16/300 before and 0/300 after; and the
+original crt-cli objects relinked with the diagnostic allocator, in held-lock pairs: 3 of 4 unfixed pairs crashed (exit 139),
+0 of 4 fixed pairs did.
+
+Fix: a `src/Registers.hpp` patch in the libunwind recipe plus `imported_libcxx_eh_registers_test.cc` (600/600 catches lose
+the registers without the patch, none with it). A fresh `crt-libcxx-smoke` build through the recipe applies the patch and passes the
+new test for static and shared linkage. Not done: a fresh Development SDK and CLI rebuilt with the fix, the full Windows
+replay on it, and a refreshed committed CLI binary; `bin/win-x64/crt-cli.exe` still contains the old libunwind. Other targets are
+unverified. The diagnostic allocator relinks and probes are local evidence under the ignored `out/sigsegv-b/`.
+
 ### Replay selection, first build and pinned HTTPS on Windows/x64
 
 Consumer-side replay against the existing rehearsal.8 SDK (CRT `436b4f2`; the delta to `4db4c85` is host-tools and docs only): selection 68/68, first build 86/86, pinned HTTPS 74/74 and the

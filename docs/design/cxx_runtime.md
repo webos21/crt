@@ -312,6 +312,19 @@ definition for the full empirical trail (confirmed via
 default and undefined under `-fdwarf-exceptions`), and [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s
 2026-08-21 C++ runtime entries for the adoption trail.
 
+### Win64 callee-saved vector registers across a catch
+
+Win64 makes XMM6-XMM15 callee-saved. The pinned libunwind's `Registers_x86_64(const void*)` copied only the GPR struct
+into its cursor, never the `_xmm` array that `__unw_getcontext` fills, so `jumpto()` resumed a catch handler with
+indeterminate XMM6-XMM15 unless an unwound frame had saved them with CFI. clang keeps a zeroed XMM6 live across calls to
+zero-initialise `std::basic_string`; after a catch the next string was built from stack garbage (a bogus size byte), and
+path conversion overran the stack or freed a wild pointer. This was the Windows/x64 concurrent-`sdk install` SIGSEGV (the
+`--lock-wait` loop catches an exception per poll). The recipe patch (`libstdc++/third_party/libunwind/recipe.json`,
+`src/Registers.hpp`) copies `_xmm` under `_WIN64` and zeroes it in the default constructor.
+`libstdc++/tests/imported_libcxx_eh_registers_test.cc`, run for both linkages by `tools/test_libcxx_runtime.py`,
+checks XMM6/XMM7 across catches thrown from user frames, from libc++ frames and after a stream open; it checks Windows/x86_64
+only. Other targets are unverified here (AArch64 keeps D8-D15 callee-saved and has its own libunwind save/restore path).
+
 ### Known cost: DWARF-compiled code has zero Windows-native unwind info
 
 This was checked directly (2026-08-21), not assumed: compiling identical code

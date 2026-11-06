@@ -217,6 +217,21 @@ def main():
                 f"stdout={stream_result.stdout!r} stderr={stream_result.stderr!r}")
         print(f"imported_libcxx_iostream_test ({linkage}): ok", flush=True)
 
+        # Callee-saved vector registers must survive a catch (Win64 XMM6-XMM15); see the test's own comment and the
+        # libunwind recipe's Registers_x86_64 patch.
+        eh_binary = binary.with_name(f"{binary.stem}_eh_registers{binary.suffix}")
+        run_native(command + typed_new_delete_flag + [
+            "-std=c++17", "-O1",
+            str(root / "libstdc++" / "tests" / "imported_libcxx_eh_registers_test.cc"),
+            "-o", str(eh_binary),
+        ], env=env, check=True, timeout=60)
+        eh_result = run_native([str(eh_binary)], env=run_env, timeout=30, capture_output=True, text=True)
+        if eh_result.returncode != 0 or "imported_libcxx_eh_registers_test: ok" not in eh_result.stdout:
+            raise SystemExit(
+                f"eh registers {linkage}: exit={eh_result.returncode}, stdout={eh_result.stdout!r} "
+                f"stderr={eh_result.stderr!r}")
+        print(f"imported_libcxx_eh_registers_test ({linkage}): ok", flush=True)
+
 
 if __name__ == "__main__":
     main()

@@ -144,9 +144,11 @@ owning acceptance records; this list contains the remaining producer work.
   [Linux consumer slice passes](docs/acceptance/sdk_split_acceptance.md#installation-time-contract-pin-handoff-2026-11-05)
   and [macOS receipt replay passes](docs/acceptance/sdk_split_acceptance.md#macosarm64-installation-receipt-and-repair-replay-2026-11-05);
   [Windows/x64 receipt boundaries also pass](docs/acceptance/sdk_split_acceptance.md#windowsx64-installation-receipt-and-repair-replay-2026-11-05),
-  but its first concurrent-install replay hit a native SIGSEGV. Keep the
-  coordinated CLI/producer crash investigation and Windows/arm64 delta replay
-  open; a passing continuation does not close the failed Windows gate.
+  but its first concurrent-install replay hit a native SIGSEGV. Root cause
+  found and fixed in the libunwind recipe (callee-saved XMM6-XMM15 were not
+  restored on catch; [design note](docs/design/cxx_runtime.md)). Keep the gate
+  open until a Development SDK and CLI rebuilt with the fix pass the full
+  Windows replay; Windows/arm64 delta replay also remains.
 - [ ] **3.2** Finish affected-host SDK path/tool/DLL collision replay. The
   [Linux selection slice passes](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-selection-collision-slice-2026-11-05)
   and fixes truncated full-identity matching in CLI;
