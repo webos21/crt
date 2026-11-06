@@ -1764,3 +1764,34 @@ gates remain open, as does Linux's retained pure-C shared provider-policy audit.
 Existing Linux evidence retains its tested snapshots; it is not a replay of
 the new consumer correction. Defaults, root locks, committed CLI binaries,
 public trust and STATUS remain unchanged.
+
+
+## Windows/arm64 receipt, selection, first build and HTTPS replay (2026-11-06)
+
+**Pass, local/unpromoted consumer replay of an existing producer candidate; Windows/arm64.** Native Windows 11 arm64 VM (10.0.26300, 4 vCPUs, no GPU), LLVM 22.1.8, Windows SDK imports `10.0.28000.0/um/arm64`, native arm64 shell and Python.
+The producer input is the **existing** clean-commit Development SDK of the Stage 2 record: CRT `0631131`, `v0.0.1-rehearsal.7` (archive `976150ba98d3e5d6dc609a6218a5d4e4ad9ab0f4746e1447694765fdbd316294`, toolchain contract
+`08ae2c51559704ea6791dab7e4555448d9fbeeef29f7f92bdd66bfa8a6301d68`, manifest `167f326094539ec92cd86a7aed723cc8a23b191d7fdcf38a0ee8f7de43232b4e`, content identity `c4b352012b426c60e2d4d666febf565e17239f8f534714e7b67d89430f051233`).
+**It was not rebuilt.** The producer delta from `0631131` to the reviewed CRT `a00c6be` is `tools/create_host_tools.py` (a macOS-only private dylib closure), `tools/replay_host_private_macos.py`, `tools/test_host_tools.py` and `AGENTS.md`; none of
+these is shipped in the Development SDK, whose wrappers, libc, libc++ and ports are unchanged, so the earlier producer gate (`crt-development-sdk-test`, `crt-c-test` 169/169, `crt-dev-release`) is not repeated and no producer claim is made for `a00c6be`.
+
+The consumer is the CLI self-built from this SDK alone at crt-cli `160a4a6` (executable `d855f092e27bfab01047902ec14ae9747447e82d866702ea71d580d59ef80582`, 32,403,968 bytes, PE machine `0xAA64`, imports only `kernel32.dll` and
+`api-ms-win-core-synch-l1-2-0.dll`; cold self-build 17 executed / 0 reused, warm 0 / 17; 985 native, 151 archive and 113 SDK-store checks; 531 recorded processes; unchanged SDK inventory). The drivers are the CLI repository's existing
+Windows drivers, unchanged, under the restricted token of `crt_windows_trace`:
+
+| Suite | Result |
+| --- | --- |
+| Installer, installation receipts and explicit repair, stored contract, project selection (`replay_sdk_install_windows.py`) | **101/101** (includes the three concurrent-install cases) |
+| Installed-SDK selection and search-path collisions, full-identity matcher (`replay_sdk_selection_windows.py --cases selection`) | **68/68** |
+| First build without `configure` (`--cases first-build`) | **86/86** |
+| Pinned HTTPS acquisition with a disposable test CA (`replay_sdk_acquire_windows.py`) | **74/74** |
+
+All four suites install or acquire from the original producer manifest, which has no top-level `format` (the release-envelope correction) and `install.format` 1. A junk `libc.dll` planted in the CLI's working directory shadows the shared runtime on
+Windows; that limit is documented by a passing case, not defended. No decoy executable was started in the selection, first-build and acquisition suites.
+
+**Concurrent-install note.** The 3.1 item about the native SIGSEGV seen once in a Windows/x64 concurrent install stays open: it is neither reproduced nor explained here. For supporting evidence only, the same scenario (two simultaneous
+`sdk install --lock-wait 300` of this SDK into a fresh store) was repeated 15 times with the self-built CLI run directly; in 15 of 15 rounds both processes exit 0, one reports `installed:` and the other `already installed:` with the same identity,
+the store holds one SDK and nothing is left in `.staging` or `.locks`. The throwaway script labeled every round `FAIL` because it parsed text output as JSON; the rounds were judged from the retained raw output.
+
+No CRT, producer or SDK defect and no CLI product defect was found. Details, hashes and the record of the stress script's defect are in the CLI's
+[acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#selection-first-build-and-pinned-https-replay-windowsarm64-2026-11-06). Raw evidence is in the CLI checkout's ignored
+`out/windows-arm64-s3-20261106/`. Not run: Full-stage metadata, a published release asset, official trust, promotion and the Windows/x64 crash closure. No tag, release, production lock or STATUS change.
