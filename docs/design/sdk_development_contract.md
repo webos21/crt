@@ -535,8 +535,12 @@ and OS-only source target metadata do not change with this decision.
 ### Explicit developer HTTPS handoff (2026-11-06)
 
 The [Linux technical handoff](../acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)
-uses existing format-1 manifest/install metadata and named portable-contract
-assets. CLI owns implemented source format 0 and commands/selection; its
+uses existing release assets, archive install metadata format 1 and named
+portable-contract assets. The release envelope has no required top-level
+`format`; version 1 belongs to the selected archive's `install` object.
+The [macOS replay](../acceptance/sdk_split_acceptance.md#macosarm64-selection-first-build-and-https-handoff-replay-2026-11-06)
+corrected a consumer assumption about that field without changing producer
+assets or assigning a new schema. CLI owns implemented source format 0 and commands/selection; its
 [contract](https://github.com/webos21/crt-cli/blob/main/docs/reference/bootstrap_contract.md#explicit-pinned-https-sdk-source-experimental-format-0)
 records explicit URL/CA/metadata/content pins, limits and rejection/reuse rules.
 No URL channel or official publisher authority is inferred from an SDK version.

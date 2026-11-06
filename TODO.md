@@ -127,8 +127,9 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   and CLI shell on Windows/x64: private imports/aliases, paths and owned-process cleanup.
   [macOS/arm64 replay passes](docs/acceptance/host_tools_acceptance.md#macosarm64-independent-bundle-replay-2026-11-03);
   [Windows/x64 passes](docs/acceptance/host_tools_acceptance.md#final-combined-replay-2026-11-03) after four producer
-  repairs (LF-preserving LLVM fetch, mksh async status, directory `X_OK`, explicit child rootfs). Private-DLL and
-  Windows/arm64 acceptance stay open.
+  repairs (LF-preserving LLVM fetch, mksh async status, directory `X_OK`, explicit child rootfs).
+  [macOS private-dylib fixture replay passes](docs/acceptance/host_tools_acceptance.md#macosarm64-private-dylib-closure-replay-2026-11-06);
+  Windows private-DLL and Windows/arm64 acceptance stay open.
 - [x] **2.3** Repeat D1-07 with Windows/x64's selected package/trust bytes.
   Linux, macOS/arm64 and Windows/x64 pass; earlier host transport records retain their own identities.
   Official release signing/metadata policy stays separate from this local test-identity gate.
@@ -148,8 +149,9 @@ owning acceptance records; this list contains the remaining producer work.
   open; a passing continuation does not close the failed Windows gate.
 - [ ] **3.2** Finish affected-host SDK path/tool/DLL collision replay. The
   [Linux selection slice passes](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-selection-collision-slice-2026-11-05)
-  and fixes truncated full-identity matching in CLI; macOS/Windows matcher
-  replay and actual Windows DLL collision checks remain. Reuse existing SDKs.
+  and fixes truncated full-identity matching in CLI;
+  [macOS matcher/collision replay passes](docs/acceptance/sdk_split_acceptance.md#macosarm64-selection-first-build-and-https-handoff-replay-2026-11-06).
+  Windows matcher replay and actual DLL collision checks remain. Reuse existing SDKs.
 - [x] **3.4** Exercise the explicit developer-pinned Linux metadata/archive/
   portable-contract handoff through HTTPS acquisition and first build
   ([technical evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)).
@@ -185,7 +187,8 @@ external-tool selection/diagnosis and download/install orchestration.
   consumers, including runtime/worker resources and CLI self-build/run.
 - [ ] **6.3** Support broader profile/capability metadata for project-specific SDK
   pins. Native-dev installed selection and explicit pinned first-build acquisition
-  have [Linux evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06);
+  have [Linux evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)
+  and [macOS replay](docs/acceptance/sdk_split_acceptance.md#macosarm64-selection-first-build-and-https-handoff-replay-2026-11-06);
   general profile/offline behavior stays here.
 
 - [ ] **6.4** Audit pure C shared-executable provider policy. The retained

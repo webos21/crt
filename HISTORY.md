@@ -10,6 +10,42 @@ substantive update.
 
 ## 2026-11-06
 
+### Close the macOS host-tools private-dylib replay slice
+
+Rebuilt the existing AWK import with the retained public SDK's shared C policy
+and assembled a separately identified, unpromoted host-tools fixture. Native
+relocation/loader/collision/missing-or-modified-library replay passes 27/27.
+Fixed copied Mach-O aliases' private closure by adding pinned internal runtime
+links, and reject non-native or non-relocatable private dependencies before
+publication. The earlier static bundle's complete payload/inventory stays
+identical; 51 focused producer regressions pass. No upstream source, original
+SDK, runtime ABI or global loader setting changed.
+
+The [producer record](docs/acceptance/host_tools_acceptance.md#macosarm64-private-dylib-closure-replay-2026-11-06)
+owns exact fixture hashes and retained failures. It records that sandbox-exec
+strips DYLD variables: native test-only post-boundary injection now proves the
+working poison control and CLI child filtering. The prior selection/first-build
+replays are strengthened with that same mechanism and pass 66/66 and 86/86;
+their original TLS/native receipts are retained, not rerun or relabeled.
+Windows private-DLL/arm64 and production promotion remain separate gates.
+
+### Replay SDK selection, first build and pinned HTTPS handoff on macOS/arm64
+
+Reviewed CRT `82466be` and CLI's latest Linux increments `8788b59`, `4f55a52`
+and `1dc3c03`, reusing clean CRT `784389b` Dev and its original rehearsal.6
+release inputs. Native Seatbelt replay passes selection/collisions 66/66,
+first build 86/86, HTTPS acquisition 73/73 and failure/retry 12/12, including
+actual static/shared consumers and their Mach-O binding audit; the corrected
+candidate/native fixture also passes 922 native checks. The replay
+found a consumer-only envelope assumption: CRT release manifests have no
+required top-level `format`; archive `install.format` owns version 1. CLI now
+uses that existing contract and tests rejection of unsupported install metadata.
+No producer runtime, schema or SDK bytes changed. The
+[producer replay record](docs/acceptance/sdk_split_acceptance.md#macosarm64-selection-first-build-and-https-handoff-replay-2026-11-06)
+links exact consumer inputs, retained failures and scope. Windows gates,
+pure C shared-policy audit and public trust/promotion remain open; no lock,
+committed binary, default or STATUS was refreshed.
+
 ### Exercise the explicit pinned HTTPS developer SDK handoff
 
 Confirmed existing format-1 release assets can feed CLI-owned source format 0,

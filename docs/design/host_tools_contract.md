@@ -45,6 +45,28 @@ only the bundle's physical `system/bin`; user/global PATH and build flags are
 not inherited. The existing PAL's rootfs path rules remain in force; this is
 not an OS sandbox for arbitrary scripts.
 
+### Mach-O private runtime closure
+
+Private images must match the execution host. A macOS private load name is a
+flat `@rpath/<name>` or `@loader_path/<name>` reference; absolute producer/SDK
+paths, bare names, traversal and private shadows of the declared OS runtime
+are rejected before publication. The declared OS dependency remains
+`/usr/lib/libSystem.B.dylib`. Search paths are empty or `@loader_path`.
+
+The canonical private dylibs live in `system/bin`. A copied executable alias
+has its own loader directory: preserve its bytes and add internal relative
+dylib links beside it, pointing to that same canonical closure. These links
+are ordinary pinned inventory entries; no manifest version change is needed.
+Missing or modified closure files/links invalidate the inventory before a CLI
+job is created. A source SDK with non-relocatable images must be prepared as a
+separate identified candidate, never silently edited by assembly.
+
+CLI jobs construct a clean child environment rather than inherit `DYLD_*`.
+This is not a claim that manual direct execution is immune to arbitrary dyld
+overrides. The [native private-closure replay](../acceptance/host_tools_acceptance.md#macosarm64-private-dylib-closure-replay-2026-11-06)
+uses a working poisoned-library control and actual dyld load evidence; runtime
+fixture coverage is distinct from the ordinary static bundle.
+
 `SHELL`, `CONFIG_SHELL`, `MAKE` and `AWK` use the manifest's whitespace-free
 virtual paths. `MAKEFLAGS=SHELL=/system/bin/sh` (Windows: `sh.exe`) also selects
 the CRT shell for GNU make, which ignores the environment's SHELL on POSIX.

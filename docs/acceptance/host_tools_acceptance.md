@@ -328,3 +328,94 @@ any production adoption stay open. Earlier SDK tool probes remain historical and
 artifact. Interactive terminal/job control, source-port/compiler adapters,
 cross-target execution, official trust/metadata policy and public release are
 separate work; no new production consumer lock is adopted here.
+
+## macOS/arm64 private-dylib closure replay (2026-11-06)
+
+**Pass for the previously unexercised private-dylib scenario, at this exact
+local fixture.** CRT baseline `82466be` plus the recorded assembler/test delta;
+CLI baseline `1dc3c03` plus the earlier macOS workflow correction, executable
+`94ddda0ee179b3e47bf4dbfc91502415ef33209dfa9945706f7cb1116fd9ea8d`.
+Native macOS 27.2/arm64, explicit Xcode Clang/ld. Reused clean CRT `784389b`
+Dev (`v0.0.1-rehearsal.6`), content
+`72d1b37593abb2f5dd9d58a8338f44191b0b2023d6cbf2621cf7cd688ce80b4c`.
+No fresh runtime or original SDK change is involved.
+
+### Fixture and producer change
+
+`tools/replay_host_private_macos.py` copies the existing onetrue-awk import,
+without source edits, compiles its nine normal C sources and links using that
+SDK's pinned native `executable-shared` C policy (`6ffbf556...41d2e7`). Only
+the separate test view's AWK and copied aliases change. Packaging normalizes
+its RPATH to `@loader_path` and ad-hoc signs that fixture image; upstream code
+and the actual SDK/contract pins are untouched. The view's manifest records
+its parent SDK and AWK source hashes, and VERSION labels it as a test fixture.
+It is not a new Development SDK or an official all-shared host-tools release.
+
+The ordinary assembler copies the actual dependency closure:
+`system/bin/libc.dylib`, `libm.dylib` and `libdl.dylib`, with the existing OS
+libSystem boundary. It now rejects foreign native images and absolute/unsafe
+Mach-O private load names before publication. Copied AWK aliases in `bin` and
+`usr/bin` retain their executable bytes and gain relative links to the same
+canonical three dylibs. Those six links are covered by inventory format 1.
+
+| Fixture identity | SHA-256 |
+| --- | --- |
+| Host-tools manifest | `1e71a84593d220cbe09d62932c7d446073a5dc8f5bc7313128142aaa9c2301e8` |
+| Payload | `f9db98a574d3eb5ec99092dff3bbe9a6609c5553e837cfbfafb6cd88371213cf` |
+| Shared AWK | `7034e5fd9b2ef20199c11fcc2b9398fb51428fdb4e0d7c12d7bc160fd9b7db7c` |
+| Accepted 27-case result | `d068c05a558688f64ff82ec19ae46b693a642ba91bbba6e49e9935f637d5fad3` |
+
+### Native evidence
+
+**27/27 pass** in `replay-r3`. Original producer/SDK/contract/source/compiler
+paths are unreadable under Seatbelt; native tool execution is explicitly
+allowed, host shell/awk/make/Python/compiler fallbacks and network are denied.
+The selected bundle is read-only to consumers. The test orchestrator alone
+mutates disposable copies for negative cases.
+
+- Two independent space/Hangul relocations preserve the same inventory/pin
+  and run actual shared AWK through CLI shell jobs and its physical bundle alias.
+- `DYLD_PRINT_LIBRARIES` proves all three CRT dylibs load from the relocated
+  bundle. The shared AWK and closure pass the existing binding/allocator audit.
+- A valid, host-only poisoned `libdl.dylib` exits 97 and writes a marker when
+  deliberately selected by an unfiltered direct launch. With the same hostile
+  cwd and DYLD paths supplied to the CLI, its children use the verified bundle,
+  print the correct AWK/math results and leave no marker. The trap is never an
+  accepted product dependency or host-libc fallback.
+- Removing copied-alias runtime links produces an actual dyld missing-library
+  failure; restoring the canonical links makes that same alias run again.
+- A missing canonical dylib produces a direct dyld failure with original SDK
+  access denied. CLI doctor and shell reject missing/changed inventory before
+  job creation; restoration verifies and runs. Expected dyld abort diagnostics
+  are negative controls, not accepted runtime crashes.
+- Original SDK, bundle and imported AWK bytes remain unchanged after restoration.
+  The previous static bundle is freshly reassembled from its original C SDK:
+  complete inventory/payload remains `6e6984bb...58608e`. Its new manifest differs
+  truthfully in assembler identity. **51 focused producer tests pass** (host
+  tools, binary dependencies, ELF parsing and runtime notices).
+
+### Retention and limits
+
+Evidence is in ignored `out/host-private-macos-20261106/`: exact invocation,
+`replay-r3/{result,fixture,commands,bindings}.json`, per-call output, producer
+tests and `static-regression.json`. Work is
+`/private/tmp/crt-host-private-20261106/private dylib 한글 wygec906`.
+`replay-r1` (18/25) retains unsynchronized fixture alias bytes, ineffective
+pre-sandbox DYLD injection and an absolute `/usr/bin/awk` attempt; `replay-r2`
+passes 25/25 before the two copied-alias controls are added. No failed result
+is relabeled as the final candidate.
+
+Apple's protected sandbox-exec startup strips DYLD variables. A native
+**test-host-only** bridge sets those keys after that boundary, then execs the
+selected image; the poison constructor proves the control actually operates.
+It is not a shipped launcher. The earlier CLI selection/first-build adapters
+are strengthened the same way and pass 66/66 and 86/86 again; their old results
+remain separate. Existing absolute host paths may pass through PAL rootfs
+translation: `/usr/bin/awk` is intentionally denied here, and alias tests use
+the selected bundle's physical paths. This is not chroot or a new PAL namespace
+policy. Direct manual launches with arbitrary DYLD overrides are not hardened.
+
+The [CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#macosarm64-private-dylib-host-tools-replay-2026-11-06)
+owns consumer adoption. This closes the macOS/arm64 private-closure test slice,
+not every future bundle/profile, macOS/x86_64, Windows private DLLs, Windows/arm64
+or production trust/promotion. No default, root lock, SDK release or STATUS change.

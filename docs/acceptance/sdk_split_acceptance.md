@@ -1715,3 +1715,52 @@ consumer adoption, preview assembly and affected-host macOS/Windows replay
 remain separate gates. Existing Windows concurrency/DLL and pure C shared-policy
 work stays open. No producer code/SDK bytes, root/default lock, binary, release
 or STATUS is changed by this documentation update.
+
+## macOS/arm64 selection, first build and HTTPS handoff replay (2026-11-06)
+
+**Pass for the bounded three-increment consumer replay.** Reviewed CRT
+`82466be582e57c8770a6816f1c6b9ed0bf819f76` and CLI `1dc3c03` (the
+Linux full-identity selection `8788b59`, first-build binding `4f55a52` and
+pinned acquisition `1dc3c03`). Reused the clean CRT `784389b` Development SDK
+and original `v0.0.1-rehearsal.6` archive/portable-contract/manifest from the
+[earlier macOS record](#macosarm64-installation-receipt-and-repair-replay-2026-11-05),
+not newly built runtime assets or rewritten release fixtures.
+
+The original CLI's HTTPS path failed after the first metadata GET: it required
+`manifest.format == 1`, a field neither the retained nor current producer's
+`tools/crt_sdk_release.py` emits. The actual versioned contract is the archive
+asset's **`install.format == 1`**. The local CLI correction removes that false
+envelope requirement while retaining version/native-target/profile/content,
+size/digest and install-format checks. It is common consumer code, not a macOS
+branch or a new producer schema; original release inputs and pins stay intact.
+The shared TLS suite now also rejects unsupported install metadata before any
+asset download. Other-host replay of that correction is not claimed here.
+
+The corrected SDK-only CLI self-build passes cold **17/0**, warm **0/17** and
+bare import/ownership checks. Native Seatbelt replay passes:
+
+- **66/66 selection/collision** checks: full supplied identity digits,
+  competing SDKs, explicit tools, preserved locks, hostile search paths and
+  actual static/shared consumers.
+- **86/86 first-build** checks: source-only new, exact pins, failed compilation,
+  ambiguity/partial-state refusal, real publication-rename failure with rollback,
+  cache-preserving retry and C static/C++ shared execution.
+- **73/73 HTTPS acquisition** checks, with explicit disposable test trust,
+  TLS/metadata/asset failures, exact installed reuse and live/dead fetch recovery;
+  **12/12 focused first-build acquisition failure/retry** checks.
+
+Four static/shared consumer images pass the macOS binding audit; shared C++
+consumers import the selected installed CRT dylibs, not host libc++ as a
+substitute. The corrected native fixture passes **922 regression checks**
+against that same candidate. Original/copied SDK inventories and release inputs stay unchanged.
+The [CLI-owned acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#selection-first-build-and-pinned-https-replay-macosarm64-2026-11-06)
+owns exact tested source/binary/tool/trust identities, commands, host-test
+isolation, retained failures and regression scope. Raw evidence remains in
+ignored `out/first-workflow-macos-20261106/` in the CRT checkout.
+
+No producer code/schema/API/ABI change, SDK rebuild, production pin or artifact
+promotion was needed. Windows matcher/workflow/DLL and installer-concurrency
+gates remain open, as does Linux's retained pure-C shared provider-policy audit.
+Existing Linux evidence retains its tested snapshots; it is not a replay of
+the new consumer correction. Defaults, root locks, committed CLI binaries,
+public trust and STATUS remain unchanged.
