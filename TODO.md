@@ -146,9 +146,10 @@ owning acceptance records; this list contains the remaining producer work.
   but its first concurrent-install replay hit a native SIGSEGV. Keep the
   coordinated CLI/producer crash investigation and Windows/arm64 delta replay
   open; a passing continuation does not close the failed Windows gate.
-- [ ] **3.2** Review targeted installed-SDK path/tool/DLL collisions and lock
-  preservation using the implemented project selection. Finish affected-store
-  regressions without reopening unchanged whole-stack builds.
+- [ ] **3.2** Finish affected-host SDK path/tool/DLL collision replay. The
+  [Linux selection slice passes](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-selection-collision-slice-2026-11-05)
+  and fixes truncated full-identity matching in CLI; macOS/Windows matcher
+  replay and actual Windows DLL collision checks remain. Reuse existing SDKs.
 - [ ] **3.4** Supply an exact Linux metadata/archive/portable-contract handoff
   for first-build acquisition. Keep developer pins explicit; approved official
   trust and actual producer promotion precede default public acquisition/adoption.

@@ -10,6 +10,17 @@ substantive update.
 
 ## 2026-11-05
 
+### Record Linux SDK selection collisions and the consumer identity fix
+
+Reviewed the bounded CLI 3.2 slice against producer `d856a00`, reusing the
+identified dirty developer SDK without rebuilding runtime artifacts. CLI fixed
+full-identity references being truncated to the store's 12-digit suffix and
+validated competing SDK selection, unchanged locks and hostile search paths
+with actual static/shared consumers. The [producer record](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-selection-collision-slice-2026-11-05)
+links consumer-owned identities and evidence. No shared schema or producer
+code changed. Affected-host collision replay and the Windows native crash
+remain open; first-build/acquisition continues under its existing queue.
+
 ### Replay Windows/x64 receipt boundaries and retain a native concurrency blocker
 
 Reused the clean `436b4f2` Development SDK and original rehearsal.8 release

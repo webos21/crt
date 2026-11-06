@@ -1631,3 +1631,30 @@ continuation harness error are preserved. Windows/x64 concurrency closure,
 Windows/arm64 receipt replay, collisions and first-build/acquisition remain
 open. No STATUS, SDK, committed CLI binary, default, project lock, tag or
 release was changed.
+
+## Linux installed-SDK selection collision slice (2026-11-05)
+
+Reviewed producer documentation baseline `d856a009358dcf6391c89ee0af7390b54db2419b`
+and CLI base `483e76d846808aa3391b329908c4b5883c815c66`. The bounded CLI
+selection replay found that content references longer than 12 digits matched
+only the store directory suffix. CLI now checks every supplied digit against
+the installation receipt, then applies the existing SDK/provider content
+validation. This is a consumer matcher correction: SDK identity, producer
+metadata, portable compiler policy, receipts and project-lock formats do not
+change. No producer artifact rebuild or promotion is needed for this fix.
+
+The [consumer-owned evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#installed-sdk-selection-and-search-path-collisions-linuxx86_64-2026-11-05)
+records fresh SDK-only CLI build, native regressions, competing same-version
+SDK identities, lock preservation, hostile path/tool/header/runtime search
+inputs and actual static/shared build/test/run on Linux/x86_64. It reuses the
+explicitly dirty local developer SDK from the Linux receipt slice above;
+its additional synthetic resolver SDK is not a producer release. Exact input/
+source/binary/tool hashes, retained failing baselines and reporting checks live
+in that record and CLI ignored `out/d2-selection-20261105/`.
+
+This completes the Linux collision slice only. Affected-host macOS/Windows
+matcher replay, actual Windows DLL collisions, Windows/x64 native concurrency
+investigation and Windows/arm64 receipt replay remain open. First-build binding
+and pinned acquisition remain consumer workflow work, with producer handoff
+tracked separately in 3.4. No runtime/SDK bytes, production pin, lock, STATUS
+or public artifact is changed by the producer documentation update.
