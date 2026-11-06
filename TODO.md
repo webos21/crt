@@ -151,7 +151,8 @@ owning acceptance records; this list contains the remaining producer work.
   [Linux selection slice passes](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-selection-collision-slice-2026-11-05)
   and fixes truncated full-identity matching in CLI;
   [macOS matcher/collision replay passes](docs/acceptance/sdk_split_acceptance.md#macosarm64-selection-first-build-and-https-handoff-replay-2026-11-06).
-  Windows matcher replay and actual DLL collision checks remain. Reuse existing SDKs.
+  [Windows/x64 matcher/collision replay passes](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#selection-first-build-and-pinned-https-replay-windowsx64-2026-11-06) (CLI-owned; existing rehearsal.8 SDK,
+  decoy executables, and a documented working-directory DLL limitation); Windows/arm64 remains. Reuse existing SDKs.
 - [x] **3.4** Exercise the explicit developer-pinned Linux metadata/archive/
   portable-contract handoff through HTTPS acquisition and first build
   ([technical evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)).

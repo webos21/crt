@@ -10,6 +10,12 @@ substantive update.
 
 ## 2026-11-06
 
+### Replay selection, first build and pinned HTTPS on Windows/x64
+
+Consumer-side replay against the existing rehearsal.8 SDK (CRT `436b4f2`; the delta to `4db4c85` is host-tools and docs only): selection 68/68, first build 86/86, pinned HTTPS 74/74 and the
+installer/receipt driver 101/101 with a CLI self-built from `ea9b8cd`. No producer, runtime or PAL change was needed; the original envelope without top-level `format` is accepted. A junk DLL in the
+caller's working directory shadows the shared runtime on Windows (documented, not defended). The [CLI-owned record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#selection-first-build-and-pinned-https-replay-windowsx64-2026-11-06) has the exact identities and harness findings.
+
 ### Close the macOS host-tools private-dylib replay slice
 
 Rebuilt the existing AWK import with the retained public SDK's shared C policy
