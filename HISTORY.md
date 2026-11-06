@@ -8,6 +8,20 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-06
+
+### Record the Linux installed-SDK first-build workflow
+
+CLI now builds an unresolved native Dev project without a separate configure,
+publishing exact existing-format pins after success. The [consumer slice](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-first-build-consumer-slice-2026-11-06)
+links SDK-only build, native regressions, isolated lock-preservation and
+publication rollback evidence. Reused the dirty developer SDK/provider without
+new producer artifacts. ELF review exposed the retained provider's static C
+inputs under its shared policy; queued producer audit 6.4 rather than claiming
+C shared acceptance. C static and actual C++ shared evidence stay separate.
+Remote acquisition and other-host first-build replay remain open. No producer
+code, SDK/lock/default promotion or STATUS update is involved.
+
 ## 2026-11-05
 
 ### Record Linux SDK selection collisions and the consumer identity fix

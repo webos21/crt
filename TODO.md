@@ -154,6 +154,8 @@ owning acceptance records; this list contains the remaining producer work.
   for first-build acquisition. Keep developer pins explicit; approved official
   trust and actual producer promotion precede default public acquisition/adoption.
   Existing Dev is the initial consumer profile; broader profile metadata is deferred.
+  [Installed-SDK first build passes on Linux](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-first-build-consumer-slice-2026-11-06);
+  remote acquisition remains the next CLI slice.
 
 **3.3** remains the self-upgrade work item, deferred in Planned; identifiers
 and historical evidence are not renumbered. CLI owns first-build binding,
@@ -185,6 +187,12 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **6.3** Support broader profile/capability metadata for project-specific SDK
   pins. Existing native-dev store selection is implemented; basic first-build
   acquisition proceeds with 3.4, while general profile/offline behavior stays here.
+
+- [ ] **6.4** Audit pure C shared-executable provider policy. The retained
+  [Linux first-build provider](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-first-build-consumer-slice-2026-11-06)
+  emits static C inputs for `executable-shared.link_c`; establish the intended
+  policy, then correct or explicitly reject that mode before claiming C shared
+  acceptance. Preserve the retained SDK/contract pin and qualify new inputs separately.
 
 #### Tranche 7. Deployment and automation contracts (D6)
 

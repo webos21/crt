@@ -1658,3 +1658,29 @@ investigation and Windows/arm64 receipt replay remain open. First-build binding
 and pinned acquisition remain consumer workflow work, with producer handoff
 tracked separately in 3.4. No runtime/SDK bytes, production pin, lock, STATUS
 or public artifact is changed by the producer documentation update.
+
+## Linux installed-SDK first-build consumer slice (2026-11-06)
+
+Reviewed producer baseline `c9e6aa9ecb73c85c73ba32761b2715d0b09fbe71`
+and CLI base `8788b59a77841537033915b34bbbf3c9a013b906`. CLI implements
+first `build` binding of an unresolved format-1 project from explicit LLVM
+paths or local configuration, with exact installed SDK/provider/tool pins
+published after success. Failed selection/compilation/publication preserves
+the existing binding; resolved/partial state is not silently reselected.
+The [consumer-owned evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#first-build-without-configure-linuxx86_64-2026-11-06)
+owns exact source/binary/SDK/tool inputs, native regressions, isolated workflow,
+publication failure/rollback/retry and actual C static/C++ shared consumers.
+
+No new producer format or artifact is needed. The consumer reuses the explicitly
+dirty developer SDK and immutable provider from the Linux receipt record;
+this is not producer promotion or default/public acquisition. Tranche 3.4 still
+covers the pinned metadata/archive/contract handoff for subsequent acquisition.
+macOS/Windows first-build replay and existing native installer gates remain open.
+
+ELF review of the retained provider found a separate limitation:
+`executable-shared.link_c` contains `libc.a`/static runtime inputs, and a C
+shared request emits no dynamic imports. Do not count that as C shared proof.
+The final consumer replay distinguishes C static from actual C++ shared output.
+Tranche 6.4 tracks review of the intended producer C shared policy and any new
+qualified contract/artifact needed; the retained pin is not rewritten, and no
+root cause or current-HEAD runtime fix is claimed from this legacy fixture.
