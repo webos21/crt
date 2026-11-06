@@ -29,6 +29,14 @@ Windows driver 101/101 three times, selection 68/68, first build 86/86 and pinne
 [record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-concurrent-install-sigsegv-fix-2026-11-06) has the identities. Other targets are
 unverified. The diagnostic allocator relinks and probes are local evidence under the ignored `out/sigsegv-b/`.
 
+### Replay receipts, selection, first build and pinned HTTPS on Windows/arm64
+
+Consumer-side replay against the existing clean-commit rehearsal.7 SDK (CRT `0631131`; the producer delta to `a00c6be` is the macOS-only host-tools dylib work, its replay script, tests and `AGENTS.md`, none shipped in the SDK): the CLI self-built from
+`160a4a6` passes the installer/receipt driver 101/101, selection 68/68, first build 86/86 and pinned HTTPS 74/74 on the first run with the existing Windows drivers. No producer, runtime or PAL change was needed. Fifteen repeated
+concurrent installs also succeed, as supporting evidence only: the Windows/x64 native crash is neither reproduced nor closed. The
+[CLI-owned record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#selection-first-build-and-pinned-https-replay-windowsarm64-2026-11-06) has the details; the
+[producer-side note](docs/acceptance/sdk_split_acceptance.md#windowsarm64-receipt-selection-first-build-and-https-replay-2026-11-06) records the SDK reuse.
+
 ### Replay selection, first build and pinned HTTPS on Windows/x64
 
 Consumer-side replay against the existing rehearsal.8 SDK (CRT `436b4f2`; the delta to `4db4c85` is host-tools and docs only): selection 68/68, first build 86/86, pinned HTTPS 74/74 and the

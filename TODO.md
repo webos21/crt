@@ -149,13 +149,14 @@ owning acceptance records; this list contains the remaining producer work.
   restored on catch; [design note](docs/design/cxx_runtime.md)); a CLI built
   against the fixed SDK passes the full Windows/x64 replay
   ([record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-concurrent-install-sigsegv-fix-2026-11-06)).
-  The Windows/arm64 delta replay remains.
-- [ ] **3.2** Finish affected-host SDK path/tool/DLL collision replay. The
+  The [Windows/arm64 receipt/repair delta replay passes](docs/acceptance/sdk_split_acceptance.md#windowsarm64-receipt-selection-first-build-and-https-replay-2026-11-06)
+  (CLI driver 101/101; 15 of 15 repeated concurrent installs also pass).
+- [x] **3.2** Finish affected-host SDK path/tool/DLL collision replay. The
   [Linux selection slice passes](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-selection-collision-slice-2026-11-05)
   and fixes truncated full-identity matching in CLI;
   [macOS matcher/collision replay passes](docs/acceptance/sdk_split_acceptance.md#macosarm64-selection-first-build-and-https-handoff-replay-2026-11-06).
   [Windows/x64 matcher/collision replay passes](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#selection-first-build-and-pinned-https-replay-windowsx64-2026-11-06) (CLI-owned; existing rehearsal.8 SDK,
-  decoy executables, and a documented working-directory DLL limitation); Windows/arm64 remains. Reuse existing SDKs.
+  decoy executables, and a documented working-directory DLL limitation); [Windows/arm64 passes too](docs/acceptance/sdk_split_acceptance.md#windowsarm64-receipt-selection-first-build-and-https-replay-2026-11-06) (68/68, existing rehearsal.7 SDK). Reuse existing SDKs.
 - [x] **3.4** Exercise the explicit developer-pinned Linux metadata/archive/
   portable-contract handoff through HTTPS acquisition and first build
   ([technical evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)).
