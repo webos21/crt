@@ -150,12 +150,11 @@ owning acceptance records; this list contains the remaining producer work.
   [Linux selection slice passes](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-selection-collision-slice-2026-11-05)
   and fixes truncated full-identity matching in CLI; macOS/Windows matcher
   replay and actual Windows DLL collision checks remain. Reuse existing SDKs.
-- [ ] **3.4** Supply an exact Linux metadata/archive/portable-contract handoff
-  for first-build acquisition. Keep developer pins explicit; approved official
-  trust and actual producer promotion precede default public acquisition/adoption.
-  Existing Dev is the initial consumer profile; broader profile metadata is deferred.
-  [Installed-SDK first build passes on Linux](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-first-build-consumer-slice-2026-11-06);
-  remote acquisition remains the next CLI slice.
+- [x] **3.4** Exercise the explicit developer-pinned Linux metadata/archive/
+  portable-contract handoff through HTTPS acquisition and first build
+  ([technical evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)).
+  Existing format-1 assets suffice; CLI owns source format 0. Public/default URLs,
+  approved trust and actual producer promotion remain preview/release gates.
 
 **3.3** remains the self-upgrade work item, deferred in Planned; identifiers
 and historical evidence are not renumbered. CLI owns first-build binding,
@@ -185,8 +184,9 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **6.2** Validate CLI-owned templates and external C/C++/GFX/Media/UI/Web
   consumers, including runtime/worker resources and CLI self-build/run.
 - [ ] **6.3** Support broader profile/capability metadata for project-specific SDK
-  pins. Existing native-dev store selection is implemented; basic first-build
-  acquisition proceeds with 3.4, while general profile/offline behavior stays here.
+  pins. Native-dev installed selection and explicit pinned first-build acquisition
+  have [Linux evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06);
+  general profile/offline behavior stays here.
 
 - [ ] **6.4** Audit pure C shared-executable provider policy. The retained
   [Linux first-build provider](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-first-build-consumer-slice-2026-11-06)

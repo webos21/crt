@@ -1684,3 +1684,34 @@ The final consumer replay distinguishes C static from actual C++ shared output.
 Tranche 6.4 tracks review of the intended producer C shared policy and any new
 qualified contract/artifact needed; the retained pin is not rewritten, and no
 root cause or current-HEAD runtime fix is claimed from this legacy fixture.
+
+## Linux pinned HTTPS SDK handoff (2026-11-06)
+
+Reviewed CRT `6e064f2cc2ff84b5507d7be8000668c730dfe73a` and CLI base
+`4f55a52bd75660b4c8d2543da58da6337efd45de`. Existing producer release-manifest
+and install metadata format 1, named archive/portable-contract assets, exact
+sizes/digests and SDK content identity are sufficient for this developer handoff.
+CLI owns the implemented `crt-cli.sdk-source`, format 0: explicit HTTPS URLs,
+CA bytes/pin, manifest size/digest and expected SDK/contract pins. No producer
+wire/schema, ABI, source-stage or runtime artifact changes are needed.
+
+The [consumer-owned record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#pinned-https-sdk-acquisition-linuxx86_64-2026-11-06)
+contains exact source/binary/SDK/tool/trust inputs, SDK-only CLI build, native
+regressions, real loopback TLS failure/recovery and first-build behavior. It
+reuses the original dirty local Linux Dev fixture from receipt acceptance;
+its assets are not overwritten or relabeled as a clean/promoted release.
+Technical tests use a disposable explicit CA, not approved public trust.
+
+Tranche 3.4's bounded developer handoff is exercised: metadata/contract/archive
+are verified before normal immutable installation; exact installed identities
+need no redownload; failed transfer/compile/publication preserves project pins.
+PID-owned network staging uses the existing live/dead recovery boundary.
+Caller-supplied SDK/contract pins are checked on installed reuse without claiming
+a fresh remote-manifest verification. CLI owns transaction/selection semantics
+and keeps the compatibility ledger, not this producer record.
+
+Official/default URLs and publisher trust, producer promotion before production
+consumer adoption, preview assembly and affected-host macOS/Windows replay
+remain separate gates. Existing Windows concurrency/DLL and pure C shared-policy
+work stays open. No producer code/SDK bytes, root/default lock, binary, release
+or STATUS is changed by this documentation update.

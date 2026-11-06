@@ -10,6 +10,17 @@ substantive update.
 
 ## 2026-11-06
 
+### Exercise the explicit pinned HTTPS developer SDK handoff
+
+Confirmed existing format-1 release assets can feed CLI-owned source format 0,
+native HTTPS acquisition, immutable installation and first build. The
+[Linux consumer evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)
+records exact retained dirty developer inputs, TLS failures, installed-identity
+reuse, live/dead fetch recovery and unchanged project pins on failure. Closed
+bounded technical handoff 3.4 without new producer code/schema/artifacts. Public
+trust/default URLs, actual promotion/preview assembly and other-host replay
+remain separate work; existing Windows and C shared-policy gates are unchanged.
+
 ### Record the Linux installed-SDK first-build workflow
 
 CLI now builds an unresolved native Dev project without a separate configure,

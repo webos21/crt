@@ -532,6 +532,18 @@ the [comparison record](../acceptance/release_qualification.md#source-asset-comp
 owns the measured evidence and limits. Existing stage recipe schema version 2
 and OS-only source target metadata do not change with this decision.
 
+### Explicit developer HTTPS handoff (2026-11-06)
+
+The [Linux technical handoff](../acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)
+uses existing format-1 manifest/install metadata and named portable-contract
+assets. CLI owns implemented source format 0 and commands/selection; its
+[contract](https://github.com/webos21/crt-cli/blob/main/docs/reference/bootstrap_contract.md#explicit-pinned-https-sdk-source-experimental-format-0)
+records explicit URL/CA/metadata/content pins, limits and rejection/reuse rules.
+No URL channel or official publisher authority is inferred from an SDK version.
+An explicit dirty developer candidate remains distinct from producer promotion
+and approved public/default trust. Compatibility and native evidence stay in
+the consumer ledger and linked acceptance, rather than copying its schema here.
+
 ## 8. Cross-repository Contract Review
 
 The local Tranche 2 increment implements a separate
