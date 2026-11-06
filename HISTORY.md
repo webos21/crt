@@ -24,8 +24,9 @@ original crt-cli objects relinked with the diagnostic allocator, in held-lock pa
 
 Fix: a `src/Registers.hpp` patch in the libunwind recipe plus `imported_libcxx_eh_registers_test.cc` (600/600 catches lose
 the registers without the patch, none with it). A fresh `crt-libcxx-smoke` build through the recipe applies the patch and passes the
-new test for static and shared linkage. Not done: a fresh Development SDK and CLI rebuilt with the fix, the full Windows
-replay on it, and a refreshed committed CLI binary; `bin/win-x64/crt-cli.exe` still contains the old libunwind. Other targets are
+new test for static and shared linkage. A Development SDK rebuilt from the committed fix (`v0.0.1-rehearsal.10`) and a CLI self-built against it pass the
+Windows driver 101/101 three times, selection 68/68, first build 86/86 and pinned HTTPS 74/74; the CLI-owned
+[record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-concurrent-install-sigsegv-fix-2026-11-06) has the identities. Other targets are
 unverified. The diagnostic allocator relinks and probes are local evidence under the ignored `out/sigsegv-b/`.
 
 ### Replay selection, first build and pinned HTTPS on Windows/x64
