@@ -568,7 +568,7 @@ recipe or archive format. CRT's part:
 - The Dev SDK's own zlib is not replaced, patched or reused as proof of a source port; any later change to an SDK-shipped
   library's bytes follows the normal change-impact policy above.
 
-Status: design reviewed on paper only. No producer artifact, recipe, test or promotion changed.
+Status: design reviewed on paper only. No producer artifact, recipe, test or promotion changed. The CLI now carries a seeded adapter-table entry for the zlib recipe (file SHA-256 `dde94498...349b`) marked `crt_review: pending`; CRT's review of that entry and of the accepted field subset is still open.
 
 ## 8. Cross-repository Contract Review
 
