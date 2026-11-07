@@ -10,6 +10,10 @@ substantive update.
 
 ## 2026-11-06
 
+### Document the Windows/x64 SIGSEGV fix in producer acceptance and the D3 producer obligations
+
+Review of the pulled macOS/Windows replays. `docs/acceptance/sdk_split_acceptance.md` gained the fix section and marks its two older "stays open" notes as superseded; `docs/design/sdk_development_contract.md` gained the D3 source-port adapter producer obligations (adapter-table review, `crt-cc` under the host-tools `mksh`, SDK zlib untouched). Linux was checked on paper only: the libunwind patch `find` text occurs once in the pristine pinned `Registers.hpp` and the added code is `_WIN64`-only; no Linux rebuild was run. Design only, no implementation.
+
 ### Fix the Windows/x64 concurrent-install SIGSEGV: libunwind dropped XMM6-XMM15 on catch
 
 Root cause of the crash recorded at the first Windows receipt replay: the pinned libunwind copied only general registers into

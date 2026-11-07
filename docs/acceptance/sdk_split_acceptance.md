@@ -1584,8 +1584,9 @@ project lock or STATUS was changed or promoted by this replay.
 
 ## Windows/x64 installation receipt and repair replay (2026-11-05)
 
-**Receipt/repair boundaries pass; the whole Windows installer gate remains
-open after a native concurrent-install crash.** Reviewed CRT `dc62e8d` and CLI
+**Receipt/repair boundaries pass; the whole Windows installer gate remained
+open after a native concurrent-install crash (closed later by the
+[root-cause fix](#windowsx64-concurrent-install-sigsegv-fix-2026-11-06)).** Reviewed CRT `dc62e8d` and CLI
 `51f1dc0`, whose product/test input snapshot matches receipt implementation
 `502992e` and the Linux/macOS replay. Reused the retained clean CRT
 `436b4f2e18db4ce2ac5d1eb56d6f2c7b37606296` Development SDK and its original
@@ -1788,10 +1789,28 @@ Windows drivers, unchanged, under the restricted token of `crt_windows_trace`:
 All four suites install or acquire from the original producer manifest, which has no top-level `format` (the release-envelope correction) and `install.format` 1. A junk `libc.dll` planted in the CLI's working directory shadows the shared runtime on
 Windows; that limit is documented by a passing case, not defended. No decoy executable was started in the selection, first-build and acquisition suites.
 
-**Concurrent-install note.** The 3.1 item about the native SIGSEGV seen once in a Windows/x64 concurrent install stays open: it is neither reproduced nor explained here. For supporting evidence only, the same scenario (two simultaneous
+**Concurrent-install note (superseded by the [root-cause fix](#windowsx64-concurrent-install-sigsegv-fix-2026-11-06)).** At the time of this replay the 3.1 item about the native SIGSEGV seen once in a Windows/x64 concurrent install stayed open: it was neither reproduced nor explained here. For supporting evidence only, the same scenario (two simultaneous
 `sdk install --lock-wait 300` of this SDK into a fresh store) was repeated 15 times with the self-built CLI run directly; in 15 of 15 rounds both processes exit 0, one reports `installed:` and the other `already installed:` with the same identity,
 the store holds one SDK and nothing is left in `.staging` or `.locks`. The throwaway script labeled every round `FAIL` because it parsed text output as JSON; the rounds were judged from the retained raw output.
 
 No CRT, producer or SDK defect and no CLI product defect was found. Details, hashes and the record of the stress script's defect are in the CLI's
 [acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#selection-first-build-and-pinned-https-replay-windowsarm64-2026-11-06). Raw evidence is in the CLI checkout's ignored
 `out/windows-arm64-s3-20261106/`. Not run: Full-stage metadata, a published release asset, official trust, promotion and the Windows/x64 crash closure. No tag, release, production lock or STATUS change.
+
+## Windows/x64 concurrent-install SIGSEGV fix (2026-11-06)
+
+**Root cause fixed in the pinned libunwind recipe; verified by the CLI-owned replay.** CRT `05b5678`
+(`libstdc++/third_party/libunwind/recipe.json`) patches `Registers_x86_64(const void*)` to copy the `_xmm` array under
+`_WIN64` and to zero it in the default constructor. Win64 makes XMM6-XMM15 callee-saved; the unpatched cursor resumed a
+catch handler with indeterminate vector registers, which corrupted a freshly zero-initialised `std::wstring` in the
+`--lock-wait` retry loop. Producer-side evidence is the minimal reproducer `libstdc++/tests/imported_libcxx_eh_registers_test.cc`
+(run for both linkages by `tools/test_libcxx_runtime.py`, effective on Windows/x86_64 only) and the design note in
+[cxx_runtime.md](../design/cxx_runtime.md#win64-callee-saved-vector-registers-across-a-catch). The CLI-owned
+[replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-concurrent-install-sigsegv-fix-2026-11-06)
+passes the installer driver 101/101 three times, selection 68/68, first build 86/86 and HTTPS 74/74 with a CLI self-built
+against the SDK rebuilt from `05b5678`.
+
+Linux check done for this review: the patch's `find` text occurs exactly once in the pristine pinned `Registers.hpp`
+(so the recipe still applies on every host) and the added code is `_WIN64`-only, so Linux libunwind code is unchanged.
+A Linux rebuild of the patched recipe was not re-run here. macOS, Windows/arm64 and Linux/aarch64 are not re-verified
+against the fix (their own libunwind save/restore paths are separate).

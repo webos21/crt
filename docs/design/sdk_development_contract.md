@@ -548,6 +548,28 @@ An explicit dirty developer candidate remains distinct from producer promotion
 and approved public/default trust. Compatibility and native evidence stay in
 the consumer ledger and linked acceptance, rather than copying its schema here.
 
+### D3 Source-port Adapter: Producer Obligations (2026-11-06)
+
+The CLI-owned [design record](https://github.com/webos21/crt-cli/blob/main/docs/design/source_port_adapter.md) fixes the
+first slice: the reviewed `zlib` recipe executed natively on Linux/x86_64 into a separate port store. It changes no SDK,
+recipe or archive format. CRT's part:
+
+- Keep `porting/recipes/zlib.json` (`schema_version: 1`) and `crt-port-build.py` as the reference semantics and the
+  differential oracle. They are not a runtime dependency of the CLI and their internal Python APIs stay non-public.
+- Review the CLI's **adapter table**, keyed by the recipe file SHA-256: which `dependencies` are host tools (zlib: `make`),
+  which are target ports (none), the SDK stage requirement and the supported variants. Roles must not be guessed from names;
+  no field is added to the recipe JSON for this.
+- Review the accepted field and placeholder subset (`@PORT_PREFIX@`, `@PORT_PREFIX_POSIX@`, `@PORT_PREFIX_MAKE@`, `@CC@`) against
+  the oracle, including the generated-`Makefile` `post_configure_patch`, which is a recorded workaround and not an upstream
+  source patch.
+- Keep `tools/crt-cc` / `crt-c++` stable as the `CC`/`CXX` a recipe's `configure` sees until a CLI compiler bridge is
+  separately adopted. Whether `crt-cc` runs under the host-tools bundle's `mksh` is **unverified** and is the first
+  thing the implementation must show.
+- The Dev SDK's own zlib is not replaced, patched or reused as proof of a source port; any later change to an SDK-shipped
+  library's bytes follows the normal change-impact policy above.
+
+Status: design reviewed on paper only. No producer artifact, recipe, test or promotion changed.
+
 ## 8. Cross-repository Contract Review
 
 The local Tranche 2 increment implements a separate

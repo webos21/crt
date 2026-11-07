@@ -170,7 +170,10 @@ external-tool selection/diagnosis and download/install orchestration.
 #### Tranche 4. First source-built port (D3)
 
 - [ ] **4.1** Expose the reviewed zlib recipe/compiler adapter against pinned
-  SDK/host-tool contracts; this can proceed with the first-build work. Dev already
+  SDK/host-tool contracts; this can proceed with the first-build work. The CLI-owned
+  [design record](https://github.com/webos21/crt-cli/blob/main/docs/design/source_port_adapter.md) and the
+  [producer obligations](docs/design/sdk_development_contract.md#d3-source-port-adapter-producer-obligations-2026-11-06)
+  (adapter-table review, `crt-cc` under the host-tools `mksh`) are written; nothing is implemented. Dev already
   includes zlib: distinguish SDK-provided reuse from an explicit isolated source
   build into the CLI port store, preserving source/SDK bytes and ABI policy.
 - [ ] **4.2** Review Windows CRT-shell/make static/shared zlib build/link/run;
