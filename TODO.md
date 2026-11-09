@@ -182,6 +182,8 @@ external-tool selection/diagnosis and download/install orchestration.
   now covers static/shared consumption and oracle comparison. Formal table approval and remaining-host gates stay open.
 - [ ] **4.2** Review Windows CRT-shell/make static/shared zlib build/link/run;
   require unchanged SDK/source inputs and a separate CLI-owned port store.
+  The [Windows/x64 replay](docs/acceptance/sdk_split_acceptance.md#windowsx64-d3-public-sdk-replay-boundary-2026-11-09)
+  confirms CLI executor/layout/PE-audit gaps; common regressions pass, D3 stays open.
 
 #### Tranche 5. Dependencies, variants, locks and cache (D4)
 

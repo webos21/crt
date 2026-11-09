@@ -71,11 +71,15 @@ def main():
         target.parent.mkdir(parents=True, exist_ok=True)
         # Windows checkouts convert to CRLF; the exported inputs are the repository's LF text, as on the other hosts.
         target.write_bytes(file.read_bytes().replace(b'\r\n', b'\n'))
-    code = [p for directory in ('src', 'include') for p in (source / directory).rglob('*') if p.is_file()]
+    # Recipe fixtures contain documented upstream OS macros; only translation units and headers are consumer code.
+    code = [p for directory in ('src', 'include') for p in (source / directory).rglob('*')
+            if p.is_file() and p.suffix in {'.c', '.cc', '.cpp', '.cxx', '.h', '.hpp', '.hxx', '.inc'}]
     if any(re.search(r'\b(?:__linux__|__APPLE__|_WIN32|CRT_TARGET_OS_[A-Z]+)\b', p.read_text(encoding='utf-8')) for p in code):
         raise ValueError('CLI source must use CRT PAL rather than OS macros')
-    if list((source / 'src/main').glob('*.h')) or not (source / 'include/crtcli/core.h').is_file():
-        raise ValueError('CLI headers must live under include/')
+    # D3 shares private store-lock helpers between implementation modules; public headers still live under include/.
+    private_headers = {p.name for p in (source / 'src/main').glob('*.h')}
+    if private_headers - {'store_lock.h'} or not (source / 'include/crtcli/core.h').is_file():
+        raise ValueError('unexpected CLI private header or missing public core header')
     input_inventory = inventory(source)
     commands = []
 

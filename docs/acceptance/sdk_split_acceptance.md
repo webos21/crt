@@ -1843,3 +1843,39 @@ Scope: macOS/arm64 only. This does not qualify the new delta on Linux or Windows
 move a production SDK/CLI lock or publish a release. Earlier Linux/Windows SDK and CLI baselines retain their own
 records. Formal table approval (including the macOS layout/tool policy) and native Windows CRT-shell/make
 static/shared acceptance remain open in Tranche 4. STATUS is not changed by this replay.
+
+## Windows/x64 D3 public-SDK replay boundary (2026-11-09)
+
+Reviewed producer `a62d5e2d3a17ed0984e659552413a6d044330f6c` and CLI
+`4936df5e2abae90e84cd3a52d452b7a9bb612329`. The producer diff since
+`05b56788501b02f71a8b8084cc4041effa1475a9` contains four documentation files only.
+The consumer therefore reuses that clean, local `v0.0.1-rehearsal.10` public Dev SDK,
+with its original provenance, without rebuilding or promoting it. No CRT runtime,
+recipe, SDK payload, compiler policy, ABI or release identity changed.
+
+The current CLI product inventory matches the macOS D3 replay. Native Windows/x64
+common regressions, cold/warm self-build, SDK-free commands and direct PE imports
+pass with source/SDK/provider visibility probes and process accounting. Original
+and copied SDK inventories stay unchanged. This is not a fresh producer CTest,
+Development SDK production/trust run or Windows/arm64 acceptance.
+
+The CLI's five input-enabled D3 suites all compile after consumer-owned test
+fixture path/home corrections, then fail at the unsupported Windows boundary:
+no Windows adapter layout, executor admission or PE port audit. No native CLI
+static/shared source-port item, consumer proof or oracle equivalence is accepted.
+The producer recipe's existing Windows support is not changed to a failure status:
+these are CLI adapter gaps, not a rerun/failure of CRT's recipe engine. Formal
+adapter-table approval and Tranche 4.2 remain open.
+
+The producer-side `replay_cli_contract_windows.py` needed two guard corrections:
+scan C/C++ source/header suffixes rather than recipe JSON descriptions containing
+`_WIN32`, and permit D3's private `src/main/store_lock.h`. It still rejects consumer
+OS macros and unexpected private headers. The script hash under test is
+`3bf505ded4a323aaf57b2a4019ca5ee35de3df57f495ab913cb2e1d43d58bb81`.
+Consumer fstream fixtures use explicit UTF-8 strings with the current SDK's narrow
+file APIs; the unavailable wide-path overload is not qualified by that adjustment.
+
+[CLI-owned evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#source-port-d3-replay-windowsx64-2026-11-09) records exact SDK/policy/tool/binary identities, per-suite
+outcomes, all failed attempts and input-checked test-only continuations. Raw logs
+are in the CLI checkout's ignored `out/windows-d3-20261109/`. No committed binary,
+consumer root lock, default trust, STATUS, public tag or release was changed.

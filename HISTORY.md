@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-11-09
 
+### Windows/x64 replay of the Linux/macOS D3 increment
+
+Reused the clean rehearsal.10 public SDK after confirming the later producer delta
+is documentation only. Corrected the Windows contract driver's source/header guards;
+CLI common regressions and SDK-free/PE checks pass. Input-enabled CLI D3 suites
+compile after fixture corrections but confirm unsupported Windows execution/layout/PE
+audit; no producer runtime, recipe or SDK change or D3 acceptance is claimed.
+[Producer boundary and consumer-owned evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-d3-public-sdk-replay-boundary-2026-11-09).
+
 ### Fresh macOS Dev SDK and CLI D3 source-port replay
 
 A clean detached producer at `2f4103d` built local `v0.0.1-rehearsal.7`; Dev verification and its static/shared
