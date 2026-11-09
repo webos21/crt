@@ -173,9 +173,13 @@ external-tool selection/diagnosis and download/install orchestration.
   SDK/host-tool contracts; this can proceed with the first-build work. The CLI-owned
   [design record](https://github.com/webos21/crt-cli/blob/main/docs/design/source_port_adapter.md) and the
   [producer obligations](docs/design/sdk_development_contract.md#d3-source-port-adapter-producer-obligations-2026-11-06)
-  (adapter-table review, `crt-cc` under the host-tools `mksh`) are written; nothing is implemented. Dev already
+  (adapter-table review, `crt-cc` under the host-tools `mksh`) are written. The CLI's Linux implementation now includes
+  execution, audit/store, explicit provider consumption, oracle comparison and lock pins; native-host
+  acceptance and formal adapter-table approval remain separate gates. Dev already
   includes zlib: distinguish SDK-provided reuse from an explicit isolated source
   build into the CLI port store, preserving source/SDK bytes and ABI policy.
+  The [macOS public-SDK replay](docs/acceptance/sdk_split_acceptance.md#macosarm64-d3-public-sdk-handoff-2026-11-09)
+  now covers static/shared consumption and oracle comparison. Formal table approval and remaining-host gates stay open.
 - [ ] **4.2** Review Windows CRT-shell/make static/shared zlib build/link/run;
   require unchanged SDK/source inputs and a separate CLI-owned port store.
 

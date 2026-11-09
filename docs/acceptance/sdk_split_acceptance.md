@@ -1814,3 +1814,32 @@ Linux check done for this review: the patch's `find` text occurs exactly once in
 (so the recipe still applies on every host) and the added code is `_WIN64`-only, so Linux libunwind code is unchanged.
 A Linux rebuild of the patched recipe was not re-run here. macOS, Windows/arm64 and Linux/aarch64 are not re-verified
 against the fix (their own libunwind save/restore paths are separate).
+
+## macOS/arm64 D3 public-SDK handoff (2026-11-09)
+
+Producer: clean `2f4103d97880d5a51c474ef7b65fe810186c49de`, retained detached worktree `../crt-d3-2f4103d`,
+build `out/d3-macos-20261109/build`. Local Dev SDK version `v0.0.1-rehearsal.7`, content identity
+`02e67f3ef8e8eef48f4497c1f5f5ad938e2fdc98ff143fd6cdf849b46fec999b`; portable compiler provider SHA-256
+`912094d0016e8d1a8a6c116e1b257867cfc2f284b148de8d5b419f4d6c97e189` (exported with `tools/export_cli_toolchain.py --portable`).
+The producer logs `dev-build.log`, `release-build.log`, `result.txt` retain both commands' exit 0. Dev verification passes,
+including its static/shared HTTPS+inflate and trust-negative consumer. These are local artifacts, not publication.
+
+The consumer copied that public SDK and independently pinned host-tools bundle outside both repositories and the
+producer worktree. Seatbelt denies original-tree reads/writes, undeclared execution, outside-scratch writes and
+network access for the native jobs. The CLI needs no producer-private headers, sources or build outputs. It builds
+unmodified zlib 1.3.1 into a separate port store and proves static/shared C/C++ consumption and SDK-provider controls;
+the SDK copy and original SDK inventory stay unchanged. The packaged Python oracle is test-only and has a separately
+labeled host-interpreter/SDK-tool exception. No CRT source, public ABI, recipe bytes or wrapper changed here.
+
+CLI owns the exact executor/audit/store/key policy and technical evidence, committed as
+`4936df5e2abae90e84cd3a52d452b7a9bb612329`, in
+[its D3 macOS record](https://github.com/webos21/crt-cli/blob/4936df5e2abae90e84cd3a52d452b7a9bb612329/docs/acceptance/sdk_install_acceptance.md#source-port-d3-replay-macosarm64-2026-11-09).
+CRT's ignored `out/d3-macos-20261109/` retains per-suite stdout/stderr/commands and input inventories, actual loader
+provider paths and the nine-image Mach-O binding audit. The native build uses declared ar/ranlib; the oracle's Darwin
+configure chooses `libtool` and its temporary absolute install name. The differential keeps all 15 static member
+objects identical and explicitly checks the intended install-name/RPATH difference, rather than patching upstream.
+
+Scope: macOS/arm64 only. This does not qualify the new delta on Linux or Windows, approve the pending adapter table,
+move a production SDK/CLI lock or publish a release. Earlier Linux/Windows SDK and CLI baselines retain their own
+records. Formal table approval (including the macOS layout/tool policy) and native Windows CRT-shell/make
+static/shared acceptance remain open in Tranche 4. STATUS is not changed by this replay.

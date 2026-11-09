@@ -8,6 +8,18 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-09
+
+### Fresh macOS Dev SDK and CLI D3 source-port replay
+
+A clean detached producer at `2f4103d` built local `v0.0.1-rehearsal.7`; Dev verification and its static/shared
+HTTPS+inflate/trust-negative consumer pass. The public SDK was handed off outside the producer trees for the CLI's
+native macOS zlib adapter replay: CRT host-tools configure/make, separate immutable port store, static/shared C/C++
+consumer/provider/lock proof, Mach-O audit and packaged-oracle differential. No CRT implementation or recipe changes
+were required. The source/SDK inventories stay unchanged; exact producer inputs and the CLI-owned evidence are linked
+from [SDK acceptance](docs/acceptance/sdk_split_acceptance.md#macosarm64-d3-public-sdk-handoff-2026-11-09).
+Formal adapter-table approval, Windows D3, affected Linux replay and release promotion remain open; STATUS is unchanged.
+
 ## 2026-11-06
 
 ### Document the Windows/x64 SIGSEGV fix in producer acceptance and the D3 producer obligations

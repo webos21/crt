@@ -565,7 +565,9 @@ recipe or archive format. CRT's part:
 - Keep `tools/crt-cc` / `crt-c++` stable as the `CC`/`CXX` a recipe's `configure` sees until a CLI compiler bridge is
   separately adopted. Whether `crt-cc` runs under the host-tools bundle's `mksh`: shown on Linux/x86_64 on 2026-11-08 (compile/link/run with a
   bundle-only `PATH`; the linker must be passed explicitly and `make`'s `SHELL` path cannot contain spaces; CLI record
-  `docs/acceptance/sdk_install_acceptance.md`). No `crt-cc` change was needed or made; other hosts unverified.
+  `docs/acceptance/sdk_install_acceptance.md`). The [macOS replay](../acceptance/sdk_split_acceptance.md#macosarm64-d3-public-sdk-handoff-2026-11-09)
+  also exercises the public wrapper under the independent bundle, with explicit `SDKROOT`, declared ar/sibling ranlib
+  and a CLI adapter-owned relocatable install name. No `crt-cc` change was needed or made; Windows remains unverified here.
 - The Dev SDK's own zlib is not replaced, patched or reused as proof of a source port; any later change to an SDK-shipped
   library's bytes follows the normal change-impact policy above.
 
