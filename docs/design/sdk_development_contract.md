@@ -572,13 +572,17 @@ recipe or archive format. CRT's part:
 - The Dev SDK's own zlib is not replaced, patched or reused as proof of a source port; any later change to an SDK-shipped
   library's bytes follows the normal change-impact policy above.
 
-Current closure status (2026-11-09): Linux/macOS/Windows-x64 technical records exist, and the
-latest common-change proof is recorded on [Linux](../acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09)
-and [macOS](../acceptance/sdk_split_acceptance.md#macos-d3-affected-change-closure-replay-2026-11-09).
-Formal table/field/key adoption remains open. Keep the digest-keyed zlib entry `crt_review: pending` until
-that explicit decision is recorded. Its review metadata is excluded from the build key: approval
-alone must preserve existing items/pins. Actual policy changes require new keys
-and affected-host replay. Windows/arm64 D3 is a separate qualification target.
+The bounded digest-keyed zlib adapter is **approved** on 2026-11-09 for the exercised
+Linux/x86_64, macOS/arm64 and Windows/x64 combinations. The
+[producer decision](../acceptance/sdk_split_acceptance.md#d3-adapter-contract-approval-2026-11-09)
+records the reviewed fields, roles, OS policies, key/store behavior and limits; the
+[CLI ledger](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#d3-bounded-adapter-adoption-2026-11-09)
+owns adoption. This is technical contract approval, not artifact promotion.
+
+`crt_review: approved` is publication-time metadata excluded from the build key.
+Existing `pending` manifests remain byte-identical and reusable with their original
+project pins; do not migrate or rewrite them. Policy changes still need new keys
+and affected-host evidence. Windows/arm64 D3 is a separate qualification target.
 
 The first preview joins Dev SDK and CLI; Full delivery is not an installation
 capability implied by that preview. Reuse existing Full assembly/owner approvals

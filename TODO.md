@@ -69,10 +69,10 @@ closure. Local Development-SDK installation and stored-contract/project
 selection have evidence on all five native pairs, including Windows/x64
 ([producer evidence](docs/acceptance/sdk_split_acceptance.md),
 [CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
-The current focus is D3 producer review/adoption after the affected Linux/macOS common-change
-proof. Installed-SDK first build/pinned acquisition and the three-host zlib
-implementation retain their recorded technical baselines. Next, qualify Dev SDK
-+ CLI preview; Full SDK delivery is separate. D4 may proceed on fixed contracts;
+The current focus is Dev SDK + CLI preview input qualification after
+[bounded D3 contract approval](docs/acceptance/sdk_split_acceptance.md#d3-adapter-contract-approval-2026-11-09).
+Installed-SDK first build/pinned acquisition and the three-host zlib
+implementation retain their recorded technical baselines. Full SDK delivery is separate. D4 may proceed on fixed contracts;
 general updates/self-upgrade stay beyond that first preview. Scope/replay policy is in the
 [SDK contract](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05).
 Numbered tranches 1-8 map to D0-D7.
@@ -169,12 +169,11 @@ external-tool selection/diagnosis and download/install orchestration.
 
 #### Tranche 4. First source-built port (D3)
 
-- [ ] **4.1** Finish digest-keyed zlib adapter/field/key review and record CRT
-  acceptance plus CLI adoption. Affected-host proof is recorded; keep `crt_review: pending` until the explicit
-  approval/adoption decision. Approval metadata alone must not change keys or existing items.
-- [x] **4.2** The native [macOS delta passes](docs/acceptance/sdk_split_acceptance.md#macos-d3-affected-change-closure-replay-2026-11-09)
-  on the [Linux-verified source](docs/acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09). Reuse the [Windows/x64 qualification](docs/acceptance/sdk_split_acceptance.md#windowsx64-cli-source-port-implementation-handoff-2026-11-09)
-  unless policy/product changes affect it. Windows/arm64 D3 remains separate.
+- [x] **4.1** The bounded digest-keyed zlib adapter/field/key contract is
+  [approved and adopted](docs/acceptance/sdk_split_acceptance.md#d3-adapter-contract-approval-2026-11-09);
+  review metadata preserves existing keys, manifests and project pins.
+- [x] **4.2** Affected Linux/macOS common-change proof and retained Windows/x64
+  qualification complete D3's exercised scope. Windows/arm64 D3 stays separate.
 
 
 #### Tranche 5. Dependencies, variants, locks and cache (D4)
@@ -211,8 +210,10 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **7.2** Review CLI test/package, versioned JSON/job events, cancellation,
   locked/offline behavior and recovery through original consumer evidence.
   Include the one-executable release goal and self/environment/project doctor scopes.
-- [ ] **7.3** Prepare a bounded Linux preview candidate after the first user flow;
-  include CLI/SDK notices, trust and external LLVM setup. Full SDK delivery is
+- [ ] **7.3** Qualify clean Linux Dev SDK + CLI preview inputs after D3 closure;
+  include CLI/SDK notices, trust, external LLVM setup and final first-user replay.
+  Retained dirty developer fixtures are not release candidates; keep unqualified
+  Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery is
   a separate path with existing approvals preserved/rechecked, not a first-CLI
   preview prerequisite. D4 does not block the first preview. Coordinate publication
   from the exercised combination:

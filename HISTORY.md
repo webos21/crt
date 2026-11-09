@@ -10,6 +10,24 @@ substantive update.
 
 ## 2026-11-09
 
+### Approve and close the bounded D3 source-port contract
+
+Reviewed CRT `dfb83c4` / CLI `8ad11dd`, including the completed macOS common-change
+replay. [Producer acceptance](docs/acceptance/sdk_split_acceptance.md#d3-adapter-contract-approval-2026-11-09)
+approves the digest-keyed zlib roles, supported fields, generated-Makefile
+workaround, OS policies, key/store and provider/pin boundaries for the exercised
+Linux/x86_64, macOS/arm64 and Windows/x64 combinations. The
+[CLI adoption ledger](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#d3-bounded-adapter-adoption-2026-11-09)
+records the metadata-only adoption and focused key/existing-item/pinned-consumer
+proof. No producer runtime, wrapper, recipe, SDK, ABI or format changes.
+
+Tranche 4.1/4.2 close in that bounded scope. Windows/arm64 D3 and the unendorsed
+Linux C shared SDK-provider policy remain separate; unchanged host proof is
+retained at its original inputs. The next focus is clean Linux Dev SDK + CLI
+Preview input qualification, with dirty developer fixtures kept as technical
+regression inputs. Full delivery and D4 do not block that preparation. No SDK
+promotion, production lock, public release or routine STATUS update is made.
+
 ### Close the macOS affected-common-code D3 replay
 
 The CLI rebuilds Linux's exact `22720f7d...bee16` product/test snapshot with the retained clean macOS rehearsal.7

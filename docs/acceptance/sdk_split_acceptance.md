@@ -1984,3 +1984,51 @@ binary, SDK asset or STATUS was changed. The macOS port key remains the earlier 
 This completes Tranche 4.2's requested macOS affected-source proof, not formal CRT approval, D3 global closure,
 artifact promotion or preview release. Tranche 4.1 remains the explicit adapter/field/key review and adoption decision.
 Existing Windows/x64 qualification is retained for its unchanged inputs; Windows/arm64 D3 remains separate.
+
+
+## D3 adapter contract approval (2026-11-09)
+
+**Decision: approve the bounded zlib adapter; close Tranche 4/D3 for its exercised
+Linux/x86_64, macOS/arm64 and Windows/x64 combinations.** Review baselines are CRT
+`dfb83c4` and CLI `8ad11dd95d09c416c62ddf4ea6d393e4f7c5279f`, plus the CLI's
+review-metadata/regression delta identified in its linked acceptance. CRT owns recipe
+semantics, SDK/compiler and host-tools contracts; CLI owns adapter execution, store,
+provider/project locks and the adoption ledger. Studio has no affected contract.
+
+| Reviewed boundary | Accepted policy |
+| --- | --- |
+| Identity | zlib 1.3.1; recipe SHA-256 `dde944984d799197c0af1553ac7cf38139edc7b2e4e673ef9b4c17dd8c1a349b`, source `9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23`, roundtrip test `3d7460fb51e215424ef4fa36593cd7662bdcf83bbd1e986eb0ed746b07aebe62`; producer and exercised installed SDK files match |
+| Roles/capabilities | `make` is an explicitly pinned host tool; no target-port dependencies; static/shared variants; `01-c` minimum is a requirement, not qualification of every `01-c` SDK; the exercised CLI inputs are Dev `02-cxx` |
+| Recipe semantics | Fail-closed configure subset and declared placeholders/environment merge; unknown fields/digests refused; generated-Makefile prefix escaping retains its documented removal condition; no upstream source patch |
+| Native execution | Explicit CRT shell/tools and public SDK wrappers; native Clang/linker/ar/ranlib and declared OS-SDK boundary; Python reference driver is a separately labeled oracle only |
+| OS policy | ELF SONAME/layout; macOS relocatable install-name and declared archiver arguments; Windows PE audit despite POSIX file names, real symlinks and declared import libraries; oracle differences retain their per-host explanations |
+| Keys/lifetime | Source/recipe/test/adapter, SDK, target/tool/bundle and declared executor environment/make inputs remain pinned; OS metadata/import-library identities retain their recorded bounded scope; review metadata and local paths are excluded; equal keys do not prove byte reproducibility |
+| Providers/locks | One SDK or port provider per closure; separate immutable port store; SDK unchanged; locks pin item manifest digests and SDK identity; approval never rewrites old pending manifests |
+
+The [Linux common-change replay](#linux-d3-common-change-closure-and-macos-handoff-2026-11-09),
+[matching macOS replay](#macos-d3-affected-change-closure-replay-2026-11-09) and
+[Windows/x64 implementation](#windowsx64-cli-source-port-implementation-handoff-2026-11-09)
+provide native evidence at their exact retained inputs. The review changes only
+CLI review metadata and focused tests; executor, key serialization, audits, recipe,
+SDK and provider bytes are unchanged. Focused Linux evidence and the actual reuse
+of a retained pending item/project pin are owned by
+[CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#d3-review-metadata-and-existing-item-reuse-2026-11-09).
+Unchanged macOS/Windows execution gates are reused rather than represented as fresh
+runs of the new metadata-only binary.
+
+Limits remain explicit: Linux's retained C shared SDK-provider control resolved
+host libz and is **not endorsed** (Tranche 6.4); Windows SDK shared-z absence is a
+refusal, not positive evidence. Windows/arm64 D3, general recipes/dependency graphs,
+locked/offline semantics, binary-cache trust, exhaustive loader auditing and Full
+installation are outside this closure. The Windows oracle's extra byte-identical
+`z.lib` remains a D4 layout review before dependent ports. No schema/version,
+producer artifact, root lock, committed CLI binary or trust/default URL is changed;
+this decision grants no public release or production pin.
+
+The next bounded gate is Linux Dev SDK + CLI Preview input qualification. Existing
+dirty Linux developer SDK/bundle provenance is useful replay evidence, not a clean
+release candidate. Freeze a clean identified producer candidate, verify its actual
+archive/portable contract and source/notices, then build the CLI against that
+immutable handoff. Keep C shared SDK mode excluded until 6.4 is qualified. Final
+package/trust/first-user replay applies to each advertised host; promote producer
+assets before consumer pin adoption. D4 and Full delivery remain independent.
