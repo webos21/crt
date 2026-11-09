@@ -18,6 +18,10 @@ The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-
 > and limitations. Public-release approval is not a claim of an available new
 > binary download or a sandboxed general-purpose browser.
 
+The SDK/CLI work now closes the zlib adapter contract and affected-host replay
+before a Dev SDK + CLI preview. Full SDK delivery remains a separate qualified
+path; see [the current work queue](TODO.md#crt-developer-experience-sdk---cli---studio).
+
 [Documentation](docs/README.md) ·
 [Roadmap](docs/design/runtime_roadmap.md) ·
 [Current Status](STATUS.md) ·

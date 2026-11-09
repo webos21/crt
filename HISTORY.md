@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-11-09
 
+### Record Linux D3 common-change proof and the macOS closure handoff
+
+The public-SDK-only CLI replay passes seven input-enabled suites and 29/29
+isolation/publication/reuse/inventory gates without producer/product/recipe
+changes. Its [record](docs/acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09)
+links exact consumer-owned hashes/results and preserves the retained dirty
+SDK/local host-tools provenance. The historical C shared SDK control maps host
+libz and is explicitly not endorsed SDK binding; policy/runtime-search follow-up
+6.4 remains open. Linux's affected delta is recorded; the owner performs native
+macOS proof before final table adoption/D3 closure. No runtime/Full rebuild,
+artifact promotion, root/default lock or binary refresh.
+
+### Align D3 closure and Dev SDK/CLI preview planning
+
+At the owner's request, refreshed the SDK/CLI part of STATUS, README/TODO and
+producer contract against CRT `21b9d0e` / CLI `2ae74d4`, preserving unrelated
+subsystem scope and original execution/approval records. Formal adapter review
+and latest common-change Linux/macOS proof remain distinct from existing
+three-host zlib evidence. Preview starts with Dev SDK + CLI; Full delivery is
+separate and D4 does not extend D3. The [closure review candidate](docs/acceptance/sdk_split_acceptance.md#d3-closure-review-and-affected-host-plan-2026-11-09)
+records pins/ownership; Linux execution and the owner's macOS handoff are
+recorded separately when complete. No SDK/recipe/runtime/promotion change.
+
 ### Windows/x64 CLI source-port implementation handoff
 
 Reviewed the CLI Windows adapter against the unchanged rehearsal.10 public SDK and

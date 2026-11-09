@@ -1906,3 +1906,55 @@ oracle's explicit extra `z.lib` copy. Affected common changes still need their
 Linux/macOS replay; Windows/arm64 and promotion remain separate gates. No consumer
 root lock, STATUS or public release is changed. The CLI compatibility ledger owns
 the exercised combination; this document does not duplicate its adoption ledger.
+
+## D3 closure review and affected-host plan (2026-11-09)
+
+Owner-requested baseline: CRT `21b9d0e` and CLI `2ae74d4`. Producer recipe
+`dde944984d799197c0af1553ac7cf38139edc7b2e4e673ef9b4c17dd8c1a349b`
+and test `3d7460fb51e215424ef4fa36593cd7662bdcf83bbd1e986eb0ed746b07aebe62`
+match the SDK copy and CLI adapter. The adapter classifies make as a host tool,
+no target-port dependencies, static/shared variants and a minimum C SDK stage;
+the exercised CLI installation profile remains native Dev at `02-cxx`.
+
+Review covers the accepted field/placeholder subset and generated-Makefile
+workaround; independent CRT shell/make and declared LLVM; Linux ELF, macOS
+install-name/ar/OS-SDK and Windows DLL/import-library/audit policy; separate
+port-store/provider/lock identities; and bounded oracle differences. Current
+macOS executor environment/make overrides are included in key inputs; review
+metadata is deliberately excluded. Do not change recipe or SDK bytes simply
+to mark a review. Do not rewrite existing store items or root locks.
+
+This is a review candidate, not final approval. Latest common-change Linux
+proof is run here and the owner provides the matching native macOS replay.
+Keep `crt_review: pending` and TODO 4.1/4.2 open until both evidence and the
+review/adoption decision are recorded. Existing Windows/x64 final evidence
+remains valid for its exact unchanged inputs; any new affected policy needs
+its own delta. Windows/arm64 D3 is separate from its completed D2 results.
+The CLI owns its compatibility ledger and
+[native handoff](https://github.com/webos21/crt-cli/blob/main/docs/guides/development.md#d3-common-change-closure-and-native-handoff).
+
+## Linux D3 common-change closure and macOS handoff (2026-11-09)
+
+Baseline CRT `21b9d0e` / CLI `2ae74d4`: the [consumer-owned replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#linux-d3-common-change-replay-and-macos-handoff-2026-11-09)
+passes the six input-enabled D3 suites plus native project regression, bare CLI/
+import/visibility checks and actual port publication/reuse/verify. The copied
+public Dev SDK and independent CRT host tools preserve exact original inventories;
+no producer runtime, SDK, recipe or wrapper changes are needed for the common
+Linux code delta. No GFX/Web/Full rebuild is performed.
+
+The retained Linux SDK is the earlier dirty `b6bf52b` developer fixture, with
+its existing compiler contract and local-only host tools. This is intentionally
+not clean release qualification or a new latest-CRT-runtime acceptance. Exact
+source/binary/SDK/provider/tool/archive pins, results, oracle exception, traces
+and data paths stay in CLI acceptance and its compatibility ledger.
+
+The old SDK-provider C shared control maps host `libz.so.1.3.1`. Its historical
+negative-separation assertion is not endorsed SDK binding. Positive static SDK
+and actual port static/shared evidence remain distinct. TODO 6.4 retains the
+compiler-policy/runtime-search decision; do not silently waive or relabel that
+mode at contract approval.
+
+Linux's affected-delta gate is recorded. The owner runs the same product/test
+fingerprint on native macOS through the CLI guide. Final adapter-table approval,
+D3 closure and any release promotion remain open. Existing final Windows/x64
+evidence is reused for unchanged inputs; Windows/arm64 D3 remains separate.

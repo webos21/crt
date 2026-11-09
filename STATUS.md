@@ -5,18 +5,16 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-Last synchronized with the source tree and git history: **2026-11-05**
-(SDK/CLI status and priorities reviewed through CRT
-`433a7d65b34ee25d71eb9d7c96976c817f5936cd` and CLI
-`3978cedbefa2abda7c4cd0c11ca1649912d7943a`; other subsystem statements retain
-their linked original acceptance scope, last reviewed here on 2026-10-28).
-The earlier local assembly review remains in
-[release qualification](docs/acceptance/release_qualification.md), with frozen
-clean producer `3741ea5`; later SDK/CLI records do not relabel that artifact.
-This documentation refresh executes no new native test or release promotion.
-Updated only on explicit request from here on, not as part of routine
-documentation passes -- see `TODO.md`'s Notice section. It may lag behind
-`HISTORY.md`/`TODO.md` between syncs; those two are the source of truth.
+SDK/CLI snapshot refreshed at the owner's explicit request: **2026-11-09**,
+reviewing CRT `21b9d0e6067ed8253d424912132b9be24e459049` and CLI
+`2ae74d4d55bd1d7210c96ae596a48b2a934931bf`. Unrelated subsystem statements retain their
+original linked acceptance scope (last broad review 2026-10-28). Existing clean
+assembly baseline `3741ea5` in [release qualification](docs/acceptance/release_qualification.md)
+is not relabeled as a new artifact. The documentation refresh imports existing
+records; the later [Linux common-change replay](docs/acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09)
+passes at its retained developer inputs. The owner's macOS delta remains open.
+Future STATUS refreshes remain explicit requests; TODO owns current work and
+acceptance original measured inputs/results.
 
 ## Current Baseline
 
@@ -338,14 +336,21 @@ SDK-only CLI; every record is in
 assets: no published release, no explicit SDK updates or self-upgrade, and no
 Full-stage (`06-web`) install metadata yet.
 
-The CLI's installer/selection currently supports native `dev` only. Its latest
-stored-contract verify guard has Linux developer/unit evidence, without new
-other-host replay or binary refresh; installation-time contract digest/
-required-presence recording and installed-SDK host collisions remain open.
-First-build automatic configure, remote acquisition and generic profile
-selection are not implemented. External LLVM/OS SDKs remain prerequisites.
-See the [CLI snapshot](https://github.com/webos21/crt-cli/blob/main/STATUS.md)
-and original installation acceptance; this is not a new five-pair latest-HEAD run.
+The CLI supports native `dev` selection, installation-time receipt pins,
+explicit repair, first-build binding and caller-pinned HTTPS acquisition. These
+have per-host records in [SDK acceptance](docs/acceptance/sdk_split_acceptance.md)
+and CLI installation acceptance. Windows/x64's earlier concurrent-install crash
+was fixed in the pinned libunwind recipe and replayed with the fixed SDK; its
+old failure is retained. General profiles/Full installation, default publisher
+trust and promotion remain separate; external LLVM/OS SDKs are prerequisites.
+
+D3 zlib source execution/store/provider/lock/oracle now has Linux/x86_64,
+macOS/arm64 and Windows/x64 technical evidence. Formal adapter approval and
+latest macOS common-change replay remain open; the Linux delta passes at its
+recorded developer inputs. Windows/arm64 D3 is a
+separate target. Neither these records nor the snapshot approve a latest-source
+five-pair matrix or a public SDK/CLI release. The CLI compatibility ledger owns
+exact adoption combinations.
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -556,12 +561,13 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-The SDK -> CLI initiative is active. Local installation, stored portable
-contracts and project selection have native records on all five pairs; the
-next producer/consumer increment is the bounded local-store integrity/collision
-closure, installed-SDK first build and pinned acquisition on Linux. D3 zlib's
-public adapter may proceed in parallel against fixed contracts. Detailed order
-is in [TODO](TODO.md#crt-developer-experience-sdk---cli---studio).
+The SDK -> CLI initiative now prioritizes D3 producer contract review and
+the owner's native macOS delta after recorded Linux proof, then a Dev SDK + CLI
+preview candidate. The retained Linux SDK C shared control's host libz mapping
+remains unendorsed under producer policy review 6.4.
+D4 SQLite/libpng work can proceed on frozen contracts. Full SDK delivery and its
+final source/license/security/assembly review stay separate, preserving existing
+approval evidence. Detailed order is in [TODO](TODO.md#crt-developer-experience-sdk---cli---studio).
 
 - CRT supplies exact public artifacts and compiler/recipe policy; the implemented
   CRT-native CLI owns installation, first-build binding, external-tool diagnosis

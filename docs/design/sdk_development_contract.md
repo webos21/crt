@@ -567,11 +567,23 @@ recipe or archive format. CRT's part:
   bundle-only `PATH`; the linker must be passed explicitly and `make`'s `SHELL` path cannot contain spaces; CLI record
   `docs/acceptance/sdk_install_acceptance.md`). The [macOS replay](../acceptance/sdk_split_acceptance.md#macosarm64-d3-public-sdk-handoff-2026-11-09)
   also exercises the public wrapper under the independent bundle, with explicit `SDKROOT`, declared ar/sibling ranlib
-  and a CLI adapter-owned relocatable install name. No `crt-cc` change was needed or made; Windows remains unverified here.
+  and a CLI adapter-owned relocatable install name. No `crt-cc` change was needed or made. The later [Windows/x64 qualification](../acceptance/sdk_split_acceptance.md#windowsx64-cli-source-port-implementation-handoff-2026-11-09)
+  supplies its own implementation/PE/provider/oracle evidence.
 - The Dev SDK's own zlib is not replaced, patched or reused as proof of a source port; any later change to an SDK-shipped
   library's bytes follows the normal change-impact policy above.
 
-Status: design reviewed on paper only. No producer artifact, recipe, test or promotion changed. The CLI now carries a seeded adapter-table entry for the zlib recipe (file SHA-256 `dde94498...349b`) marked `crt_review: pending`; CRT's review of that entry and of the accepted field subset is still open.
+Current closure status (2026-11-09): Linux/macOS/Windows-x64 technical records
+exist, but formal table/field/key adoption and latest common-change Linux/macOS
+proof are open. Keep the digest-keyed zlib entry `crt_review: pending` until
+those gates pass. Its review metadata is excluded from the build key: approval
+alone must preserve existing items/pins. Actual policy changes require new keys
+and affected-host replay. Windows/arm64 D3 is a separate qualification target.
+
+The first preview joins Dev SDK and CLI; Full delivery is not an installation
+capability implied by that preview. Reuse existing Full assembly/owner approvals
+for their original inputs, then recheck the final candidate's changes/validity.
+D4 adds a SQLite amalgamation adapter and libpng -> zlib dependency handling;
+it does not retroactively enlarge D3 or block first-preview qualification.
 
 ## 8. Cross-repository Contract Review
 

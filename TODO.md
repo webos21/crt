@@ -69,11 +69,11 @@ closure. Local Development-SDK installation and stored-contract/project
 selection have evidence on all five native pairs, including Windows/x64
 ([producer evidence](docs/acceptance/sdk_split_acceptance.md),
 [CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
-The next focus is the bounded local-store integrity/collision closure and the
-first Linux user workflow: installed SDK -> first build -> pinned acquisition.
-The zlib public adapter can proceed in parallel against fixed contracts.
-Full-stage metadata, general updates and self-upgrade are outside that first
-workflow; keep them in Planned below. Scope/replay policy is in the
+The current focus is D3 producer review and the affected Linux/macOS common-change
+replay. Installed-SDK first build/pinned acquisition and the three-host zlib
+implementation retain their recorded technical baselines. Next, qualify Dev SDK
++ CLI preview; Full SDK delivery is separate. D4 may proceed on fixed contracts;
+general updates/self-upgrade stay beyond that first preview. Scope/replay policy is in the
 [SDK contract](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05).
 Numbered tranches 1-8 map to D0-D7.
 SDK split and local assembly rehearsal are complete
@@ -169,25 +169,19 @@ external-tool selection/diagnosis and download/install orchestration.
 
 #### Tranche 4. First source-built port (D3)
 
-- [ ] **4.1** Expose the reviewed zlib recipe/compiler adapter against pinned
-  SDK/host-tool contracts; this can proceed with the first-build work. The CLI-owned
-  [design record](https://github.com/webos21/crt-cli/blob/main/docs/design/source_port_adapter.md) and the
-  [producer obligations](docs/design/sdk_development_contract.md#d3-source-port-adapter-producer-obligations-2026-11-06)
-  (adapter-table review, `crt-cc` under the host-tools `mksh`) are written. The CLI's Linux implementation now includes
-  execution, audit/store, explicit provider consumption, oracle comparison and lock pins; native-host
-  acceptance and formal adapter-table approval remain separate gates. Dev already
-  includes zlib: distinguish SDK-provided reuse from an explicit isolated source
-  build into the CLI port store, preserving source/SDK bytes and ABI policy.
-  The [macOS public-SDK replay](docs/acceptance/sdk_split_acceptance.md#macosarm64-d3-public-sdk-handoff-2026-11-09)
-  now covers static/shared consumption and oracle comparison. Formal table approval and remaining-host gates stay open.
-- [ ] **4.2** Finish formal review of the Windows adapter policy; native Windows/x64
-  static/shared build, store consumption and oracle now have [CLI-owned evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-cli-source-port-implementation-handoff-2026-11-09).
-  Keep table approval and remaining-host replay distinct from that technical result.
+- [ ] **4.1** Finish digest-keyed zlib adapter/field/key review and record CRT
+  acceptance plus CLI adoption. Keep `crt_review: pending` until affected-host
+  proof closes; approval metadata alone must not change keys or existing items.
+- [ ] **4.2** Finish the owner's native macOS delta on the Linux-verified source;
+  [Linux affected-change replay passes](docs/acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09). Reuse the [Windows/x64 qualification](docs/acceptance/sdk_split_acceptance.md#windowsx64-cli-source-port-implementation-handoff-2026-11-09)
+  unless policy/product changes affect it. Windows/arm64 D3 remains separate.
+
 
 #### Tranche 5. Dependencies, variants, locks and cache (D4)
 
-- [ ] **5.1** Review SQLite and libpng-to-zlib recipe/dependency contracts,
-  distinguishing host generators, target ports and SDK-provided dependencies.
+- [ ] **5.1** Review SQLite `amalgamation` execution and libpng -> zlib
+  dependency/provider/variant contracts. Revisit Windows `z.lib` layout before
+  dependent ports; distinguish host tools from target ports and SDK providers.
 - [ ] **5.2** Support CLI build-key/project-view/cache validation with three-host
   static/shared, ABI-mismatch, collision and rerun/recovery evidence.
   Bind native ports to exact SDK/target/tool identities regardless of storage backend.
@@ -207,8 +201,8 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **6.4** Audit pure C shared-executable provider policy. The retained
   [Linux first-build provider](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-first-build-consumer-slice-2026-11-06)
   emits static C inputs for `executable-shared.link_c`; establish the intended
-  policy, then correct or explicitly reject that mode before claiming C shared
-  acceptance. Preserve the retained SDK/contract pin and qualify new inputs separately.
+  policy, including SDK-library runtime search, then correct or explicitly reject
+  that mode before claiming C shared acceptance. Preserve the retained SDK/contract pin and qualify new inputs separately.
 
 #### Tranche 7. Deployment and automation contracts (D6)
 
@@ -218,7 +212,9 @@ external-tool selection/diagnosis and download/install orchestration.
   locked/offline behavior and recovery through original consumer evidence.
   Include the one-executable release goal and self/environment/project doctor scopes.
 - [ ] **7.3** Prepare a bounded Linux preview candidate after the first user flow;
-  include CLI/SDK notices, trust and external LLVM setup. Coordinate publication
+  include CLI/SDK notices, trust and external LLVM setup. Full SDK delivery is
+  a separate path with existing approvals preserved/rechecked, not a first-CLI
+  preview prerequisite. D4 does not block the first preview. Coordinate publication
   from the exercised combination:
   promote the SDK first, verify the actual promoted artifact, then adopt its exact
   pin and release the CLI; independent versions need no simultaneous publication.
