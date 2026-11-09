@@ -572,10 +572,11 @@ recipe or archive format. CRT's part:
 - The Dev SDK's own zlib is not replaced, patched or reused as proof of a source port; any later change to an SDK-shipped
   library's bytes follows the normal change-impact policy above.
 
-Current closure status (2026-11-09): Linux/macOS/Windows-x64 technical records
-exist, but formal table/field/key adoption and latest common-change Linux/macOS
-proof are open. Keep the digest-keyed zlib entry `crt_review: pending` until
-those gates pass. Its review metadata is excluded from the build key: approval
+Current closure status (2026-11-09): Linux/macOS/Windows-x64 technical records exist, and the
+latest common-change proof is recorded on [Linux](../acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09)
+and [macOS](../acceptance/sdk_split_acceptance.md#macos-d3-affected-change-closure-replay-2026-11-09).
+Formal table/field/key adoption remains open. Keep the digest-keyed zlib entry `crt_review: pending` until
+that explicit decision is recorded. Its review metadata is excluded from the build key: approval
 alone must preserve existing items/pins. Actual policy changes require new keys
 and affected-host replay. Windows/arm64 D3 is a separate qualification target.
 

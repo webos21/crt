@@ -69,8 +69,8 @@ closure. Local Development-SDK installation and stored-contract/project
 selection have evidence on all five native pairs, including Windows/x64
 ([producer evidence](docs/acceptance/sdk_split_acceptance.md),
 [CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
-The current focus is D3 producer review and the affected Linux/macOS common-change
-replay. Installed-SDK first build/pinned acquisition and the three-host zlib
+The current focus is D3 producer review/adoption after the affected Linux/macOS common-change
+proof. Installed-SDK first build/pinned acquisition and the three-host zlib
 implementation retain their recorded technical baselines. Next, qualify Dev SDK
 + CLI preview; Full SDK delivery is separate. D4 may proceed on fixed contracts;
 general updates/self-upgrade stay beyond that first preview. Scope/replay policy is in the
@@ -170,10 +170,10 @@ external-tool selection/diagnosis and download/install orchestration.
 #### Tranche 4. First source-built port (D3)
 
 - [ ] **4.1** Finish digest-keyed zlib adapter/field/key review and record CRT
-  acceptance plus CLI adoption. Keep `crt_review: pending` until affected-host
-  proof closes; approval metadata alone must not change keys or existing items.
-- [ ] **4.2** Finish the owner's native macOS delta on the Linux-verified source;
-  [Linux affected-change replay passes](docs/acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09). Reuse the [Windows/x64 qualification](docs/acceptance/sdk_split_acceptance.md#windowsx64-cli-source-port-implementation-handoff-2026-11-09)
+  acceptance plus CLI adoption. Affected-host proof is recorded; keep `crt_review: pending` until the explicit
+  approval/adoption decision. Approval metadata alone must not change keys or existing items.
+- [x] **4.2** The native [macOS delta passes](docs/acceptance/sdk_split_acceptance.md#macos-d3-affected-change-closure-replay-2026-11-09)
+  on the [Linux-verified source](docs/acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09). Reuse the [Windows/x64 qualification](docs/acceptance/sdk_split_acceptance.md#windowsx64-cli-source-port-implementation-handoff-2026-11-09)
   unless policy/product changes affect it. Windows/arm64 D3 remains separate.
 
 

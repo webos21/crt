@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-11-09
 
+### Close the macOS affected-common-code D3 replay
+
+The CLI rebuilds Linux's exact `22720f7d...bee16` product/test snapshot with the retained clean macOS rehearsal.7
+SDK, not Linux's dirty fixture. All seven requested suites and 29/29 source-hidden/bare/command/cache/inventory gates
+pass, with actual port/SDK mapping and nine-image binding proof. No producer implementation, SDK, recipe, ABI or
+artifact changes were needed; completed Tranche 4.2's native macOS proof and linked the
+[handoff](docs/acceptance/sdk_split_acceptance.md#macos-d3-affected-change-closure-replay-2026-11-09).
+Formal CRT adapter approval/adoption, Windows/arm64 D3 and release decisions remain separate; STATUS stays unchanged.
+
 ### Record Linux D3 common-change proof and the macOS closure handoff
 
 The public-SDK-only CLI replay passes seven input-enabled suites and 29/29

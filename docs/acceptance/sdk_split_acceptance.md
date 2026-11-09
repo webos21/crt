@@ -1958,3 +1958,29 @@ Linux's affected-delta gate is recorded. The owner runs the same product/test
 fingerprint on native macOS through the CLI guide. Final adapter-table approval,
 D3 closure and any release promotion remain open. Existing final Windows/x64
 evidence is reused for unchanged inputs; Windows/arm64 D3 remains separate.
+
+## macOS D3 affected-change closure replay (2026-11-09)
+
+Reviewed producer documentation baseline `2fdce21d687936c313a3a5990d7acdc3ab824c54` and consumer
+`938518c4b3bb2c887e921af602082b46ac9be5b4`. CLI's product/test fingerprint is exactly the Linux handoff's
+`22720f7d9e223af06e41887ec0bed9ede55568ecdd6b9b5ef3499769893bee16`, including the Windows implementation's common
+changes. The clean macOS public Dev SDK from `2f4103d` (rehearsal.7, content `02e67f3e...c999b`) and its separately
+pinned provider/independent host tools are reused with their original identities; Linux's dirty developer provenance
+is not adopted. The producer delta is documentation plus the Windows-only replay guard, absent from this SDK;
+therefore no runtime/recipe/wrapper/ABI or SDK/GFX/Web/Full rebuild is needed.
+
+Fresh native macOS/arm64 source-hidden CLI build and the six input-enabled D3 suites plus full native regression
+pass. The improved macOS host-only driver passes **29/29 gates**, including copied-SDK/source/provider/bundle-free
+CLI checks, actual port publication/reuse/verify, warm cache and unchanged original/copied inputs. Port-provider and
+SDK-provider runtime maps discriminate correctly on this SDK; the existing Mach-O binding audit passes on nine images.
+This does not endorse the earlier Linux C shared SDK control's host-libz mapping (TODO 6.4 remains open).
+
+Consumer-owned [acceptance](https://github.com/webos21/crt-cli/blob/8ad11dd95d09c416c62ddf4ea6d393e4f7c5279f/docs/acceptance/sdk_install_acceptance.md#macos-d3-common-change-closure-replay-2026-11-09)
+at CLI `8ad11dd95d09c416c62ddf4ea6d393e4f7c5279f` and its compatibility ledger retain exact SDK/provider/tool/source/CLI pins, suite counts, raw receipts and the oracle-only
+exception. Raw evidence is in this checkout's ignored `out/d3-common-macos-20261109/`; `qualification.json` binds the
+input/command/result and map/audit hashes. No product or upstream patch was required; no root/default lock, committed
+binary, SDK asset or STATUS was changed. The macOS port key remains the earlier `d1cf55d8...5e2797`.
+
+This completes Tranche 4.2's requested macOS affected-source proof, not formal CRT approval, D3 global closure,
+artifact promotion or preview release. Tranche 4.1 remains the explicit adapter/field/key review and adoption decision.
+Existing Windows/x64 qualification is retained for its unchanged inputs; Windows/arm64 D3 remains separate.
