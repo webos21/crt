@@ -507,6 +507,7 @@ set_tests_properties(ifaddrs_test_runs PROPERTIES
 add_crt_test(ucontext_test ucontext_test.c)
 set_tests_properties(ucontext_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "ucontext_test: ok"
+  TIMEOUT 15
 )
 
 # Native TLS for pthread_create()'d threads (Linux used to share the creator's

@@ -36,7 +36,9 @@ static void coro_entry(int a, int b) {
 }
 
 int main(void) {
-  int resume_count = 0;
+  /* setcontext restores saved registers, so the resume marker must live in
+   * memory rather than a register restored to its pre-increment value. */
+  volatile int resume_count = 0;
 
   /* Isolated check: getcontext() returns 0 on a plain, never-resumed
    * call. probe_ctx is never handed to setcontext()/swapcontext(), so

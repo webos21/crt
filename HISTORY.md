@@ -8,6 +8,20 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-10
+
+### Keep the ucontext regression valid in optimized builds
+
+The clean Linux Preview rehearsal exposed a hanging `ucontext_test` at `-O3`:
+its automatic resume counter could remain in a saved register, so `setcontext`
+restored the pre-increment value on every pass. The same source passes at `-O0`;
+making the counter volatile passes at `-O3` against the identical runtime.
+Only the test marker changes; no public header, runtime assembly or ABI changes.
+Bound the CTest case to 15 seconds. The original failed rehearsal and the three
+compile/run variants are retained under `crt-preview-20261110/ucontext-repro/`
+outside this checkout. A new clean producer baseline/candidate is required for
+the Preview rehearsal; the failed SDK identity is not relabeled.
+
 ## 2026-11-09
 
 ### Approve and close the bounded D3 source-port contract
