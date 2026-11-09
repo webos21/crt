@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -34,6 +35,7 @@ def main():
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--sysroot", required=True, type=Path)
     parser.add_argument("--target-os", required=True, choices=["linux", "macos", "windows"])
+    parser.add_argument("--target-arch", choices=["x86_64", "aarch64"], help="native execution architecture; foreign targets are refused")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--rootfs", type=Path, help="Windows only: the Android-like rootfs (toybox applets, mksh)")
     parser.add_argument("--windows-sdk-libpath", type=Path, help="Windows only: dir containing kernel32.lib")
@@ -58,6 +60,10 @@ def main():
     parser.add_argument("--host-cxx", help="host clang++ for this script's own feature probe / Windows CRT_HOST_CXX export")
     args = parser.parse_args()
 
+    native_arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(platform.machine().lower(), platform.machine().lower())
+    if args.target_arch and args.target_arch != native_arch:
+        parser.error(f"runtime smoke requires native architecture {native_arch}, not {args.target_arch}")
+
     root = args.root.resolve()
     sysroot = args.sysroot.resolve()
     output = args.output.resolve()
@@ -71,6 +77,8 @@ def main():
         CRT_CXX_ENABLE_RTTI="1",
         CRT_CXX_STANDARD_INCLUDE_FLAGS=f"-isystem{sysroot / 'include' / 'c++' / 'v1'}",
     )
+    if args.target_arch:
+        base_env["CRT_TARGET_ARCH"] = args.target_arch
 
     wrapper = root / "tools" / "crt-c++"
     command = [str(wrapper)]

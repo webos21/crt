@@ -10,6 +10,19 @@ substantive update.
 
 ## 2026-11-10
 
+### Repair the explicit native libc++ smoke entry point
+
+The Linux Preview rehearsal configured explicit `x86_64`, exposing that CMake's
+shared libc++ argument list passed `--target-arch` to a smoke driver that did
+not accept it. Accept the explicit native architecture, pass it to the wrapper,
+and reject foreign execution before creating output. Also give the project-owned
+EH-register fixture's `main` C linkage for freestanding Linux consumers; its
+Windows vector-register checks are unchanged. Static/shared runtime, string-ABI
+and iostream smokes pass with the same SDK bytes; foreign aarch64 is refused.
+Linux's Win64 vector-register branch remains not applicable. Both files ship in
+the 02-cxx source asset, so the final Preview needs newly generated source assets
+at this clean producer baseline rather than relabeling the earlier candidate.
+
 ### Keep the ucontext regression valid in optimized builds
 
 The clean Linux Preview rehearsal exposed a hanging `ucontext_test` at `-O3`:

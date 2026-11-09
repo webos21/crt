@@ -54,7 +54,7 @@ static int check(const char* what, Thrower thrower) {
 }
 #endif
 
-int main() {
+extern "C" int main() {
 #ifdef CRT_EH_VECTOR_TEST
     int lost = 0;
     lost += check("user frame", [] { throw_from_user_frame(); });
