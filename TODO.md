@@ -180,10 +180,9 @@ external-tool selection/diagnosis and download/install orchestration.
   build into the CLI port store, preserving source/SDK bytes and ABI policy.
   The [macOS public-SDK replay](docs/acceptance/sdk_split_acceptance.md#macosarm64-d3-public-sdk-handoff-2026-11-09)
   now covers static/shared consumption and oracle comparison. Formal table approval and remaining-host gates stay open.
-- [ ] **4.2** Review Windows CRT-shell/make static/shared zlib build/link/run;
-  require unchanged SDK/source inputs and a separate CLI-owned port store.
-  The [Windows/x64 replay](docs/acceptance/sdk_split_acceptance.md#windowsx64-d3-public-sdk-replay-boundary-2026-11-09)
-  confirms CLI executor/layout/PE-audit gaps; common regressions pass, D3 stays open.
+- [ ] **4.2** Finish formal review of the Windows adapter policy; native Windows/x64
+  static/shared build, store consumption and oracle now have [CLI-owned evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-cli-source-port-implementation-handoff-2026-11-09).
+  Keep table approval and remaining-host replay distinct from that technical result.
 
 #### Tranche 5. Dependencies, variants, locks and cache (D4)
 

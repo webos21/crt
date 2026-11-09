@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-11-09
 
+### Windows/x64 CLI source-port implementation handoff
+
+Reviewed the CLI Windows adapter against the unchanged rehearsal.10 public SDK and
+independent host tools. Fresh isolated consumer replay covers static/shared zlib,
+C/C++ provider/lock proof, PE/store failures and recovery, and the packaged oracle.
+No producer implementation/artifact changes were required. Formal table review and
+other-host common-change replay remain open; STATUS is unchanged.
+[Consumer commit and owning evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-cli-source-port-implementation-handoff-2026-11-09).
+
 ### Windows/x64 replay of the Linux/macOS D3 increment
 
 Reused the clean rehearsal.10 public SDK after confirming the later producer delta

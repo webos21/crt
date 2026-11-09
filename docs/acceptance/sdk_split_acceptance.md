@@ -1879,3 +1879,30 @@ file APIs; the unavailable wide-path overload is not qualified by that adjustmen
 outcomes, all failed attempts and input-checked test-only continuations. Raw logs
 are in the CLI checkout's ignored `out/windows-d3-20261109/`. No committed binary,
 consumer root lock, default trust, STATUS, public tag or release was changed.
+
+## Windows/x64 CLI source-port implementation handoff (2026-11-09)
+
+The CLI implementation at `2ae74d4d55bd1d7210c96ae596a48b2a934931bf` closes the missing Windows executor/layout/PE
+boundary recorded above for native Windows/x64. It consumes the same clean public
+rehearsal.10 SDK from CRT `05b56788501b02f71a8b8084cc4041effa1475a9` and the same
+independently pinned CRT host-tools bundle. Reviewed producer baseline is `ff6b9e2`;
+no producer runtime, SDK, recipe, wrapper, ABI or artifact identity changes are needed.
+The shared recipe schema, native compiler policy, host-tools and project-lock
+formats retain their existing versions; Windows layout/audit/key inputs belong to
+the consumer's experimental digest-keyed adapter.
+
+[CLI-owned acceptance](https://github.com/webos21/crt-cli/blob/2ae74d4d55bd1d7210c96ae596a48b2a934931bf/docs/acceptance/sdk_install_acceptance.md#source-port-d3-windowsx64-implementation-and-replay-2026-11-09) records final source/binary/receipt hashes, the fresh
+isolated contract replay, all input-enabled source-port suites and the actual JSON
+port-build command. Both static/shared recipe roundtrips and C/C++ store consumers
+pass with static-link and actual shared-provider evidence, lock negatives, PE/store
+failure/recovery checks and the packaged producer-driver oracle. The CLI executable
+is refreshed from the qualified image. Earlier unsupported/failed receipts retain
+their original outcomes; unchanged SDK and host-tools inventories are checked.
+
+This is a consumer acceptance handoff, not new producer CTest/SDK production or
+release qualification. Formal adapter-table approval stays pending, including
+Windows tool-script policy, import-library build-key inputs, PE audit scope and the
+oracle's explicit extra `z.lib` copy. Affected common changes still need their
+Linux/macOS replay; Windows/arm64 and promotion remain separate gates. No consumer
+root lock, STATUS or public release is changed. The CLI compatibility ledger owns
+the exercised combination; this document does not duplicate its adoption ledger.
