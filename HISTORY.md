@@ -10,6 +10,19 @@ substantive update.
 
 ## 2026-11-10
 
+### Publish and promote the Linux Development SDK Preview
+
+Published `v0.0.1-preview.20261110.3` as a Linux/x86_64 Dev prerelease at the
+original clean producer `0ab8f8c`. A reviewed manual-pin/TLS policy and immutable
+manifest pin precede publication; no signer/default-channel authority is inferred.
+All original collector assets and source/tag pins are retained. Authenticated
+draft and unauthenticated public downloads match; the actual public bytes pass
+native C/C++ installation/first-build consumers. [Promotion acceptance](docs/acceptance/sdk_split_acceptance.md#linux-dev-sdk-public-promotion-2026-11-10)
+owns the release/receipt hashes, evidence and remaining CLI boundaries. Current
+CLI follows no redirects, so this release qualifies manual HTTPS download plus
+pinned native install; GitHub acquisition and CLI binary delivery remain next.
+No Full/other-host artifact, default SDK migration or routine STATUS change.
+
 ### Qualify the clean Linux Dev SDK Preview handoff
 
 Built clean producer `0ab8f8c` as local version `v0.0.1-preview.20261110.3`,

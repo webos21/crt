@@ -14,13 +14,13 @@ The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-
 
 > CRT is pre-1.0 developer software under active development.
 > The SDK stack includes native application UI and optional `06-web` embedding
-> through CRT-owned APIs. See [STATUS](STATUS.md) for accepted host/device scope
-> and limitations. Public-release approval is not a claim of an available new
-> binary download or a sandboxed general-purpose browser.
+> through CRT-owned APIs. See [STATUS](STATUS.md) for accepted host/device scope,
+> limitations and the Web runtime's embedding/security boundary.
 
-The SDK/CLI work has adopted the bounded zlib adapter contract and now prepares
-Dev SDK + CLI preview inputs. Full SDK delivery remains a separate qualified
-path; see [the current work queue](TODO.md#crt-developer-experience-sdk---cli---studio).
+The [Linux/x86_64 Development SDK Preview](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3)
+is available for C/C++ development (`dev`, `02-cxx`). See the
+[installation guide](docs/guides/dev_sdk_preview.md). CLI binary delivery and
+Full SDK delivery continue on their separate [work queue](TODO.md#crt-developer-experience-sdk---cli---studio).
 
 [Documentation](docs/README.md) ·
 [Roadmap](docs/design/runtime_roadmap.md) ·

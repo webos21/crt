@@ -1,5 +1,10 @@
 # Developer Preview Release
 
+The newer [Linux Development SDK Preview](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3)
+is a separate `dev`/`02-cxx` release; use its [guide](dev_sdk_preview.md) and
+[publication evidence](../acceptance/sdk_split_acceptance.md#linux-dev-sdk-public-promotion-2026-11-10).
+The graphics-preview record below remains historical.
+
 This document defines what a CRT developer-preview release contains, how it is
 verified, and how a maintainer produces it. **The first preview,
 `v0.4.0-preview.1`, was withdrawn by the owner; checked 2026-10-22.** Its source

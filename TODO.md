@@ -69,8 +69,9 @@ closure. Local Development-SDK installation and stored-contract/project
 selection have evidence on all five native pairs, including Windows/x64
 ([producer evidence](docs/acceptance/sdk_split_acceptance.md),
 [CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
-The current focus is Dev SDK + CLI preview input qualification after
-[bounded D3 contract approval](docs/acceptance/sdk_split_acceptance.md#d3-adapter-contract-approval-2026-11-09).
+The current focus is CLI Preview delivery against the
+[promoted Linux Dev SDK](docs/acceptance/sdk_split_acceptance.md#linux-dev-sdk-public-promotion-2026-11-10),
+following bounded D3 contract approval.
 Installed-SDK first build/pinned acquisition and the three-host zlib
 implementation retain their recorded technical baselines. Full SDK delivery is separate. D4 may proceed on fixed contracts;
 general updates/self-upgrade stay beyond that first preview. Scope/replay policy is in the
@@ -210,9 +211,10 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **7.2** Review CLI test/package, versioned JSON/job events, cancellation,
   locked/offline behavior and recovery through original consumer evidence.
   Include the one-executable release goal and self/environment/project doctor scopes.
-- [ ] **7.3** Complete Linux Dev SDK + CLI Preview delivery. The
-  [clean input rehearsal passes](docs/acceptance/sdk_split_acceptance.md#linux-dev-preview-candidate-rehearsal-2026-11-10);
-  source publication, approved trust/metadata and actual producer promotion remain.
+- [ ] **7.3** Complete CLI Preview delivery against the
+  [published Linux Dev SDK](docs/acceptance/sdk_split_acceptance.md#linux-dev-sdk-public-promotion-2026-11-10).
+  Producer source/manual-pin trust/public-byte promotion pass; CLI binary delivery,
+  consumer default pins and GitHub redirect-aware acquisition remain separate.
   Keep unqualified Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery is
   a separate path with existing approvals preserved/rechecked, not a first-CLI
   preview prerequisite. D4 does not block the first preview. Coordinate publication

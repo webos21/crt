@@ -2121,3 +2121,47 @@ C/C++ first build/test/run; redirect-aware acquisition is a separate CLI change.
 Publication is staged as a prerelease and public-byte/consumer receipts are
 recorded below after download verification. Full and CLI binary releases are
 outside this producer promotion.
+
+### Published result and consumer proof
+
+**Promoted:** [v0.0.1-preview.20261110.3](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3), public prerelease
+published `2026-11-10T00:37:33Z`, source tag `0ab8f8cfbbde19e14dd5861ba176fb8881e06182`.
+The tag resolves to that exact producer, and all six original collector outputs
+remain unchanged. Draft upload metadata and an authenticated draft re-download
+match the frozen names, sizes and digests before publication.
+
+An additional **unauthenticated** public download verifies **6/6 files** against
+the pre-publication pins. TLS peer/hostname verification is enabled with explicit
+CA PEM `/etc/ssl/certs/ca-certificates.crt` (SHA-256
+`a9bdea6ecf3eea678a2a25ec45b6167abd5fe18c2caef26380186bceff2a5fdd`), TLS >=1.2 and proxies disabled. The
+host verifier accepts one HTTPS hop only to GitHub asset-storage hosts and omits
+temporary signed redirect URLs from receipts. Public raw source copies of the
+three corrected files match the source commit (**3/3**).
+
+The qualified CLI `6ba046e5baeae24b86e407ad04353ec9d98b989c21921160413408ca0f71dab2` consumes those actual
+public-download bytes with producer/repository/build/local-SDK trees hidden,
+private HOME/tmp, empty PATH and no consumer network access. **12/12 checks pass**:
+pinned native SDK install/verify; C and C++ source-only new, installed-SDK first
+build without configure, test/run, zero-command warm build and unchanged exact
+project locks; unchanged installed SDK and all download inventories.
+The stored-policy selector is `--sdk`; the first guide dry-run's legacy
+`--sdk-id` refused a missing explicit contract without binding the project.
+The corrected guide at commit `13320f8` passes; no SDK or CLI product change was
+required. Failed dry-run evidence is retained separately.
+
+Receipts stay under `/home/syszone/GitLocal/crt-preview-20261110/promotion-20261110/`:
+`draft-verification.json`, `public-verification.json`,
+`native-public-consumer-r2.json` and `promotion.json`. Promotion receipt SHA-256:
+`dd2ed35ce279a1d7b9117890dc1a8ab8095c2e7b425633d0b4ad35127aee055f`. It binds the public files, source/tag/trust-review
+commit, explicit CA, exact CLI and every consumer command. Manifest remains
+`d4211d3298a764ff22f6e262073f834bbb36cb5d07c22e1ecb10f7f83f8fca60`, SDK content
+`36623957fbdd5a384cc173991e20253ff83148028ab8072298dcd434a55a2b3f`, portable policy
+`90b3bb59aaac7df481becbad4e2b87473e2fefcb803123332689d7f1135e4e30`.
+
+This closes the **producer publication/manual-trust/promotion** part of 7.3.
+The [CLI ledger](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#published-linux-dev-sdk-adoption-2026-11-10)
+records the exercised public-byte combination. CLI binary publication, automatic
+GitHub HTTPS acquisition/redirect policy and production/default-lock adoption
+remain separate. Publisher authentication is still `not_verified`; a new signer
+or automatic channel is not invented. Existing Full/other-host qualifications
+retain their original scope; no new runtime/ABI or format change is introduced.
