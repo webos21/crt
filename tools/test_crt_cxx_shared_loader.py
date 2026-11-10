@@ -27,7 +27,7 @@ def main():
     scratch.mkdir(exist_ok=True)
     env = dict(os.environ, CRT_SYSROOT=str(args.sdk_root.resolve()), CRT_TARGET_OS="linux",
                CRT_CXX_RUNTIME_LINKAGE="shared", CRT_CXX_HOSTED="1", TMPDIR=str(scratch))
-    command = [str(args.wrapper.resolve())]
+    command = [str(args.wrapper.resolve()), "-std=c++17", "-fexceptions", "-frtti"]
     library = output / "libcrt_tls_regression.so"
     subprocess.run(command + ["-shared", "-fPIC", str(ROOT / "libstdc++/tests/shared_loader_tls.cc"),
                               "-Wl,-soname," + library.name, "-o", str(library)], env=env, check=True)
@@ -53,6 +53,9 @@ def main():
         symbols = subprocess.check_output(["readelf", "--dyn-syms", "--wide", str(image)], text=True)
         if any("UND" in line and "__tls_get_addr" in line for line in symbols.splitlines()):
             raise ValueError(f"GD TLS import remains; rebuild with TLSDESC: {image}")
+    relocations = subprocess.check_output(["readelf", "--relocs", "--wide", str(library)], text=True)
+    if "TLSDESC" not in relocations:
+        raise ValueError("the shared-library fixture did not exercise a TLS descriptor")
     missing = output / "libmissing.so"
     subprocess.run(command + ["-shared", "-fPIC", str(ROOT / "libstdc++/tests/shared_loader_unresolved.cc"),
                               "-o", str(missing)], env=env, check=True)
