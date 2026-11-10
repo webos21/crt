@@ -128,3 +128,34 @@ plain build/test/run reuse the project lock. The Windows CLI Preview also qualif
 through its restricted redirect policy; manual installation above remains valid. Qualified scope is the recorded native first-build/installed-selection flow with static C and
 C++ consumers; pure C shared SDK-provider mode stays unqualified, and the Windows SDK contract ships no shared `z`.
 The PE images are not Authenticode-signed.
+
+## Linux/aarch64
+
+The [Linux/aarch64 Preview release](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.linux.arm64.2) offers the native
+Linux/aarch64 Dev SDK `v0.0.1-preview.20261110.linux.arm64.2` (stage `02-cxx`, profile `dev`), qualified with Ubuntu's LLVM **21.1.8**
+(`clang`, `ld.lld`, `llvm-ar-21`) on Ubuntu 26.04 with glibc 2.43. No compiler is bundled.
+Download these three original files from the release into a fresh directory with a trusted HTTPS client or browser:
+
+- [SDK archive](https://github.com/webos21/crt/releases/download/v0.0.1-preview.20261110.linux.arm64.2/crt-v0.0.1-preview.20261110.linux.arm64.2-linux-aarch64-dev.tar.xz)
+- [Portable native compiler policy](https://github.com/webos21/crt/releases/download/v0.0.1-preview.20261110.linux.arm64.2/crt-v0.0.1-preview.20261110.linux.arm64.2-linux-aarch64-dev-toolchain.json)
+- [Release manifest](https://github.com/webos21/crt/releases/download/v0.0.1-preview.20261110.linux.arm64.2/release-manifest-dev-linux-aarch64.json)
+
+The independently trusted manifest SHA-256 from the reviewed repository is
+`ba77b26edfa0413df5e8c17309506d7ae6ecf134ae7e9908e3742bc562067be3` (1772 bytes); the
+[trust policy](../design/dev_preview_trust.md#linuxaarch64-bounded-policy-adopted-2026-11-10) defines the boundary.
+No `crt-cli` executable is published for Linux/aarch64: use one built for this host from `crt-cli` sources that include
+the stored-policy selection (`--sdk`) and the pinned installer, for example by the CLI's own bootstrap against this SDK.
+Substitute actual absolute paths:
+
+```text
+crt-cli sdk install --archive /absolute/downloads/crt-v0.0.1-preview.20261110.linux.arm64.2-linux-aarch64-dev.tar.xz --release-manifest /absolute/downloads/release-manifest-dev-linux-aarch64.json --release-manifest-sha256 ba77b26edfa0413df5e8c17309506d7ae6ecf134ae7e9908e3742bc562067be3
+crt-cli new hello-cxx --language cxx
+crt-cli build --project hello-cxx --sdk cd2ab657615c0fa52a1804f301a57dfa21b1067e3e5ed5a9f9a07d86ae050cc6 --cc /usr/bin/clang --cxx /usr/bin/clang++ --linker /usr/bin/ld.lld --ar /usr/bin/llvm-ar-21
+crt-cli test --project hello-cxx
+crt-cli run --project hello-cxx
+```
+
+For C sources choose `--language c` and another fresh project name. The first build binds the installed SDK; later plain
+build/test/run reuse the project lock. Qualified scope is the recorded native first-build/installed-selection flow with static
+C and C++ consumers and the shared-loader regression on glibc 2.43; the older glibc 2.39 loader was not exercised on this
+architecture, and pure C shared SDK-provider mode stays unqualified.

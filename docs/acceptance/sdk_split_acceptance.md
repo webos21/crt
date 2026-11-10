@@ -2461,3 +2461,54 @@ erratum; macOS/Windows assets, Full delivery, publisher signing, default/project
 locks and STATUS are unchanged. Linux producer CI now provisions LLVM 21 and
 compiler-rt explicitly; earlier CI provisioning failures are not SDK/runtime
 failures or passing compatibility evidence.
+
+## Linux/aarch64 Dev Preview candidate (2026-11-10)
+
+**Clean local producer candidate, unpromoted.** Select CRT `e6a94ab9e69b05497b3804328971d24d6071a53d`, version `v0.0.1-preview.20261110.linux.arm64.2`, native
+Linux/aarch64 (Ubuntu 26.04.1, Linux 7.0.0-43, glibc 2.43, 4 CPU QEMU guest), Release, Ubuntu LLVM 21.1.8
+(`clang`, `ld.lld`, `llvm-ar-21`). The SDK keeps Dev profile 1, manifest stage `02-cxx`, native policy 1 and the existing
+recipe formats; producer and compile provenance are both known and clean. This candidate includes the Linux loader/TLS
+repair (`d33678b`, `cddade2`, `448fa32`): the first aarch64 candidate `.1` was built from `a339924` before it and is excluded
+and never published. The two later commits (`422b45a`, `ce99845`) change only CI configuration and documentation.
+
+A detached worktree and a fresh Ninja output were configured with explicit `CRT_TARGET_OS=linux`, `CRT_TARGET_ARCH=aarch64`,
+`CRT_USE_IMPORTED_LIBCXX=ON`, `CMAKE_BUILD_TYPE=Release` and the version above; Skia, FFmpeg, media curl and LVGL are off.
+`cmake --build <fresh-build> --target crt-c-test crt-cxx-test crt-dev-release crt-host-tools-test --parallel 3` exits zero.
+C tests pass **147/147**; the imported-libc++ runtime, string-ABI, iostream and EH-register smokes pass static and shared; the
+shared-loader regression (calloc/free, TLS descriptors in a real DSO and a second thread, thread-local destruction, a cross-DSO C++
+exception, rejection of an unrelated missing import) passes. AArch64 already generates TLS descriptors by default, so the x86_64-only
+`-mtls-dialect=gnu2` flag is not applied; the removal of the link-only loader import stub shrinks the SDK by one entry (2,796 vs 2,797
+in the earlier candidate). Dev's static/shared HTTPS+inflate and trust negatives pass, followed by actual archive extraction/profile
+verification (`verify_dist.py --stage 02-cxx --profile dev` on a path with spaces) and the portable policy export. The extracted SDK also
+passes the external relocated validation with producer and SDK trees hidden.
+
+| Collected asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.0.1-preview.20261110.linux.arm64.2-linux-aarch64-dev.tar.xz` | 7632648 | `5c99dc59b747cb31cb623fa057264c3a4e7d5715f960203073dc1b34f664a1c4` |
+| `crt-v0.0.1-preview.20261110.linux.arm64.2-linux-aarch64-dev-toolchain.json` | 403294 | `a3df2fbd6b4d14d316b691a1d2831d0692aaba133e3b168076ee0ec7cb6434d4` |
+| `crt-v0.0.1-preview.20261110.linux.arm64.2-linux-02-cxx-source.tar.xz` | 9114820 | `39f7de2ace7154fde45b187fafeae9d10f8d7772f70ecab438d7591f1c29ccbe` |
+| `crt-v0.0.1-preview.20261110.linux.arm64.2-linux-03-gfx-simple-source.tar.xz` | 838332 | `1fec38dbc1ff2e7fa886723b1e9327ebd55b65fffd714b1d2b3d9c619a3b746c` |
+
+The release-manifest SHA-256 is `ba77b26edfa0413df5e8c17309506d7ae6ecf134ae7e9908e3742bc562067be3` (1772 bytes); the archive's install
+metadata (format 1) is `tar.xz`, root `dev`, 2,796 entries (2,601 files, 178 directories, 17 symlinks), 112,632,062 bytes, SDK content
+identity `cd2ab657615c0fa52a1804f301a57dfa21b1067e3e5ed5a9f9a07d86ae050cc6`; the Linux portable policy has no OS SDK entry. `SHA256SUMS-dev-linux-aarch64`
+(SHA-256 `0be55a0fb39d9b5fc351e849012fd1cf22d6b779be95580a19f5b3071eedb35a`) verifies all four assets, and all declared sizes and digests match the
+copied files. The development contract records producer and base commit `e6a94ab` with `producer_working_tree_dirty: false`; both stage-source
+assets carry that commit and `working_tree_dirty: false`.
+
+### Consumer qualification before publication
+
+The CLI's contract replay (`tools/replay_cli_contract_linux.py`) builds `crt-cli` `5d148ba` from this SDK alone with the host LLVM driven through the SDK's exported
+toolchain policy (bubblewrap, no network, producer and CLI trees hidden, execve audit): cold self-build **21 executed / 0 reused**, unchanged rebuild 0 / 21, native
+**913**, archive **221**, SDK-store **114** and port-recipe **142** checks with every suite exiting 0, SDK-hidden help/version/doctor, 32 distinct executed
+paths (none forbidden), no `DT_NEEDED`, interpreter `/lib/ld-linux-aarch64.so.1`, and an unchanged SDK inventory. Executable SHA-256
+`ae5f2b212be4351dcb8fc699785cf5c6822aa0b0dcd5183a23e94e56529ec543` (23,162,944 bytes). The replay driver's source guard scanned a JSON fixture's
+documented `_WIN32` as code; it now checks compiled source suffixes only (the macOS driver carries the same guard and was not changed).
+
+That executable consumes the **local handoff** (the unchanged collector outputs, kept outside both repositories) with the pre-publication pins:
+`tools/replay_preview_public_linux.py` in `crt-cli` passes **30/30** (pin and asset digests, pinned install and verify, idempotent reinstall, wrong-pin refusal
+with nothing published, C and C++ source-only `new`, first build without configure through the installed SDK, test, run, zero-command warm build, unchanged project
+locks and downloads). Public-byte results are recorded after publication.
+
+Not covered: the older glibc 2.39 loader on aarch64 (the x86_64 repair used an official Ubuntu 24.04 userland for it), a published Linux/aarch64 CLI executable,
+Full or other-host packages, the independent host-tools bundle, the unqualified pure C shared SDK-provider mode and redirect-aware acquisition from this URL.

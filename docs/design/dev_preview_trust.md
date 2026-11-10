@@ -114,3 +114,24 @@ No signer, default SDK migration or Full/other-host promotion is introduced.
 The published CLI's reviewed GitHub redirect policy can consume this release;
 manual pinned installation remains valid. Public-byte proof and CLI adoption
 are recorded after promotion, independently of local qualification.
+
+## Linux/aarch64 bounded policy adopted 2026-11-10
+
+The same caller-trusted manual pin model, procedure and limits apply to the native
+Linux/aarch64 Development SDK Preview. The owner authorized its GitHub prerelease
+promotion on 2026-11-10. It is a separate release with its own tag and pins; it does
+not alter, replace or extend the other Previews' assets or pins.
+
+| Boundary | Decision |
+| --- | --- |
+| Publisher location | Public `webos21/crt` repository and the exact release tag `v0.0.1-preview.20261110.linux.arm64.2`; no `latest` lookup |
+| Build/source pin | `e6a94ab9e69b05497b3804328971d24d6071a53d`; tag must resolve to that exact clean producer |
+| Metadata anchor | Manifest SHA-256 `ba77b26edfa0413df5e8c17309506d7ae6ecf134ae7e9908e3742bc562067be3` and size 1772, copied from the qualified bytes into reviewed repository source before publication |
+| TLS, payload acceptance, publisher authentication, existing state, immutability | As in the Linux policy above: explicit trusted CA PEM, exact manifest pin then every asset's size/SHA-256, `not_verified`, install beside existing versions, no replacement of accepted assets or tag movement |
+| OS SDK | None: the Linux portable compiler policy has no OS SDK entry; the consumer supplies LLVM 21 (`clang`, `ld.lld`, `llvm-ar`) |
+| Loader boundary | The system ELF interpreter; TLS uses descriptors (AArch64's default code generation). Qualified with glibc 2.43 only |
+
+Promotion follows the procedure above (draft prerelease, unchanged collector outputs,
+digest check before publishing, unauthenticated public download, native consumer
+proof on the downloaded bytes). The record is in
+[SDK acceptance](../acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10).
