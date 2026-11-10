@@ -214,6 +214,8 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **7.3** Complete CLI Preview delivery against the
   [published Linux Dev SDK](docs/acceptance/sdk_split_acceptance.md#linux-dev-sdk-public-promotion-2026-11-10).
   The macOS/arm64 Dev SDK Preview is published as well ([record](docs/acceptance/sdk_split_acceptance.md#macos-dev-sdk-public-promotion-2026-11-10)).
+  Its final macOS CLI package (notices, inventory, extraction, SDK-free doctor) is qualified locally; the archive is unpublished
+  ([CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#macos-final-cli-package-2026-11-10)).
   Producer source/manual-pin trust/public-byte promotion pass; CLI binary delivery,
   consumer default pins and GitHub redirect-aware acquisition remain separate.
   Keep unqualified Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery is
