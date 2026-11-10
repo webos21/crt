@@ -58,6 +58,13 @@ undefined-symbol checks. The former `.3` assets/tag and failed results are retai
 The existing published Linux CLI can install/select this SDK; this SDK release
 does not publish a replacement CLI executable.
 
+Actual hosted Ubuntu 24.04 (glibc `2.39-0ubuntu8.9`) and Ubuntu 26.04 (glibc
+`2.43-2ubuntu2.4`) both pass the complete CLI bootstrap, 913/221/114/142 suites,
+second self-build, warm reuse, import audit and SDK-free execution in
+[CI run 42805951580](https://github.com/webos21/crt-cli/actions/runs/42805951580).
+Both hosts use LLVM 21.1.8; stage 1/2 bytes match within each host. This extends
+the local loader tests with real old-LTS/new-host qualification.
+
 This is a Linux/x86_64 **Dev** release. No native Linux/aarch64 replay, other-OS
 replay, Full/GFX/Web rebuild, universal glibc compatibility or late `dlopen` TLS
 support is implied. Pure C shared SDK-provider mode remains separately
