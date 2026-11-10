@@ -415,6 +415,13 @@ case "$target_os" in
     ;;
   linux)
     common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1"
+    # TLSDESC keeps ELF TLS in the interpreter without importing __tls_get_addr.
+    # Explicit DT_NEEDED on ld.so triggers glibc 2.39's GNU-libc allocator
+    # handover and cannot coexist with our CRT_1.0 symbol namespace.
+    # AArch64 already uses TLS descriptors by default.
+    if [ "$target_arch" = x86_64 ]; then
+      common_flags="$common_flags -mtls-dialect=gnu2"
+    fi
     # Linux/aarch64 (2026-10-21): the project's own code is built with
     # -mno-outline-atomics (CMakeLists.txt, crt_build_flags) because the CRT
     # libc/shared objects export no __aarch64_ld*/swp/cas helpers.  Ports
@@ -1151,45 +1158,10 @@ if [ "$target_os" = linux ]; then
      [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
     set -- "$@" "${CRT_SYSROOT}/lib/crtbegin_so.o"
   fi
-  # The host loader's global-dynamic TLS entry point. libc++abi.so and libicuuc.so are built with
-  # the general-dynamic TLS model and call __tls_get_addr, which only the dynamic loader defines
-  # (the accepted loader boundary, docs/acceptance/crtweb_acceptance.md). The loader is searched
-  # for that symbol only when some object lists it as DT_NEEDED -- glibc's own libc.so.6 does,
-  # CRT's libc.so does not -- so first use of `thread_local` with a destructor
-  # (__cxa_thread_atexit in WebCore) died with "symbol lookup error". Name the loader as a needed
-  # object through a link-only import stub that carries the loader's soname:
-  # nothing of the host is linked and the soname resolves to the interpreter
-  # already mapped. The stub must advertise __tls_get_addr too: an empty DSO
-  # cannot satisfy GNU ld's shared-library undefined-symbol check. Do NOT use
-  # --allow-shlib-undefined, which would hide unrelated missing API symbols.
-  if [ "$runtime_linkage" = shared ]; then
-    case "${CRT_TARGET_ARCH:-$(uname -m)}" in
-      *aarch64*|*arm64*|*ARM64*) loader_arch=aarch64; loader_soname="ld-linux-aarch64.so.1" ;;
-      *) loader_arch=x86_64; loader_soname="ld-linux-x86-64.so.2" ;;
-    esac
-    # The SDK ships this stub (lib/crt-loader-import.so, tools/create_dist.py), so the link names a file that exists
-    # beside the other SDK libraries and a consumer can record the same argv. An SDK without it (an older one, an
-    # in-tree build) gets the per-link stub below.
-    loader_stub_dir=""
-    loader_stub="${CRT_SYSROOT}/lib/crt-loader-import.so"
-    if [ ! -f "$loader_stub" ]; then
-    # Private per-link storage: never trust a predictable world-writable /tmp
-    # cache. Explicit target selection also works for an x86_64 build host
-    # producing an aarch64 executable. No host headers/runtime are used.
-    loader_stub_dir=$(mktemp -d "${TMPDIR:-/tmp}/crt-loader-needed-${loader_arch}.XXXXXX")
-    loader_stub="${loader_stub_dir}/loader.so"
-    if ! printf '%s\n' 'void *__tls_get_addr(void *index) { return index; }' | \
-      "$cxx" "--target=${loader_arch}-linux-gnu" -fuse-ld=lld -x c - \
-        -shared -nostdlib -ffreestanding -fno-stack-protector -fPIC \
-        "-Wl,-soname,${loader_soname}" -o "$loader_stub"; then
-      rm -f "$loader_stub"
-      rmdir "$loader_stub_dir"
-      echo "crt-c++: failed to create the target loader import stub" >&2
-      exit 1
-    fi
-    fi
-    set -- "$@" -Wl,--no-as-needed "$loader_stub" -Wl,--as-needed
-  fi
+  # Linux consumers and imported runtimes use TLSDESC. Do not explicitly
+  # import ld.so: older glibc interpreters then try to bind GNU-libc malloc
+  # and pthread symbols even when GNU libc is absent. Keep strict undefined
+  # shared-import checks; old GD-TLS libraries must be rebuilt, not hidden.
   set -- "$@" -Wl,--start-group
   if [ "${CRT_CXX_BUILDING_RUNTIME:-0}" != 1 ]; then
     if [ "$runtime_linkage" = shared ]; then
@@ -1215,20 +1187,9 @@ if [ "$target_os" = linux ]; then
   fi
   set -- "$@" "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -Wl,--end-group
   if [ "$runtime_linkage" = shared ]; then
-    # run_cxx execs the compiler. Keep a parent only on this path so the
-    # link-only stub is removed on both success and linker failure.
-    if (run_cxx -nostdlib -nostartfiles -nodefaultlibs \
+    run_cxx -nostdlib -nostartfiles -nodefaultlibs \
       -Wl,-e,_start -Wl,--gc-sections \
-      "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"); then
-      loader_link_status=0
-    else
-      loader_link_status=$?
-    fi
-    if [ -n "$loader_stub_dir" ]; then
-      rm -f "$loader_stub"
-      rmdir "$loader_stub_dir"
-    fi
-    exit "$loader_link_status"
+      "-Wl,-rpath,${CRT_SYSROOT}/lib" "$@"
   fi
   # Use the project's primary ELF linker for a static C++ runtime and ignore
   # LLVM archive .deplibs metadata: every required CRT archive is already in

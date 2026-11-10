@@ -101,6 +101,16 @@ class PredecessorFingerprintTests(unittest.TestCase):
         for recipe in self.order:
             self.assertTrue((self.build_root / recipe["name"] / "sentinel").is_file())
 
+    def test_old_general_dynamic_tls_cache_is_rebuilt(self) -> None:
+        fingerprint = DRIVER.predecessor_fingerprint(self.sysroot)
+        previous = dict(fingerprint)
+        previous.pop("linux_tls_policy")
+        DRIVER.write_predecessor_fingerprint(self.build_root, previous)
+        self.make_build_trees()
+        DRIVER.invalidate_stale_builds(self.build_root, self.order, fingerprint)
+        for recipe in self.order:
+            self.assertFalse((self.build_root / recipe["name"]).exists())
+
 
 class RuntimeEnvironmentTests(unittest.TestCase):
     def test_linux_cross_configure_keeps_target_abi_path_and_pthread_policy(self):

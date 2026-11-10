@@ -60,6 +60,13 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
+### Linux Dev SDK loader compatibility repair
+
+- [ ] Rebuild TLSDESC runtimes, qualify the same shared ELF on Ubuntu 24.04/26.04,
+  and publish a new immutable Linux/x86_64 Dev Preview; preserve `.3` and its
+  failed loader replay. Follow [the loader policy](docs/design/cxx_runtime.md#linux-shared-runtime-loader-imports).
+
+
 ### CRT developer experience: SDK -> CLI -> Studio
 
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and

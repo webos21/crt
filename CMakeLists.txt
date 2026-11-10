@@ -630,6 +630,13 @@ else()
   set(CRT_EFFECTIVE_ARCH_FOR_FLAGS "${CRT_TARGET_ARCH}")
 endif()
 
+# Match the installed wrappers: no __tls_get_addr/explicit ld.so dependency.
+if(CRT_TARGET_OS STREQUAL "linux" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(x86_64|amd64|AMD64)$")
+  target_compile_options(crt_build_flags INTERFACE
+    $<$<COMPILE_LANGUAGE:C,CXX>:-mtls-dialect=gnu2>
+  )
+endif()
+
 if(CRT_TARGET_OS STREQUAL "linux" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(arm64|ARM64|aarch64)$")
   target_compile_options(crt_build_flags INTERFACE
     $<$<COMPILE_LANGUAGE:C>:-mno-outline-atomics>

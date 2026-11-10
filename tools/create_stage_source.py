@@ -53,6 +53,10 @@ STAGES = {
             "tools/crt_libcxx_sources.py",
             "tools/install_libcxx_runtimes.py",
             "tools/test_libcxx_runtime.py",
+            "tools/test_crt_cxx_shared_loader.py",
+            "libstdc++/tests/shared_loader_import_test.cc",
+            "libstdc++/tests/shared_loader_tls.cc",
+            "libstdc++/tests/shared_loader_unresolved.cc",
             # verify_dist.py imports DIST_PORTING_TOOLS/DIST_PORTING_DIRS/
             # DIST_WRAPPER_TOOLS from create_dist.py (added the same day as
             # this stage-source packaging itself, e400ad9 "chained sdk") --

@@ -501,6 +501,13 @@ case "$target_os" in
     ;;
   linux)
     common_flags="$common_flags -DCRT_TARGET_OS_LINUX=1"
+    # TLSDESC keeps ELF TLS in the interpreter without importing __tls_get_addr.
+    # Explicit DT_NEEDED on ld.so triggers glibc 2.39's GNU-libc allocator
+    # handover and cannot coexist with our CRT_1.0 symbol namespace.
+    # AArch64 already uses TLS descriptors by default.
+    if [ "$target_arch" = x86_64 ]; then
+      common_flags="$common_flags -mtls-dialect=gnu2"
+    fi
     # Linux/aarch64 (2026-10-21): the project's own code is built with
     # -mno-outline-atomics (CMakeLists.txt, crt_build_flags) because the CRT
     # libc/shared objects export no __aarch64_ld*/swp/cas helpers.  Ports

@@ -281,7 +281,9 @@ Metadata-only retries must not upgrade unknown/dirty compile provenance into
 a clean build. `verify_dist.py --profile dev` checks this profile and the
 ordinary distribution gates together.
 
-Linux shared C++ consumers explicitly import the OS ELF loader for TLS.
+Linux shared C++ consumers use the OS ELF interpreter for TLS.
+The TLSDESC policy in [C++ runtime design](cxx_runtime.md#linux-shared-runtime-loader-imports)
+removes the former explicit loader import; the interpreter prerequisite remains.
 The canonical `linux-elf-loader` prerequisite therefore starts at `02-cxx`
 and is inherited by the Development profile and all later Full stages.
 Its component is selected by target architecture and stays outside the SDK.

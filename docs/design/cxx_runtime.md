@@ -190,24 +190,31 @@ destructors register against.
 
 ### Linux shared-runtime loader imports
 
-The system ELF interpreter remains the documented loader boundary until CRT
-owns an ELF loader. Shared libc++abi/ICU can call the loader's general-dynamic
-TLS entry point, `__tls_get_addr`; CRT does not implement or export a second
-copy. A shared-runtime executable records the target loader SONAME through a
-**link-only import stub**. Its sole advertised TLS symbol satisfies the static
-linker's dependency check; no stub code is copied into the executable or SDK,
-and runtime binding goes to the interpreter already mapped by the OS.
+The system ELF interpreter remains the loader boundary until CRT owns an ELF
+loader. Linux/x86_64 code built by the wrappers and in-tree CMake uses TLSDESC
+(`-mtls-dialect=gnu2`, qualified with LLVM 21); AArch64's default descriptor
+codegen is retained. Imported libc++/libc++abi/libunwind are rebuilt through
+those wrappers. Descriptor relocations require no `__tls_get_addr` import and
+no explicit `DT_NEEDED` on the interpreter. The native compiler policy captures
+the same flags; no CLI-specific linker workaround is required.
 
-An empty stub recorded `DT_NEEDED` but still failed GNU ld's shared-library
-undefined-symbol check during the isolated Web ICU build. The stub now declares
-that one import rather than disabling all undefined-shared-library checks.
-It is generated with an explicit target triple and LLD, without host headers
-or libc, in a private per-link temporary directory and reclaimed on successful
-or failed links. No predictable shared `/tmp` file is trusted. The regression
-entrypoint is `tools/test_crt_cxx_shared_loader.py`: real shared CRT TLS/thread
-destructors pass, an unrelated missing shared import still fails, and no host
-libc/GNU C++ runtime or temporary stub remains in the executable's dependencies.
-This is not implementation or acceptance of a CRT-owned ELF loader.
+The former link-only `crt-loader-import.so` forced an explicit loader dependency.
+On glibc 2.39 this activates the loader's GNU-libc allocator/mutex handover even
+without GNU libc: `calloc@GLIBC_2.2.5` cannot bind to `calloc@@CRT_1.0`.
+Newer loaders guard that handover on the presence of GNU libc. Preserve the
+`CRT_1.0` firewall; GLIBC aliases, host-libc injection and broad
+`--allow-shlib-undefined` are not remedies. Old general-dynamic TLS libraries
+must be rebuilt rather than linked with the old stub. Runtime-cache policy
+fingerprints invalidate pre-TLSDESC imported-runtime builds.
+
+`tools/test_crt_cxx_shared_loader.py --sdk-root ... --output ... --loader ...`
+executes the same shared-CRT ELF through each selected interpreter, exercising
+calloc/free, TLS in an actual DSO and a second thread, thread-local destruction
+and a cross-DSO C++ exception. It rejects explicit loader dependencies and
+remaining GD imports, and checks that unrelated unresolved shared imports
+still fail at link time. Actual qualified loader/architecture combinations
+belong to SDK acceptance; this policy does not imply every glibc version or
+late `dlopen` TLS support. The CRT-owned ELF loader remains separate work.
 
 ### Windows emulated TLS ownership
 
