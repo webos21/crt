@@ -17,8 +17,9 @@ The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-
 > through CRT-owned APIs. See [STATUS](STATUS.md) for accepted host/device scope,
 > limitations and the Web runtime's embedding/security boundary.
 
-The [Linux/x86_64 Development SDK Preview](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3)
-is available for C/C++ development (`dev`, `02-cxx`). See the
+The [Linux/x86_64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3) and
+[macOS/arm64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1) Development SDK Previews
+are available for C/C++ development (`dev`, `02-cxx`). See the
 [installation guide](docs/guides/dev_sdk_preview.md). CLI binary delivery and
 Full SDK delivery continue on their separate [work queue](TODO.md#crt-developer-experience-sdk---cli---studio).
 

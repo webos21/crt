@@ -2212,3 +2212,44 @@ warm build, unchanged project locks and downloads). Public-byte results are reco
 Raw outputs are under the CRT checkout's ignored `out/preview-macos/` and the producer worktree's `out/preview-macos-20261110/`. Not covered:
 Full or other-host packages, a published CLI executable, Developer ID signing or notarization, the unqualified pure C shared SDK-provider
 mode, redirect-aware GitHub acquisition, and the macOS independent host-tools bundle (local-only).
+
+
+## macOS Dev SDK public promotion (2026-11-10)
+
+Review decision: promote the unchanged qualified `v0.0.1-preview.20261110.macos.1` macOS/arm64 Dev artifacts from clean source
+`445f127dc2e1ef4ab538166aa2e374f25773a803` under the [bounded manual-pin trust policy](../design/dev_preview_trust.md#macosarm64-bounded-policy-adopted-2026-11-10).
+The owner authorized the GitHub prerelease promotion. The [release notes](../releases/release_notes_v0.0.1-preview.20261110.macos.1.md), the policy and the guide
+section were frozen in the reviewed commit `0d7632d` before publication, so the manifest pin
+`0981110c84e5d24a903dbd3965dbe92eb2fe405edfa89804e3086dfeb75983de` precedes the bytes it vouches for. No asset was rebuilt or replaced, no
+publisher signature or default channel is claimed, and the Linux Preview is untouched.
+
+### Published result and consumer proof
+
+**Promoted:** [v0.0.1-preview.20261110.macos.1](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1), public prerelease (not marked latest) published
+`2026-11-10T01:29:10Z`. The source tag resolves to `445f127dc2e1ef4ab538166aa2e374f25773a803`, the clean build commit, which is an ancestor of the reviewed pin
+commit on `main`. Six assets were uploaded from the unchanged collector output through `gh` into a **draft**: the SDK archive, the portable compiler policy, the
+02 and 03 source assets, the release manifest and `SHA256SUMS-dev-macos-aarch64`. Before publishing, the draft's asset names, sizes and
+`sha256` digests matched the frozen pins and an authenticated re-download verified against `SHA256SUMS`; the downloaded manifest was byte-identical to the collector's.
+
+An additional **unauthenticated** public download of the six files (`curl`, HTTPS only, TLS >= 1.2, proxies disabled) followed exactly one redirect per file,
+to `release-assets.githubusercontent.com` (the host was checked before following and temporary signed URLs are not recorded), and verifies **6/6** against the
+pins: all four assets against `SHA256SUMS`, the manifest `0981110c...83de` (1728 bytes) and the checksum file itself.
+
+The exact CLI `558c13c15ffdf0394fb66e85d3a11c4f9c21c6606aae0e3f39aade353e3c7e53` (4368360 bytes; `bin/macos/crt-cli` of
+`crt-cli` `dbb0913`) consumes those actual public-download bytes under Seatbelt: no network, writes confined to a scratch HOME and a private temporary directory, the
+producer, CLI and worktree checkouts unreadable, a cleared environment with an empty `PATH`, Xcode's `clang`, `clang++`, `ld` and `ar` as the only toolchain.
+`tools/replay_preview_public_macos.py` passes **30/30**: pin and asset digests, pinned native install and verify, idempotent reinstall, refusal of a wrong pin with
+nothing published, C and C++ source-only `new`, first build **without configure** through the installed SDK selected by `--sdk`, test, run, zero-command warm build,
+unchanged project locks (each selects SDK `e3dc7fb1810a3f78ab8ef33882225ccb562d21f6f5977a2037ab92819326bac8`, stored policy `d5a100fdd0d38f940fe1c398996f013d57ccc7c4743af2b9ab4988c42b8de464`, clean
+producer provenance), an unchanged installed SDK and unchanged downloads. The result file's SHA-256 is
+`8eaee9b5b76659ff0f6fd208d2effa600856cd2c256d1e8b2f327746e7c40f13`.
+
+Receipts stay under the CRT checkout's ignored `out/preview-macos/`: `draft-dl/`, `public-dl/` and `public-consumer/` (`result.json`, per-call output). The
+guide commands use the same flags as the proof.
+
+### Limits
+
+Current CLI follows no HTTPS redirects, so the accepted path is manual download plus pinned local installation; GitHub `sdk acquire --source` is not advertised. The
+images are not Developer ID signed or notarized. Full, other-host and independent host-tools packages, a published CLI executable, the macOS port/provider replay against
+this exact SDK, the unqualified pure C shared SDK-provider mode, updates and Studio remain in their owning queues. STATUS and default locks are unchanged.
+

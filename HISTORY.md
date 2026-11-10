@@ -10,6 +10,16 @@ substantive update.
 
 ## 2026-11-10
 
+### Publish and promote the macOS Development SDK Preview
+
+Published `v0.0.1-preview.20261110.macos.1` as a macOS/arm64 Dev prerelease at the clean producer `445f127`, built Release with Xcode's Apple clang 21.0.0 on macOS 27.2.
+The manifest pin, trust policy, notes and guide were frozen in a reviewed commit before publication; the release was staged as a draft with the unchanged collector
+assets, verified, then published as a non-latest prerelease through `gh`. Unauthenticated public downloads match the pins, and a `crt-cli` built from its sources by this
+SDK alone installs and builds C and C++ projects from the actual public bytes without configure (30/30 under Seatbelt). The Linux Preview is untouched. Reaching
+a self-build exposed two stale replay guards (a JSON fixture's documented `_WIN32`, the private lock helper's location); the header now lives under `include/`.
+[Promotion acceptance](docs/acceptance/sdk_split_acceptance.md#macos-dev-sdk-public-promotion-2026-11-10) owns the release and receipt hashes. CLI redirect-aware
+acquisition, a published CLI executable, Developer ID signing, Full and other-host packages remain separate; no STATUS or default-lock change.
+
 ### Publish and promote the Linux Development SDK Preview
 
 Published `v0.0.1-preview.20261110.3` as a Linux/x86_64 Dev prerelease at the
