@@ -10,6 +10,13 @@ substantive update.
 
 ## 2026-11-10
 
+### Publish and promote the Windows Development SDK Preview
+
+Built a clean Release Dev SDK `v0.0.1-preview.20261110.windows.1` from `b31276a` (CTest 169/169, symlink-free ZIP, 73 MB), froze its manifest pin
+`b0fca4c8...6976`, trust policy, guide and notes in a reviewed commit, tagged the clean build commit and published a GitHub **prerelease** through `gh` (draft, digest check, authenticated
+re-download, publish). An unauthenticated download verifies 6/6 against the pins, and the committed Windows CLI consumes the public bytes 31/31 under a restricted token. No asset was
+rebuilt; no signature, Authenticode or default channel is claimed. [Evidence](docs/acceptance/sdk_split_acceptance.md#windows-dev-sdk-public-promotion-2026-11-10).
+
 ### Publish and promote the macOS Development SDK Preview
 
 Published `v0.0.1-preview.20261110.macos.1` as a macOS/arm64 Dev prerelease at the clean producer `445f127`, built Release with Xcode's Apple clang 21.0.0 on macOS 27.2.

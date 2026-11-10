@@ -2300,3 +2300,43 @@ recorded after publication.
 Raw outputs are under the producer worktree's ignored `out/preview-windows-20261110/` and the local `s9` evidence directory. Not covered: Full or other-host packages
 (including Windows/arm64), a published CLI executable, Authenticode signing, the unqualified pure C shared SDK-provider mode, redirect-aware GitHub acquisition, and the Windows
 independent host-tools bundle (local-only).
+
+## Windows Dev SDK public promotion (2026-11-10)
+
+Review decision: promote the unchanged qualified `v0.0.1-preview.20261110.windows.1` Windows/x86_64 Dev artifacts from clean source
+`b31276a6acccf0a89731f7bb0aecbdcdc9b45cda` under the [bounded manual-pin trust policy](../design/dev_preview_trust.md#windowsx86_64-bounded-policy-adopted-2026-11-10).
+The owner requested the GitHub prerelease promotion. The [release notes](../releases/release_notes_v0.0.1-preview.20261110.windows.1.md), the policy, the guide section
+and the candidate record were frozen in the reviewed commit `a9c813b` (on `main` as part of `2117b1b`) before publication, so the manifest pin
+`b0fca4c81d29b8eee28e0d9fb7d6e26950b094a8be4f2c091e43922366a46976` precedes the bytes it vouches for. No asset was rebuilt or replaced, no publisher signature or default
+channel is claimed, and the Linux and macOS Previews are untouched.
+
+### Published result and consumer proof
+
+**Promoted:** [v0.0.1-preview.20261110.windows.1](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1), public prerelease (not marked latest) published
+`2026-11-10T02:38:15Z`. The lightweight source tag resolves to `b31276a6acccf0a89731f7bb0aecbdcdc9b45cda`, the clean build commit, which is an ancestor of the reviewed pin commit on
+`main`. Six assets were uploaded with `gh` from the unchanged collector output into a **draft**: the SDK archive, the portable compiler policy, the 02 and 03 source assets, the
+release manifest and `SHA256SUMS-dev-windows-x86_64`. Before publishing, the draft's asset names, sizes and `sha256` digests matched the frozen pins and an authenticated
+re-download was byte-identical to the collector's files (6/6).
+
+An additional **unauthenticated** public download of the six files (Python `urllib`, HTTPS only, TLS >= 1.2 with peer and hostname verification against the Windows certificate store,
+proxies disabled, no credentials) followed exactly one redirect per file, to `release-assets.githubusercontent.com` (the host was checked before following and temporary signed URLs
+are not recorded), and verifies **6/6** against the pins: the four assets, the manifest `b0fca4c8...6976` (1800 bytes) and the checksum file itself. Receipt SHA-256
+`91efd072ea7ff93fa99235789f1d4b9ee84469d3d6ed4786c3f45ce14bcf9ca9`.
+
+The exact CLI `3e8c0491d2e385bbaba5c0e8bd63eeac3896f498fed762ecab4370ecf277bd90` (44920832 bytes; `bin/win-x64/crt-cli.exe` of `crt-cli` `f0537ef`) consumes those actual public-download
+bytes under a restricted token: a per-run SID with the producer, CLI and CRT checkouts proven unreadable by a native probe, a private work directory and temporary directory, an empty
+`PATH`, and job-object process accounting; LLVM 22.1.8 `clang`, `clang++`, `ld.lld` and `llvm-ar` are the only toolchain, with the Windows SDK `10.0.28000.0` import libraries.
+`tools/replay_preview_public_windows.py` passes **31/31**: pin and asset digests, pinned native install and verify, idempotent reinstall, refusal of a wrong pin with nothing published, C and
+C++ source-only `new`, first build **without configure** through the installed SDK selected by `--sdk`, test, run, zero-command warm build, unchanged project locks (each selects SDK
+`5bb55372ec10e3cfa24c84de981a7130f56aeb57ef0d43d5da22a65036dec7ef`, stored policy `7762f572b4614b3068e1ea99694ce19360e213d31c5bd01019e4ad6ce005b726`, clean producer provenance), an unchanged
+installed SDK and unchanged downloads. The result file's SHA-256 is `5784f28a815be4edb4a881fdabfff63d37885441ba802487d7398f47c6acfd20`.
+
+Receipts stay in the local evidence directory `s9` next to the producer worktree's ignored `out/preview-windows-20261110/`: `draft-dl/`, `public-dl/`, `public-dl-receipt.json` and
+`public-consumer/` (`result.json`, per-call output). The guide commands use the same flags as the proof.
+
+### Limits
+
+Current CLI follows no HTTPS redirects, so the accepted path is manual download plus pinned local installation; GitHub `sdk acquire --source` is not advertised. Windows process accounting is
+not executable or network denial. The images are not Authenticode-signed. `SHA256SUMS-dev-windows-x86_64` has Windows (CRLF) line endings as produced, so a POSIX `sha256sum -c` needs them
+stripped; the manifest is the pinned anchor. Full, other-host (including Windows/arm64) and independent host-tools packages, a published CLI executable, the Windows port/provider replay against
+this exact SDK, the unqualified pure C shared SDK-provider mode, updates and Studio remain in their owning queues. STATUS and default locks are unchanged.
