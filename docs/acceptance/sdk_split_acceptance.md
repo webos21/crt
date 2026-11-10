@@ -2415,3 +2415,19 @@ and the six original collector files. Evidence stays under
 `source-policy-review.json` and `external-validation.json/` retain technical
 results. Earlier incomplete candidates remain unpromoted and excluded.
 Final CLI/public/hosted receipts follow here after validation.
+
+### Local CLI candidate result
+
+CLI `65b20c4` is exported outside both repositories and bootstrapped by the
+unchanged published Linux CLI `v0.1.0-preview.20261110.linux-x86_64.1`.
+Pinned native install of the copied collector outputs and stage-1 self-build
+pass (21 executed/0 reused); native **913**, archive **221**, SDK-store **114**
+and port-recipe **142** checks pass with no skips. Warm build is 0/21;
+ELF import audit and SDK-free version/help/bootstrap-doctor pass. The local
+wrapper initially misread `Ci.run_tests`'s empty failure dictionary as a tuple
+after all four suites had passed. Preserve that harness failure; the corrected
+postcheck validates the recorded suite exits, warm reuse and standalone checks
+without rerunning or relabeling product failures. Final local receipt:
+`consumer-postcheck/artifact/ci-summary.json`, CLI SHA-256
+`80dddf03f746e6b50caea596ff0201983cf180cfb8d15abea870c2c019df117a`.
+The public-byte consumer and actual Ubuntu 24.04 hosted suite are still pending.
