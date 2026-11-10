@@ -2462,6 +2462,26 @@ locks and STATUS are unchanged. Linux producer CI now provisions LLVM 21 and
 compiler-rt explicitly; earlier CI provisioning failures are not SDK/runtime
 failures or passing compatibility evidence.
 
+### Required hosted replay closure
+
+The same published `.4` SDK passes both required native Ubuntu 24.04/glibc
+`2.39-0ubuntu8.9` and Ubuntu 26.04/glibc `2.43-2ubuntu2.4` CLI jobs in
+[run `42805951580`](https://github.com/webos21/crt-cli/actions/runs/42805951580),
+consumer `5d148ba`. This includes the formerly failing shared-C++ variant,
+both self-build stages, four full suites, unchanged rebuild, stage byte equality
+and SDK-free/import gates. The [CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#completed-linux-hosted-qualification)
+owns exact consumer binary/compiler/test/artifact identities; it is not just
+local interpreter substitution. The producer defect and this release item close
+for those combinations; prior `.3` evidence is retained and wider support is not inferred.
+
+Producer entry-point [CI `42805529392`](https://github.com/webos21/crt/actions/runs/42805529392)
+at `422b45a` also passes all five existing core-platform legs (Linux amd64/arm64,
+macOS aarch64 and Windows x64/arm64). Relative to the artifact's source `448fa32`,
+only CI provisioning/release documentation changed. The immutable source-tag CI
+still used its former unversioned LLVM provisioning and failed on x86's older
+Clang; main's explicit LLVM 21/compiler-rt provisioning resolves that CI issue.
+It is neither a runtime failure nor new native aarch64/other-host Dev SDK qualification.
+
 ## Linux/aarch64 Dev Preview candidate (2026-11-10)
 
 **Clean local producer candidate, unpromoted.** Select CRT `e6a94ab9e69b05497b3804328971d24d6071a53d`, version `v0.0.1-preview.20261110.linux.arm64.2`, native

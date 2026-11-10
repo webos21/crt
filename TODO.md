@@ -60,12 +60,6 @@ under an active tranche only to make its execution order legible.
 
 ## In Progress
 
-### Linux Dev SDK loader compatibility repair
-
-- [ ] Close the required Ubuntu 24.04/26.04 CLI hosted replay on the published `.4`
-  SDK; local/public-byte repair evidence is [accepted](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10).
-
-
 ### CRT developer experience: SDK -> CLI -> Studio
 
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and

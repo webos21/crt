@@ -21,7 +21,8 @@ pass TLS/destructor/exception checks. C 147/147, Dev external checks, local CLI
 913/221/114/142 and 14/14 public-byte consumer checks pass. All six public
 assets and four source files match the pre-publication pins. The old `.3`
 release remains with an erratum; no project lock or other-host SDK changes.
-[Acceptance](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10)
+Both required Ubuntu 24.04/26.04 CLI jobs also pass the full hosted workflow
+on this same public SDK. [Acceptance](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10)
 owns exact hashes, preserved failed candidates, CI provisioning and replay limits.
 
 ### Windows/x64 CLI Preview publication handoff
