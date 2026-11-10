@@ -78,7 +78,7 @@ def main():
         target = source / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(file, target)
-    code = [p for directory in ('src', 'include') for p in (source / directory).rglob('*') if p.is_file()]
+    code = [p for directory in ('src', 'include') for p in (source / directory).rglob('*') if p.is_file() and p.suffix in ('.c', '.cc', '.cpp', '.h', '.hpp')]
     if any(re.search(r'\b(?:__linux__|__APPLE__|_WIN32|CRT_TARGET_OS_[A-Z]+)\b', p.read_text()) for p in code):
         raise ValueError('CLI source must use CRT PAL rather than OS macros')
     if list((source / 'src/main').glob('*.h')) or not (source / 'include/crtcli/core.h').is_file():

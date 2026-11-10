@@ -53,3 +53,25 @@ silently enabled during producer publication.
 
 No machine trust store, global PATH, account permission or release/security
 setting is changed by this policy. Test issuers/keys are not release trust roots.
+
+## macOS/arm64 bounded policy adopted 2026-11-10
+
+The same caller-trusted manual pin model, procedure and limits apply to the native
+macOS/arm64 Development SDK Preview. The owner authorized its GitHub prerelease
+promotion on 2026-11-10. It is a separate release with its own tag and pins; it does
+not alter, replace or extend the Linux Preview's assets or pins.
+
+| Boundary | Decision |
+| --- | --- |
+| Publisher location | Public `webos21/crt` repository and the exact release tag `v0.0.1-preview.20261110.macos.1`; no `latest` lookup |
+| Build/source pin | `445f127dc2e1ef4ab538166aa2e374f25773a803`; tag must resolve to that exact clean producer |
+| Metadata anchor | Manifest SHA-256 `0981110c84e5d24a903dbd3965dbe92eb2fe405edfa89804e3086dfeb75983de` and size 1728, copied from the qualified bytes into reviewed repository source before publication |
+| TLS, payload acceptance, publisher authentication, existing state, immutability | As in the Linux policy above: explicit trusted CA PEM, exact manifest pin then every asset's size/SHA-256, `not_verified`, install beside existing versions, no replacement of accepted assets or tag movement |
+| OS SDK | The portable compiler policy names the kind `macos-xcode-sdk`, not a path: the consumer's own Xcode SDK is discovered with `xcrun` or selected with `--os-sdk` and kept in local state only |
+| Code signing | Images carry the linker's ad-hoc signatures only; no Developer ID signature or notarization is claimed |
+
+Promotion follows the procedure above (draft prerelease, unchanged collector outputs,
+digest check before publishing, unauthenticated public download, native consumer
+proof on the downloaded bytes). The record is in
+[SDK acceptance](../acceptance/sdk_split_acceptance.md#macos-dev-sdk-public-promotion-2026-11-10).
+

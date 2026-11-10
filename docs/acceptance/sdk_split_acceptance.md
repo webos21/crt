@@ -2165,3 +2165,50 @@ GitHub HTTPS acquisition/redirect policy and production/default-lock adoption
 remain separate. Publisher authentication is still `not_verified`; a new signer
 or automatic channel is not invented. Existing Full/other-host qualifications
 retain their original scope; no new runtime/ABI or format change is introduced.
+
+
+## macOS Dev Preview candidate (2026-11-10)
+
+**Clean local producer candidate, unpromoted.** Select CRT `445f127dc2e1ef4ab538166aa2e374f25773a803`,
+version `v0.0.1-preview.20261110.macos.1`, native macOS/arm64 (macOS 27.2, build 26B123), Release, Apple clang 21.0.0 with
+Xcode `ld` (ld-27106.1). The SDK keeps Dev profile 1, manifest stage `02-cxx`, native policy 1 and the existing recipe formats;
+producer and compile provenance are both known and clean. No source, public header, runtime or ABI change was made for this
+candidate; the Linux Preview's assets and pins are untouched.
+
+A detached worktree at the commit and a fresh Ninja output directory were configured with explicit `CRT_TARGET_OS=macos`,
+`CRT_TARGET_ARCH=aarch64`, `CRT_USE_IMPORTED_LIBCXX=ON`, `CMAKE_BUILD_TYPE=Release` and the version above; Skia, FFmpeg, media curl and
+LVGL are off, and Dev's own network/JSON/xz ports build through their normal path. `cmake --build <fresh-build> --target crt-c-test
+crt-cxx-test crt-dev-release crt-host-tools-test --parallel 8` exits zero. C tests pass **146/146** (the Linux count is 147; one
+test is host-conditional); the imported-libc++ runtime, string-ABI and iostream smokes pass static and shared. Dev's static/shared
+HTTPS+inflate and trust negatives pass, followed by actual archive extraction/profile verification and the portable policy export.
+
+| Collected asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.0.1-preview.20261110.macos.1-macos-aarch64-dev.tar.xz` | 6136776 | `41a1afe701514496a912de83e46481455c9f2c0526d2eadd5b058813c26b2146` |
+| `crt-v0.0.1-preview.20261110.macos.1-macos-aarch64-dev-toolchain.json` | 402864 | `d5a100fdd0d38f940fe1c398996f013d57ccc7c4743af2b9ab4988c42b8de464` |
+| `crt-v0.0.1-preview.20261110.macos.1-macos-02-cxx-source.tar.xz` | 9005764 | `8a1beeaf48f9e9f25af60ed50f067754b4f6b674b8b43589b4c1f4e7c355fc3a` |
+| `crt-v0.0.1-preview.20261110.macos.1-macos-03-gfx-simple-source.tar.xz` | 134120 | `e2d4fc76ca3c5ff378e883ea29565a2a5ba3a5b70d6dc9899c23724fbbf02378` |
+
+The release-manifest SHA-256 is `0981110c84e5d24a903dbd3965dbe92eb2fe405edfa89804e3086dfeb75983de` (1728 bytes); the archive's install
+metadata (format 1) carries SDK content identity `e3dc7fb1810a3f78ab8ef33882225ccb562d21f6f5977a2037ab92819326bac8`, and the portable policy
+names the OS SDK kind `macos-xcode-sdk` without a path. All four declared sizes and digests match the copied files and the original
+`SHA256SUMS-dev-macos-aarch64`.
+
+### Consumer qualification before publication
+
+A `crt-cli` built from its sources (`1e821d1` plus the move of the private `store_lock.h` into `include/crtcli/`) by this SDK alone, with the
+previously committed macOS executable as the bootstrap seed, passes the producer's Seatbelt contract replay: **21 sources**, cold 21
+executed / 0 reused, unchanged rebuild 0 / 21, bootstrap loop (code and data identical, only `LC_UUID` and `__LINKEDIT` differ), native
+**922/922**, archive **221/221**, SDK-store **114/114** and recipe **141/141**, SDK-hidden help/version/doctor, and only `libSystem` imported.
+Executable SHA-256 `558c13c15ffdf0394fb66e85d3a11c4f9c21c6606aae0e3f39aade353e3c7e53` (4368360 bytes). The replay needed two driver corrections that
+concern its own guards, not the product: it scanned a JSON fixture's documented `_WIN32` as code, and it rejected the private lock helper by
+location, which the repository's header rule (headers live under `include/`) resolves by moving it. Failed attempts are retained.
+
+The same executable then consumes the **local handoff** (the unchanged collector outputs) under Seatbelt with the pre-publication pins:
+`tools/replay_preview_public_macos.py` passes **30/30** (pin and asset digests, pinned install and verify, idempotent reinstall, wrong-pin
+refusal with nothing published, C and C++ source-only `new`, first build without configure through the installed SDK, test, run, zero-command
+warm build, unchanged project locks and downloads). Public-byte results are recorded after publication.
+
+Raw outputs are under the CRT checkout's ignored `out/preview-macos/` and the producer worktree's `out/preview-macos-20261110/`. Not covered:
+Full or other-host packages, a published CLI executable, Developer ID signing or notarization, the unqualified pure C shared SDK-provider
+mode, redirect-aware GitHub acquisition, and the macOS independent host-tools bundle (local-only).
