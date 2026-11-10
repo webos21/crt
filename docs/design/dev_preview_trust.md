@@ -75,3 +75,24 @@ digest check before publishing, unauthenticated public download, native consumer
 proof on the downloaded bytes). The record is in
 [SDK acceptance](../acceptance/sdk_split_acceptance.md#macos-dev-sdk-public-promotion-2026-11-10).
 
+## Windows/x86_64 bounded policy adopted 2026-11-10
+
+The same caller-trusted manual pin model, procedure and limits apply to the native
+Windows/x86_64 Development SDK Preview. The owner requested its GitHub prerelease
+promotion on 2026-11-10. It is a separate release with its own tag and pins; it does
+not alter, replace or extend the Linux or macOS Previews' assets or pins.
+
+| Boundary | Decision |
+| --- | --- |
+| Publisher location | Public `webos21/crt` repository and the exact release tag `v0.0.1-preview.20261110.windows.1`; no `latest` lookup |
+| Build/source pin | `b31276a6acccf0a89731f7bb0aecbdcdc9b45cda`; tag must resolve to that exact clean producer |
+| Metadata anchor | Manifest SHA-256 `b0fca4c81d29b8eee28e0d9fb7d6e26950b094a8be4f2c091e43922366a46976` and size 1800, copied from the qualified bytes into reviewed repository source before publication |
+| TLS, payload acceptance, publisher authentication, existing state, immutability | As in the Linux policy above: user-selected trusted CA input, exact manifest pin then every asset's size/SHA-256, `not_verified`, install beside existing versions, no replacement of accepted assets or tag movement |
+| OS SDK | The portable compiler policy names the kind `windows-um-import-libraries`, not a path: the consumer's own Windows SDK import-library directory is selected with `--os-sdk` (or `CRT_WINDOWS_SDK_LIBPATH`) and kept in local state only; it is neither redistributed nor locked |
+| Code signing | The PE images are not Authenticode-signed; nothing is claimed about SmartScreen or other reputation checks |
+| Installation | The ZIP archive contains no symbolic links; installation needs no Developer Mode and no elevation |
+
+Promotion follows the procedure above (draft prerelease, unchanged collector outputs,
+digest check before publishing, unauthenticated public download, native consumer
+proof on the downloaded bytes). The record is in
+[SDK acceptance](../acceptance/sdk_split_acceptance.md#windows-dev-sdk-public-promotion-2026-11-10).

@@ -90,3 +90,37 @@ build/test/run reuse the project lock. GitHub's asset redirect is not followed b
 (as above), exactly as for Linux. Qualified scope is the recorded native first-build/installed-selection flow with static
 C and C++ consumers; pure C shared SDK-provider mode stays unqualified.
 
+## Windows/x86_64
+
+The [Windows Preview release](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) offers the native
+Windows/x86_64 Dev SDK `v0.0.1-preview.20261110.windows.1` (stage `02-cxx`, profile `dev`), qualified with LLVM/Clang/LLD **22.1.8**
+and the Windows SDK `10.0.28000.0` import libraries on Windows 11 (build 26100). The LLVM tools and the Windows SDK are external
+prerequisites; none is bundled. Download these three original files from the release into a fresh directory with a trusted HTTPS client or browser:
+
+- [SDK archive](https://github.com/webos21/crt/releases/download/v0.0.1-preview.20261110.windows.1/crt-v0.0.1-preview.20261110.windows.1-windows-x86_64-dev.zip)
+- [Portable native compiler policy](https://github.com/webos21/crt/releases/download/v0.0.1-preview.20261110.windows.1/crt-v0.0.1-preview.20261110.windows.1-windows-x86_64-dev-toolchain.json)
+- [Release manifest](https://github.com/webos21/crt/releases/download/v0.0.1-preview.20261110.windows.1/release-manifest-dev-windows-x86_64.json)
+
+The independently trusted manifest SHA-256 from the reviewed repository is
+`b0fca4c81d29b8eee28e0d9fb7d6e26950b094a8be4f2c091e43922366a46976` (1800 bytes); the
+[trust policy](../design/dev_preview_trust.md#windowsx86_64-bounded-policy-adopted-2026-11-10) defines the boundary. Use a
+`crt-cli` built for Windows/x64 from a source that includes the stored-policy selection (`--sdk`), the pinned installer and the
+Windows D3 adapter; the `bin/win-x64/crt-cli.exe` of the `crt-cli` repository is that executable
+(SHA-256 `3e8c0491d2e385bbaba5c0e8bd63eeac3896f498fed762ecab4370ecf277bd90`, 44920832 bytes) and is a local, unpromoted test
+executable, not a published release. The SDK archive contains no symbolic links, so installation needs no Developer Mode.
+Substitute actual absolute paths (the LLVM and Windows SDK paths below are the exercised ones):
+
+```text
+crt-cli sdk install --archive C:\downloads\crt-v0.0.1-preview.20261110.windows.1-windows-x86_64-dev.zip --release-manifest C:\downloads\release-manifest-dev-windows-x86_64.json --release-manifest-sha256 b0fca4c81d29b8eee28e0d9fb7d6e26950b094a8be4f2c091e43922366a46976
+crt-cli new hello-cxx --language cxx
+crt-cli build --project hello-cxx --sdk 5bb55372ec10e3cfa24c84de981a7130f56aeb57ef0d43d5da22a65036dec7ef --os-sdk "C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\um\x64" --cc "C:\Program Files\LLVM\bin\clang.exe" --cxx "C:\Program Files\LLVM\bin\clang++.exe" --linker "C:\Program Files\LLVM\bin\ld.lld.exe" --ar "C:\Program Files\LLVM\bin\llvm-ar.exe"
+crt-cli test --project hello-cxx
+crt-cli run --project hello-cxx
+```
+
+For C sources choose `--language c` and another fresh project name. `--os-sdk` names the directory that holds `kernel32.lib` and
+`synchronization.lib`; it is kept in local state only and never in the project lock. The first build binds the installed SDK; later
+plain build/test/run reuse the project lock. GitHub's asset redirect is not followed by the current CLI, so download manually (as
+above), exactly as for Linux and macOS. Qualified scope is the recorded native first-build/installed-selection flow with static C and
+C++ consumers; pure C shared SDK-provider mode stays unqualified, and the Windows SDK contract ships no shared `z`.
+The PE images are not Authenticode-signed.

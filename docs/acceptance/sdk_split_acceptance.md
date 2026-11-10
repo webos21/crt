@@ -2253,3 +2253,50 @@ Current CLI follows no HTTPS redirects, so the accepted path is manual download 
 images are not Developer ID signed or notarized. Full, other-host and independent host-tools packages, a published CLI executable, the macOS port/provider replay against
 this exact SDK, the unqualified pure C shared SDK-provider mode, updates and Studio remain in their owning queues. STATUS and default locks are unchanged.
 
+## Windows Dev Preview candidate (2026-11-10)
+
+**Clean local producer candidate, unpromoted.** Select CRT `b31276a6acccf0a89731f7bb0aecbdcdc9b45cda`, version
+`v0.0.1-preview.20261110.windows.1`, native Windows/x86_64 (Windows 11 Pro 10.0.26100), Release, LLVM/Clang/LLD 22.1.8, Windows SDK
+`10.0.28000.0` import libraries. The SDK keeps Dev profile 1, manifest stage `02-cxx`, native policy 1 and the existing recipe formats; producer
+and compile provenance are both known and clean. No source, public header, runtime or ABI change was made for this candidate; the Linux and macOS
+Previews' assets and pins are untouched. The Win64 callee-saved vector-register unwind fix (`05b5678`) and the Windows D3 adapter are ancestors of the build commit.
+
+A detached worktree at the commit and a fresh Ninja output directory were configured from preset `windows-host-ninja-debug` with explicit
+`CMAKE_BUILD_TYPE=Release`, `CRT_TARGET_OS=windows`, `CRT_TARGET_ARCH=x86_64`, `CRT_USE_IMPORTED_LIBCXX=ON` and the version above; Skia, FFmpeg,
+media curl and LVGL are off, and Dev's own network/JSON/xz ports build through their normal path. No network access was needed: the verified-on-use
+download caches (cJSON, curl, nlohmann json, mbedTLS, make, xz, zlib sources) and the three pinned LLVM source clones were copied from an earlier
+build and are re-checked against their pins on use.
+`cmake --build <fresh-build> --target crt-development-sdk-test crt-c-test crt-cxx-test crt-dev-release crt-host-tools-test --parallel 8` exits
+zero. CTest passes **169/169**; the imported-libc++ runtime, string-ABI, iostream and exception-register smokes pass static and shared, and Dev's
+static/shared HTTPS+inflate and trust negatives pass, followed by actual archive extraction/profile verification and the portable policy export.
+
+| Collected asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.0.1-preview.20261110.windows.1-windows-x86_64-dev.zip` | 73323880 | `c71bb91e9f2c623d44e8154c7798a446b850781bdc1cf515eb9675dc04137be1` |
+| `crt-v0.0.1-preview.20261110.windows.1-windows-x86_64-dev-toolchain.json` | 440297 | `7762f572b4614b3068e1ea99694ce19360e213d31c5bd01019e4ad6ce005b726` |
+| `crt-v0.0.1-preview.20261110.windows.1-windows-02-cxx-source.tar.xz` | 9115212 | `ef301c5e3cc084766ede7a1372c89071f0a3597863a549f6a2dff9610d0e83ab` |
+| `crt-v0.0.1-preview.20261110.windows.1-windows-03-gfx-simple-source.tar.xz` | 133720 | `cf3ba715cf764eb374199ded7da0ee0c61277c1d414f0d0cdb538a5246fd660c` |
+
+The release-manifest SHA-256 is `b0fca4c81d29b8eee28e0d9fb7d6e26950b094a8be4f2c091e43922366a46976` (1800 bytes); `SHA256SUMS-dev-windows-x86_64`
+(542 bytes) is `08e49d83a8ca8b32809c4b411de70c78bc1a02c6b8299231bfcad0bb284c0b6e`. The archive's install metadata (format 1: 2917 entries, 2736 files,
+181 directories, **0 symlinks**, 184989818 bytes) carries SDK content identity `5bb55372ec10e3cfa24c84de981a7130f56aeb57ef0d43d5da22a65036dec7ef`, and the
+portable policy names the OS SDK kind `windows-um-import-libraries` without a path. All four declared sizes and digests match the copied files. The
+unchanged collector output is kept as an immutable copy outside both repositories.
+
+### Consumer qualification before publication
+
+A `crt-cli` built from `crt-cli` `9a5272d12d80a74389edbc724fd4bd602d618064` by this SDK alone passes the producer's restricted-token contract replay: **21 sources**,
+cold 21 executed / 0 reused, unchanged rebuild 0 / 21, native **972/972**, archive **214/214**, SDK-store **113/113** and recipe **141/141**, SDK-hidden
+help/version/doctor, and only `kernel32.dll` and `api-ms-win-core-synch-l1-2-0.dll` imported; 709 recorded processes. Executable SHA-256
+`3e8c0491d2e385bbaba5c0e8bd63eeac3896f498fed762ecab4370ecf277bd90` (44920832 bytes).
+
+The same executable then consumes the **local handoff** (the unchanged collector outputs) with the pre-publication pins:
+`tools/replay_preview_public_windows.py` passes **31/31** (hidden producer and CLI trees unreadable under the run SID, pin and asset digests, pinned install and
+verify, idempotent reinstall, wrong-pin refusal with nothing published, C and C++ source-only `new`, first build without configure through the installed SDK,
+test, run, zero-command warm build, unchanged project locks, installed SDK and downloads). The documented guide commands (with `--os-sdk`) were also run as written
+and pass. Isolation is a restricted token with an empty `PATH` and job-object process accounting: no network or executable denial is claimed. Public-byte results are
+recorded after publication.
+
+Raw outputs are under the producer worktree's ignored `out/preview-windows-20261110/` and the local `s9` evidence directory. Not covered: Full or other-host packages
+(including Windows/arm64), a published CLI executable, Authenticode signing, the unqualified pure C shared SDK-provider mode, redirect-aware GitHub acquisition, and the Windows
+independent host-tools bundle (local-only).
