@@ -243,7 +243,7 @@ def main():
 
     if args.target_os == "linux":
         run_native([sys.executable, str(root / "tools/test_crt_cxx_shared_loader.py"),
-                    "--sdk-root", str(sysroot), "--output", str(output / "shared-loader")],
+                    "--sdk-root", str(sysroot), "--output", str(output.with_name(output.name + "-shared-loader"))],
                    env=base_env, check=True)
 
 
