@@ -40,7 +40,7 @@ absolute download/tool paths; SDKs install side by side in the user's store.
 ```text
 crt-cli sdk install --archive /absolute/downloads/crt-v0.0.1-preview.20261110.3-linux-x86_64-dev.tar.xz --release-manifest /absolute/downloads/release-manifest-dev-linux-x86_64.json --release-manifest-sha256 d4211d3298a764ff22f6e262073f834bbb36cb5d07c22e1ecb10f7f83f8fca60
 crt-cli new hello-cxx --language cxx
-crt-cli build --project hello-cxx --sdk-id 36623957fbdd5a384cc173991e20253ff83148028ab8072298dcd434a55a2b3f --cc /usr/bin/clang --cxx /usr/bin/clang++ --linker /usr/bin/ld.lld --ar /usr/bin/llvm-ar-21
+crt-cli build --project hello-cxx --sdk 36623957fbdd5a384cc173991e20253ff83148028ab8072298dcd434a55a2b3f --cc /usr/bin/clang --cxx /usr/bin/clang++ --linker /usr/bin/ld.lld --ar /usr/bin/llvm-ar-21
 crt-cli test --project hello-cxx
 crt-cli run --project hello-cxx
 ```
