@@ -136,7 +136,7 @@ jobs:
           sudo apt-get update
           # x86_64 TLSDESC code generation needs a modern Clang. Use the same
           # LLVM major as the qualified Linux Dev SDK, including on noble.
-          if ! apt-cache show clang-21 >/dev/null 2>&1; then
+          if ! apt-cache show clang-21 2>/dev/null | grep '^Version:' >/dev/null; then
             . /etc/os-release
             test "$VERSION_CODENAME" = noble
             fingerprint=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
