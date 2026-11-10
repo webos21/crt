@@ -10,6 +10,12 @@ substantive update.
 
 ## 2026-11-10
 
+### Acquire the macOS Dev SDK Preview from GitHub with the published CLI Preview
+
+The `crt-cli` macOS/arm64 Preview (`v0.1.0-preview.20261110.macos-arm64.1`) was built from its sources by the published macOS SDK alone and, packaged, acquires that SDK directly from the
+release URLs through the restricted `github-release` redirect policy (three redirects to `release-assets.githubusercontent.com`; manifest, policy and archive pins matched, installed
+identity equals the promoted SDK). No SDK asset, tag or pin changed. [CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#macos-cli-preview-release-2026-11-10).
+
 ### Publish and promote the Windows Development SDK Preview
 
 Built a clean Release Dev SDK `v0.0.1-preview.20261110.windows.1` from `b31276a` (CTest 169/169, symlink-free ZIP, 73 MB), froze its manifest pin

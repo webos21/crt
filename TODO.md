@@ -217,6 +217,7 @@ external-tool selection/diagnosis and download/install orchestration.
   and so is the Windows/x86_64 one ([record](docs/acceptance/sdk_split_acceptance.md#windows-dev-sdk-public-promotion-2026-11-10)).
   Its final macOS CLI package (notices, inventory, extraction, SDK-free doctor) is qualified locally; the archive is unpublished
   ([CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#macos-final-cli-package-2026-11-10)).
+  The `crt-cli` macOS/arm64 Preview is published too ([CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#macos-cli-preview-release-2026-11-10)): it acquires this SDK from GitHub through the opt-in redirect policy.
   Producer source/manual-pin trust/public-byte promotion pass; CLI binary delivery,
   consumer default pins and GitHub redirect-aware acquisition remain separate.
   Keep unqualified Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery is
