@@ -198,6 +198,16 @@ those wrappers. Descriptor relocations require no `__tls_get_addr` import and
 no explicit `DT_NEEDED` on the interpreter. The native compiler policy captures
 the same flags; no CLI-specific linker workaround is required.
 
+Linux libc++abi also keeps upstream's pthread-key TLS-destructor fallback in
+CRT's domain. Upstream's disabled `HAVE___CXA_THREAD_ATEXIT_IMPL` option still
+weak-probes GNU `__cxa_thread_atexit_impl`; a host Wayland/GPU DSO can make it
+present, but glibc's destructor registry never runs on CRT-owned clone threads.
+The owned standalone CMake driver redirects that weak probe to an intentionally
+unavailable private name, without modifying upstream source or exporting a new
+ABI. Remove this adapter when CRT owns the corresponding Bionic-compatible
+entry point and DSO lifetimes. The existing fallback's main-thread destruction
+ordering and `dlclose` limitations remain; no new lifecycle promise is made.
+
 The former link-only `crt-loader-import.so` forced an explicit loader dependency.
 On glibc 2.39 this activates the loader's GNU-libc allocator/mutex handover even
 without GNU libc: `calloc@GLIBC_2.2.5` cannot bind to `calloc@@CRT_1.0`.
@@ -212,7 +222,9 @@ executes the same shared-CRT ELF through each selected interpreter, exercising
 calloc/free, TLS in an actual DSO and a second thread, thread-local destruction
 and a cross-DSO C++ exception. It rejects explicit loader dependencies and
 remaining GD imports, and checks that unrelated unresolved shared imports
-still fail at link time. Actual qualified loader/architecture combinations
+still fail at link time. `--host-library` additionally tests GNU-libc coexistence;
+the native Linux libc++ smoke includes the basic descriptor regression.
+Actual qualified loader/architecture combinations
 belong to SDK acceptance; this policy does not imply every glibc version or
 late `dlopen` TLS support. The CRT-owned ELF loader remains separate work.
 

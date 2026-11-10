@@ -20,6 +20,8 @@ def main():
     parser.add_argument("--wrapper", type=Path, default=ROOT / "tools/crt-c++")
     parser.add_argument("--loader", action="append", default=[], type=Path,
                         help="also execute the same ELF with this interpreter (repeatable)")
+    parser.add_argument("--host-library", type=Path,
+                        help="also test with this GNU-libc-linked host DSO in the global scope")
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -53,9 +55,20 @@ def main():
         symbols = subprocess.check_output(["readelf", "--dyn-syms", "--wide", str(image)], text=True)
         if any("UND" in line and "__tls_get_addr" in line for line in symbols.splitlines()):
             raise ValueError(f"GD TLS import remains; rebuild with TLSDESC: {image}")
+        if any("UND" in line and "__cxa_thread_atexit_impl" in line for line in symbols.splitlines()):
+            raise ValueError(f"host thread-exit registry can capture CRT destructors: {image}")
     relocations = subprocess.check_output(["readelf", "--relocs", "--wide", str(library)], text=True)
     if "TLSDESC" not in relocations:
         raise ValueError("the shared-library fixture did not exercise a TLS descriptor")
+    if args.host_library:
+        mixed = output / "shared-loader-host-test"
+        subprocess.run(command + inputs + ["-Wl,--no-as-needed", str(args.host_library.resolve()),
+            "-Wl,--as-needed", "-o", str(mixed)], env=env, check=True)
+        result = subprocess.run([str(mixed)], env=env, check=True, capture_output=True, text=True, timeout=30)
+        if result.stdout.strip() != "shared_loader_import_test: ok":
+            raise ValueError("host DSO captured CRT's thread-local destructor registration")
+        executions.append({"loader": "PT_INTERP", "host_library": str(args.host_library.resolve()),
+            "stdout": result.stdout.strip(), "passed": True})
     missing = output / "libmissing.so"
     subprocess.run(command + ["-shared", "-fPIC", str(ROOT / "libstdc++/tests/shared_loader_unresolved.cc"),
                               "-o", str(missing)], env=env, check=True)

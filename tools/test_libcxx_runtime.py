@@ -6,6 +6,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -239,6 +240,11 @@ def main():
                 f"eh registers {linkage}: exit={eh_result.returncode}, stdout={eh_result.stdout!r} "
                 f"stderr={eh_result.stderr!r}")
         print(f"imported_libcxx_eh_registers_test ({linkage}): ok", flush=True)
+
+    if args.target_os == "linux":
+        run_native([sys.executable, str(root / "tools/test_crt_cxx_shared_loader.py"),
+                    "--sdk-root", str(sysroot), "--output", str(output / "shared-loader")],
+                   env=base_env, check=True)
 
 
 if __name__ == "__main__":

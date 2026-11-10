@@ -196,7 +196,7 @@ def predecessor_fingerprint(sysroot: Path) -> dict:
     # Older cached links may contain consumer-injected absolute RPATHs.
     # Ninja cannot track environment-only link changes; rebuild those trees
     # once when adopting isolated runtime environments, even with identical C inputs.
-    return {"schema_version": 1, "runtime_environment_policy": 1, "linux_tls_policy": "tlsdesc-1", "files": files}
+    return {"schema_version": 1, "runtime_environment_policy": 1, "linux_tls_policy": "tlsdesc-2-owned-dtors", "files": files}
 
 
 def invalidate_stale_builds(build_root: Path, order: list[dict], fingerprint: dict) -> None:

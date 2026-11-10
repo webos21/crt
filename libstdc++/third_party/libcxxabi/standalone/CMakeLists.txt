@@ -85,3 +85,16 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # expression. libcxxabi first, libcxx second, fixes it.
 add_subdirectory("${CRT_LIBCXXABI_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/libcxxabi")
 add_subdirectory("${CRT_LIBCXX_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/libcxx")
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # Upstream's OFF setting still weak-probes GNU __cxa_thread_atexit_impl.
+  # A host DSO can load glibc, but its thread-exit registry never runs on
+  # CRT-owned clone threads. Keep upstream's pthread-key fallback in CRT's
+  # allocation/TLS domain by probing an intentionally unavailable private name.
+  # No upstream source or public ABI is changed. Remove this adapter only when
+  # CRT owns a Bionic-compatible __cxa_thread_atexit_impl and DSO lifetimes.
+  foreach(target cxxabi_shared_objects cxxabi_static_objects)
+    target_compile_definitions(${target} PRIVATE
+      __cxa_thread_atexit_impl=__crt_unavailable_host_thread_atexit_impl)
+  endforeach()
+endif()
