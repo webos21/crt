@@ -210,10 +210,10 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **7.2** Review CLI test/package, versioned JSON/job events, cancellation,
   locked/offline behavior and recovery through original consumer evidence.
   Include the one-executable release goal and self/environment/project doctor scopes.
-- [ ] **7.3** Qualify clean Linux Dev SDK + CLI preview inputs after D3 closure;
-  include CLI/SDK notices, trust, external LLVM setup and final first-user replay.
-  Retained dirty developer fixtures are not release candidates; keep unqualified
-  Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery is
+- [ ] **7.3** Complete Linux Dev SDK + CLI Preview delivery. The
+  [clean input rehearsal passes](docs/acceptance/sdk_split_acceptance.md#linux-dev-preview-candidate-rehearsal-2026-11-10);
+  source publication, approved trust/metadata and actual producer promotion remain.
+  Keep unqualified Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery is
   a separate path with existing approvals preserved/rechecked, not a first-CLI
   preview prerequisite. D4 does not block the first preview. Coordinate publication
   from the exercised combination:

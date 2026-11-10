@@ -2032,3 +2032,71 @@ archive/portable contract and source/notices, then build the CLI against that
 immutable handoff. Keep C shared SDK mode excluded until 6.4 is qualified. Final
 package/trust/first-user replay applies to each advertised host; promote producer
 assets before consumer pin adoption. D4 and Full delivery remain independent.
+
+
+## Linux Dev Preview candidate rehearsal (2026-11-10)
+
+**Clean local producer candidate, unpromoted.** Select CRT
+`0ab8f8cfbbde19e14dd5861ba176fb8881e06182`, version `v0.0.1-preview.20261110.3`, native
+Linux/x86_64, Release, LLVM21. Producer and compile provenance are both known
+and clean; the SDK keeps Dev profile 1, manifest stage `02-cxx`, existing native
+policy 1 and recipe formats. The CLI source is independently pinned at
+`024de89d2a3e6dfbfe8b01db77262d091e2c13a7`; consumer behavior/resources and final
+binary hashes are owned by [CLI Preview acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#linux-local-candidate-2026-11-10).
+
+A detached local source clone preserves earlier work and records its canonical
+upstream origin. Fresh Ninja output is
+`/home/syszone/GitLocal/crt-preview-20261110/producer/out/preview-linux-20261110-r4`.
+Configuration uses explicit `CRT_TARGET_OS=linux`, `CRT_TARGET_ARCH=x86_64`,
+`CRT_USE_IMPORTED_LIBCXX=ON`, `CMAKE_BUILD_TYPE=Release` and the version above;
+Skia/GPU/FFmpeg/media-curl/LVGL options are off. Dev's own network/JSON/xz ports
+still build through their normal producer path. Only verified-on-use raw Git/
+download caches are reused; target outputs and source assets are fresh.
+
+`cmake --build <fresh-build> --target crt-c-test crt-cxx-test crt-dev-release crt-host-tools-test --parallel 6`
+exits zero. C tests pass **147/147**; C++ runtime, string-ABI and iostream tests
+pass static/shared. The Win64-only vector-register branch is not applicable to
+Linux and is not claimed as a native Windows replay. Host-tools inventory/native
+images pass. Dev's static/shared HTTPS+inflate and trust negatives pass, followed
+by actual archive extraction/profile verification and portable policy export.
+An additional external validation of the extracted SDK passes with producer,
+original SDK and CLI trees hidden. GFX/Web/Full SDKs are not rebuilt.
+
+| Collected asset | SHA-256 |
+| --- | --- |
+| `crt-v0.0.1-preview.20261110.3-linux-x86_64-dev.tar.xz` | `e858c1b8b22697e11551de44e1b5c3aba3cbdc93679787e33d7ae6241d6f2217` |
+| `crt-v0.0.1-preview.20261110.3-linux-x86_64-dev-toolchain.json` | `90b3bb59aaac7df481becbad4e2b87473e2fefcb803123332689d7f1135e4e30` |
+| `crt-v0.0.1-preview.20261110.3-linux-02-cxx-source.tar.xz` | `cb937e55acd86af008d2695fa826156f9c1defb300fdeb928168b953692f91d9` |
+| `crt-v0.0.1-preview.20261110.3-linux-03-gfx-simple-source.tar.xz` | `20479ccb00deffbbd9d35bddb5d0fafddf297c01ccc51bf4c9adff0c345d8270` |
+
+The release-manifest SHA-256 is `d4211d3298a764ff22f6e262073f834bbb36cb5d07c22e1ecb10f7f83f8fca60`;
+SDK content is `36623957fbdd5a384cc173991e20253ff83148028ab8072298dcd434a55a2b3f`. All four declared
+asset sizes/digests match the actual copied files. `handoff-r4/` is an immutable
+public handoff outside both repositories/build trees. `source-asset-r4.json`
+passes **3/3** checks: the two corrected C++ integration files equal this clean
+producer, and 02's nested 03 recipe references the actual collected 03 asset.
+The host-tools bundle has its own version `v0.0.1-hosttools.20261110.3` and
+manifest digest `922c76155957a55d095f902077cb73bbc120ae2c2453e9c1c000f5e58acdefa9`; it remains local-only.
+
+The retained failed attempts explain the new baseline: a nonconforming extra-
+hyphen version was rejected; an optimized ucontext fixture looped because a
+nonvolatile local counter was restored with registers (`-O0` passed, `-O3`
+timed out, volatile `-O3` passed on the same runtime). Commit `ca38216` fixes only
+the test and adds a 15-second CTest bound. Commit `0ab8f8c` makes the C++ smoke
+accept explicit native architecture, reject foreign execution before output,
+and give the EH fixture entry C linkage. Both C++ files ship in source asset 02,
+so earlier `.2` assets are preserved and excluded from final selection. No
+runtime implementation, public header, ABI or upstream source patch changes.
+
+Raw `build-r4.log`, `handoff-r4.json`, source checks, external result and original
+failed attempts stay under `/home/syszone/GitLocal/crt-preview-20261110/`.
+Consumer `qualification-r4.json` binds the producer evidence and final CLI
+receipts. Local fixture/tool changes do not relabel old dirty SDKs as clean.
+
+This completes the bounded input-rehearsal part of TODO 7.3. Producer source
+publication, trust/release metadata, actual SDK promotion and subsequent consumer
+pin adoption remain open. The two producer fixes are local commits until pushed;
+this source offer is not advertised as publicly available. Every advertised
+host needs its final package replay. Linux C shared SDK policy stays unqualified
+under 6.4; positive source-port shared evidence does not endorse that SDK mode.
+D4 and Full delivery remain independent, and STATUS/default locks are unchanged.

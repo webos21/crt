@@ -10,6 +10,19 @@ substantive update.
 
 ## 2026-11-10
 
+### Qualify the clean Linux Dev SDK Preview handoff
+
+Built clean producer `0ab8f8c` as local version `v0.0.1-preview.20261110.3`,
+retaining earlier failed inputs and rebuilding the corrected source assets.
+C/C++/Dev/host-tool entry points, actual archive/profile/portable-contract
+collection, external hidden-source consumers and nested source-recipe checks
+pass. [Producer acceptance](docs/acceptance/sdk_split_acceptance.md#linux-dev-preview-candidate-rehearsal-2026-11-10)
+owns exact artifacts and results; [CLI Preview acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#linux-local-candidate-2026-11-10)
+records the fresh consumer's final binary/package and first-user replay.
+The input-rehearsal part of 7.3 is complete; source publication, official trust,
+asset promotion and consumer pin adoption remain open. No runtime/public ABI,
+default lock, Full/Web build or routine STATUS change.
+
 ### Repair the explicit native libc++ smoke entry point
 
 The Linux Preview rehearsal configured explicit `x86_64`, exposing that CMake's
@@ -35,8 +48,6 @@ compile/run variants are retained under `crt-preview-20261110/ucontext-repro/`
 outside this checkout. A new clean producer baseline/candidate is required for
 the Preview rehearsal; the failed SDK identity is not relabeled.
 
-## 2026-11-09
-
 ### Approve and close the bounded D3 source-port contract
 
 Reviewed CRT `dfb83c4` / CLI `8ad11dd`, including the completed macOS common-change
@@ -54,6 +65,8 @@ retained at its original inputs. The next focus is clean Linux Dev SDK + CLI
 Preview input qualification, with dirty developer fixtures kept as technical
 regression inputs. Full delivery and D4 do not block that preparation. No SDK
 promotion, production lock, public release or routine STATUS update is made.
+
+## 2026-11-09
 
 ### Close the macOS affected-common-code D3 replay
 
