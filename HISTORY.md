@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-10
 
+### Windows/x64 CLI Preview publication handoff
+
+The CLI consumes the unchanged public Windows Dev SDK, qualifies restricted HTTPS redirects
+and real GitHub acquisition, and publishes its Windows/x64 package with notices and explicit
+manual-pin trust. Linked consumer-owned evidence and refreshed README, STATUS and install
+procedures at the owner's request; no producer runtime/SDK/format/default-lock change.
+[Exact consumer checkpoint and scope](docs/acceptance/sdk_split_acceptance.md#windows-cli-preview-publication-handoff-2026-11-10).
+
 ### Acquire the macOS Dev SDK Preview from GitHub with the published CLI Preview
 
 The `crt-cli` macOS/arm64 Preview (`v0.1.0-preview.20261110.macos-arm64.1`) was built from its sources by the published macOS SDK alone and, packaged, acquires that SDK directly from the

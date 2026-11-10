@@ -6,8 +6,8 @@ open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
 SDK/CLI snapshot refreshed at the owner's explicit request: **2026-11-10**,
-reviewing CRT `797339dfb2b0f1ff905489d09e04afb95caa611a` and CLI
-`f4ae92a597c8f9235bdb35fbc0b9b1902d243ddb`; the previous refresh was 2026-11-09 (CRT `21b9d0e`, CLI `2ae74d4`).
+reviewing CRT `8e89ee1` and CLI `0cae8c8bc1fee02a31baf230aba703460fe1afa3`; the previous SDK/CLI refresh was earlier on 2026-11-10
+(CRT `797339d`, CLI `f4ae92a`).
 Unrelated subsystem statements retain their original linked acceptance scope (last broad
 review 2026-10-28). Existing clean assembly baseline `3741ea5` in
 [release qualification](docs/acceptance/release_qualification.md) is not relabeled as a new
@@ -360,14 +360,15 @@ publisher signature (callers pin digests and choose a CA; CLI `publisher_authent
 | macOS/arm64 Development SDK | [`v0.0.1-preview.20261110.macos.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1) | `445f127` |
 | Windows/x64 Development SDK | [`v0.0.1-preview.20261110.windows.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) | `b31276a` |
 | `crt-cli` Linux/x86_64 and macOS/arm64 | [Linux](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.linux-x86_64.1), [macOS](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.macos-arm64.1) | CLI `dc796f7`, `541b2af` |
+| `crt-cli` Windows/x64 | [Windows](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.windows-x86_64.1) | CLI `a55c0d0` |
 
 Each SDK Preview is the `dev`/`02-cxx` artifact with its manifest pin frozen in a reviewed commit before
 publication; the [trust policy](docs/design/dev_preview_trust.md) defines the manual-pin boundary and the per-host
 [acceptance](docs/acceptance/sdk_split_acceptance.md) records the unauthenticated public-download and consumer proofs.
 The CLI Previews acquire their host's SDK directly from GitHub through the opt-in restricted redirect policy
-(Linux and macOS replayed; Windows is open). The macOS images carry only the linker's ad-hoc signature (no Developer ID,
-no notarization); a quarantined browser download was not tested. Windows/x64 has a local CLI package record but no CLI
-release; Linux/aarch64 and Windows/arm64 have no Preview. Pure C shared SDK-provider mode stays unqualified (producer 6.4).
+(Linux/x86_64, macOS/arm64 and Windows/x64 replayed; [Windows CLI evidence](https://github.com/webos21/crt-cli/blob/0cae8c8bc1fee02a31baf230aba703460fe1afa3/docs/acceptance/preview_acceptance.md#windowsx64-cli-preview-release-2026-11-10)). The macOS images carry only the linker's ad-hoc signature (no Developer ID,
+no notarization); a quarantined browser download was not tested. Windows images are not Authenticode-signed;
+SmartScreen/browser reputation was not tested. Linux/aarch64 and Windows/arm64 have no Preview. Pure C shared SDK-provider mode stays unqualified (producer 6.4).
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -580,8 +581,8 @@ statuses, and exceptions are maintained in:
 ## Next Priorities
 
 The SDK -> CLI initiative has published Dev SDK Previews for Linux/x86_64, macOS/arm64 and
-Windows/x64 and CLI Previews for Linux/x86_64 and macOS/arm64. Next are the Windows CLI package and
-redirect replay, explicit default/project SDK pin adoption against the promoted SDKs, and the hosts without a Preview. The
+Windows/x64 and matching CLI Previews on those three hosts. Next are explicit default/project SDK pin adoption
+against the promoted SDKs and the hosts without a Preview. The
 retained Linux SDK C shared control's host libz mapping remains unendorsed under producer policy
 review 6.4. D4 SQLite/libpng work can proceed on frozen contracts. Full SDK delivery and its
 final source/license/security/assembly review stay separate, preserving existing

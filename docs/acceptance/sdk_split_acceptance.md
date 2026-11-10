@@ -2340,3 +2340,26 @@ Current CLI follows no HTTPS redirects, so the accepted path is manual download 
 not executable or network denial. The images are not Authenticode-signed. `SHA256SUMS-dev-windows-x86_64` has Windows (CRLF) line endings as produced, so a POSIX `sha256sum -c` needs them
 stripped; the manifest is the pinned anchor. Full, other-host (including Windows/arm64) and independent host-tools packages, a published CLI executable, the Windows port/provider replay against
 this exact SDK, the unqualified pure C shared SDK-provider mode, updates and Studio remain in their owning queues. STATUS and default locks are unchanged.
+
+## Windows CLI Preview publication handoff (2026-11-10)
+
+The consumer published [`v0.1.0-preview.20261110.windows-x86_64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.windows-x86_64.1) from clean CLI product/test source `a55c0d0`;
+the consumer documentation/driver checkpoint is `0cae8c8bc1fee02a31baf230aba703460fe1afa3`. Reviewed CRT baseline
+`8e89ee1` and the public Windows Dev SDK `v0.0.1-preview.20261110.windows.1` from
+`b31276a` are unchanged. No producer rebuild, SDK promotion, API/ABI or shared format
+change is needed. The original SDK publication and manual-install evidence above retain
+their exact bytes and scope.
+
+[CLI-owned release acceptance](https://github.com/webos21/crt-cli/blob/0cae8c8bc1fee02a31baf230aba703460fe1afa3/docs/acceptance/preview_acceptance.md#windowsx64-cli-preview-release-2026-11-10) records the fresh public-SDK-only
+restricted-token build/self-build/native regression, Windows redirect replay, deterministic
+package/SDK-free checks, real GitHub acquisition and C/C++ workflow, publication and
+unauthenticated public-byte verification. The CLI's compatibility ledger owns adoption;
+this producer handoff links that evidence without duplicating its pin/count ledger.
+
+Windows now has the same explicit GitHub redirect-aware acquisition path as Linux/macOS,
+while the default refuses redirects. Caller-selected CA/digest pins provide integrity;
+publisher authentication remains `not_verified`, with no Authenticode or default trust
+channel. Windows process accounting is not network/executable denial. Full profiles,
+Windows/arm64, source-port replay from this exact CLI package and updates/self-upgrade
+remain separate. The owner explicitly requested README/STATUS consistency in both repos;
+the snapshot refresh does not relabel unrelated runtime/device acceptance.

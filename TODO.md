@@ -69,9 +69,9 @@ closure. Local Development-SDK installation and stored-contract/project
 selection have evidence on all five native pairs, including Windows/x64
 ([producer evidence](docs/acceptance/sdk_split_acceptance.md),
 [CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
-The current focus is CLI Preview delivery against the
-[promoted Linux Dev SDK](docs/acceptance/sdk_split_acceptance.md#linux-dev-sdk-public-promotion-2026-11-10),
-following bounded D3 contract approval.
+Three-host Dev SDK/CLI Previews are published following bounded D3 contract approval;
+[the Windows CLI handoff](docs/acceptance/sdk_split_acceptance.md#windows-cli-preview-publication-handoff-2026-11-10)
+links its exact consumer evidence. Explicit default/project pin adoption remains separate.
 Installed-SDK first build/pinned acquisition and the three-host zlib
 implementation retain their recorded technical baselines. Full SDK delivery is separate. D4 may proceed on fixed contracts;
 general updates/self-upgrade stay beyond that first preview. Scope/replay policy is in the
@@ -211,21 +211,10 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **7.2** Review CLI test/package, versioned JSON/job events, cancellation,
   locked/offline behavior and recovery through original consumer evidence.
   Include the one-executable release goal and self/environment/project doctor scopes.
-- [ ] **7.3** Complete CLI Preview delivery against the
-  [published Linux Dev SDK](docs/acceptance/sdk_split_acceptance.md#linux-dev-sdk-public-promotion-2026-11-10).
-  The macOS/arm64 Dev SDK Preview is published as well ([record](docs/acceptance/sdk_split_acceptance.md#macos-dev-sdk-public-promotion-2026-11-10)),
-  and so is the Windows/x86_64 one ([record](docs/acceptance/sdk_split_acceptance.md#windows-dev-sdk-public-promotion-2026-11-10)).
-  Its final macOS CLI package (notices, inventory, extraction, SDK-free doctor) is qualified locally; the archive is unpublished
-  ([CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#macos-final-cli-package-2026-11-10)).
-  The `crt-cli` macOS/arm64 Preview is published too ([CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#macos-cli-preview-release-2026-11-10)): it acquires this SDK from GitHub through the opt-in redirect policy.
-  Producer source/manual-pin trust/public-byte promotion pass; CLI binary delivery,
-  consumer default pins and GitHub redirect-aware acquisition remain separate.
-  Keep unqualified Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery is
-  a separate path with existing approvals preserved/rechecked, not a first-CLI
-  preview prerequisite. D4 does not block the first preview. Coordinate publication
-  from the exercised combination:
-  promote the SDK first, verify the actual promoted artifact, then adopt its exact
-  pin and release the CLI; independent versions need no simultaneous publication.
+- [ ] **7.3** Review explicit default/project pin adoption against the published three-host
+  Dev SDK/CLI Previews; retain the [Windows publication handoff](docs/acceptance/sdk_split_acceptance.md#windows-cli-preview-publication-handoff-2026-11-10).
+  Keep unqualified Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery
+  and its source/license/security/assembly review stay separate; D4 does not block the preview.
 
 #### Tranche 8. Studio integration and exercised combinations (D7)
 

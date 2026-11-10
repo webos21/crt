@@ -1,4 +1,4 @@
-# Use the Linux Development SDK Preview
+# Use the Development SDK Previews
 
 The [Preview release](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3) contains the native
 Linux/x86_64 Dev SDK `v0.0.1-preview.20261110.3`. LLVM/Clang/LLD are
@@ -22,17 +22,18 @@ defines the Preview's manual pin/TLS boundary. Publisher signatures/default
 channels are not supplied. Component notices and source pins are inside the SDK;
 the release tag and 02/03 assets retain the corresponding project/upstream inputs.
 
-GitHub asset URLs redirect to GitHub storage. The current CLI intentionally
-rejects redirects, so use manual download plus `sdk install` below. This release
-does not advertise GitHub `sdk acquire --source` or automatic first-build download.
+GitHub asset URLs redirect to GitHub storage. The published CLI Previews support
+explicitly pinned `sdk acquire --source` with `"redirect_policy": "github-release"`;
+the default still refuses redirects. Manual download plus `sdk install` below remains
+available. The [CLI source/redirect contract](https://github.com/webos21/crt-cli/blob/main/docs/reference/bootstrap_contract.md#restricted-https-redirects-experimental-cli-owned)
+owns the JSON fields and limits. No default-download channel or trust pin is selected implicitly.
 The CLI app/build paths themselves require no Python, shell or CMake.
 
 ## Install and build without configure
 
-Use the CLI baseline from [consumer acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#linux-local-candidate-2026-11-10).
-The qualified executable SHA-256 is
-`6ba046e5baeae24b86e407ad04353ec9d98b989c21921160413408ca0f71dab2`;
-CLI executable publication is a separate step from this SDK release.
+Use the [published Linux/x86_64 CLI Preview](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.linux-x86_64.1);
+[its acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#linuxx86_64-cli-preview-release-2026-11-10)
+owns the exact executable/package pins. This CLI publication is independent of the SDK version.
 The SDK installer validates the pinned manifest before trusting its payload
 hashes and validates the portable policy beside the archive. Substitute actual
 absolute download/tool paths; SDKs install side by side in the user's store.
@@ -73,7 +74,8 @@ The independently trusted manifest SHA-256 from the reviewed repository is
 `0981110c84e5d24a903dbd3965dbe92eb2fe405edfa89804e3086dfeb75983de` (1728 bytes); the
 [trust policy](../design/dev_preview_trust.md#macosarm64-bounded-policy-adopted-2026-11-10) defines the boundary. Use a
 `crt-cli` built for macOS/arm64 from a source that includes the stored-policy selection (`--sdk`) and the pinned installer;
-the `bin/macos/crt-cli` of the `crt-cli` repository is a local, unpromoted test executable, not a published release.
+the [published macOS/arm64 CLI Preview](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.macos-arm64.1)
+provides that executable with notices and its pinned inventory.
 Substitute actual absolute paths (the toolchain paths below are Xcode's):
 
 ```text
@@ -86,8 +88,8 @@ crt-cli run --project hello-cxx
 
 For C sources choose `--language c` and another fresh project name. The first build binds the installed SDK and
 discovers the macOS SDK with `xcrun`; pass `--os-sdk <MacOSX.sdk directory>` to select it explicitly. Later plain
-build/test/run reuse the project lock. GitHub's asset redirect is not followed by the current CLI, so download manually
-(as above), exactly as for Linux. Qualified scope is the recorded native first-build/installed-selection flow with static
+build/test/run reuse the project lock. The [macOS CLI release record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#macos-cli-preview-release-2026-11-10)
+provides a pinned `sdk acquire` source with the explicit GitHub redirect policy; manual installation above remains valid. Qualified scope is the recorded native first-build/installed-selection flow with static
 C and C++ consumers; pure C shared SDK-provider mode stays unqualified.
 
 ## Windows/x86_64
@@ -105,9 +107,9 @@ The independently trusted manifest SHA-256 from the reviewed repository is
 `b0fca4c81d29b8eee28e0d9fb7d6e26950b094a8be4f2c091e43922366a46976` (1800 bytes); the
 [trust policy](../design/dev_preview_trust.md#windowsx86_64-bounded-policy-adopted-2026-11-10) defines the boundary. Use a
 `crt-cli` built for Windows/x64 from a source that includes the stored-policy selection (`--sdk`), the pinned installer and the
-Windows D3 adapter; the `bin/win-x64/crt-cli.exe` of the `crt-cli` repository is that executable
-(SHA-256 `3e8c0491d2e385bbaba5c0e8bd63eeac3896f498fed762ecab4370ecf277bd90`, 44920832 bytes) and is a local, unpromoted test
-executable, not a published release. The SDK archive contains no symbolic links, so installation needs no Developer Mode.
+Windows D3 adapter. The [published Windows/x64 CLI Preview](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.windows-x86_64.1)
+provides the executable with notices and a pinned inventory; [the Windows CLI guide](https://github.com/webos21/crt-cli/blob/main/docs/guides/windows_preview.md)
+owns extraction, caller CA export, pinned GitHub source and first-build steps. The SDK archive contains no symbolic links, so installation needs no Developer Mode.
 Substitute actual absolute paths (the LLVM and Windows SDK paths below are the exercised ones):
 
 ```text
@@ -120,7 +122,7 @@ crt-cli run --project hello-cxx
 
 For C sources choose `--language c` and another fresh project name. `--os-sdk` names the directory that holds `kernel32.lib` and
 `synchronization.lib`; it is kept in local state only and never in the project lock. The first build binds the installed SDK; later
-plain build/test/run reuse the project lock. GitHub's asset redirect is not followed by the current CLI, so download manually (as
-above), exactly as for Linux and macOS. Qualified scope is the recorded native first-build/installed-selection flow with static C and
+plain build/test/run reuse the project lock. The Windows CLI Preview also qualifies explicit pinned GitHub `sdk acquire`
+through its restricted redirect policy; manual installation above remains valid. Qualified scope is the recorded native first-build/installed-selection flow with static C and
 C++ consumers; pure C shared SDK-provider mode stays unqualified, and the Windows SDK contract ships no shared `z`.
 The PE images are not Authenticode-signed.

@@ -22,8 +22,9 @@ The [Linux/x86_64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20
 [Windows/x86_64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) Development SDK Previews
 are available for C/C++ development (`dev`, `02-cxx`). See the
 [installation guide](docs/guides/dev_sdk_preview.md). The matching `crt-cli` Previews for
-[Linux/x86_64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.linux-x86_64.1) and
-[macOS/arm64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.macos-arm64.1) acquire these SDKs directly from GitHub. Full SDK delivery continues on their separate [work queue](TODO.md#crt-developer-experience-sdk---cli---studio).
+[Linux/x86_64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.linux-x86_64.1),
+[macOS/arm64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.macos-arm64.1), and
+[Windows/x64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.windows-x86_64.1) acquire their host SDKs directly from GitHub through the explicit redirect policy. Full SDK delivery continues on their separate [work queue](TODO.md#crt-developer-experience-sdk---cli---studio).
 
 [Documentation](docs/README.md) ·
 [Roadmap](docs/design/runtime_roadmap.md) ·
