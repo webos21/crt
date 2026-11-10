@@ -96,3 +96,21 @@ Promotion follows the procedure above (draft prerelease, unchanged collector out
 digest check before publishing, unauthenticated public download, native consumer
 proof on the downloaded bytes). The record is in
 [SDK acceptance](../acceptance/sdk_split_acceptance.md#windows-dev-sdk-public-promotion-2026-11-10).
+
+## Linux loader-repair policy adopted 2026-11-10
+
+The owner authorized repair and a new Linux SDK release. Extend the existing
+caller-trusted manual-pin procedure to `v0.0.1-preview.20261110.4` only, with clean producer
+`448fa32349ae697f589f0ad8fc60cfdf7a7e195a`, manifest SHA-256 `983dbcf143b1fe227bf519f07ec153ce5baf50e190382222995770affe43b2c3`
+and size 1683. Freeze these pins in source before staging a draft;
+the tag must resolve to that producer and all six collector files must remain
+unchanged. [Release notes](../releases/release_notes_v0.0.1-preview.20261110.4.md)
+list every payload pin and migration limit. `.3` is retained; its glibc 2.39
+shared-C++ failure is not relabeled as passing.
+
+Keep verified TLS, exact asset/content/policy checks, publisher authentication
+`not_verified`, non-latest prerelease status and explicit side-by-side selection.
+No signer, default SDK migration or Full/other-host promotion is introduced.
+The published CLI's reviewed GitHub redirect policy can consume this release;
+manual pinned installation remains valid. Public-byte proof and CLI adoption
+are recorded after promotion, independently of local qualification.

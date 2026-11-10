@@ -132,11 +132,29 @@ jobs:
       - name: Install build tools (Linux)
         if: runner.os == 'Linux'
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld ninja-build cmake libc++-dev libc++abi-dev libvulkan-dev mesa-vulkan-drivers
-          clang --version
-          clang++ --version
-          ld.lld --version
+          # x86_64 TLSDESC code generation needs a modern Clang. Use the same
+          # LLVM major as the qualified Linux Dev SDK, including on noble.
+          if ! apt-cache show clang-21 >/dev/null 2>&1; then
+            . /etc/os-release
+            test "$VERSION_CODENAME" = noble
+            fingerprint=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+            export GNUPGHOME="$(mktemp -d)"
+            curl --proto '=https' --tlsv1.2 -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o "$GNUPGHOME/llvm.asc"
+            gpg --batch --quiet --import "$GNUPGHOME/llvm.asc"
+            sudo install -d -m 0755 /etc/apt/keyrings
+            gpg --batch --export "$fingerprint" | sudo tee /etc/apt/keyrings/apt.llvm.org.gpg > /dev/null
+            test -s /etc/apt/keyrings/apt.llvm.org.gpg
+            gpg --batch --show-keys --with-colons /etc/apt/keyrings/apt.llvm.org.gpg | awk -F: '$1 == "fpr" { print $10 }' | grep -qx "$fingerprint"
+            echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
+            sudo apt-get update
+          fi
+          sudo apt-get install -y --no-install-recommends clang-21 lld-21 llvm-21 ninja-build cmake libc++-21-dev libc++abi-21-dev libvulkan-dev mesa-vulkan-drivers
+          echo /usr/lib/llvm-21/bin >> "$GITHUB_PATH"
+          /usr/lib/llvm-21/bin/clang --version
+          /usr/lib/llvm-21/bin/clang++ --version
+          /usr/lib/llvm-21/bin/ld.lld --version
           cmake --version
           ninja --version
 

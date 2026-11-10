@@ -2363,3 +2363,55 @@ channel. Windows process accounting is not network/executable denial. Full profi
 Windows/arm64, source-port replay from this exact CLI package and updates/self-upgrade
 remain separate. The owner explicitly requested README/STATUS consistency in both repos;
 the snapshot refresh does not relabel unrelated runtime/device acceptance.
+
+## Linux loader compatibility repair (2026-11-10)
+
+**Qualified local producer; publication pending.** Owner scope: repair Linux Dev
+SDK compatibility and publish new immutable `v0.0.1-preview.20261110.4`. Review baselines:
+CRT `a339924`, CLI `65b20c4`; selected clean producer
+`448fa32349ae697f589f0ad8fc60cfdf7a7e195a`. CRT owns TLS/allocator/link policy and source assets;
+CLI owns native installation/build/testing and its later adoption ledger. SDK
+manifest/profile/native-policy and recipe formats are unchanged. Producer
+promotion precedes any consumer CI pin update.
+
+The same original `.3` consumer fails with `calloc@GLIBC_2.2.5` under Ubuntu's
+`2.39-0ubuntu8.8` loader and passes under `2.43-2ubuntu2.4`. The former forced
+`DT_NEEDED` on ld.so activates glibc 2.39's GNU allocator/mutex handover.
+[Upstream's later guard](https://sourceware.org/pipermail/glibc-cvs/2025q1/087042.html)
+explains why newer loaders skip it without GNU libc. This is pre-main symbol
+resolution, not ENOMEM. [Owned policy](../design/cxx_runtime.md#linux-shared-runtime-loader-imports)
+uses TLSDESC, preserves `CRT_1.0`, removes the stub and invalidates old runtime
+caches. No upstream source or pin changes. The existing Linux libc++abi weak
+GNU destructor probe also captured CRT-thread cleanup when Wayland loaded GNU
+libc; the failure reproduces with `.3`. The owned standalone CMake adapter
+keeps upstream's pthread-key fallback in CRT's thread domain.
+
+Fresh Release output is `out/preview-linux-20261110-r8`; raw verified source
+fetches are reused, target outputs/source assets are rebuilt. The collector ran
+at the clean producer above. C 147/147, C++ static/shared runtime/string/iostream,
+new integrated descriptor/exception/thread/destructor regression, host-tools and
+Dev static/shared HTTPS+inflate with CA negatives pass. External relocated Dev
+checks hide producer/SDK/CLI inputs. The same regression ELF passes both exact
+loaders (old loader SHA-256 `cd4df4f3c7b83673d61189bf2eaebd33ca4f2853ab9772b8a25e025ef99b1e81`,
+new loader `bda779ea9e9ad234f60315477d7cfd0bdde861cd8ddd9df8cdaf62f18c4cec14`),
+including a separate host GNU-libc/Wayland coexistence run. ELF checks reject
+loader dependencies, GD imports and accidental host destructor registration;
+unrelated unresolved imports still fail. Source/policy checks pass 7/7: owned
+files match source, nested 03 recipe matches the actual common source archive,
+all native modes capture descriptor flags, and no dummy loader DSO remains.
+
+The old runtime comes from official `ubuntu-base-24.04.5-base-amd64.tar.gz`,
+SHA-256 `e77b6f10c2590cef872b33ee9f635a0e3fd1f57fb074c0e52b5c7f56147a0c86`.
+Local loader substitution is not a full Ubuntu 24.04 hosted-suite replay.
+No native aarch64/other-OS, Full/GFX/Web or arbitrary glibc range is qualified.
+Old GD objects need rebuilding; fallback destructor-order/DSO-unload and pure-C
+shared SDK mode limits remain. No existing project lock is migrated.
+
+[Reviewed release notes](../releases/release_notes_v0.0.1-preview.20261110.4.md)
+freeze manifest `983dbcf143b1fe227bf519f07ec153ce5baf50e190382222995770affe43b2c3`, SDK content `22107183e5127d44e979f328fa78aaf2a436db802aa9f8821a864a39d492ca81`
+and the six original collector files. Evidence stays under
+`/home/syszone/GitLocal/crt-preview-20261110-tlsdesc/` and the fresh build output;
+`loader-regression/result.json`, `host-glibc239-result.json`,
+`source-policy-review.json` and `external-validation.json/` retain technical
+results. Earlier incomplete candidates remain unpromoted and excluded.
+Final CLI/public/hosted receipts follow here after validation.
