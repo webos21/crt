@@ -150,7 +150,7 @@ jobs:
             echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
             sudo apt-get update
           fi
-          sudo apt-get install -y --no-install-recommends clang-21 lld-21 llvm-21 ninja-build cmake libc++-21-dev libc++abi-21-dev libvulkan-dev mesa-vulkan-drivers
+          sudo apt-get install -y --no-install-recommends clang-21 lld-21 llvm-21 libclang-rt-21-dev ninja-build cmake libc++-21-dev libc++abi-21-dev libvulkan-dev mesa-vulkan-drivers
           echo /usr/lib/llvm-21/bin >> "$GITHUB_PATH"
           /usr/lib/llvm-21/bin/clang --version
           /usr/lib/llvm-21/bin/clang++ --version
