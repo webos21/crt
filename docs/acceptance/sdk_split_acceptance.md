@@ -2100,3 +2100,24 @@ this source offer is not advertised as publicly available. Every advertised
 host needs its final package replay. Linux C shared SDK policy stays unqualified
 under 6.4; positive source-port shared evidence does not endorse that SDK mode.
 D4 and Full delivery remain independent, and STATUS/default locks are unchanged.
+
+
+## Linux Dev SDK public promotion (2026-11-10)
+
+Review decision: promote the unchanged qualified `v0.0.1-preview.20261110.3`
+Linux/x86_64 Dev artifacts from clean source `0ab8f8cfbbde19e14dd5861ba176fb8881e06182`
+under the [bounded manual-pin trust policy](../design/dev_preview_trust.md).
+The owner authorized source publication, trust review and SDK promotion.
+The [release notes](../releases/release_notes_v0.0.1-preview.20261110.3.md)
+freeze the exact manifest/archive/policy/source hashes before publication.
+Manifest pin: `d4211d3298a764ff22f6e262073f834bbb36cb5d07c22e1ecb10f7f83f8fca60`. No asset is rebuilt or
+replaced, no publisher signature/default channel is claimed, and the tag must
+resolve to the original producer. Source publication now includes the pushed
+producer fixes and the public CLI packaging/acceptance checkpoint `3b9a8ed`.
+
+The current CLI refuses GitHub's HTTPS asset redirect. The accepted public path
+is a verified manual download followed by native pinned local installation and
+C/C++ first build/test/run; redirect-aware acquisition is a separate CLI change.
+Publication is staged as a prerelease and public-byte/consumer receipts are
+recorded below after download verification. Full and CLI binary releases are
+outside this producer promotion.
