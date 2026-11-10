@@ -5,16 +5,15 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-SDK/CLI snapshot refreshed at the owner's explicit request: **2026-11-09**,
-reviewing CRT `21b9d0e6067ed8253d424912132b9be24e459049` and CLI
-`2ae74d4d55bd1d7210c96ae596a48b2a934931bf`. Unrelated subsystem statements retain their
-original linked acceptance scope (last broad review 2026-10-28). Existing clean
-assembly baseline `3741ea5` in [release qualification](docs/acceptance/release_qualification.md)
-is not relabeled as a new artifact. The documentation refresh imports existing
-records; the later [Linux common-change replay](docs/acceptance/sdk_split_acceptance.md#linux-d3-common-change-closure-and-macos-handoff-2026-11-09)
-passes at its retained developer inputs. The owner's macOS delta remains open.
-Future STATUS refreshes remain explicit requests; TODO owns current work and
-acceptance original measured inputs/results.
+SDK/CLI snapshot refreshed at the owner's explicit request: **2026-11-10**,
+reviewing CRT `797339dfb2b0f1ff905489d09e04afb95caa611a` and CLI
+`f4ae92a597c8f9235bdb35fbc0b9b1902d243ddb`; the previous refresh was 2026-11-09 (CRT `21b9d0e`, CLI `2ae74d4`).
+Unrelated subsystem statements retain their original linked acceptance scope (last broad
+review 2026-10-28). Existing clean assembly baseline `3741ea5` in
+[release qualification](docs/acceptance/release_qualification.md) is not relabeled as a new
+artifact. The published Development SDK Previews and CLI Previews below are separate
+artifacts with their own exact build commits and records. Future STATUS refreshes remain
+explicit requests; TODO owns current work and acceptance original measured inputs/results.
 
 ## Current Baseline
 
@@ -333,8 +332,9 @@ x64/arm64) from rehearsal releases of committed CRT trees, with a self-built
 SDK-only CLI; every record is in
 [SDK split acceptance](docs/acceptance/sdk_split_acceptance.md) and the CLI's
 `docs/acceptance/sdk_install_acceptance.md`. These are unpromoted rehearsal
-assets: no published release, no explicit SDK updates or self-upgrade, and no
-Full-stage (`06-web`) install metadata yet.
+assets: they are not releases. The published Previews below were built afterwards from clean
+commits. There are no explicit SDK updates or self-upgrade, and no Full-stage (`06-web`)
+install metadata yet.
 
 The CLI supports native `dev` selection, installation-time receipt pins,
 explicit repair, first-build binding and caller-pinned HTTPS acquisition. These
@@ -344,13 +344,30 @@ was fixed in the pinned libunwind recipe and replayed with the fixed SDK; its
 old failure is retained. General profiles/Full installation, default publisher
 trust and promotion remain separate; external LLVM/OS SDKs are prerequisites.
 
-D3 zlib source execution/store/provider/lock/oracle now has Linux/x86_64,
-macOS/arm64 and Windows/x64 technical evidence. Formal adapter approval and
-latest macOS common-change replay remain open; the Linux delta passes at its
-recorded developer inputs. Windows/arm64 D3 is a
-separate target. Neither these records nor the snapshot approve a latest-source
-five-pair matrix or a public SDK/CLI release. The CLI compatibility ledger owns
-exact adoption combinations.
+D3 zlib source execution/store/provider/lock/oracle has Linux/x86_64,
+macOS/arm64 and Windows/x64 technical evidence, and the bounded adapter contract is
+[approved and adopted](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#d3-bounded-adapter-adoption-2026-11-09)
+(CRT `90989ac`); the macOS common-change replay is closed. Windows/arm64 D3 is a
+separate target. These records do not approve a latest-source five-pair matrix. The CLI
+compatibility ledger owns exact adoption combinations.
+
+**Published Previews (2026-11-10).** GitHub prereleases, none marked latest, none carrying a
+publisher signature (callers pin digests and choose a CA; CLI `publisher_authentication` is `not_verified`):
+
+| Artifact | Release | Build commit |
+| --- | --- | --- |
+| Linux/x86_64 Development SDK | [`v0.0.1-preview.20261110.3`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3) | `0ab8f8c` |
+| macOS/arm64 Development SDK | [`v0.0.1-preview.20261110.macos.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1) | `445f127` |
+| Windows/x64 Development SDK | [`v0.0.1-preview.20261110.windows.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) | `b31276a` |
+| `crt-cli` Linux/x86_64 and macOS/arm64 | [Linux](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.linux-x86_64.1), [macOS](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.macos-arm64.1) | CLI `dc796f7`, `541b2af` |
+
+Each SDK Preview is the `dev`/`02-cxx` artifact with its manifest pin frozen in a reviewed commit before
+publication; the [trust policy](docs/design/dev_preview_trust.md) defines the manual-pin boundary and the per-host
+[acceptance](docs/acceptance/sdk_split_acceptance.md) records the unauthenticated public-download and consumer proofs.
+The CLI Previews acquire their host's SDK directly from GitHub through the opt-in restricted redirect policy
+(Linux and macOS replayed; Windows is open). The macOS images carry only the linker's ad-hoc signature (no Developer ID,
+no notarization); a quarantined browser download was not tested. Windows/x64 has a local CLI package record but no CLI
+release; Linux/aarch64 and Windows/arm64 have no Preview. Pure C shared SDK-provider mode stays unqualified (producer 6.4).
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -360,12 +377,13 @@ still prevent publication. Existing development SDKs keep their recorded
 candidate decisions; new artifacts must embed the approval and pass current
 release checks. The [local assembly rehearsal](docs/acceptance/release_qualification.md)
 records the clean frozen producer, native Dev/Full collectors and separate ARM
-cross scope at WebKit 2.54.2. The later
+cross scope at WebKit 2.54.2; the Dev SDK Previews above are a separate, Dev-only publication. The later
 [Tranche 1.7 selection](docs/acceptance/release_qualification.md#common-source-candidate-selection-2026-11-02)
 repairs cache validation and selects new canonical Linux 02/03 source candidates;
 older variants remain historical. Neither that selection nor later D2 rehearsal
 assets constitute a newly promoted public upload set.
-No replacement binary release or CLI/Studio adoption has been published.
+No replacement Full/graphics binary release or Studio adoption has been published; the Dev SDK and CLI Previews above are the only
+current public binaries.
 See the [release guide](docs/guides/release_preview.md#05-ui-and-06-web).
 
 ## Verification Model
@@ -561,11 +579,11 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-The SDK -> CLI initiative now prioritizes D3 producer contract review and
-the owner's native macOS delta after recorded Linux proof, then a Dev SDK + CLI
-preview candidate. The retained Linux SDK C shared control's host libz mapping
-remains unendorsed under producer policy review 6.4.
-D4 SQLite/libpng work can proceed on frozen contracts. Full SDK delivery and its
+The SDK -> CLI initiative has published Dev SDK Previews for Linux/x86_64, macOS/arm64 and
+Windows/x64 and CLI Previews for Linux/x86_64 and macOS/arm64. Next are the Windows CLI package and
+redirect replay, explicit default/project SDK pin adoption against the promoted SDKs, and the hosts without a Preview. The
+retained Linux SDK C shared control's host libz mapping remains unendorsed under producer policy
+review 6.4. D4 SQLite/libpng work can proceed on frozen contracts. Full SDK delivery and its
 final source/license/security/assembly review stay separate, preserving existing
 approval evidence. Detailed order is in [TODO](TODO.md#crt-developer-experience-sdk---cli---studio).
 
