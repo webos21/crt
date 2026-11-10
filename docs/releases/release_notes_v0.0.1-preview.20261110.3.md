@@ -1,5 +1,11 @@
 # Linux Development SDK Preview v0.0.1-preview.20261110.3
 
+**Compatibility erratum (2026-11-10):** this release's C++ shared-runtime path
+fails before main on Ubuntu 24.04/glibc 2.39. Use the repaired
+[`.4` Preview](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.4)
+and rebuild dependent objects/ports. These `.3` assets and source tag remain
+unchanged; project locks are not migrated automatically.
+
 This prerelease offers the reduced Development SDK for **native Linux/x86_64**.
 Its manifest stage is `02-cxx`, profile `dev`: CRT C/C++ runtimes, public compiler
 policy, networking/JSON/compression dependencies and their notices. LLVM is an

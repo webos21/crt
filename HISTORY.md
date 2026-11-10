@@ -10,6 +10,20 @@ substantive update.
 
 ## 2026-11-10
 
+### Publish the Linux Dev SDK loader-compatibility repair
+
+Published immutable `v0.0.1-preview.20261110.4` from clean `448fa32` after
+rebuilding Linux/x86_64 runtimes/ports/source assets. TLSDESC removes the explicit
+loader import that failed before main on glibc 2.39; CRT_1.0 remains intact.
+An owned libc++abi build adapter also keeps weak GNU thread-exit registration
+out of CRT clone threads. Both loader versions and GNU-libc/Wayland coexistence
+pass TLS/destructor/exception checks. C 147/147, Dev external checks, local CLI
+913/221/114/142 and 14/14 public-byte consumer checks pass. All six public
+assets and four source files match the pre-publication pins. The old `.3`
+release remains with an erratum; no project lock or other-host SDK changes.
+[Acceptance](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10)
+owns exact hashes, preserved failed candidates, CI provisioning and replay limits.
+
 ### Windows/x64 CLI Preview publication handoff
 
 The CLI consumes the unchanged public Windows Dev SDK, qualifies restricted HTTPS redirects

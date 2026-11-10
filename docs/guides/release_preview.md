@@ -1,6 +1,6 @@
 # Developer Preview Release
 
-The newer [Linux Development SDK Preview](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3)
+The newer [Linux Development SDK Preview](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.4)
 is a separate `dev`/`02-cxx` release; use its [guide](dev_sdk_preview.md) and
 [publication evidence](../acceptance/sdk_split_acceptance.md#linux-dev-sdk-public-promotion-2026-11-10).
 The [macOS/arm64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1) and

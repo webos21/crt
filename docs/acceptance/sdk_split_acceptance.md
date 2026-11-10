@@ -2366,7 +2366,7 @@ the snapshot refresh does not relabel unrelated runtime/device acceptance.
 
 ## Linux loader compatibility repair (2026-11-10)
 
-**Qualified local producer; publication pending.** Owner scope: repair Linux Dev
+**Promoted:** [v0.0.1-preview.20261110.4](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.4), public non-latest prerelease. Owner scope: repair Linux Dev
 SDK compatibility and publish new immutable `v0.0.1-preview.20261110.4`. Review baselines:
 CRT `a339924`, CLI `65b20c4`; selected clean producer
 `448fa32349ae697f589f0ad8fc60cfdf7a7e195a`. CRT owns TLS/allocator/link policy and source assets;
@@ -2431,3 +2431,33 @@ without rerunning or relabeling product failures. Final local receipt:
 `consumer-postcheck/artifact/ci-summary.json`, CLI SHA-256
 `80dddf03f746e6b50caea596ff0201983cf180cfb8d15abea870c2c019df117a`.
 The public-byte consumer and actual Ubuntu 24.04 hosted suite are still pending.
+
+### Public promotion and downloaded-byte proof
+
+The source tag resolves to clean `448fa32349ae697f589f0ad8fc60cfdf7a7e195a`.
+Reviewed pins precede publication (`2793fc0`, expanded local acceptance
+`e6a94ab`). The draft contains exactly the six unchanged collector files;
+authenticated re-download matches every name/size/digest before publication.
+Unauthenticated verified-TLS public downloads then match **6/6** frozen files,
+and four public source files match the producer commit. `draft-verification.json`
+and `public-verification.json` retain checks and CA/redirect policy.
+
+The unchanged published Linux CLI, executable SHA-256
+`a8fb76a4b257c52345d79560312e0a94f52aaa9251f67524823a0fab8476a43a`, consumes
+those public bytes under bubblewrap: read-only root, hidden producer/CLI/local
+SDK trees, no network, empty PATH, private HOME/tmp. **14/14** checks pass:
+native pinned install/verify, C/C++ new and first build/test/run without
+configure, zero-command warm reuse and unchanged exact project locks, SDK and
+download inventories. An additional C++ shared-library project passes on the
+host 2.43 loader; its identical `greeting-test` also passes the pinned 2.39
+loader. This is an actual public SDK/native policy replay, not just wrappers.
+Receipt: `native-public-consumer.json`; no existing project is silently updated.
+
+CLI CI adopts these producer-promoted pins in `5d148ba`, retaining the old
+failure and adding required Ubuntu 24.04 beside Ubuntu 26.04. The
+[CLI ledger](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#linux-loader-repair-sdk-adoption-2026-11-10)
+owns completed hosted results. `.3` remains available with a compatibility
+erratum; macOS/Windows assets, Full delivery, publisher signing, default/project
+locks and STATUS are unchanged. Linux producer CI now provisions LLVM 21 and
+compiler-rt explicitly; earlier CI provisioning failures are not SDK/runtime
+failures or passing compatibility evidence.

@@ -62,9 +62,8 @@ under an active tranche only to make its execution order legible.
 
 ### Linux Dev SDK loader compatibility repair
 
-- [ ] Rebuild TLSDESC runtimes, qualify the same shared ELF on Ubuntu 24.04/26.04,
-  and publish a new immutable Linux/x86_64 Dev Preview; preserve `.3` and its
-  failed loader replay. Follow [the loader policy](docs/design/cxx_runtime.md#linux-shared-runtime-loader-imports).
+- [ ] Close the required Ubuntu 24.04/26.04 CLI hosted replay on the published `.4`
+  SDK; local/public-byte repair evidence is [accepted](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10).
 
 
 ### CRT developer experience: SDK -> CLI -> Studio
