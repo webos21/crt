@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-10
 
+### Publish the Linux/aarch64 Dev SDK Preview
+
+Promoted `v0.0.1-preview.20261110.linux.arm64.2` from clean `e6a94ab` (it includes the Linux TLS-descriptor and thread-destructor repair; the earlier aarch64 candidate `.1` predates it and was never published).
+C 147/147, the shared-loader regression, `verify_dist --profile dev`, the relocated external check and a CLI self-built from the SDK (913/221/114/142 checks) pass; after the pins were frozen in a reviewed commit the
+tag was created at the build commit, six unchanged assets went through a draft prerelease, and an unauthenticated public download matched 6/6 and passed the 30/30 native consumer replay. The contract
+replay driver's source guard now ignores data fixtures. Glibc 2.39 and a Linux/aarch64 CLI executable are not covered.
+[Record](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10).
+
 ### Publish the Linux Dev SDK loader-compatibility repair
 
 Published immutable `v0.0.1-preview.20261110.4` from clean `448fa32` after

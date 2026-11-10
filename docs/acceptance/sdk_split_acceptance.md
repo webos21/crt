@@ -2532,3 +2532,41 @@ locks and downloads). Public-byte results are recorded after publication.
 
 Not covered: the older glibc 2.39 loader on aarch64 (the x86_64 repair used an official Ubuntu 24.04 userland for it), a published Linux/aarch64 CLI executable,
 Full or other-host packages, the independent host-tools bundle, the unqualified pure C shared SDK-provider mode and redirect-aware acquisition from this URL.
+
+## Linux/aarch64 Dev SDK public promotion (2026-11-10)
+
+Review decision: promote the unchanged qualified `v0.0.1-preview.20261110.linux.arm64.2` Linux/aarch64 Dev artifacts from clean source
+`e6a94ab9e69b05497b3804328971d24d6071a53d` under the [bounded manual-pin trust policy](../design/dev_preview_trust.md#linuxaarch64-bounded-policy-adopted-2026-11-10).
+The owner authorized the GitHub prerelease promotion. The [release notes](../releases/release_notes_v0.0.1-preview.20261110.linux.arm64.2.md), the policy and the guide
+section were frozen in the reviewed commit `d5c54bb` before publication (merged as `ab72aeb`), so the manifest pin
+`ba77b26edfa0413df5e8c17309506d7ae6ecf134ae7e9908e3742bc562067be3` precedes the bytes it vouches for. No asset was rebuilt or replaced, no
+publisher signature or default channel is claimed, and the other Previews are untouched.
+
+### Published result and consumer proof
+
+**Promoted:** [v0.0.1-preview.20261110.linux.arm64.2](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.linux.arm64.2), public prerelease (not marked latest) published
+`2026-11-10T23:27:22Z`. The annotated source tag resolves to `e6a94ab9e69b05497b3804328971d24d6071a53d`, the clean build commit, which is an ancestor of the
+reviewed pin commit on `main`. Six assets were uploaded from the unchanged collector output through `gh` into a **draft**: the SDK archive, the portable
+compiler policy, the 02 and 03 source assets, the release manifest and `SHA256SUMS-dev-linux-aarch64`. Before publishing, the draft's asset names and sizes matched the
+frozen pins and an authenticated re-download was byte-identical to the collector outputs and verified against `SHA256SUMS`.
+
+An additional **unauthenticated** public download of the six files (`curl`, HTTPS only, TLS >= 1.2, proxies disabled, explicit CA file `/etc/ssl/certs/ca-certificates.crt`)
+followed exactly one redirect per file to `release-assets.githubusercontent.com` (the host was checked before following and the temporary signed URLs are not recorded) and
+verifies **6/6**: all four assets against `SHA256SUMS`, the manifest `ba77b26e...67be3` (1772 bytes) and the checksum file itself, and every file is byte-identical to the
+handoff.
+
+The exact CLI `ae5f2b212be4351dcb8fc699785cf5c6822aa0b0dcd5183a23e94e56529ec543` (23,162,944 bytes; built from `crt-cli` `5d148ba` by this SDK alone) consumes those
+actual public-download bytes in bubblewrap (no network, read-only root, producer and CLI source trees hidden, cleared environment, empty `PATH`, the host LLVM 21.1.8 as the only
+toolchain). `tools/replay_preview_public_linux.py` passes **30/30**: pin and asset digests, pinned native install and verify, idempotent reinstall, refusal of a wrong pin with
+nothing published, C and C++ source-only `new`, first build **without configure** through the installed SDK selected by `--sdk`, test, run, zero-command warm build, unchanged
+project locks (each selects SDK `cd2ab657615c0fa52a1804f301a57dfa21b1067e3e5ed5a9f9a07d86ae050cc6` with its stored policy), an unchanged installed SDK and unchanged downloads. The
+result file's SHA-256 is `2c2495bba6002d7e5669de6974b2a73babe9ecd7fe1428b6d625f2213ae01974`.
+
+Receipts stay under the CLI checkout's ignored `out/linux-arm64-preview-20261110/` (`external/`, `replay/`, `handoff-consumer/`, `public-consumer/`) and the handoff root
+`/home/cmjo/preview-arm64-20261110/` (`handoff/`, `draft-dl/`, `public-dl/`). The guide commands use the same flags as the proof.
+
+### Limits
+
+Qualification used glibc 2.43; the older glibc 2.39 loader was not exercised on this architecture. No Linux/aarch64 `crt-cli` executable is published (the exact one above is
+not committed). Redirect-aware `sdk acquire` from this URL, Full, other-host and independent host-tools packages, the unqualified pure C shared SDK-provider mode, updates and Studio
+remain in their owning queues. STATUS and default locks are unchanged.

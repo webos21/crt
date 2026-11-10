@@ -69,7 +69,7 @@ closure. Local Development-SDK installation and stored-contract/project
 selection have evidence on all five native pairs, including Windows/x64
 ([producer evidence](docs/acceptance/sdk_split_acceptance.md),
 [CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
-Three-host Dev SDK/CLI Previews are published following bounded D3 contract approval;
+Three-host Dev SDK/CLI Previews are published following bounded D3 contract approval, and the Linux/aarch64 Dev SDK Preview `v0.0.1-preview.20261110.linux.arm64.2` follows ([record](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10));
 [the Windows CLI handoff](docs/acceptance/sdk_split_acceptance.md#windows-cli-preview-publication-handoff-2026-11-10)
 links its exact consumer evidence. Explicit default/project pin adoption remains separate.
 Installed-SDK first build/pinned acquisition and the three-host zlib
