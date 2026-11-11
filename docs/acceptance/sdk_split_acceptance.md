@@ -2565,6 +2565,20 @@ result file's SHA-256 is `2c2495bba6002d7e5669de6974b2a73babe9ecd7fe1428b6d625f2
 Receipts stay under the CLI checkout's ignored `out/linux-arm64-preview-20261110/` (`external/`, `replay/`, `handoff-consumer/`, `public-consumer/`) and the handoff root
 `/home/cmjo/preview-arm64-20261110/` (`handoff/`, `draft-dl/`, `public-dl/`). The guide commands use the same flags as the proof.
 
+### Source-tag CI result and the configure-time guard
+
+The push CI of the source tag ([run `42923428386`](https://github.com/webos21/crt/actions/runs/42923428386)) is red on **linux-arm64 only**; the other four legs pass. It is the
+tag's own workflow at `e6a94ab`, which installed LLVM 21 with `--no-install-recommends` and therefore without the compiler-rt package (`libclang-rt-21-dev`, only a suggested
+dependency). Linux/aarch64 long double is software binary128, so `printf` and `gdtoa` need compiler-rt's `__multf3`/`__netf2`/`__extenddftf2` family; with no archive the configure
+still succeeded and `shell/sh` and `shell/mksh` failed to link much later. Linux/amd64 uses x87 long double natively and never needed the archive. `main`'s `422b45a` installs the
+package, and `main` at `ab72aeb` (the same SDK sources) passes all five legs including linux-arm64 ([run `42923382106`](https://github.com/webos21/crt/actions/runs/42923382106)).
+The tag is not moved, as with the `.4` tag run; a re-run would use the same old workflow. The published assets are the local qualified collector outputs, not CI products.
+
+The root `CMakeLists.txt` now fails the configure on a **native Linux/aarch64 host** that finds no compiler-rt builtins, naming the package and
+`CRT_COMPILER_RT_BUILTINS_OVERRIDE`; an x86_64-host cross configuration only warns, because it may legitimately be configured without being linked.
+`tools/test_compiler_rt_configure.py` (native aarch64 hosts only) uses a compiler wrapper that finds no archive: the configure fails with the remedy, an explicit archive still configures,
+and the former silent success makes the test fail.
+
 ### Limits
 
 Qualification used glibc 2.43; the older glibc 2.39 loader was not exercised on this architecture. No Linux/aarch64 `crt-cli` executable is published (the exact one above is

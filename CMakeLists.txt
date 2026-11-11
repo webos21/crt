@@ -779,6 +779,28 @@ if(CRT_USE_COMPILER_RT)
     install(FILES "${CRT_COMPILER_RT_BUILTINS}" DESTINATION lib RENAME libclang_rt.builtins.a COMPONENT crt-c)
   else()
     message(STATUS "compiler-rt builtins not found by ${CMAKE_C_COMPILER}")
+    if(CRT_TARGET_OS STREQUAL "linux" AND CRT_EFFECTIVE_ARCH_FOR_FLAGS MATCHES "^(aarch64|arm64|ARM64)$")
+      # Linux/aarch64 long double is IEEE binary128 in software: printf/gdtoa need compiler-rt's
+      # __multf3/__netf2/__extenddftf2 family, and nothing else in the CRT provides them.  Without the
+      # archive the configure used to succeed and the failure surfaced hundreds of lines later as
+      # undefined references while linking shell/sh (a CI leg installed LLVM with
+      # --no-install-recommends, which skips the compiler-rt package).  x86_64 uses the x87 format
+      # natively and never needed it.
+      set(CRT_COMPILER_RT_MISSING_ADVICE
+        "Linux/aarch64 needs the compiler-rt builtins archive (libclang_rt.builtins-aarch64.a) for "
+        "128-bit long double helpers such as __multf3 and __netf2. Install the compiler-rt package of "
+        "the selected LLVM (Debian/Ubuntu: libclang-rt-<N>-dev, which --no-install-recommends skips) or "
+        "pass -DCRT_COMPILER_RT_BUILTINS_OVERRIDE=<path to the archive>. The compiler printed: "
+        "'${CRT_COMPILER_RT_BUILTINS}' for '${CMAKE_C_COMPILER} --rtlib=compiler-rt --print-libgcc-file-name'.")
+      if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+        # A native build cannot link without it: fail at configure time with the remedy.
+        message(FATAL_ERROR ${CRT_COMPILER_RT_MISSING_ADVICE})
+      else()
+        # An x86_64-host cross configuration may legitimately only be configured; the archive is
+        # still required to link, so say so without blocking the configure.
+        message(WARNING ${CRT_COMPILER_RT_MISSING_ADVICE})
+      endif()
+    endif()
     add_library(crt_compiler_rt_builtins INTERFACE)
   endif()
 else()

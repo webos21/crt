@@ -8,6 +8,16 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-11
+
+### Fail the Linux/aarch64 configure when compiler-rt is missing
+
+The source-tag CI of the Linux/aarch64 Preview was red only on linux-arm64: the tag's workflow predates `422b45a` and installed LLVM without compiler-rt, so `printf`/`gdtoa` could not
+link the binary128 helpers (`__netf2` and friends) and the break surfaced as undefined references in `shell/sh` and `shell/mksh` after a successful configure. `main` already installs
+`libclang-rt-21-dev` and passes. Native Linux/aarch64 configures without the archive now fail immediately with the package name and `CRT_COMPILER_RT_BUILTINS_OVERRIDE` (cross configurations only warn);
+`tools/test_compiler_rt_configure.py` pins it. The tag is not moved.
+[Record](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10).
+
 ## 2026-11-10
 
 ### Publish the Linux/aarch64 Dev SDK Preview
