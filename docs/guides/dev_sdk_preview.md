@@ -3,7 +3,9 @@
 The [Preview release](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.4) contains the native
 Linux/x86_64 Dev SDK `v0.0.1-preview.20261110.4`. LLVM/Clang/LLD are
 external inputs; use LLVM **21** (qualified with **21.1.8**) for TLS descriptor code generation. The SDK
-retains stage `02-cxx`, profile `dev`. Full and other-host packages are separate.
+retains stage `02-cxx`, profile `dev`. Other native Previews have their own sections below:
+[Linux/aarch64](#linuxaarch64), [macOS/arm64](#macosarm64) and [Windows/x86_64](#windowsx86_64).
+Full SDK delivery is separate.
 
 ## Download and trusted metadata
 
@@ -143,8 +145,9 @@ Download these three original files from the release into a fresh directory with
 The independently trusted manifest SHA-256 from the reviewed repository is
 `ba77b26edfa0413df5e8c17309506d7ae6ecf134ae7e9908e3742bc562067be3` (1772 bytes); the
 [trust policy](../design/dev_preview_trust.md#linuxaarch64-bounded-policy-adopted-2026-11-10) defines the boundary.
-No `crt-cli` executable is published for Linux/aarch64: use one built for this host from `crt-cli` sources that include
-the stored-policy selection (`--sdk`) and the pinned installer, for example by the CLI's own bootstrap against this SDK.
+The [published Linux/aarch64 CLI Preview](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261111.linux-arm64.1)
+provides the native executable with notices; [its acceptance](https://github.com/webos21/crt-cli/blob/6201aa612fd82a83b37a61673504e64f307617cc/docs/acceptance/preview_acceptance.md#linuxaarch64-cli-preview-release-2026-11-11)
+owns the exact package pins, SDK-only build and packaged-consumer proof. This CLI release is independent of the SDK version.
 Substitute actual absolute paths:
 
 ```text
@@ -159,3 +162,5 @@ For C sources choose `--language c` and another fresh project name. The first bu
 build/test/run reuse the project lock. Qualified scope is the recorded native first-build/installed-selection flow with static
 C and C++ consumers and the shared-loader regression on glibc 2.43; the older glibc 2.39 loader was not exercised on this
 architecture, and pure C shared SDK-provider mode stays unqualified.
+The CLI release record also qualifies pinned GitHub `sdk acquire` through the opt-in `github-release` redirect policy,
+including the native redirect and source/SDK-hidden package replays; manual installation above remains valid.

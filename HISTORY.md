@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-11
 
+### Synchronize the public Preview documentation
+
+Compared the SDK production/public-download/consumer records and the CLI-owned release evidence with GitHub's public asset inventory.
+README now includes Linux/aarch64 SDK and CLI downloads; the installation guide links the newly published native CLI rather than requiring a source bootstrap.
+At the owner's request, refreshed STATUS to the exact reviewed snapshots, Linux/x86_64 loader-repair `.4` and the four published native SDK/CLI pairs.
+Updated the stale README workflow and TODO's pin-adoption scope; retained Windows/arm64, pure C shared, signing and Full-delivery limits.
+This is documentation reconciliation, not new native execution, artifact publication, pin adoption or a rewrite of historical acceptance evidence.
+
 ### Fail the Linux/aarch64 configure when compiler-rt is missing
 
 The source-tag CI of the Linux/aarch64 Preview was red only on linux-arm64: the tag's workflow predates `422b45a` and installed LLVM without compiler-rt, so `printf`/`gdtoa` could not

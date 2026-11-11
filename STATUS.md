@@ -5,9 +5,9 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-SDK/CLI snapshot refreshed at the owner's explicit request: **2026-11-10**,
-reviewing CRT `8e89ee1` and CLI `0cae8c8bc1fee02a31baf230aba703460fe1afa3`; the previous SDK/CLI refresh was earlier on 2026-11-10
-(CRT `797339d`, CLI `f4ae92a`).
+SDK/CLI snapshot refreshed at the owner's explicit request: **2026-11-11**,
+reviewing CRT `0d93b7c32b823c0631df4d84e4384c1343ce9561` and CLI
+`6201aa612fd82a83b37a61673504e64f307617cc`, with the public GitHub release inventory checked.
 Unrelated subsystem statements retain their original linked acceptance scope (last broad
 review 2026-10-28). Existing clean assembly baseline `3741ea5` in
 [release qualification](docs/acceptance/release_qualification.md) is not relabeled as a new
@@ -342,7 +342,7 @@ have per-host records in [SDK acceptance](docs/acceptance/sdk_split_acceptance.m
 and CLI installation acceptance. Windows/x64's earlier concurrent-install crash
 was fixed in the pinned libunwind recipe and replayed with the fixed SDK; its
 old failure is retained. General profiles/Full installation, default publisher
-trust and promotion remain separate; external LLVM/OS SDKs are prerequisites.
+trust and future artifact promotion remain separate; external LLVM/OS SDKs are prerequisites.
 
 D3 zlib source execution/store/provider/lock/oracle has Linux/x86_64,
 macOS/arm64 and Windows/x64 technical evidence, and the bounded adapter contract is
@@ -351,24 +351,36 @@ macOS/arm64 and Windows/x64 technical evidence, and the bounded adapter contract
 separate target. These records do not approve a latest-source five-pair matrix. The CLI
 compatibility ledger owns exact adoption combinations.
 
-**Published Previews (2026-11-10).** GitHub prereleases, none marked latest, none carrying a
+**Published Previews (checked 2026-11-11).** GitHub prereleases, none marked latest, none carrying a
 publisher signature (callers pin digests and choose a CA; CLI `publisher_authentication` is `not_verified`):
 
 | Artifact | Release | Build commit |
 | --- | --- | --- |
-| Linux/x86_64 Development SDK | [`v0.0.1-preview.20261110.3`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.3) | `0ab8f8c` |
+| Linux/x86_64 Development SDK | [`v0.0.1-preview.20261110.4`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.4) | `448fa32` |
+| Linux/aarch64 Development SDK | [`v0.0.1-preview.20261110.linux.arm64.2`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.linux.arm64.2) | `e6a94ab` |
 | macOS/arm64 Development SDK | [`v0.0.1-preview.20261110.macos.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1) | `445f127` |
 | Windows/x64 Development SDK | [`v0.0.1-preview.20261110.windows.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) | `b31276a` |
 | `crt-cli` Linux/x86_64 and macOS/arm64 | [Linux](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.linux-x86_64.1), [macOS](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.macos-arm64.1) | CLI `dc796f7`, `541b2af` |
+| `crt-cli` Linux/aarch64 | [`v0.1.0-preview.20261111.linux-arm64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261111.linux-arm64.1) | CLI `6a00885` |
 | `crt-cli` Windows/x64 | [Windows](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.windows-x86_64.1) | CLI `a55c0d0` |
 
 Each SDK Preview is the `dev`/`02-cxx` artifact with its manifest pin frozen in a reviewed commit before
 publication; the [trust policy](docs/design/dev_preview_trust.md) defines the manual-pin boundary and the per-host
 [acceptance](docs/acceptance/sdk_split_acceptance.md) records the unauthenticated public-download and consumer proofs.
+Use the [installation guide](docs/guides/dev_sdk_preview.md) for downloads and host-specific prerequisites.
+Linux/x86_64 `.4` repairs loader/TLS compatibility and has [both Ubuntu 24.04/glibc 2.39 and Ubuntu 26.04/glibc 2.43 hosted proof](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10);
+the original `.3` remains historical with its compatibility erratum. Linux/aarch64's
+[public SDK proof](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10)
+covers glibc 2.43 only, not the x86_64 older-loader matrix. The source-tag CI's missing compiler-rt failure is
+recorded separately from the qualified public assets; `main` provisions the package and now rejects a native
+Linux/aarch64 configure that cannot find it.
 The CLI Previews acquire their host's SDK directly from GitHub through the opt-in restricted redirect policy
-(Linux/x86_64, macOS/arm64 and Windows/x64 replayed; [Windows CLI evidence](https://github.com/webos21/crt-cli/blob/0cae8c8bc1fee02a31baf230aba703460fe1afa3/docs/acceptance/preview_acceptance.md#windowsx64-cli-preview-release-2026-11-10)). The macOS images carry only the linker's ad-hoc signature (no Developer ID,
+(Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64 replayed;
+[Linux/aarch64 CLI evidence](https://github.com/webos21/crt-cli/blob/6201aa612fd82a83b37a61673504e64f307617cc/docs/acceptance/preview_acceptance.md#linuxaarch64-cli-preview-release-2026-11-11),
+[Windows CLI evidence](https://github.com/webos21/crt-cli/blob/0cae8c8bc1fee02a31baf230aba703460fe1afa3/docs/acceptance/preview_acceptance.md#windowsx64-cli-preview-release-2026-11-10)). The macOS images carry only the linker's ad-hoc signature (no Developer ID,
 no notarization); a quarantined browser download was not tested. Windows images are not Authenticode-signed;
-SmartScreen/browser reputation was not tested. Linux/aarch64 and Windows/arm64 have no Preview. Pure C shared SDK-provider mode stays unqualified (producer 6.4).
+SmartScreen/browser reputation was not tested. Windows/arm64 has no published SDK or CLI Preview.
+Pure C shared SDK-provider mode stays unqualified (producer 6.4).
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -580,9 +592,9 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-The SDK -> CLI initiative has published Dev SDK Previews for Linux/x86_64, macOS/arm64 and
-Windows/x64 and matching CLI Previews on those three hosts. Next are explicit default/project SDK pin adoption
-against the promoted SDKs and the hosts without a Preview. The
+The SDK -> CLI initiative has published Dev SDKs and matching CLI Previews for Linux/x86_64,
+Linux/aarch64, macOS/arm64 and Windows/x64. Next are explicit default/project SDK pin adoption
+against the promoted SDKs and Windows/arm64 Preview qualification. The
 retained Linux SDK C shared control's host libz mapping remains unendorsed under producer policy
 review 6.4. D4 SQLite/libpng work can proceed on frozen contracts. Full SDK delivery and its
 final source/license/security/assembly review stay separate, preserving existing

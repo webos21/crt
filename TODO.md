@@ -211,7 +211,7 @@ external-tool selection/diagnosis and download/install orchestration.
 - [ ] **7.2** Review CLI test/package, versioned JSON/job events, cancellation,
   locked/offline behavior and recovery through original consumer evidence.
   Include the one-executable release goal and self/environment/project doctor scopes.
-- [ ] **7.3** Review explicit default/project pin adoption against the published three-host
+- [ ] **7.3** Review explicit default/project pin adoption against the published Linux x86_64/aarch64, macOS/arm64 and Windows/x64
   Dev SDK/CLI Previews; retain the [Windows publication handoff](docs/acceptance/sdk_split_acceptance.md#windows-cli-preview-publication-handoff-2026-11-10).
   Keep unqualified Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery
   and its source/license/security/assembly review stay separate; D4 does not block the preview.
