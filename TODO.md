@@ -64,26 +64,17 @@ under an active tranche only to make its execution order legible.
 
 Follow the [SDK contract](docs/design/sdk_development_contract.md) and
 [CLI joint sequence D0-D7](docs/design/crt_cli.md#9-joint-development-sequence).
-This whole initiative is active. Tranches 1/2 retain their scoped technical
-closure. Local Development-SDK installation and stored-contract/project
-selection have evidence on all five native pairs, including Windows/x64
-([producer evidence](docs/acceptance/sdk_split_acceptance.md),
-[CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md)).
-Three-host Dev SDK/CLI Previews are published following bounded D3 contract approval, and the Linux/aarch64 Dev SDK Preview `v0.0.1-preview.20261110.linux.arm64.2` follows ([record](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10));
-[the Windows CLI handoff](docs/acceptance/sdk_split_acceptance.md#windows-cli-preview-publication-handoff-2026-11-10)
-links its exact consumer evidence. Explicit default/project pin adoption remains separate.
-Installed-SDK first build/pinned acquisition and the three-host zlib
-implementation retain their recorded technical baselines. Full SDK delivery is separate. D4 may proceed on fixed contracts;
-general updates/self-upgrade stay beyond that first preview. Scope/replay policy is in the
+Current work is dependencies/variants, broader SDK-only application and deployment
+contracts, explicit Preview pin adoption and Studio integration. Completed Tranches
+1-4 are retained in [HISTORY](HISTORY.md) and the owning
+[SDK acceptance](docs/acceptance/sdk_split_acceptance.md),
+[source-asset review](docs/acceptance/release_qualification.md#common-source-candidate-selection-2026-11-02)
+and [host-tools acceptance](docs/acceptance/host_tools_acceptance.md).
+Their scoped completion does not close the remaining host qualifications below.
+Full SDK delivery, general updates and self-upgrade remain separate. Scope/replay policy is in the
 [SDK contract](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05).
-Numbered tranches 1-8 map to D0-D7.
-SDK split and local assembly rehearsal are complete
-([final review](docs/acceptance/release_qualification.md#final-combined-assembly-review-2026-10-28)).
-The SDK Producer Contract Gate P0 is the producer work within the early
-tranches, developed together with the CLI consumer rather than completed as a
-separate prerequisite to all CLI work. Later tranches extend those contracts.
-D0 may start with a manually installed identified SDK snapshot; promotion gates
-apply before consumer-lock adoption, not before every bootstrap experiment.
+Original tranche identifiers map to D0-D7 and are not renumbered; **3.3** remains
+the deferred self-upgrade item in Planned.
 Use one authorized local session for the sibling `crt` and `crt-cli` repositories:
 produce a Dev SDK candidate, hand off an immutable copy/extraction outside the
 producer checkout/build tree, run the CLI consumer, then fix/rebuild/retest.
@@ -98,84 +89,15 @@ Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`; these are not artifact locks.
 Follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review);
 the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
-#### Tranche 1. SDK/CLI contracts and minimal bootstrap (P0 + D0)
+#### Remaining host qualification
 
-- [x] **1.1** Record crt-cli naming, one-executable/data/temporary-helper policy,
-  shared immutable SDK references and first-configure/build acquisition.
-- [x] **1.2** Review the initial CLI source/module/build layout before implementation;
-  share native crt.json/lock, src/main modules and C/C++ src/test with templates.
-- [x] **1.3** Identify the existing Linux Dev SDK, public wrappers/imports and host/target
-  identities; record local handoff, producer/CLI snapshots, archive/content hashes and tools.
-- [x] **1.4** Implement CLI-owned bootstrap input/result records and experimental
-  manifest/lock fixtures, without claiming the general SDK contract is implemented.
-- [x] **1.5** Validate SDK-owned startup/link rules, basic CLI diagnosis and
-  one-executable feasibility on the five recorded native pairs
-  ([technical gate review](docs/acceptance/sdk_split_acceptance.md#sdkcli-technical-bootstrap-gate-review-2026-11-02)).
-- [x] **1.6** Review relocated SDK-only build/run, producer-tree isolation and
-  native ABI/import evidence at those recorded combinations; not production adoption
-  ([technical gate review](docs/acceptance/sdk_split_acceptance.md#sdkcli-technical-bootstrap-gate-review-2026-11-02)).
-- [x] **1.7** Repair canonical source/cache handling and select coherent common
-  Linux 02/03 assets plus the exercised SDK/provider/CLI candidate
-  ([selection and limits](docs/acceptance/release_qualification.md#common-source-candidate-selection-2026-11-02)).
-  Production adoption/public release remain separate; existing evidence is not relabeled.
-
-#### Tranche 2. SDK-free CLI runtime and host environment (P0 + D1)
-
-- [x] **2.1** Replay the new single-executable/scoped-doctor/resource candidate
-  on native Windows/x64 ([Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsx64-independent-host-environment-replay-2026-11-03));
-  Linux and macOS/arm64 proof is [CLI-owned](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md).
-- [x] **2.2** Replay the [independent host-tools contract](docs/acceptance/host_tools_acceptance.md)
-  and CLI shell on Windows/x64: private imports/aliases, paths and owned-process cleanup.
-  [macOS/arm64 replay passes](docs/acceptance/host_tools_acceptance.md#macosarm64-independent-bundle-replay-2026-11-03);
-  [Windows/x64 passes](docs/acceptance/host_tools_acceptance.md#final-combined-replay-2026-11-03) after four producer
-  repairs (LF-preserving LLVM fetch, mksh async status, directory `X_OK`, explicit child rootfs).
-  [macOS private-dylib fixture replay passes](docs/acceptance/host_tools_acceptance.md#macosarm64-private-dylib-closure-replay-2026-11-06);
-  Windows private-DLL and Windows/arm64 acceptance stay open.
-- [x] **2.3** Repeat D1-07 with Windows/x64's selected package/trust bytes.
-  Linux, macOS/arm64 and Windows/x64 pass; earlier host transport records retain their own identities.
-  Official release signing/metadata policy stays separate from this local test-identity gate.
-
-#### Tranche 3. Immutable SDK installation and selection (D2)
-
-The existing local dev/install/portable-contract baseline is retained in the
-owning acceptance records; this list contains the remaining producer work.
-
-- [x] **3.1** Define the installation-time contract pin/repair handoff using
-  existing producer format-1 assets, preserving SDK identity/schema. The
-  [Linux consumer slice passes](docs/acceptance/sdk_split_acceptance.md#installation-time-contract-pin-handoff-2026-11-05)
-  and [macOS receipt replay passes](docs/acceptance/sdk_split_acceptance.md#macosarm64-installation-receipt-and-repair-replay-2026-11-05);
-  [Windows/x64 receipt boundaries also pass](docs/acceptance/sdk_split_acceptance.md#windowsx64-installation-receipt-and-repair-replay-2026-11-05),
-  but its first concurrent-install replay hit a native SIGSEGV. Root cause
-  found and fixed in the libunwind recipe (callee-saved XMM6-XMM15 were not
-  restored on catch; [design note](docs/design/cxx_runtime.md)); a CLI built
-  against the fixed SDK passes the full Windows/x64 replay
-  ([record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-concurrent-install-sigsegv-fix-2026-11-06)).
-  The [Windows/arm64 receipt/repair delta replay passes](docs/acceptance/sdk_split_acceptance.md#windowsarm64-receipt-selection-first-build-and-https-replay-2026-11-06)
-  (CLI driver 101/101; 15 of 15 repeated concurrent installs also pass).
-- [x] **3.2** Finish affected-host SDK path/tool/DLL collision replay. The
-  [Linux selection slice passes](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-selection-collision-slice-2026-11-05)
-  and fixes truncated full-identity matching in CLI;
-  [macOS matcher/collision replay passes](docs/acceptance/sdk_split_acceptance.md#macosarm64-selection-first-build-and-https-handoff-replay-2026-11-06).
-  [Windows/x64 matcher/collision replay passes](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#selection-first-build-and-pinned-https-replay-windowsx64-2026-11-06) (CLI-owned; existing rehearsal.8 SDK,
-  decoy executables, and a documented working-directory DLL limitation); [Windows/arm64 passes too](docs/acceptance/sdk_split_acceptance.md#windowsarm64-receipt-selection-first-build-and-https-replay-2026-11-06) (68/68, existing rehearsal.7 SDK). Reuse existing SDKs.
-- [x] **3.4** Exercise the explicit developer-pinned Linux metadata/archive/
-  portable-contract handoff through HTTPS acquisition and first build
-  ([technical evidence](docs/acceptance/sdk_split_acceptance.md#linux-pinned-https-sdk-handoff-2026-11-06)).
-  Existing format-1 assets suffice; CLI owns source format 0. Public/default URLs,
-  approved trust and actual producer promotion remain preview/release gates.
-
-**3.3** remains the self-upgrade work item, deferred in Planned; identifiers
-and historical evidence are not renumbered. CLI owns first-build binding,
-external-tool selection/diagnosis and download/install orchestration.
-
-#### Tranche 4. First source-built port (D3)
-
-- [x] **4.1** The bounded digest-keyed zlib adapter/field/key contract is
-  [approved and adopted](docs/acceptance/sdk_split_acceptance.md#d3-adapter-contract-approval-2026-11-09);
-  review metadata preserves existing keys, manifests and project pins.
-- [x] **4.2** Affected Linux/macOS common-change proof and retained Windows/x64
-  qualification complete D3's exercised scope. Windows/arm64 D3 stays separate.
-
+- [ ] Qualify an independent Windows/x64 host-tools bundle with actual private
+  DLLs: initial-load closure and search-path collisions. The existing static
+  closure does not cover this [remaining gate](docs/acceptance/host_tools_acceptance.md#native-scope-and-remaining-gates).
+- [ ] Replay independent host tools on Windows/arm64 and separately qualify its
+  D3 zlib source-port path; completed D2/SDK evidence does not close these gates
+  ([host-tools scope](docs/acceptance/host_tools_acceptance.md#native-scope-and-remaining-gates),
+  [bounded D3 scope](docs/acceptance/sdk_split_acceptance.md#d3-adapter-contract-approval-2026-11-09)).
 
 #### Tranche 5. Dependencies, variants, locks and cache (D4)
 

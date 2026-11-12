@@ -1,7 +1,7 @@
 # Independent Host-tools Acceptance
 
 Producer contract: [experimental host tools](../design/host_tools_contract.md).
-Work queue: [Tranche 2](../../TODO.md#tranche-2-sdk-free-cli-runtime-and-host-environment-p0--d1).
+Work queue: [remaining host qualification](../../TODO.md#remaining-host-qualification).
 The CLI owns commands, adoption and native execution in its
 [compatibility ledger](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#independent-host-tools-and-d1-linux-adoption-2026-11-02)
 and [D1 evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md).

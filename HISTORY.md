@@ -8,6 +8,15 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-12
+
+### Remove completed SDK/CLI gates from the active work queue
+
+Cross-checked the completed Tranche 1-4 entries against the bootstrap/source-asset, host-tools, D2 and bounded D3 acceptance records.
+Removed 15 checked items and their completed summaries from TODO; the original evidence and dated completion records remain here and in acceptance.
+Preserved Windows/x64 private-DLL and Windows/arm64 independent-tools/D3 qualification as explicit unchecked follow-ups, and repaired the host-tools work-queue link.
+Tranches 5-8 and deferred self-upgrade 3.3 keep their existing identifiers and scope. No STATUS, runtime, SDK or consumer adoption change.
+
 ## 2026-11-11
 
 ### Synchronize the public Preview documentation
