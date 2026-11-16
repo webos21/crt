@@ -78,11 +78,14 @@ Ordered; each step needs its own approval. The owner decides keys, custody and w
 
 1. **Publish the key and fingerprint** (this document). Done 2026-11-16.
 2. **Publish the fingerprint on an independent channel.** At least one place that is not the CRT repository: for example GitHub Pages of the
-   organization and one location outside GitHub. Record the locations here. Until a location outside the GitHub account exists, the limit
-   above stands.
+   organization and one location outside GitHub. Record the locations here. The limit above stands until then; it is narrowed by the Naver blog post below.
    - 2026-11-16: published on the project site `https://webos21.github.io/` ("배포 서명 공개 키 지문"; the same SHA-256 value, verified by
      fetching the page). This is a second *place*, but it is served from the same GitHub account, so it does not protect against an account
-     takeover. A location outside GitHub (for example another domain or a signed announcement) is still open.
+     takeover. 2026-11-16: also published in the project blog post `https://blog.naver.com/webos21/224479549664` (Naver Blog, "Release signing
+     public key fingerprint", SHA-256 of the DER SubjectPublicKeyInfo; the same value, verified by fetching the post). This is the first location
+     outside the GitHub account: an attacker would need the Naver account as well to make the published copies agree. It is still the owner's
+     own account (a post can be edited later, and it is not signed), so users should record the fingerprint once, from two places, and treat later
+     changes as suspect. The limit above is narrowed, not removed.
 3. **Sign the two published host-tools bundles** (`v0.1.0-hosttools.20261116.linux-x86_64.1`, `...linux-aarch64.1`) as `.sig` files added to
    their releases, then the Dev SDK Preview archives and the `crt-cli` Preview, using the procedure above. Adding signature files is not a
    replacement of accepted assets; record it as such.
