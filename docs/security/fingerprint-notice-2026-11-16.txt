@@ -1,0 +1,37 @@
+CRT release publisher key - fingerprint notice
+Issued: 2026-11-16
+
+Key:          RSA 2048-bit public key; signatures are RSASSA-PSS with SHA-256,
+              MGF1-SHA256 and a 32-byte salt
+Fingerprint:  59218576956e493476bc36f7385d8e01a03ff9b92946a531b013ad3937d43fa2
+              (SHA-256 of the DER SubjectPublicKeyInfo)
+Public key:   https://github.com/webos21/crt/blob/main/docs/security/crt-release-publisher.pub
+
+Statements, made by the holder of the private key of the fingerprint above:
+
+1. This notice is signed with that key. Its detached signature is the file
+   fingerprint-notice-2026-11-16.txt.sig, made over the exact bytes of this
+   file.
+2. Release archives of webos21/crt and webos21/crt-cli published with a
+   "<asset>.sig" file were signed with this key. Archives without such a file
+   are not signed.
+3. This fingerprint is also published at:
+     https://github.com/webos21/crt/blob/main/docs/security/publisher_signing.md
+     https://webos21.github.io/
+     https://blog.naver.com/webos21/224479549664
+   A copy that differs from the fingerprint above is not this key's.
+4. No other key is used to sign releases. A change of key is announced by a
+   notice that is signed with the previous key and published in the same
+   places; a change that is not announced that way is not authorized.
+5. This notice sets no expiry. Revocation, if ever needed, is announced in the
+   same places.
+
+Verify (OpenSSL), with the public key file saved from the link above after you
+have compared its fingerprint with an independently recorded value:
+
+  openssl pkey -pubin -in crt-release-publisher.pub -outform DER | sha256sum
+  openssl dgst -sha256 -verify crt-release-publisher.pub \
+    -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
+    -sigopt rsa_mgf1_md:sha256 \
+    -signature fingerprint-notice-2026-11-16.txt.sig \
+    fingerprint-notice-2026-11-16.txt
