@@ -78,10 +78,26 @@ Ordered; each step needs its own approval. The owner decides keys, custody and w
 
 1. **Publish the key and fingerprint** (this document). Done 2026-11-16.
 2. **Publish the fingerprint on an independent channel.** At least one place that is not the CRT repository: for example GitHub Pages of the
-   organization and one location outside GitHub. Record the locations here. Until they exist, the limit above stands.
+   organization and one location outside GitHub. Record the locations here. Until a location outside the GitHub account exists, the limit
+   above stands.
+   - 2026-11-16: published on the project site `https://webos21.github.io/` ("배포 서명 공개 키 지문"; the same SHA-256 value, verified by
+     fetching the page). This is a second *place*, but it is served from the same GitHub account, so it does not protect against an account
+     takeover. A location outside GitHub (for example another domain or a signed announcement) is still open.
 3. **Sign the two published host-tools bundles** (`v0.1.0-hosttools.20261116.linux-x86_64.1`, `...linux-aarch64.1`) as `.sig` files added to
    their releases, then the Dev SDK Preview archives and the `crt-cli` Preview, using the procedure above. Adding signature files is not a
    replacement of accepted assets; record it as such.
+   - 2026-11-16: signed and attached as `crt-<tag>.tar.xz.sig` (256 bytes, RSA-2048 PSS) to both host-tools releases
+     (`...linux-x86_64.1`, `...linux-aarch64.1`); no existing asset was changed. Verified from the public download URLs with `openssl` and
+     with `crt-cli fetch --publisher-key --signature` (`publisher_authentication: signature_verified` for both; the x86_64 signature
+     against the aarch64 archive is refused with `publisher_signature_invalid` and leaves no output). Only these two assets are signed; the
+     Dev SDK and `crt-cli` Previews, the release record and `SHA256SUMS` are not. Consumer pins and `sdk acquire` do not require the
+     signature yet (step 4).
+   - 2026-11-16: the main archive of each Dev SDK Preview (`crt` releases `v0.0.1-preview.20261110.3`, `.4`, `.linux.arm64.2`, `.macos.1`,
+     `.windows.1`) and each `crt-cli` Preview (`crt-cli` releases `v0.1.0-preview.20261110.linux-x86_64.1`, `...macos-arm64.1`,
+     `...windows-x86_64.1`, `v0.1.0-preview.20261111.linux-arm64.1`) was signed the same way; `<archive>.sig` was added to each release
+     (9 files, no existing asset changed). Each was verified with `openssl` before upload (and matched the release `SHA256SUMS`), then from
+     the public URL with `crt-cli fetch --publisher-key --signature` (`signature_verified` for all nine). Not signed: the `*-source.tar.xz`
+     stage archives, `*-toolchain.json`, release manifests and `SHA256SUMS` files of those releases.
 4. **Teach consumers to require it.** `crt-cli`'s `sdk acquire` source file and the CI host-tools pin have no field for the key or the
    signature yet (only `fetch` takes them). Add `publisher_key` and signature locations to those inputs, report `signature_verified` in the
    acquisition record and let a pin require it. This is CLI work, not CRT's.
