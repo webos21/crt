@@ -455,5 +455,19 @@ checks the archive against its manifest, assembles with `--promotion preview`, p
 candidate and evidence. The driver passed locally on x86_64 against the public `.4` SDK (16/16 replay cases there; the glibc 2.39 and CLI cases above
 need `--glibc-root`/`--cli`). Its hosted aarch64 result is recorded separately once run.
 
-**Not done.** A clean-tree candidate, the aarch64 bundle result, publication/draft re-download, and the CLI pin and hosted integration. Reproduction: assemble with `--promotion preview` from the installed public SDK, `create_host_tools_release.py pack`/`verify`,
-then `replay_host_tools_linux.py --bundle <extracted> --output <new> --glibc-root <ubuntu-base> --cli <crt-cli>`.
+**Hosted clean-tree candidates (run [43818243485](https://github.com/webos21/crt/actions/runs/43818243485), commit `5fc1a7d`, 2026-11-16).** Both
+legs pass: unit tests, bubblewrap setup, assemble/pack/verify and the 16-case native replay (empty-environment sandbox over `/usr` and a space/Hangul
+bundle copy: shell, awk, make, twelve applet smokes, every declared alias). Records say `promotion: preview`, assembler and packer trees clean, and
+`publisher_authentication: not_verified`.
+
+| Host | Runner | Source Dev SDK | Archive (size, SHA-256) | Bundle manifest SHA-256 |
+| --- | --- | --- | --- | --- |
+| Linux/x86_64 | `ubuntu-26.04` | `v0.0.1-preview.20261110.4` (content `22107183e512...`) | 626632, `81174849...2155` | `9bd3ddf1...f192a` |
+| Linux/aarch64 | `ubuntu-26.04-arm` | `v0.0.1-preview.20261110.linux.arm64.2` (content `cd2ab657615c...`) | 589644, `7a4c26ad...c75f` | `2ea7bff5...b3c2` |
+
+Versions are `v0.1.0-hosttools.20261116.linux-x86_64.1` and `...linux-aarch64.1`. These are workflow artifacts retained under
+`/home/syszone/GitLocal/crt-hosttools-20261116/hosted-r1/` for the maintainer's review; they are candidates, not pins, until a release uploads
+exactly these bytes (the workflow publishes nothing, and a re-run at another commit changes the manifest digest). The aarch64 tools ran only on the
+hosted runner's own replay; the glibc-2.39 root, the CLI acceptance/negative controls and the five port suites were run for x86_64 only (above).
+
+**Not done.** Draft upload -> re-download comparison -> public release for both hosts, the aarch64 CLI/port-suite runs, and the CLI pin and hosted integration.
