@@ -20,6 +20,9 @@ from crt_runtime_notices import install_component, load_registry
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = 'crt.experimental.host-tools'
 ROLES = ('shell', 'toybox', 'awk', 'make')
+# `promotion` labels the manifest's intended audience only. It is not publisher authentication or a trust grant: a published
+# bundle is trusted solely through the digests a caller pins, and the evidence for a promotion lives in its release record.
+PROMOTIONS = ('local-only', 'preview')
 
 
 def digest(path):
@@ -98,7 +101,9 @@ def link_macho_alias_runtimes(root, aliases, tools, dependencies):
                 target.symlink_to(relative)
 
 
-def assemble(sdk, output, version, make_source=None, project=ROOT):
+def assemble(sdk, output, version, make_source=None, project=ROOT, promotion='local-only'):
+    if promotion not in PROMOTIONS:
+        raise ValueError('unknown host-tools promotion: ' + str(promotion))
     sdk, output = sdk.resolve(), output.absolute()
     manifest = json.loads((sdk / 'manifest.json').read_text(encoding='utf-8'))
     host = native_host()
@@ -230,7 +235,7 @@ def assemble(sdk, output, version, make_source=None, project=ROOT):
             'source_sdk_tool_sha256': digest(sdk / tools['make'])}, indent=2) + '\n', encoding='utf-8')
         shutil.copy2(sdk / 'LICENSE.md', temporary / 'LICENSE.md')
         files = payload_inventory(temporary)
-        result = {'schema': SCHEMA, 'format': 1, 'promotion': 'local-only', 'version': version, 'host': host,
+        result = {'schema': SCHEMA, 'format': 1, 'promotion': promotion, 'version': version, 'host': host,
                   'assembler': {'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=project, text=True).strip(),
                                 'working_tree_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=project)),
                                 'script_sha256': digest(Path(__file__))},
@@ -255,7 +260,7 @@ def assemble(sdk, output, version, make_source=None, project=ROOT):
 def verify_bundle(root):
     root = root.resolve()
     manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
-    if manifest.get('schema') != SCHEMA or manifest.get('format') != 1 or manifest.get('host') != native_host():
+    if manifest.get('schema') != SCHEMA or manifest.get('format') != 1 or manifest.get('host') != native_host() or manifest.get('promotion') not in PROMOTIONS:
         raise ValueError('unsupported host-tools manifest/host')
     actual = payload_inventory(root)
     if actual != manifest['inventory'] or canonical_hash(actual) != manifest['content_sha256']:
@@ -276,9 +281,10 @@ def main():
     parser.add_argument('--sdk-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--version', required=True)
+    parser.add_argument('--promotion', choices=PROMOTIONS, default='local-only', help='manifest audience label; not a trust grant')
     parser.add_argument('--make-source', type=Path, help='optional pristine make cache; its COPYING must match the pinned notice')
     args = parser.parse_args()
-    result = assemble(args.sdk_root, args.output, args.version, args.make_source)
+    result = assemble(args.sdk_root, args.output, args.version, args.make_source, promotion=args.promotion)
     print(json.dumps({'output': str(args.output.resolve()), 'manifest_sha256': digest(args.output / 'manifest.json'),
                       'content_sha256': result['content_sha256'], 'host': result['host']}, indent=2))
 

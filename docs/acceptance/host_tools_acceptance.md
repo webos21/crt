@@ -419,3 +419,35 @@ The [CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ho
 owns consumer adoption. This closes the macOS/arm64 private-closure test slice,
 not every future bundle/profile, macOS/x86_64, Windows private DLLs, Windows/arm64
 or production trust/promotion. No default, root lock, SDK release or STATUS change.
+
+
+## Linux/x86_64 Preview bundle rehearsal from the public Dev SDK (2026-11-16)
+
+Scope: the producer tooling for an independent **public** host-tools Preview and a native Linux/x86_64 rehearsal. It is a rehearsal: the
+assembler tree was dirty (the new tooling was uncommitted), so the archive is not a release candidate and nothing is published or pinned.
+The contract is [Public Preview releases](../design/host_tools_contract.md#public-preview-releases-adopted-2026-11-16-linuxx86_64-first).
+
+**Input SDK.** The published Dev SDK Preview `v0.0.1-preview.20261110.4` (stage `02-cxx`, content `22107183...ca81`) was downloaded from
+GitHub, verified against its release manifest and installed with the published CLI. The unchanged `create_host_tools.py` assembled the bundle from it
+(`--promotion preview` is the only change): a separate `01-c` SDK is not required, answering the first publication question.
+
+**Tooling.** `create_host_tools.py` gains a closed `--promotion {local-only,preview}` label; `create_host_tools_release.py pack|verify` builds
+the deterministic archive, checksum file and release record and re-verifies an extraction (`test_host_tools.py` and `test_host_tools_release.py`:
+21 tests, including determinism, dirty/tag/local-only refusals, a changed archive or record, foreign/escaping/extra members and an existing
+extraction directory). The rehearsal archive is 626468 bytes; packing twice gives identical bytes.
+
+**Native replay** (`tools/replay_host_tools_linux.py`, 40/40): the verified bundle copied to a path with spaces and Hangul runs in an empty
+bubblewrap root exposing only `/usr` (the OS loader) and the copy, with an empty environment: `sh`, `awk`, `make`, twelve applet smokes and every
+declared alias starts. The same smoke passes in an Ubuntu 24.04.5 base (glibc 2.39) root, where a CRT shared-runtime executable failed earlier
+(the bundle's tools are static-PIE with the host ELF loader as their only dependency). The CLI accepts the bundle and runs shell/awk/make, and
+rejects, before any job, a changed alias, an extra file, a missing alias, an escaping symlink, a lost execute bit, a wrong pin, an unknown
+promotion and a wrong host (the last two with their own consistent pin).
+
+**Source port.** With the preview bundle, the CLI's five port suites pass on the retained rehearsal SDK/project: `port-build` 35, `port-store` 90,
+`port-oracle` 23, `port-command` 33 and `port-project` 81 checks, none skipped. That SDK is not the public `.4`; it shows the bundle's tools
+drive the reviewed zlib recipe, not the public-SDK-to-hosted-CI combination. The CLI needed a one-line compatibility change (accept `preview`,
+report the manifest's own label); it is in the CLI repository's working tree, not yet committed or released.
+
+**Not done.** A clean-tree candidate, the aarch64 bundle (the `ubuntu-26.04-arm` runner), publication/draft re-download, and the CLI pin and
+hosted integration. Reproduction: assemble with `--promotion preview` from the installed public SDK, `create_host_tools_release.py pack`/`verify`,
+then `replay_host_tools_linux.py --bundle <extracted> --output <new> --glibc-root <ubuntu-base> --cli <crt-cli>`.

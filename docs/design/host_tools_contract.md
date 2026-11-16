@@ -16,7 +16,9 @@ failure rather than change settings. No MSYS markers or host shell fallback.
 `manifest.json` contains:
 
 - `schema`, `format`, `version`, execution `host` (OS/architecture), and
-  `promotion: local-only` for this experiment;
+  `promotion`: `local-only` (a candidate selected on one machine) or `preview`
+  (assembled for a public Preview release; see below). The label names the intended
+  audience only; it is not publisher authentication or a trust grant;
 - producer assembler commit/dirty/script identities, and the source SDK's exact
   manifest hash, producer identity and build provenance (not a runtime input);
 - `tools`: relative native paths for the four roles;
@@ -75,6 +77,31 @@ upstream make patch or permanent launcher. Jobs execute argv directly and use
 the common bounded owned-process runner; interactive terminal/job control is
 outside this contract. Source-port recipe execution and compiler-wrapper
 adapters remain D3; this increment does not implement a recipe engine.
+
+## Public Preview releases (adopted 2026-11-16, Linux/x86_64 first)
+
+A bundle can be published as a **host-tools Preview** from `webos21/crt` without changing format 1.
+
+- **Input.** The bundle is assembled from a published native **Dev SDK Preview** (stage `02-cxx`), not from a separate `01-c` SDK. The
+  assembler does not restrict the SDK's stage: it checks the execution host, the four tool images, the alias dispatchers, the private
+  runtime closure, the notices and the adopted `make` recipe/notice pin. The release record binds the SDK's release-manifest SHA-256,
+  archive digest and content identity. Building the bundle needs the SDK; running it does not.
+- **Promotion label.** `promotion: preview` is written with `create_host_tools.py --promotion preview`; `local-only` stays the default.
+  `verify_bundle` accepts only these two values. A consumer pins the manifest SHA-256 and the archive digest and treats those digests as
+  the trust anchor. The evidence for a promotion is the release record and acceptance entry, not the string. A CLI that predates `preview`
+  accepts only `local-only` and rejects a preview bundle before any job starts; it must be updated to use one.
+- **Version and tag.** The bundle version is independent of the SDK: `v0.1.0-hosttools.<yyyymmdd>.<os>-<arch>.<n>`, which is also the git
+  tag and the manifest's `version`. A new version is made when a tool, the runtime closure, an alias set or this contract changes, not for
+  every SDK Preview; the input SDK stays recorded in the release record.
+- **Assets** (`tools/create_host_tools_release.py pack`, written into a new directory): `crt-<version>.tar.xz` (one top-level
+  `crt-host-tools-<os>-<arch>/`, sorted members, owner 0, mtime 0, relative symlinks kept, deterministic), `SHA256SUMS-host-tools-<os>-<arch>`
+  and `host-tools-release-record-<os>-<arch>.json`. The record names the packer/assembler commit and whether the tree was clean, the source
+  SDK identity, the make source/notice correspondence, the bundle's manifest/content identity and the six consumer pins (`url`, `name`,
+  `size`, `sha256`, `manifest_sha256`, `version`). A bundle assembled from a dirty tree is refused unless `--allow-dirty`, which is for
+  rehearsals; a consumer must not pin it.
+- **Verification.** `create_host_tools_release.py verify` re-checks the archive against the record, extracts it with the stdlib `data` filter
+  into a new directory, rejects foreign/special/escaping members and non-deterministic metadata, and re-verifies the extracted bundle's
+  inventory, native images and execute bits. Native replay on each host is `tools/replay_host_tools_<os>.py`.
 
 Producer procedures, exercised native scope and original receipts belong to
 [host-tools acceptance](../acceptance/host_tools_acceptance.md); CLI command/JSON
