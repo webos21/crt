@@ -105,6 +105,12 @@ Ordered; each step needs its own approval. The owner decides keys, custody and w
    signature yet (only `fetch` takes them). Add `publisher_key` and signature locations to those inputs, report `signature_verified` in the
    acquisition record and let a pin require it. This is CLI work, not CRT's.
 5. **Sign commits and tags** of release-bearing refs so the repository history that carries pins is authenticated by a key as well.
+   - 2026-11-16: a **signed fingerprint notice** was issued first: [`fingerprint-notice-2026-11-16.txt`](fingerprint-notice-2026-11-16.txt) with its detached
+     signature [`.sig`](fingerprint-notice-2026-11-16.txt.sig) (same RSA-PSS format; verification commands are in the notice). It states the fingerprint, the
+     publication places, that releases are signed only when a `.sig` exists, and that a key change is valid only if announced by a notice signed with the
+     previous key. Verified from the committed bytes with `openssl` and the stdlib verifier; the same signature fails on a one-byte-changed copy. It lets a
+     user who recorded the fingerprint check this statement without trusting any web page, and lets a later rotation be chained to this key; it does not by
+     itself prove who the key holder is, and signed commits/tags remain open.
 6. **Key lifecycle policy.** Decide and document, before the first non-test signature is relied on:
    - *Expiry/review*: a review date for the key (for example two years) after which it is rotated or consciously renewed.
    - *Rotation*: publish the new fingerprint through every channel in step 2, sign the rotation notice with the old key, and overlap so older
