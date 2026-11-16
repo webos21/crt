@@ -470,4 +470,25 @@ Versions are `v0.1.0-hosttools.20261116.linux-x86_64.1` and `...linux-aarch64.1`
 exactly these bytes (the workflow publishes nothing, and a re-run at another commit changes the manifest digest). The aarch64 tools ran only on the
 hosted runner's own replay; the glibc-2.39 root, the CLI acceptance/negative controls and the five port suites were run for x86_64 only (above).
 
-**Not done.** Draft upload -> re-download comparison -> public release for both hosts, the aarch64 CLI/port-suite runs, and the CLI pin and hosted integration.
+## Linux host-tools Preview publication (2026-11-16)
+
+Both candidates above were published as prereleases of `webos21/crt`, tag target `5fc1a7d639f27a5b8b38f81035b571a675c1e51a`
+(the candidate commit; later documentation commits do not move the tags): draft upload, byte-for-byte comparison of the re-downloaded draft assets
+with the workflow artifacts (all six identical), then publication at 2026-11-16T06:43Z.
+
+| Release | Archive size | Archive SHA-256 | Bundle manifest SHA-256 |
+| --- | --- | --- | --- |
+| [`v0.1.0-hosttools.20261116.linux-x86_64.1`](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261116.linux-x86_64.1) | 626632 | `811748496ed027339916609fceaee1a78c806d9dbdbb3aaa8b3a035095972155` | `9bd3ddf18176c5a875e137846edc4f7e62dc2f178e1f1afcc97533a4cc5f192a` |
+| [`v0.1.0-hosttools.20261116.linux-aarch64.1`](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261116.linux-aarch64.1) | 589644 | `7a4c26ada280e8a877d05d3adab9c76df2b6dc181a96cac42e8977030019c75f` | `2ea7bff56cd784dd2dd5b6d5a858b59bf41a1585bf3f77e8b09e79c8b4b7b3c2` |
+
+Each release carries the archive, `SHA256SUMS-host-tools-linux-<arch>` and `host-tools-release-record-linux-<arch>.json`; the record's
+`consumer_pin` holds the six values a consumer pins (`url`, `name`, `size`, `sha256`, `manifest_sha256`, `version`).
+
+**Public download check (unauthenticated, redirect followed).** Both archives match the checksum file, the record's size/digest and the workflow
+candidate. The published **x86_64** archive was then verified with `create_host_tools_release.py verify` and replayed natively: **40/40**, covering
+the empty-environment sandbox, an Ubuntu 24.04.5 (glibc 2.39) root and the CLI's acceptance plus its eight fail-closed controls (changed alias, extra
+file, missing alias, escaping symlink, lost execute bit, wrong pin, unknown promotion, wrong host). The published **aarch64** archive was checked for
+digest/size and was executed only by the hosted runner's replay (16/16 on the workflow artifact); no aarch64 glibc-root, CLI-control or port-suite run
+exists yet. Publisher authentication stays `not_verified`: trust is the pinned digests.
+
+**Not done.** The CLI pins and hosted integration (five port suites on both Linux runners), aarch64 CLI/port-suite evidence, and macOS/Windows bundles.
