@@ -1,0 +1,18 @@
+{
+  "format": 0,
+  "note": "Published Dev SDK Previews the independent host-tools bundle is assembled from. The release manifest SHA-256 is the pin; the archive digest comes from that manifest. A change here is a reviewed change.",
+  "hosts": {
+    "linux-x86_64": {
+      "repository": "webos21/crt",
+      "sdk_tag": "v0.0.1-preview.20261110.4",
+      "release_manifest": "release-manifest-dev-linux-x86_64.json",
+      "release_manifest_sha256": "983dbcf143b1fe227bf519f07ec153ce5baf50e190382222995770affe43b2c3"
+    },
+    "linux-aarch64": {
+      "repository": "webos21/crt",
+      "sdk_tag": "v0.0.1-preview.20261110.linux.arm64.2",
+      "release_manifest": "release-manifest-dev-linux-aarch64.json",
+      "release_manifest_sha256": "ba77b26edfa0413df5e8c17309506d7ae6ecf134ae7e9908e3742bc562067be3"
+    }
+  }
+}

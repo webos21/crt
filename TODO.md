@@ -95,7 +95,8 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   [`crt_host_tools_publication_request.md`](https://github.com/webos21/crt-cli/blob/main/docs/crt_host_tools_publication_request.md)).
   Contract, assembler `--promotion preview`, release packer/verifier and Linux/x86_64 rehearsal are recorded in
   [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#linuxx86_64-preview-bundle-rehearsal-from-the-public-dev-sdk-2026-11-16).
-  Open: clean-tree candidate, Linux/aarch64 native assembly/replay, draft upload -> re-download -> public release for both,
+  Manual workflow `host-tools.yml` assembles/replays both Linux hosts from pinned public Dev SDKs.
+  Open: clean-tree candidate, its hosted x86_64/aarch64 results, draft upload -> re-download -> public release for both,
   then the CLI pins the six fields.
 
 - [ ] Qualify an independent Windows/x64 host-tools bundle with actual private

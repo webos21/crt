@@ -448,6 +448,12 @@ promotion and a wrong host (the last two with their own consistent pin).
 drive the reviewed zlib recipe, not the public-SDK-to-hosted-CI combination. The CLI needed a one-line compatibility change (accept `preview`,
 report the manifest's own label); it is in the CLI repository's working tree, not yet committed or released.
 
-**Not done.** A clean-tree candidate, the aarch64 bundle (the `ubuntu-26.04-arm` runner), publication/draft re-download, and the CLI pin and
-hosted integration. Reproduction: assemble with `--promotion preview` from the installed public SDK, `create_host_tools_release.py pack`/`verify`,
+**Linux/aarch64 path.** This machine cannot assemble an aarch64 bundle. `.github/workflows/host-tools.yml` (manual, publishes nothing) runs
+`tools/ci_host_tools_release.py` on `ubuntu-26.04` and `ubuntu-26.04-arm`: it downloads the pinned public Dev SDK Preview (x86_64
+`v0.0.1-preview.20261110.4`, aarch64 `v0.0.1-preview.20261110.linux.arm64.2`; release-manifest SHA-256 pins in `.github/ci/host-tools-sdk-pins.json`),
+checks the archive against its manifest, assembles with `--promotion preview`, packs, verifies the extraction and replays it, then uploads the
+candidate and evidence. The driver passed locally on x86_64 against the public `.4` SDK (16/16 replay cases there; the glibc 2.39 and CLI cases above
+need `--glibc-root`/`--cli`). Its hosted aarch64 result is recorded separately once run.
+
+**Not done.** A clean-tree candidate, the aarch64 bundle result, publication/draft re-download, and the CLI pin and hosted integration. Reproduction: assemble with `--promotion preview` from the installed public SDK, `create_host_tools_release.py pack`/`verify`,
 then `replay_host_tools_linux.py --bundle <extracted> --output <new> --glibc-root <ubuntu-base> --cli <crt-cli>`.
