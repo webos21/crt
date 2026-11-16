@@ -25,6 +25,13 @@ authentication. Manual account/repository trust and TLS are this Preview's
 explicit bootstrap boundary; unattended channels require a separate authority,
 key/expiry/rotation/revocation and recovery decision before adoption.
 
+### Publisher signing key (published 2026-11-16)
+
+The owner generated a release signing key; its public half and SHA-256 fingerprint are published in
+[Publisher Signing Key and Roadmap](../security/publisher_signing.md). No release has been signed, so every artifact stays
+`publisher_authentication: not_verified` and the manual-pin model above remains the only trust anchor. The roadmap there owns the signing
+procedure, verification commands, the independent-channel and key-lifecycle steps, and the consumer work still open.
+
 ## Download and promotion procedure
 
 1. Publish the selected producer source, review the clean candidate, source/

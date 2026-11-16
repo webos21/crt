@@ -10,6 +10,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 - [Build-system Consolidation](acceptance/build_system_acceptance.md)
 - [Full / Development SDK Split](acceptance/sdk_split_acceptance.md)
 - [Independent Host Tools](acceptance/host_tools_acceptance.md)
+- [Publisher Signing Key and Roadmap](security/publisher_signing.md)
 - [Release Qualification and Assembly Rehearsal](acceptance/release_qualification.md)
 - [Allocator Baseline Decision Record](acceptance/allocator_baseline.md)
 - [Encode & Capture Acceptance](acceptance/crtmedia_encode_capture_acceptance.md)
