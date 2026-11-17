@@ -89,6 +89,35 @@ Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`; these are not artifact locks.
 Follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review);
 the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
+#### Dev SDK GitHub CI/CD (integration and release workflows)
+
+The producer-side counterpart of `crt-cli`'s `integration.yml`/`release.yml`; the CLI repository's final artifact is an executable, CRT's
+is the SDK, so CRT builds and verifies the SDK once and the CLI consumes the *published* bytes (no duplicate builds of one source). Scope
+is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage items in Planned stay separate. Existing pieces to reuse:
+`ci.yml` (5-host build/test gate, stays the required check), `host-tools.yml` (manual producer workflow, publishes nothing), the
+`crt-dev-release` target / `tools/crt_sdk_release.py` (assets, manifest, toolchain contract), publisher signing
+([roadmap](docs/security/publisher_signing.md)). Design and procedure go in `docs/guides/sdk_ci.md`; evidence in
+[release qualification](docs/acceptance/release_qualification.md).
+
+- [ ] **S0** Pin the CI inputs the producer trusts: Action commits and the LLVM versions are literals in the workflow, enforced by
+  `tools/test_sdk_workflows.py` (SHA-pinned actions, read-only permissions, valid CI tag, scripts and trigger paths exist). Still open:
+  the published CLI Preview used as consumer (S2) in `.github/ci/sdk-pins.json` once a step reads it; record which checks are required
+  (`ci.yml` stays; `sdk-integration` is *not* required at first); list unsupported OS/arch pairs as unverified, not skipped silently.
+- [ ] **S1** `sdk-integration.yml` (manual + changed-path trigger; Linux x86_64/aarch64, macOS/arm64, Windows/x64): build `crt-dev-release`
+  with a CI-only version tag, then `tools/ci_sdk_release.py verify` over the assets (SHA256SUMS, release manifest, toolchain contract,
+  install metadata, no host path in the contract), extract in a clean directory outside the build tree and run the existing external
+  C/C++ consumer. Upload the assets as artifacts with their digests. Record the GitHub Actions run IDs in acceptance.
+- [ ] **S2** Consumer smoke by the pinned, signature-checked published CLI Preview: `sdk install` of the produced archive with its
+  manifest pin, then C and C++ `new`/`build`/`test`/`run` and a warm rebuild (Linux first; macOS/Windows with their Preview CLIs).
+- [ ] **S3** `sdk-release.yml` (manual, `dry_run` default true): `package` (clean commit on `main` with a green gate, same build as S1) ->
+  `verify` (separate runner, S2 on the packaged bytes) -> approval-gated `publish` in a `release` environment (draft, re-download,
+  byte compare, then non-latest prerelease). Notes from a reviewed template with digest tokens; tag = the source commit. Dry run first.
+- [ ] **S4** One real Dev SDK Preview published by `sdk-release.yml`; public bytes re-downloaded and checked; owner signs the archive
+  offline and `.sig` is attached (publisher signing procedure); acceptance records run IDs, approval and what was not covered.
+- [ ] **S5** CLI adopts it through the existing pin promotion ([policy](https://github.com/webos21/crt-cli/blob/main/docs/guides/development.md#ci-pin-promotion));
+  producer->consumer order: publish, sign, then update the CLI lock.
+- [ ] **S6** (later) Full SDK release workflow reusing S1-S4 once the Dev SDK flow is stable; not scheduled.
+
 #### Remaining host qualification
 
 - [ ] **Independent host-tools public Preview** (CLI D1 integration input; request

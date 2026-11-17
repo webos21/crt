@@ -8,6 +8,15 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-17
+
+### Dev SDK integration workflow and the independent asset verifier (not yet run on GitHub)
+
+Planned the Dev SDK GitHub CI/CD (S0-S6 in TODO) and implemented its first part: `tools/ci_sdk_release.py verify` (stdlib, imports nothing of the producer),
+`.github/workflows/sdk-integration.yml` (four native hosts, nothing published, not a required check), `tools/test_sdk_workflows.py` pin rules and the guide
+[sdk_ci](docs/guides/sdk_ci.md). Local Linux/x86_64 evidence and its limits: [release qualification](docs/acceptance/release_qualification.md#dev-sdk-integration-workflow-2026-11-17).
+No SDK, runtime or ABI change.
+
 ## 2026-11-12
 
 ### Remove completed SDK/CLI gates from the active work queue

@@ -875,3 +875,20 @@ and new native-host qualification retain their own gates. STATUS is unchanged.
 comparison, cross-build receipt and consumer identities after documentation.
 The consumer owns the product-input/binary reconciliation and original CLI
 execution receipts; no compiled artifact is relabeled by these later documents.
+
+## Dev SDK integration workflow (2026-11-17)
+
+`sdk-integration.yml` ([guide](../guides/sdk_ci.md)) builds `crt-dev-release` per host and verifies the asset set with `tools/ci_sdk_release.py` (a verifier that shares no code
+with the producer). **Status: written and locally exercised on Linux/x86_64 only; no GitHub-hosted run exists yet.** No host other than Linux/x86_64 has run any of it.
+
+Local evidence (Linux/x86_64, LLVM 21.1.8, clean `git worktree` of `ded8e99`, `out/sdk-ci`, Release, tag `v0.0.1-ci.local1`):
+
+- The workflow's own commands (`cmake --preset linux-host-ninja-debug -B out/sdk-ci ... -DCRT_RELEASE_TAG=...`, `--target crt-dev-release`) produced the four assets, the sums file and the manifest
+  (1620 bytes). A first attempt with a build directory outside the checkout failed in `crt-port-build.py` ("source not found"): the tool derives its port root from `<checkout>/out/<name>`; the guide records the rule.
+- `ci_sdk_release.py verify` accepts the set (4 assets, content identity re-derived from the extracted tree) and `test_dev_sdk_external.py` on the *extracted* archive passes under bubblewrap with the checkout hidden.
+- Against the real published Preview `v0.0.1-preview.20261110.4` the verifier reproduces the documented manifest pin `983dbcf1...b2c3` and content identity `22107183...ca81`; 15 verifier tests (11 tamper cases: changed archive byte, missing/extra file, wrong commit/version/target,
+  false install metadata, non-portable or unbound contract, path escape, hard link, outside-root member, VERSION mismatch) and 7 workflow rule tests pass.
+
+Not covered: any hosted run (Linux/aarch64, macOS/arm64, Windows/x64 are untested here, including the macOS Seatbelt and Windows restricted-token paths of the external consumer and the Windows LLVM installer step); the CLI install smoke (S2); the release workflow (S3);
+timing or cache behaviour on runners. Hosted run IDs are recorded here when they exist.
+

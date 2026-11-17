@@ -57,6 +57,7 @@ Current work is in [TODO](../TODO.md); completed work is in
 - [LGPL Source Offer](guides/lgpl_source_offer.md)
 - [Bionic Import Policy](guides/import_bionic.md)
 - [Developer Preview Release](guides/release_preview.md)
+- [Dev SDK CI and release workflows](guides/sdk_ci.md)
 - [Shell Import And Bootstrap Policy](guides/shell_import.md)
 
 ## Upstream porting plans, gaps, and status

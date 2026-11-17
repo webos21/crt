@@ -1,0 +1,239 @@
+name: SDK integration
+
+# Builds the Development SDK release assets natively on every supported host and verifies them from the bytes alone
+# (tools/ci_sdk_release.py), then exercises the *extracted* archive as an external consumer with the producer checkout hidden
+# (bubblewrap on Linux, Seatbelt on macOS, a restricted token on Windows). It publishes nothing and is not a required check: ci.yml stays the required gate for every change; this is the
+# slower, SDK-shaped proof that the release path produces a coherent, portable asset set. The version tag is CI-only
+# (v0.0.1-ci.<run id>) and never names a Preview. Runs on SDK-relevant pushes to main, weekly, and by hand.
+# Design and procedure: docs/guides/sdk_ci.md.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 4 * * 1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sdk-integration.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'include/**'
+      - 'libc/**'
+      - 'libm/**'
+      - 'libdl/**'
+      - 'libstdc++/**'
+      - 'porting/recipes/**'
+      - 'tools/build_dev_sdk.py'
+      - 'tools/crt_dev_profile.py'
+      - 'tools/crt_sdk_*.py'
+      - 'tools/create_dist.py'
+      - 'tools/export_cli_toolchain.py'
+      - 'tools/prepare_release_assets.py'
+      - 'tools/verify_dist.py'
+      - 'tools/ci_sdk_release.py'
+      - 'tools/test_ci_sdk_release.py'
+      - 'tools/test_dev_sdk*.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CI-only tag: valid for the release tooling (vMAJOR.MINOR.PATCH-prerelease), never published, never a Preview name.
+  SDK_CI_TAG: v0.0.1-ci.${{ github.run_id }}
+
+jobs:
+  unit:
+    name: verifier tests
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the sources under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Tests of the asset verifier and the workflow pin rules
+        run: python -m unittest discover -s tools -p "test_ci_sdk_release.py" && python -m unittest discover -s tools -p "test_sdk_workflows.py"
+
+  sdk:
+    name: sdk (${{ matrix.host }})
+    needs: unit
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: linux-x86_64
+            runner: ubuntu-26.04
+            preset: linux-host-ninja-debug
+            os: linux
+            arch: x86_64
+          - host: linux-aarch64
+            runner: ubuntu-26.04-arm
+            preset: linux-host-ninja-debug
+            os: linux
+            arch: aarch64
+          - host: macos-aarch64
+            runner: macos-latest
+            preset: macos-host-ninja-debug
+            os: macos
+            arch: aarch64
+          - host: windows-x86_64
+            runner: windows-latest
+            preset: windows-host-ninja-debug
+            os: windows
+            arch: x86_64
+            msvc_arch: x64
+            llvm_asset: win64
+    steps:
+      - name: Check out the producer commit under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          # Ubuntu 26.04 carries LLVM 21 (the qualified major: TLS descriptor code generation needs it) in its archive.
+          # libc++ development packages are needed by CMake's compiler ABI detection before CRT's own flags apply.
+          sudo apt-get install -y -q --no-install-recommends clang-21 lld-21 llvm-21 libclang-rt-21-dev ninja-build cmake libc++-21-dev libc++abi-21-dev bubblewrap
+          echo /usr/lib/llvm-21/bin >> "$GITHUB_PATH"
+          /usr/lib/llvm-21/bin/clang --version
+          cmake --version
+          ninja --version
+          # Ubuntu restricts unprivileged user namespaces by default; the external-consumer replay needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --unshare-all --ro-bind / / true
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja cmake
+          clang --version
+          cmake --version
+          ninja --version
+
+      - name: Set up the MSVC developer environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      - name: Install LLVM 22.1.8 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LLVM_PIN_TAG: llvmorg-22.1.8
+        run: |
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "crt-sdk-ci" }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/llvm/llvm-project/releases/tags/$env:LLVM_PIN_TAG" -Headers $headers
+          $asset = $release.assets | Where-Object {
+            $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.msi" -or $_.name -like "LLVM-*-${{ matrix.llvm_asset }}.exe"
+          } | Select-Object -First 1
+          if (-not $asset) { throw "no LLVM '${{ matrix.llvm_asset }}' installer in $($release.tag_name)" }
+          $ext = [System.IO.Path]::GetExtension($asset.name)
+          $installer = Join-Path $env:RUNNER_TEMP "llvm-installer$ext"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer
+          if ($ext -eq ".msi") {
+            Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "`"$installer`"", "/quiet", "/qn", "/norestart" -Wait
+          } else {
+            Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+          }
+          $llvmBin = "C:\Program Files\LLVM\bin"
+          if (-not (Test-Path $llvmBin)) { throw "LLVM was not installed at $llvmBin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $llvmBin
+
+      - name: Report the toolchain
+        shell: bash
+        run: |
+          clang --version
+          clang++ --version
+          cmake --version
+          ninja --version
+
+      - name: Configure the SDK release build
+        shell: bash
+        run: >
+          cmake --preset ${{ matrix.preset }} -B out/sdk-ci
+          -DCMAKE_BUILD_TYPE=Release
+          -DCRTGFX_ENABLE_SKIA=OFF -DCRTMEDIA_ENABLE_FFMPEG=OFF -DCRTMEDIA_ENABLE_CURL=OFF -DCRTUI_ENABLE_LVGL=OFF
+          -DCRT_RELEASE_TAG="$SDK_CI_TAG"
+
+      - name: Build the Development SDK release assets
+        shell: bash
+        run: cmake --build out/sdk-ci --target crt-dev-release --parallel 4
+
+      - name: Verify the assets from their bytes
+        shell: bash
+        run: >
+          python tools/ci_sdk_release.py verify
+          --assets out/sdk-ci/release/dev --os ${{ matrix.os }} --arch ${{ matrix.arch }}
+          --version "$SDK_CI_TAG" --commit "$GITHUB_SHA"
+          --forbid "$GITHUB_WORKSPACE" --forbid "${GITHUB_WORKSPACE//\\//}" --forbid "$RUNNER_TEMP" --forbid "${RUNNER_TEMP//\\//}"
+          --keep-extracted "$RUNNER_TEMP/sdk-extracted"
+          --json "$RUNNER_TEMP/sdk-verification.json"
+
+      - name: External consumer of the extracted archive with the producer checkout hidden
+        shell: bash
+        run: >
+          python tools/test_dev_sdk_external.py
+          --sdk-root "$RUNNER_TEMP/sdk-extracted/dev"
+          --output "$RUNNER_TEMP/sdk-external"
+
+      - name: Summarize the asset set
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Dev SDK assets (${{ matrix.host }})"
+            echo
+            echo "Tag \`$SDK_CI_TAG\` from \`$GITHUB_SHA\`. Verified by \`tools/ci_sdk_release.py\`; nothing was published."
+            echo
+            if [ -f "$RUNNER_TEMP/sdk-verification.json" ]; then
+              python - "$RUNNER_TEMP/sdk-verification.json" <<'PY'
+          import json, sys
+          doc = json.load(open(sys.argv[1], encoding='utf-8'))
+          print('| asset | bytes | SHA-256 |')
+          print('| --- | ---: | --- |')
+          for a in doc.get('assets', []):
+              print('| `%s` | %d | `%s` |' % (a['name'], a['size'], a['sha256']))
+          m = doc.get('manifest')
+          if m:
+              print()
+              print('Manifest pin: `%s` (%d bytes) `%s`' % (m['name'], m['size'], m['sha256']))
+          print('Content identity: `%s`' % doc.get('content_sha256'))
+          print('Problems: %d' % len(doc.get('problems', [])))
+          PY
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the assets and their verification
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-${{ matrix.host }}-${{ github.sha }}
+          path: |
+            out/sdk-ci/release/dev/*
+            ${{ runner.temp }}/sdk-verification.json
+            ${{ runner.temp }}/sdk-external/result.json
+          if-no-files-found: warn
+          retention-days: 14
