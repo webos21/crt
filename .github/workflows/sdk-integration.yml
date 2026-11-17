@@ -237,6 +237,33 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Collect the external consumer's logs after a failure
+        if: failure()
+        shell: bash
+        run: |
+          # The sandboxed consumer writes consumer.log into its own work directory under the temp root, not into --output.
+          python - <<'PY'
+          import os, shutil, tempfile
+          from pathlib import Path
+          destination = Path(os.environ['RUNNER_TEMP']) / 'sdk-external-logs'
+          destination.mkdir(parents=True, exist_ok=True)
+          for work in Path(tempfile.gettempdir()).glob('crt dev external*'):
+              for log in work.rglob('*.log'):
+                  shutil.copy2(log, destination / (work.name.replace(' ', '_') + '-' + log.name))
+          print(sorted(item.name for item in destination.iterdir()))
+          PY
+
+      - name: Keep the external consumer's logs of a failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-${{ matrix.host }}-${{ github.sha }}-external-logs
+          path: |
+            ${{ runner.temp }}/sdk-external-logs/*
+            ${{ runner.temp }}/sdk-external/*
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Keep the port build logs of a failed build
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

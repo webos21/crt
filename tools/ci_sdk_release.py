@@ -17,6 +17,7 @@ quote. Exit status is non-zero on any problem; every problem found is listed, no
 import argparse
 import hashlib
 import json
+import lzma
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -25,6 +26,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+import zlib
 
 VERSION_RE = re.compile(r'^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.]*)?$')
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
@@ -301,7 +303,7 @@ def verify(assets, os_name, arch, version, commit=None, forbidden=(), keep=None)
             target.mkdir(parents=True, exist_ok=True)
             try:
                 extracted_ok = extract(archive, target, 'dev', problems)
-            except (OSError, tarfile.TarError, zipfile.BadZipFile) as error:
+            except (OSError, EOFError, lzma.LZMAError, zlib.error, tarfile.TarError, zipfile.BadZipFile) as error:
                 problems.add('archive does not extract: %s' % error)
                 extracted_ok = False
             if extracted_ok:

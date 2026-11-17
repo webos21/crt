@@ -756,10 +756,37 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     # runtime probes, run as part of the *build* step (not the test
     # step), never inherited it. Setting it here, once, generically,
     # covers both without needing an mbedtls-specific workaround.
-    if target_os in ("linux", "macos"):
-        runtime_lib_var = "LD_LIBRARY_PATH" if target_os == "linux" else "DYLD_LIBRARY_PATH"
-        existing = env.get(runtime_lib_var, "")
-        env[runtime_lib_var] = f"{port_prefix_env}/lib{os.pathsep}{existing}" if existing else f"{port_prefix_env}/lib"
+    # (macOS now uses DYLD_FALLBACK_LIBRARY_PATH, which finds the bare install names above without shadowing the build
+    # host's own libraries; see apply_runtime_library_search.)
+    apply_runtime_library_search(env, target_os, f"{port_prefix_env}/lib")
+    return env
+
+
+#: dyld's default fallback search order; DYLD_FALLBACK_LIBRARY_PATH replaces it rather than extending it.
+MACOS_DEFAULT_FALLBACK_DIRS = ("$HOME/lib", "/usr/local/lib", "/usr/lib")
+
+
+def apply_runtime_library_search(env, target_os, lib_dir):
+    """Let configure's own runtime probes find the port prefix's libraries without letting them shadow the build host's.
+
+    Linux keeps LD_LIBRARY_PATH. macOS must NOT use DYLD_LIBRARY_PATH: it is searched *before* a library's own path, so when the
+    prefix is the Development SDK itself (which carries CRT's libc++.1.dylib) Xcode's clang, which configure runs as a host
+    tool, loaded CRT's libc++ instead of the system one and died on `Symbol not found: __ZNSt12length_errorD1Ev`
+    (hosted macOS run 44024081269, zlib configure). DYLD_FALLBACK_LIBRARY_PATH is searched only after the normal lookup, so a
+    library with a real path (/usr/lib/libc++.1.dylib) is never replaced, while a bare install name such as mbedtls's
+    `libmbedcrypto.dylib` (what the probe needs) is still found. The dyld defaults are listed explicitly because setting the
+    variable replaces them.
+    """
+    if target_os == "linux":
+        existing = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{existing}" if existing else lib_dir
+    elif target_os == "macos":
+        env.pop("DYLD_LIBRARY_PATH", None)
+        existing = env.get("DYLD_FALLBACK_LIBRARY_PATH", "")
+        entries = [lib_dir] + [part for part in existing.split(os.pathsep) if part and part != lib_dir]
+        if not existing:
+            entries += [item.replace("$HOME", env.get("HOME", "")) for item in MACOS_DEFAULT_FALLBACK_DIRS if env.get("HOME") or "$HOME" not in item]
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = os.pathsep.join(entries)
     return env
 
 

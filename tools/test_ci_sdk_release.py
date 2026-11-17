@@ -111,6 +111,21 @@ class VerifyTest(unittest.TestCase):
         self.assertFails('manifest SHA-256 differs')
         self.assertFails('sums file SHA-256 differs')
 
+    def test_a_corrupt_compressed_stream_is_a_problem_not_a_crash(self):
+        # Tar headers carry mtimes, so a flipped byte lands in different places on different runs; every placement must be
+        # reported, including the ones that break the xz structure itself (this crashed with lzma.LZMAError on a hosted run).
+        self.fixture.build()
+        archive = self.fixture.assets / self.fixture.names['archive']
+        original = archive.read_bytes()
+        for position in range(12, len(original) - 12, max(1, len(original) // 40)):
+            data = bytearray(original)
+            data[position] ^= 0xFF
+            archive.write_bytes(bytes(data))
+            problems = list(self.fixture.verify()['problems'])
+            self.assertTrue(any('manifest SHA-256 differs' in item for item in problems), (position, problems))
+        archive.write_bytes(original[:len(original) // 2])
+        self.assertFails('manifest size differs')
+
     def test_a_missing_and_an_extra_file_fail(self):
         self.fixture.build()
         (self.fixture.assets / self.fixture.names['sources'][0]).unlink()
