@@ -22,7 +22,7 @@ on:
       - 'libc/**'
       - 'libm/**'
       - 'libdl/**'
-      - 'libstdc++/**'
+      - 'libstdc\+\+/**'
       - 'porting/recipes/**'
       - 'tools/build_dev_sdk.py'
       - 'tools/crt_dev_profile.py'

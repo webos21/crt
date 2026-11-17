@@ -61,7 +61,10 @@ class WorkflowRulesTest(unittest.TestCase):
         self.assertTrue(patterns)
         files = tracked_files()
         for pattern in patterns:
-            regex = re.compile(fnmatch.translate(pattern.replace('**', '*')))
+            # GitHub filter patterns treat + ? [ ] ! as operators; a literal one must be escaped (an unescaped `+` made the
+            # whole workflow unparseable: "push event contained invalid paths patterns: libstdc++/**").
+            self.assertNotRegex(re.sub(r'\\.', '', pattern), r'[+?\[\]!]', 'unescaped filter operator in %r' % pattern)
+            regex = re.compile(fnmatch.translate(pattern.replace('\\', '').replace('**', '*')))
             self.assertTrue(any(regex.match(name) for name in files), 'trigger path %r matches no file' % pattern)
 
     def test_the_unit_job_runs_the_tests_it_names(self):
