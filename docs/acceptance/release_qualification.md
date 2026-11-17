@@ -1009,3 +1009,22 @@ consumer stage that failed in #8, and uploads the assets and verification receip
 [Core CI #515](https://github.com/webos21/crt/actions/runs/44038886604) also passes
 all five native jobs at that commit.
 
+## Hosted Windows/arm64 SDK integration (2026-11-17)
+
+`sdk-integration.yml` gained a `windows-aarch64` row on `windows-11-arm` (image `windows-11-vs2026-arm64` 20261112.217.1, MSVC arm64 developer environment, native
+LLVM 22.1.8 `woa64`, Windows SDK `um/arm64`). Its consumer smoke (S2) is explicitly **not run** (`cli_preview: none`) because no `win-arm64` crt-cli Preview exists.
+
+**First run, failure.** [Run 44048663686](https://github.com/webos21/crt/actions/runs/44048663686) at `48573c7`: the other four hosts passed; `windows-aarch64` built the SDK and
+`crt-dev-release`, passed `ci_sdk_release.py verify` and failed only in the external-consumer proof (`producer/SDK root remains visible: C:\crt\crt`). The proof was not changed.
+
+**Cause.** A diagnostic on both Windows runners (temporary branch, deleted; run [44053695065](https://github.com/webos21/crt/actions/runs/44053695065)) probed the proof's restricted token after the
+workflow's private-root step. On `windows-latest` (workspace on `D:`) the checkout and the extracted SDK were denied. On `windows-11-arm` (workspace on `C:`) both were listable, and
+`icacls` showed `Authenticated Users` and `Users:(RX)` still on the checkout after `/inheritance:r /grant:r`, which copies inherited entries and replaces only the accounts it names. After
+`icacls /remove:g *S-1-5-32-545 *S-1-5-11 *S-1-1-0` both were denied on `windows-11-arm`; the other runner was unchanged. The parents `C:\crt`, `C:` and `_temp` stay listable by design: the proof hides only the checkout and the extracted SDK.
+
+**Fix and result.** The step now removes those groups and prints the resulting ACL (`aafae3d`). [Run 44053999117](https://github.com/webos21/crt/actions/runs/44053999117) at `aafae3d`
+(`workflow_dispatch`): the verifier tests and all five `sdk` jobs succeed, including `windows-aarch64` (asset set `OK`, manifest `9ea4b49b...f825`, content `79bd424e...8a8b` for
+`v0.0.1-ci.44053999117`, never a published name) and its external-consumer proof; the consumer smoke step is skipped and a notice plus a `NOT RUN` summary are written. The required `CI`
+runs at that commit pass ([#523](https://github.com/webos21/crt/actions/runs/44053976318), push; #524, pull request).
+
+Not covered: the consumer smoke for Windows/arm64 (S2) and `sdk-release.yml` (S3). The CI tag build is not a Preview and no asset was published.
