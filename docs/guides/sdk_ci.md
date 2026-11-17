@@ -67,6 +67,11 @@ Not proven here: Full SDK content, GPU/window/media behaviour, publisher authent
   `.github/ci/sdk-pins.json` has no pin and the consumer smoke (S2) cannot run. Its row says `cli_preview: none`: the run logs a notice
   and a "NOT RUN" summary line instead of silently passing, and `tools/test_sdk_workflows.py` fails if a host has neither a pin nor that
   field, or both. Adopt the host by adding its pin and deleting the field together.
+- The Windows isolation proof (the extracted archive consumed under a restricted token with the producer hidden) needs the producer checkout
+  and the extracted SDK to be private to the runner user. On `windows-11-arm` the workspace is under `C:` and keeps `Users` and
+  `Authenticated Users` entries after `icacls /inheritance:r` (which copies inherited entries) and `/grant:r` (which replaces only the accounts it
+  names), so the first hosted run reported the checkout visible; the workflow now also removes those groups with `/remove:g` and prints the
+  resulting ACL. The windows-latest workspace on `D:` was already private. The proof's denial check was not changed.
 
 ## Running the pieces locally
 

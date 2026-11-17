@@ -232,9 +232,16 @@ jobs:
           # whatever Users/Everyone/the logon SID may read. A checkout under a developer's profile grants those nothing, but a hosted
           # runner's workspace (D:\a) inherits broad read grants and was reported "still visible". Give both roots the access a
           # developer profile has (this user, SYSTEM, Administrators) so the proof tests what it claims; its denial check is unchanged.
+          # `/inheritance:r` only turns the inherited entries into explicit ones, and `/grant:r` replaces only the accounts it names,
+          # so on a volume whose parent grants Users/Authenticated Users (the windows-11-arm image's C:\a, measured 2026-11-17) those
+          # broad grants survive and the restricted token still lists the directory. Remove them explicitly and show the result.
           foreach ($path in @($env:GITHUB_WORKSPACE, (Join-Path $env:RUNNER_TEMP 'sdk-extracted'))) {
             icacls $path /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Host
             if ($LASTEXITCODE -ne 0) { throw "icacls failed for $path" }
+            icacls $path /remove:g "*S-1-5-32-545" "*S-1-5-11" "*S-1-1-0" | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "icacls could not remove the broad grants from $path" }
+            Write-Host "ACL of ${path}:"
+            icacls $path | Out-Host
           }
 
       - name: External consumer of the extracted archive with the producer checkout hidden
