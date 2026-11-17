@@ -1,0 +1,60 @@
+{
+  "schema": "crt.sdk-ci-pins",
+  "format": 0,
+  "note": "Inputs the SDK integration smoke (tools/ci_sdk_cli_smoke.py) trusts: the published CRT-CLI Preview that installs the freshly built Dev SDK, and the publisher key that must have signed it. Mirrors the bootstrap pins of webos21/crt-cli .github/ci/pins.json. Change only in a reviewed commit that cites the CLI release record and re-checks the digests against the published bytes; never a moving tag.",
+  "cli_release_base": "https://github.com/webos21/crt-cli/releases/download/",
+  "publisher": {
+    "key_file": "docs/security/crt-release-publisher.pub",
+    "key_spki_sha256": "59218576956e493476bc36f7385d8e01a03ff9b92946a531b013ad3937d43fa2"
+  },
+  "hosts": {
+    "linux-x86_64": {
+      "release": "v0.1.0-preview.20261116.linux-x86_64.1",
+      "asset": "crt-cli-0.1.0-dev-linux-x86_64-preview.20261116.1.tar.xz",
+      "size": 5261236,
+      "sha256": "52fbe5d1950740e1b7e52b88e67169ea390f83a09f9b03be9c1867555ec7fdca",
+      "version": "0.1.0-dev",
+      "signature": {
+        "name": "crt-cli-0.1.0-dev-linux-x86_64-preview.20261116.1.tar.xz.sig",
+        "size": 256,
+        "sha256": "eb2f706d3cee016d75c62c4e348d814d433c9e8502e5cb45fadfb1feabe2e8cc"
+      }
+    },
+    "linux-aarch64": {
+      "release": "v0.1.0-preview.20261116.linux-arm64.1",
+      "asset": "crt-cli-0.1.0-dev-linux-aarch64-preview.20261116.1.tar.xz",
+      "size": 5063404,
+      "sha256": "311bc451b0c20402f6298ba469e596326bef2c5ae526333ef861edff860e77aa",
+      "version": "0.1.0-dev",
+      "signature": {
+        "name": "crt-cli-0.1.0-dev-linux-aarch64-preview.20261116.1.tar.xz.sig",
+        "size": 256,
+        "sha256": "f51383466415c05a2a4e0a705be8e490f03c5973c11fb22783c76ffdb4e2ebd7"
+      }
+    },
+    "macos-aarch64": {
+      "release": "v0.1.0-preview.20261117.macos-arm64.1",
+      "asset": "crt-cli-0.1.0-dev-macos-aarch64-preview.20261117.1.tar.xz",
+      "size": 1248592,
+      "sha256": "5084b2b334cbec008e1f1b60de4e5616f4c7d5b4299635f657983c70790fb0cb",
+      "version": "0.1.0-dev",
+      "signature": {
+        "name": "crt-cli-0.1.0-dev-macos-aarch64-preview.20261117.1.tar.xz.sig",
+        "size": 256,
+        "sha256": "5e4757dab1d6c67d1df01c9e3e4b255ed9892d74bef813e242ab2a2ebb1a6c5d"
+      }
+    },
+    "windows-x86_64": {
+      "release": "v0.1.0-preview.20261117.windows-x86_64.1",
+      "asset": "crt-cli-0.1.0-dev-windows-x86_64-preview.20261117.1.tar.xz",
+      "size": 5458816,
+      "sha256": "02396e04cd4775cb7cfd65bd5c0e2c8975c4fa5b4ad18cfa039f65bf5cdd706f",
+      "version": "0.1.0-dev",
+      "signature": {
+        "name": "crt-cli-0.1.0-dev-windows-x86_64-preview.20261117.1.tar.xz.sig",
+        "size": 256,
+        "sha256": "cfad34429f6dda74409fc8e6f4a76f782370701aa6146490de0bb75dc12f5587"
+      }
+    }
+  }
+}

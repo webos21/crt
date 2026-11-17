@@ -36,6 +36,9 @@ on:
       - 'tools/verify_dist.py'
       - 'tools/ci_sdk_release.py'
       - 'tools/test_ci_sdk_release.py'
+      - 'tools/ci_sdk_cli_smoke.py'
+      - 'tools/test_ci_sdk_cli_smoke.py'
+      - '.github/ci/sdk-pins.json'
       - 'tools/test_crt_port_build_env.py'
       - 'tools/test_dev_sdk*.py'
 
@@ -69,6 +72,7 @@ jobs:
       - name: Tests of the asset verifier and the workflow pin rules
         run: |
           python -m unittest discover -s tools -p "test_ci_sdk_release.py"
+          python -m unittest discover -s tools -p "test_ci_sdk_cli_smoke.py"
           python -m unittest tools.test_sdk_workflows tools.test_crt_port_build_env
 
   sdk:
@@ -229,6 +233,19 @@ jobs:
           --sdk-root "$RUNNER_TEMP/sdk-extracted/dev"
           --output "$RUNNER_TEMP/sdk-external"
 
+      - name: Consumer smoke by the pinned, signature-checked published CLI Preview
+        shell: bash
+        run: |
+          # The CLI that a user downloads (pinned in .github/ci/sdk-pins.json, publisher signature checked with openssl) installs the
+          # archive just built from its manifest pin, then builds, tests and runs a C and a C++ project, cold and warm.
+          case "$RUNNER_OS" in
+            Linux) host_args=(--llvm-bin /usr/lib/llvm-21/bin) ;;
+            Windows) host_args=(--os-sdk "${CRT_WINDOWS_SDK_LIBPATH//\\//}") ;;
+            *) host_args=() ;;
+          esac
+          python tools/ci_sdk_cli_smoke.py --assets out/sdk-ci/release/dev --host ${{ matrix.host }} \
+            --work "$RUNNER_TEMP/sdk-cli-smoke" --json "$RUNNER_TEMP/sdk-cli-smoke.json" "${host_args[@]}"
+
       - name: Summarize the asset set
         if: always()
         shell: bash
@@ -294,6 +311,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Keep the CLI smoke logs of a failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-${{ matrix.host }}-${{ github.sha }}-cli-smoke-logs
+          path: ${{ runner.temp }}/sdk-cli-smoke/logs/*
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Keep the assets and their verification
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -303,5 +329,6 @@ jobs:
             out/sdk-ci/release/dev/*
             ${{ runner.temp }}/sdk-verification.json
             ${{ runner.temp }}/sdk-external/result.json
+            ${{ runner.temp }}/sdk-cli-smoke.json
           if-no-files-found: warn
           retention-days: 14

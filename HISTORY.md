@@ -10,6 +10,13 @@ substantive update.
 
 ## 2026-11-17
 
+### Add the Dev SDK consumer smoke by the published CLI Preview (S2)
+
+`tools/ci_sdk_cli_smoke.py` downloads the CLI Preview pinned in `.github/ci/sdk-pins.json`, checks its size, SHA-256 and publisher signature
+(`openssl`, pinned key fingerprint), installs the SDK just built from its manifest pin, and runs C and C++ `new`/`build`/`test`/`run` plus a
+warm rebuild that must reuse the cache. It is a step of every `sdk-integration` host. Locally, on Linux/x86_64, the published
+`v0.1.0-preview.20261116.linux-x86_64.1` CLI passes against a locally built CI SDK; the hosted result is not yet recorded.
+
 ### Preserve the Windows SDK consumer's inherited test ACL
 
 Reproduced SDK Integration #8 on Windows/x64 with Python 3.12.10 and the

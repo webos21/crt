@@ -10,7 +10,7 @@ separate step that reuses this flow.
 
 | Repository | Final artifact | CI builds | CI consumes |
 | --- | --- | --- | --- |
-| `crt` (this one) | the Dev SDK asset set (archive, portable toolchain contract, source assets, release manifest, sums) | the SDK, once per host | published CLI Preview (consumer smoke, S2) |
+| `crt` (this one) | the Dev SDK asset set (archive, portable toolchain contract, source assets, release manifest, sums) | the SDK, once per host | published CLI Preview (consumer smoke, S2; pinned in `.github/ci/sdk-pins.json`) |
 | `crt-cli` | the `crt-cli` executable | the CLI | the *published* Dev SDK, pinned by digest and publisher signature |
 
 Neither repository rebuilds the other's source. The producer publishes and signs; the consumer adopts through its own pin promotion
@@ -45,7 +45,13 @@ change. A red scheduled or path-triggered run is a regression or a changed exter
 4. **External consumer** (`tools/test_dev_sdk_external.py`) on the *extracted* archive, the shipped bytes, not the build tree: static and
    shared C++ consumers build and run with the producer checkout and original SDK inaccessible (bubblewrap, Seatbelt, restricted token).
 
-Not proven here: that a consumer *installs* the archive (S2), Full SDK content, GPU/window/media behaviour, publisher authenticity
+5. **Consumer smoke** (`tools/ci_sdk_cli_smoke.py`, S2): the published CLI Preview pinned in `.github/ci/sdk-pins.json` is downloaded; its size,
+   SHA-256 and the detached publisher signature (RSA-PSS, checked with `openssl`, key fingerprint pinned) must match before it runs. It then
+   `sdk install`s the archive just built using the manifest SHA-256 computed from those assets, the installed content identity must equal
+   the manifest's, and a C and a C++ project run `new`, `build`, `test`, `run` and a warm rebuild that must reuse the whole cache. The only
+   external inputs are the compiler/linker tools (LLVM 21 on Linux, Xcode tools on macOS, LLVM 22.1.8 plus the Windows import libraries).
+
+Not proven here: Full SDK content, GPU/window/media behaviour, publisher authenticity
 (the signature is made offline by the owner after publication; see [publisher signing](../security/publisher_signing.md)).
 
 ## Pin rules (enforced by `tools/test_sdk_workflows.py`)
