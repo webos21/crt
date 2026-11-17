@@ -86,6 +86,9 @@ Ordered; each step needs its own approval. The owner decides keys, custody and w
      outside the GitHub account: an attacker would need the Naver account as well to make the published copies agree. It is still the owner's
      own account (a post can be edited later, and it is not signed), so users should record the fingerprint once, from two places, and treat later
      changes as suspect. The limit above is narrowed, not removed.
+   - 2026-11-17: the owner attached the signed notice `fingerprint-notice-2026-11-16.txt` and its `.sig` to the same blog post. The files downloaded from the
+     post are byte-identical to the repository copies (notice sha256 `6e761192...45a7`) and the signature verifies with the published key, so the
+     blog copy is checkable against the key itself, not only against the post text.
 3. **Sign the two published host-tools bundles** (`v0.1.0-hosttools.20261116.linux-x86_64.1`, `...linux-aarch64.1`) as `.sig` files added to
    their releases, then the Dev SDK Preview archives and the `crt-cli` Preview, using the procedure above. Adding signature files is not a
    replacement of accepted assets; record it as such.
@@ -101,6 +104,10 @@ Ordered; each step needs its own approval. The owner decides keys, custody and w
      (9 files, no existing asset changed). Each was verified with `openssl` before upload (and matched the release `SHA256SUMS`), then from
      the public URL with `crt-cli fetch --publisher-key --signature` (`signature_verified` for all nine). Not signed: the `*-source.tar.xz`
      stage archives, `*-toolchain.json`, release manifests and `SHA256SUMS` files of those releases.
+   - 2026-11-17: the two `crt-cli` Previews published by `release.yml` (`v0.1.0-preview.20261116.linux-x86_64.1`, `...linux-arm64.1`) were signed the same
+     way and `<archive>.sig` was added to each (2 files, no existing asset changed); verified with `openssl` and from the public URL with
+     `crt-cli fetch --publisher-key --signature` (`signature_verified` for both; a swapped signature is refused). The `SHA256SUMS-*` files of those
+     releases are not signed.
 4. **Teach consumers to require it.** `crt-cli`'s `sdk acquire` source file and the CI host-tools pin have no field for the key or the
    signature yet (only `fetch` takes them). Add `publisher_key` and signature locations to those inputs, report `signature_verified` in the
    acquisition record and let a pin require it. This is CLI work, not CRT's.
