@@ -106,6 +106,17 @@ jobs:
             arch: x86_64
             msvc_arch: x64
             llvm_asset: win64
+          # No crt-cli Preview exists for Windows/arm64 yet, so .github/ci/sdk-pins.json has no pin for it and the consumer smoke
+          # cannot run: `cli_preview: none` makes that an explicit "not run" in the log and summary (never a silent skip) and
+          # tools/test_sdk_workflows.py requires every other host to have its pin. Remove the field with the pin.
+          - host: windows-aarch64
+            runner: windows-11-arm
+            preset: windows-host-ninja-debug
+            os: windows
+            arch: aarch64
+            msvc_arch: arm64
+            llvm_asset: woa64
+            cli_preview: none
     steps:
       - name: Check out the producer commit under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -233,7 +244,19 @@ jobs:
           --sdk-root "$RUNNER_TEMP/sdk-extracted/dev"
           --output "$RUNNER_TEMP/sdk-external"
 
+      - name: Record that the consumer smoke was not run (no published CLI Preview for this host)
+        if: matrix.cli_preview == 'none'
+        shell: bash
+        run: |
+          echo "::notice title=Consumer smoke not run::${{ matrix.host }} has no published, pinned crt-cli Preview; S2 is pending for this host."
+          {
+            echo "### Consumer smoke (${{ matrix.host }}): NOT RUN"
+            echo
+            echo "No published crt-cli Preview is pinned for this host in \`.github/ci/sdk-pins.json\`. The build, the asset verification and the external consumer above ran; installation by the CLI is unverified."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Consumer smoke by the pinned, signature-checked published CLI Preview
+        if: matrix.cli_preview != 'none'
         shell: bash
         run: |
           # The CLI that a user downloads (pinned in .github/ci/sdk-pins.json, publisher signature checked with openssl) installs the

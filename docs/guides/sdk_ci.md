@@ -23,7 +23,7 @@ publish -> sign -> update the consumer lock.
 | --- | --- | --- | --- |
 | `ci.yml` | push, pull request | the required 5-host build and test gate; **stays the required check** | nothing |
 | `host-tools.yml` | manual | assembles and replays the independent host-tools bundle | nothing (artifacts only) |
-| `sdk-integration.yml` | SDK-relevant push to `main`, weekly, manual | builds `crt-dev-release` on Linux x86_64/aarch64, macOS/arm64 and Windows/x64, verifies the asset set from its bytes, runs the extracted archive as an external consumer with the producer checkout hidden | nothing (14-day artifacts) |
+| `sdk-integration.yml` | SDK-relevant push to `main`, weekly, manual | builds `crt-dev-release` on Linux x86_64/aarch64, macOS/arm64 and Windows/x64 and arm64, verifies the asset set from its bytes, runs the extracted archive as an external consumer with the producer checkout hidden | nothing (14-day artifacts) |
 | `sdk-release.yml` | manual, `dry_run` default true | planned (S3): package -> verify -> approval-gated publish | a prerelease, only after approval |
 
 `sdk-integration` is deliberately **not** a required check: it is long (a full SDK build per host) and ci.yml already gates every
@@ -61,8 +61,12 @@ Not proven here: Full SDK content, GPU/window/media behaviour, publisher authent
 - LLVM is pinned in the workflow: **21** from the Ubuntu 26.04 archive on Linux (TLS descriptor code generation needs it), **22.1.8**
   (`llvmorg-22.1.8`) on Windows, Apple clang on macOS. Changing one is a reviewed change with its own evidence.
 - Every script a workflow names and every push trigger path must exist.
-- Unsupported OS/architecture pairs (Windows/arm64, macOS/x86_64, Linux/riscv) are **unverified**, not silently skipped: they have no
-  matrix row and the guide above says so.
+- Unsupported OS/architecture pairs (macOS/x86_64, Linux/riscv) are **unverified**, not silently skipped: they have no matrix row and the
+  guide above says so.
+- Windows/arm64 (`windows-aarch64`, `windows-11-arm`) has a matrix row, but no published crt-cli Preview exists for it, so
+  `.github/ci/sdk-pins.json` has no pin and the consumer smoke (S2) cannot run. Its row says `cli_preview: none`: the run logs a notice
+  and a "NOT RUN" summary line instead of silently passing, and `tools/test_sdk_workflows.py` fails if a host has neither a pin nor that
+  field, or both. Adopt the host by adding its pin and deleting the field together.
 
 ## Running the pieces locally
 
