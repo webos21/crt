@@ -119,15 +119,44 @@ def ci_succeeded(runs_json):
     return any(item.get('conclusion') == 'success' and item.get('status') == 'completed' for item in runs_json.get('workflow_runs', []))
 
 
+def docs_only(paths):
+    """ci.yml does not run for a push that touches only these; porting/** is ignored there but ships in the SDK, so it is *not* docs here."""
+    return bool(paths) and all(path.endswith('.md') or path.startswith('docs/') for path in paths)
+
+
+def ci_gate(commit, runs_for, changed_files, parent_of, depth=20):
+    """The commit whose successful CI run covers `commit`, or a ReleaseError.
+
+    ci.yml ignores docs-only pushes, and the release procedure requires the reviewed notes to be committed before the release
+    commit, so the release commit is usually docs-only and has no run of its own. It is then covered by its nearest ancestor that
+    has a run, provided every commit passed over changed only *.md or docs/**. A run that exists but is not a success, or a
+    skipped commit that changed anything else, is a refusal.
+    """
+    sha = commit
+    for _ in range(depth):
+        runs = runs_for(sha)
+        if ci_succeeded(runs):
+            return sha
+        if runs.get('workflow_runs'):
+            raise ReleaseError('the CI run(s) of %s have not succeeded' % sha)
+        if not docs_only(changed_files(sha)):
+            raise ReleaseError('%s changed more than docs and has no CI run' % sha)
+        sha = parent_of(sha)
+    raise ReleaseError('no successful CI run within %d docs-only commits of %s' % (depth, commit))
+
+
 def command_plan(args):
     commit = require_commit(args.commit)
     info = names(args.host, args.date, args.serial)
     done = run(['git', 'merge-base', '--is-ancestor', commit, 'origin/main'], check=False)
     if done.returncode != 0:
         raise ReleaseError('%s is not on main' % commit)
-    listing = json.loads(gh('api', 'repos/%s/actions/workflows/ci.yml/runs?head_sha=%s&per_page=30' % (args.repo, commit)).stdout)
-    if not ci_succeeded(listing):
-        raise ReleaseError('the required CI workflow has no successful run for %s' % commit)
+    covered_by = ci_gate(
+        commit,
+        lambda sha: json.loads(gh('api', 'repos/%s/actions/workflows/ci.yml/runs?head_sha=%s&per_page=30' % (args.repo, sha)).stdout),
+        lambda sha: run(['git', 'diff', '--name-only', sha + '^1', sha]).stdout.split(),
+        lambda sha: run(['git', 'rev-parse', sha + '^1']).stdout.strip())
+    log('CI gate: %s is covered by the successful run of %s' % (commit, covered_by))
     if gh('release', 'view', info['tag'], '--repo', args.repo, check=False).returncode == 0:
         raise ReleaseError('a release for %s already exists; releases are never overwritten' % info['tag'])
     environment = gh('api', 'repos/%s/environments/release' % args.repo, check=False)

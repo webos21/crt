@@ -104,6 +104,37 @@ class GatesTest(unittest.TestCase):
         self.assertTrue(publish.has_required_reviewers({'protection_rules': [{'type': 'required_reviewers', 'reviewers': [{'type': 'User'}]}]}))
 
 
+class CiGateTest(unittest.TestCase):
+    OK = {'workflow_runs': [{'status': 'completed', 'conclusion': 'success'}]}
+    NONE = {'workflow_runs': []}
+    BAD = {'workflow_runs': [{'status': 'completed', 'conclusion': 'failure'}]}
+
+    def gate(self, runs, files, parents):
+        return publish.ci_gate('c3', lambda sha: runs[sha], lambda sha: files[sha], lambda sha: parents[sha])
+
+    def test_a_commit_with_a_successful_run_is_its_own_gate(self):
+        self.assertEqual(self.gate({'c3': self.OK}, {}, {}), 'c3')
+
+    def test_a_docs_only_release_commit_is_covered_by_the_nearest_tested_ancestor(self):
+        runs = {'c3': self.NONE, 'c2': self.NONE, 'c1': self.OK}
+        files = {'c3': ['docs/releases/release_notes_x.md'], 'c2': ['README.md', 'docs/guides/a.md']}
+        self.assertEqual(self.gate(runs, files, {'c3': 'c2', 'c2': 'c1'}), 'c1')
+
+    def test_a_skipped_commit_that_changed_code_or_recipes_is_refused(self):
+        for changed in (['tools/ci_sdk_publish.py'], ['porting/recipes/zlib.json'], ['docs/a.md', 'libc/x.c'], []):
+            with self.assertRaises(publish.ReleaseError, msg=changed):
+                self.gate({'c3': self.NONE}, {'c3': changed}, {'c3': 'c2'})
+
+    def test_a_failed_or_unfinished_run_is_refused_not_skipped(self):
+        for runs in (self.BAD, {'workflow_runs': [{'status': 'in_progress', 'conclusion': None}]}):
+            with self.assertRaises(publish.ReleaseError):
+                self.gate({'c3': runs}, {}, {})
+
+    def test_the_walk_is_bounded(self):
+        with self.assertRaises(publish.ReleaseError):
+            publish.ci_gate('c0', lambda sha: self.NONE, lambda sha: ['docs/a.md'], lambda sha: sha + 'x', depth=5)
+
+
 class NotesTest(unittest.TestCase):
     ARGS = dict(tag='v0.0.1-preview.20261118.linux.x64.1', commit=COMMIT, manifest={'sha256': 'c' * 64, 'size': 1716}, content_sha256='d' * 64,
                 assets=[{'name': 'b.tar.xz', 'size': 2, 'sha256': 'e' * 64}, {'name': 'a.json', 'size': 1, 'sha256': 'f' * 64}], target='linux/x86_64')
