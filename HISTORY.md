@@ -10,6 +10,13 @@ substantive update.
 
 ## 2026-11-17
 
+### Add the manual, approval-gated Dev SDK release workflow (S3)
+
+`.github/workflows/sdk-release.yml` plans, packages, verifies on a separate runner (S2 smoke on the packaged bytes) and publishes through
+`tools/ci_sdk_publish.py` behind the `release` environment, with `dry_run` true by default; the plan refuses a run whose environment has no required
+reviewers. Writing the tests found and fixed trailing-newline acceptance (`$` vs `fullmatch`) in the verifier's version and commit checks and a notes
+template whose own comment contained an unfillable token. Local only: the fake-`gh` flow tests pass; no hosted run yet.
+
 ### Add the Dev SDK consumer smoke by the published CLI Preview (S2)
 
 `tools/ci_sdk_cli_smoke.py` downloads the CLI Preview pinned in `.github/ci/sdk-pins.json`, checks its size, SHA-256 and publisher signature

@@ -1,0 +1,287 @@
+name: SDK release
+
+# Manually started, protected packaging and publication of a Development SDK Preview from a tested commit on main.
+# CI success is necessary, never publication authority:
+#   plan     validates the request: host/date/serial, a full commit that is on main with a successful CI run, no existing
+#            release of that tag, reviewed notes at that commit, and a `release` environment that requires reviewers;
+#   package  builds exactly that commit with `crt-dev-release` under the real tag, then checks the asset set from its bytes
+#            (no write permission);
+#   verify   on a separate fresh runner: independent re-verification of the downloaded bytes and the consumer smoke by the
+#            pinned, signature-checked published CLI Preview installing that archive (no write permission);
+#   publish  waits for approval on the `release` environment, re-verifies the bytes, stages a draft, downloads it back and
+#            compares every byte, and only then publishes a non-latest prerelease. It is the only job with `contents: write`
+#            and never rebuilds.
+# `dry_run: true` (the default) stops at the verified draft after the same approval; delete that draft by hand.
+# Publisher authentication is not done here: the owner signs the archive offline and attaches `.sig` afterwards
+# (docs/security/publisher_signing.md); consumers pin only after that. Design and procedure: docs/guides/sdk_ci.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: Host to release
+        type: choice
+        options: [linux-x64, linux-arm64, macos-arm64, windows-x64]
+        required: true
+      commit:
+        description: Full 40-character commit SHA on main to build (a branch or tag is refused)
+        type: string
+        required: true
+      date:
+        description: Preview date, for example 20261118
+        type: string
+        required: true
+      serial:
+        description: Serial within that date and host, starting at 1
+        type: string
+        required: true
+        default: '1'
+      notes_file:
+        description: Reviewed notes, a docs/releases/*.md path at that commit (start from sdk_release_notes_template.md)
+        type: string
+        required: true
+      dry_run:
+        description: Stop at the verified draft instead of publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release-${{ inputs.host }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: plan (${{ inputs.host }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      runner: ${{ steps.plan.outputs.runner }}
+      os: ${{ steps.plan.outputs.os }}
+      arch: ${{ steps.plan.outputs.arch }}
+      preset: ${{ steps.plan.outputs.preset }}
+      smoke_host: ${{ steps.plan.outputs.smoke_host }}
+    steps:
+      - name: Check out exactly the requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Tests of the release driver and the workflow rules
+        run: python -m unittest discover -s tools -p "test_ci_sdk_publish.py" && python -m unittest tools.test_sdk_workflows
+
+      - name: Validate the request
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOST: ${{ inputs.host }}
+          COMMIT: ${{ inputs.commit }}
+          DATE: ${{ inputs.date }}
+          SERIAL: ${{ inputs.serial }}
+          NOTES: ${{ inputs.notes_file }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          python tools/ci_sdk_publish.py plan --host "$HOST" --commit "$COMMIT" --date "$DATE" --serial "$SERIAL" --repo "$REPO" --notes-file "$NOTES"
+
+  package:
+    name: package (${{ inputs.host }})
+    needs: plan
+    runs-on: ${{ needs.plan.outputs.runner }}
+    timeout-minutes: 120
+    steps:
+      - name: Check out exactly the requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Install the host tools
+        uses: ./.github/actions/sdk-host-tools
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Configure the release build
+        shell: bash
+        env:
+          PRESET: ${{ needs.plan.outputs.preset }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: >
+          cmake --preset "$PRESET" -B out/sdk-ci
+          -DCMAKE_BUILD_TYPE=Release
+          -DCRTGFX_ENABLE_SKIA=OFF -DCRTMEDIA_ENABLE_FFMPEG=OFF -DCRTMEDIA_ENABLE_CURL=OFF -DCRTUI_ENABLE_LVGL=OFF
+          -DCRT_RELEASE_TAG="$TAG"
+
+      - name: Build the Development SDK release assets
+        shell: bash
+        run: cmake --build out/sdk-ci --target crt-dev-release --parallel 4
+
+      - name: Check the asset set from its bytes
+        shell: bash
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          OS: ${{ needs.plan.outputs.os }}
+          ARCH: ${{ needs.plan.outputs.arch }}
+          COMMIT: ${{ inputs.commit }}
+        run: >
+          python tools/ci_sdk_release.py verify
+          --assets out/sdk-ci/release/dev --os "$OS" --arch "$ARCH" --version "$TAG" --commit "$COMMIT"
+          --forbid "$GITHUB_WORKSPACE" --forbid "${GITHUB_WORKSPACE//\\//}" --forbid "$RUNNER_TEMP" --forbid "${RUNNER_TEMP//\\//}"
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-release-${{ needs.plan.outputs.tag }}
+          path: out/sdk-ci/release/dev/
+          if-no-files-found: error
+          retention-days: 14
+
+  verify:
+    name: verify (${{ inputs.host }})
+    needs: [plan, package]
+    runs-on: ${{ needs.plan.outputs.runner }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out the driver at the requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Install the host tools
+        uses: ./.github/actions/sdk-host-tools
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Download the release files from the package job
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sdk-release-${{ needs.plan.outputs.tag }}
+          path: ${{ runner.temp }}/release-files
+
+      - name: Re-verify the downloaded bytes
+        shell: bash
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          OS: ${{ needs.plan.outputs.os }}
+          ARCH: ${{ needs.plan.outputs.arch }}
+          COMMIT: ${{ inputs.commit }}
+        run: >
+          python tools/ci_sdk_release.py verify
+          --assets "$RUNNER_TEMP/release-files" --os "$OS" --arch "$ARCH" --version "$TAG" --commit "$COMMIT"
+          --json "$RUNNER_TEMP/sdk-release-verification.json"
+
+      - name: Consumer smoke on the packaged bytes
+        shell: bash
+        env:
+          SMOKE_HOST: ${{ needs.plan.outputs.smoke_host }}
+        run: |
+          case "$RUNNER_OS" in
+            Linux) host_args=(--llvm-bin /usr/lib/llvm-21/bin) ;;
+            Windows) host_args=(--os-sdk "${CRT_WINDOWS_SDK_LIBPATH//\\//}") ;;
+            *) host_args=() ;;
+          esac
+          python tools/ci_sdk_cli_smoke.py --assets "$RUNNER_TEMP/release-files" --host "$SMOKE_HOST" \
+            --work "$RUNNER_TEMP/sdk-cli-smoke" --json "$RUNNER_TEMP/sdk-cli-smoke.json" "${host_args[@]}"
+
+      - name: Summarize the pins to quote
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          temp = os.environ['RUNNER_TEMP']
+          v = json.load(open(temp + '/sdk-release-verification.json'))
+          s = json.load(open(temp + '/sdk-cli-smoke.json'))
+          print('### Verified packaged assets: %s' % v['version'])
+          print('- manifest `%s` %d bytes, SHA-256 `%s`' % (v['manifest']['name'], v['manifest']['size'], v['manifest']['sha256']))
+          print('- installed content `%s`' % v.get('content_sha256'))
+          print('- consumer smoke by `%s`: C and C++ cold/warm build, test and run passed' % s['cli']['release'])
+          PY
+
+      - name: Keep the verification receipts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-release-verify-${{ needs.plan.outputs.tag }}
+          path: |
+            ${{ runner.temp }}/sdk-release-verification.json
+            ${{ runner.temp }}/sdk-cli-smoke.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Keep the CLI smoke logs of a failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-release-smoke-logs-${{ needs.plan.outputs.tag }}
+          path: ${{ runner.temp }}/sdk-cli-smoke/logs/*
+          if-no-files-found: ignore
+          retention-days: 7
+
+  publish:
+    name: publish (${{ inputs.host }})
+    needs: [plan, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Required reviewers are configured on this environment; `plan` refused the run unless they exist, and this job does not
+    # start until a reviewer approves.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the driver and the reviewed notes at the requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Download the verified release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sdk-release-${{ needs.plan.outputs.tag }}
+          path: ${{ runner.temp }}/release-files
+
+      - name: Stage, compare and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOST: ${{ inputs.host }}
+          COMMIT: ${{ inputs.commit }}
+          DATE: ${{ inputs.date }}
+          SERIAL: ${{ inputs.serial }}
+          NOTES: ${{ inputs.notes_file }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          args=(--host "$HOST" --commit "$COMMIT" --date "$DATE" --serial "$SERIAL" --repo "$REPO"
+                --release-dir "$RUNNER_TEMP/release-files" --notes-file "$NOTES" --work "$RUNNER_TEMP/draft-check")
+          if [ "$DRY_RUN" = true ]; then args+=(--draft-only); fi
+          python tools/ci_sdk_publish.py publish "${args[@]}"

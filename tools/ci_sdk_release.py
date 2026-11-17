@@ -28,9 +28,9 @@ import tempfile
 import zipfile
 import zlib
 
-VERSION_RE = re.compile(r'^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.]*)?$')
+VERSION_RE = re.compile(r'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.]*)?')
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
-COMMIT_RE = re.compile(r'^[0-9a-f]{40}$')
+COMMIT_RE = re.compile(r'[0-9a-f]{40}')
 # Bounds on what the verifier is willing to extract; the packaged SDK is about 2.8k entries and 105 MB.
 MAX_ENTRIES = 20000
 MAX_BYTES = 1 << 30
@@ -233,10 +233,10 @@ def verify(assets, os_name, arch, version, commit=None, forbidden=(), keep=None)
     if (os_name, arch) not in SUPPORTED:
         problems.add('unsupported target %s-%s' % (os_name, arch))
         return result
-    if not VERSION_RE.match(version):
+    if not VERSION_RE.fullmatch(version):
         problems.add('version %r is not vMAJOR.MINOR.PATCH[-prerelease]' % version)
         return result
-    if commit is not None and not COMMIT_RE.match(commit):
+    if commit is not None and not COMMIT_RE.fullmatch(commit):
         problems.add('expected commit %r is not a full lowercase SHA-1' % commit)
         return result
     assets = Path(assets)
@@ -261,7 +261,7 @@ def verify(assets, os_name, arch, version, commit=None, forbidden=(), keep=None)
     if manifest.get('target') != {'os': os_name, 'arch': arch}:
         problems.add('manifest target is %r' % (manifest.get('target'),))
     source = manifest.get('source_commit')
-    if not isinstance(source, str) or not COMMIT_RE.match(source):
+    if not isinstance(source, str) or not COMMIT_RE.fullmatch(source):
         problems.add('manifest source_commit is not a full lowercase SHA-1')
     elif commit is not None and source != commit:
         problems.add('manifest source_commit %s is not the expected commit %s' % (source, commit))

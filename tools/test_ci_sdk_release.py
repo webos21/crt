@@ -97,6 +97,11 @@ class VerifyTest(unittest.TestCase):
         self.assertEqual(len(result['content_sha256']), 64)
         self.assertEqual(len(result['assets']), 4)
 
+    def test_a_trailing_newline_does_not_make_a_version_or_commit_valid(self):
+        self.fixture.build()
+        self.assertTrue(verifier.verify(self.fixture.assets, 'linux', 'x86_64', VERSION + '\n', COMMIT)['problems'])
+        self.assertTrue(verifier.verify(self.fixture.assets, 'linux', 'x86_64', VERSION, COMMIT + '\n')['problems'])
+
     def test_a_windows_zip_is_accepted(self):
         with tempfile.TemporaryDirectory() as folder:
             fixture = Fixture(folder, 'windows', 'x86_64').build()

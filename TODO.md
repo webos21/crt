@@ -110,7 +110,7 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
 - [x] **S2** Consumer smoke by the pinned, signature-checked published CLI Preview: `sdk install` of the produced archive with its
   manifest pin, then C and C++ `new`/`build`/`test`/`run` and a warm rebuild, on all four hosts with their Preview CLIs.
   [Hosted acceptance](docs/acceptance/release_qualification.md#hosted-cli-consumer-smoke-s2-2026-11-17).
-- [ ] **S3** `sdk-release.yml` (manual, `dry_run` default true): `package` (clean commit on `main` with a green gate, same build as S1) ->
+- [ ] **S3** (implemented; `release` environment and a hosted dry run pending) `sdk-release.yml` (manual, `dry_run` default true): `package` (clean commit on `main` with a green gate, same build as S1) ->
   `verify` (separate runner, S2 on the packaged bytes) -> approval-gated `publish` in a `release` environment (draft, re-download,
   byte compare, then non-latest prerelease). Notes from a reviewed template with digest tokens; tag = the source commit. Dry run first.
 - [ ] **S4** One real Dev SDK Preview published by `sdk-release.yml`; public bytes re-downloaded and checked; owner signs the archive

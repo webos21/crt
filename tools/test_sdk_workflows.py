@@ -12,7 +12,7 @@ import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-WORKFLOWS = sorted((ROOT / '.github/workflows').glob('sdk-*.yml'))
+WORKFLOWS = sorted((ROOT / '.github/workflows').glob('sdk-*.yml')) + sorted((ROOT / '.github/actions').glob('sdk-*/action.yml'))
 PIN = re.compile(r'^\s*(?:-\s+)?uses:\s*([^\s@]+)@([0-9a-f]{40})\s+#\s*v\S+', re.M)
 USES = re.compile(r'^\s*(?:-\s+)?uses:\s*(\S+)', re.M)
 
@@ -29,7 +29,7 @@ class WorkflowRulesTest(unittest.TestCase):
     def test_every_action_is_pinned_to_a_full_commit_with_its_version_noted(self):
         for path in WORKFLOWS:
             text = path.read_text(encoding='utf-8')
-            used = USES.findall(text)
+            used = [name for name in USES.findall(text) if not name.startswith('./')]  # a local action is the commit's own file
             pinned = [name for name, _ in PIN.findall(text)]
             self.assertEqual(sorted(used and [item.split('@')[0] for item in used]), sorted(pinned), '%s: an action is not pinned to a 40-hex commit with a "# vX" note' % path.name)
 
@@ -71,6 +71,66 @@ class WorkflowRulesTest(unittest.TestCase):
         text = (ROOT / '.github/workflows/sdk-integration.yml').read_text(encoding='utf-8')
         for name in re.findall(r'-p "(test_[a-z_]+\.py)"', text):
             self.assertTrue((ROOT / 'tools' / name).is_file(), name)
+
+
+class ReleaseWorkflowRulesTest(unittest.TestCase):
+    """sdk-release.yml is the only workflow that may publish: read-only by default, one write job behind an approval environment."""
+    TEXT = (ROOT / '.github/workflows/sdk-release.yml').read_text(encoding='utf-8')
+
+    def jobs(self):
+        block = self.TEXT[self.TEXT.index('\njobs:\n'):]
+        return {name: body for name, body in re.findall(r'(?ms)^  ([a-z]+):\n(.*?)(?=^  [a-z]+:\n|\Z)', block)}
+
+    def test_it_is_manual_only_and_defaults_to_a_dry_run(self):
+        on = self.TEXT[self.TEXT.index('\non:\n'):self.TEXT.index('\npermissions:')]
+        self.assertIn('workflow_dispatch:', on)
+        for trigger in ('push:', 'pull_request', 'schedule:', 'workflow_run'):
+            self.assertNotIn(trigger, on)
+        self.assertRegex(on, r'(?s)dry_run:.*?default: true')
+
+    def test_write_permission_exists_only_in_the_publish_job_behind_the_release_environment(self):
+        self.assertRegex(self.TEXT, r'(?m)^permissions:\n  contents: read\n')
+        jobs = self.jobs()
+        self.assertEqual(sorted(jobs), ['package', 'plan', 'publish', 'verify'])
+        for name, body in jobs.items():
+            if name == 'publish':
+                self.assertRegex(body, r'(?m)^    environment: release$')
+                self.assertRegex(body, r'(?m)^      contents: write$')
+                self.assertEqual(len(re.findall(r'write', re.sub(r'#.*', '', body))), 1)
+            else:
+                self.assertNotRegex(body, r'(?m):\s*write\b', name)
+                self.assertNotIn('environment:', body)
+        self.assertEqual(re.sub(r'(?m)#.*', '', self.TEXT).count('contents: write'), 1)
+
+    def test_publish_needs_the_verified_bytes_and_never_builds(self):
+        publish = self.jobs()['publish']
+        self.assertRegex(publish, r'needs: \[plan, verify\]')
+        for forbidden in ('cmake', 'crt-dev-release', 'apt-get'):
+            self.assertNotIn(forbidden, publish)
+
+    def test_inputs_reach_scripts_only_through_the_environment(self):
+        for name, body in self.jobs().items():
+            for run in re.findall(r'(?ms)^        run: [|>]-?\n(.*?)(?=^      - |\Z)', body):
+                self.assertNotRegex(run, r'\$\{\{\s*(inputs|github\.event)\.', '%s interpolates an input into a script' % name)
+
+    def test_every_job_works_on_the_requested_commit_and_writes_nothing_to_the_checkout_credentials(self):
+        for name, body in self.jobs().items():
+            for checkout in re.findall(r'(?s)actions/checkout@.*?(?=\n      - |\Z)', body):
+                self.assertIn('ref: ${{ inputs.commit }}', checkout, name)
+                self.assertIn('persist-credentials: false', checkout, name)
+
+    def test_the_toolchain_pins_match_the_integration_workflow(self):
+        integration = (ROOT / '.github/workflows/sdk-integration.yml').read_text(encoding='utf-8')
+        action = (ROOT / '.github/actions/sdk-host-tools/action.yml').read_text(encoding='utf-8')
+        for literal in ('llvmorg-22.1.8', 'clang-21 lld-21 llvm-21 libclang-rt-21-dev ninja-build cmake libc++-21-dev libc++abi-21-dev',
+                        'ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756'):
+            self.assertIn(literal, integration)
+            self.assertIn(literal, action)
+
+    def test_the_build_flags_match_the_integration_workflow(self):
+        for flag in ('-DCMAKE_BUILD_TYPE=Release', '-DCRTGFX_ENABLE_SKIA=OFF', '-DCRTMEDIA_ENABLE_FFMPEG=OFF', '-DCRTMEDIA_ENABLE_CURL=OFF', '-DCRTUI_ENABLE_LVGL=OFF', '--target crt-dev-release'):
+            self.assertIn(flag, self.TEXT)
+            self.assertIn(flag, (ROOT / '.github/workflows/sdk-integration.yml').read_text(encoding='utf-8'))
 
 
 class MatrixHostRulesTest(unittest.TestCase):

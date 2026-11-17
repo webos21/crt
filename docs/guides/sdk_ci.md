@@ -24,7 +24,7 @@ publish -> sign -> update the consumer lock.
 | `ci.yml` | push, pull request | the required 5-host build and test gate; **stays the required check** | nothing |
 | `host-tools.yml` | manual | assembles and replays the independent host-tools bundle | nothing (artifacts only) |
 | `sdk-integration.yml` | SDK-relevant push to `main`, weekly, manual | builds `crt-dev-release` on Linux x86_64/aarch64, macOS/arm64 and Windows/x64 and arm64, verifies the asset set from its bytes, runs the extracted archive as an external consumer with the producer checkout hidden | nothing (14-day artifacts) |
-| `sdk-release.yml` | manual, `dry_run` default true | planned (S3): package -> verify -> approval-gated publish | a prerelease, only after approval |
+| `sdk-release.yml` | manual, `dry_run` default true | plan -> package -> verify -> approval-gated publish (below) | a non-latest prerelease, only after a `release` environment reviewer approves |
 
 `sdk-integration` is deliberately **not** a required check: it is long (a full SDK build per host) and ci.yml already gates every
 change. A red scheduled or path-triggered run is a regression or a changed external input, not noise.
@@ -106,3 +106,26 @@ libc++ through libSystem. Check curl's `port-build-curl/work/curl/config.log` fo
 the actual mbedTLS `conftest` link and execution. See the
 [macOS replay](../acceptance/release_qualification.md#macos-dyld-investigation-and-local-replay-2026-11-17)
 for the native versus hosted scope.
+
+## Releasing a Dev SDK Preview (`sdk-release.yml`)
+
+CI success is necessary, never publication authority. The workflow is manual (`workflow_dispatch`) and `dry_run` defaults to **true**.
+
+| Job | Runner | Permission | Does |
+| --- | --- | --- | --- |
+| `plan` | ubuntu-24.04 | read (+ `actions: read`) | refuses the request unless: host/date/serial are valid, the commit is a full SHA that is an ancestor of `origin/main` with a successful `CI` run, no release of that tag exists, the notes are a `docs/releases/*.md` file at that commit that renders, and the `release` environment **has required reviewers** (GitHub auto-creates a missing environment with no approval, so its absence must fail, not pass) |
+| `package` | the host's runner | read | builds exactly that commit with `crt-dev-release` under the real tag; `ci_sdk_release.py verify` on the result; uploads the six assets |
+| `verify` | a fresh runner of the same host | read | downloads the artifact, re-verifies it, and runs the S2 consumer smoke (pinned CLI Preview installs the packaged archive; C and C++ build/test/run, cold and warm) |
+| `publish` | ubuntu-24.04 | **write**, behind environment `release` | waits for a reviewer, re-verifies the bytes, stages a draft, downloads it back and compares every byte, then (not in a dry run) publishes a non-latest prerelease. Never rebuilds, never overwrites |
+
+A dry run goes through the same approval and stops at the verified draft; delete that draft by hand. The tag is
+`v0.0.1-preview.<date>.<os>.<arch>.<serial>` (for example `v0.0.1-preview.20261118.linux.x64.1`; a prerelease identifier cannot contain `_`).
+Host keys: `linux-x64`, `linux-arm64`, `macos-arm64`, `windows-x64`; Windows/arm64 has no consumer smoke yet and is not offered.
+
+**Notes** are a reviewed file: copy `docs/releases/sdk_release_notes_template.md` to `docs/releases/release_notes_<tag>.md` in a commit that precedes the release
+commit. The workflow fills `{{TAG}} {{COMMIT}} {{TARGET}} {{MANIFEST_SHA256}} {{MANIFEST_BYTES}} {{CONTENT_SHA256}} {{ASSET_TABLE}}` from the verified bytes; any other token,
+or a template without the pins, stops it.
+
+**One-time setup** (repository settings, done by the owner): create the `release` environment with the owner as required reviewer.
+Publication does not authenticate the publisher: the owner signs the archive offline and attaches `.sig`
+([procedure](../security/publisher_signing.md)); the consumer pin moves only after that.

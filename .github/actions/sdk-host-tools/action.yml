@@ -1,0 +1,81 @@
+name: SDK host tools
+description: >
+  Installs the external tools the Dev SDK build and the CLI consumer smoke need on one hosted runner: LLVM 21 from the Ubuntu 26.04
+  archive on Linux, LLVM 22.1.8 plus the MSVC developer environment and the Windows import-library path on Windows, nothing on macOS
+  (Apple clang). The same pins as .github/workflows/sdk-integration.yml; tools/test_sdk_workflows.py keeps the two in step.
+inputs:
+  msvc_arch:
+    description: MSVC target architecture on Windows (x64)
+    default: x64
+  llvm_asset:
+    description: LLVM installer flavour on Windows (win64)
+    default: win64
+  github_token:
+    description: Token used only to read the public LLVM release metadata
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install LLVM 21 and the build tools (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -q
+        # Ubuntu 26.04 carries LLVM 21 (the qualified major: TLS descriptor code generation needs it) in its archive.
+        # libc++ development packages are needed by CMake's compiler ABI detection before CRT's own flags apply.
+        sudo apt-get install -y -q --no-install-recommends clang-21 lld-21 llvm-21 libclang-rt-21-dev ninja-build cmake libc++-21-dev libc++abi-21-dev openssl
+        echo /usr/lib/llvm-21/bin >> "$GITHUB_PATH"
+        /usr/lib/llvm-21/bin/clang --version
+        cmake --version
+        ninja --version
+
+    - name: Install the build tools (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install ninja cmake
+        clang --version
+        cmake --version
+        ninja --version
+
+    - name: Set up the MSVC developer environment (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      with:
+        arch: ${{ inputs.msvc_arch }}
+
+    - name: Install LLVM 22.1.8 (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        LLVM_PIN_TAG: llvmorg-22.1.8
+        LLVM_ASSET: ${{ inputs.llvm_asset }}
+      run: |
+        $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "crt-sdk-ci" }
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/llvm/llvm-project/releases/tags/$env:LLVM_PIN_TAG" -Headers $headers
+        $asset = $release.assets | Where-Object { $_.name -like "LLVM-*-$($env:LLVM_ASSET).msi" -or $_.name -like "LLVM-*-$($env:LLVM_ASSET).exe" } | Select-Object -First 1
+        if (-not $asset) { throw "no LLVM '$($env:LLVM_ASSET)' installer in $($release.tag_name)" }
+        $ext = [System.IO.Path]::GetExtension($asset.name)
+        $installer = Join-Path $env:RUNNER_TEMP "llvm-installer$ext"
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer
+        if ($ext -eq ".msi") {
+          Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "`"$installer`"", "/quiet", "/qn", "/norestart" -Wait
+        } else {
+          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+        }
+        $llvmBin = "C:\Program Files\LLVM\bin"
+        if (-not (Test-Path $llvmBin)) { throw "LLVM was not installed at $llvmBin" }
+        Add-Content -Path $env:GITHUB_PATH -Value $llvmBin
+
+    - name: Locate the Windows SDK import libraries (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        MSVC_ARCH: ${{ inputs.msvc_arch }}
+      run: |
+        $um = $env:LIB -split ';' | Where-Object { $_ -match "\\um\\$($env:MSVC_ARCH)\\?$" -and (Test-Path (Join-Path $_ 'kernel32.lib')) } | Select-Object -First 1
+        if (-not $um) { throw "no um\$($env:MSVC_ARCH) directory with kernel32.lib on LIB: $env:LIB" }
+        Write-Host "Windows SDK import libraries: $um"
+        Add-Content -Path $env:GITHUB_ENV -Value "CRT_WINDOWS_SDK_LIBPATH=$um"
