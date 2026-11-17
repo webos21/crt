@@ -879,7 +879,7 @@ execution receipts; no compiled artifact is relabeled by these later documents.
 ## Dev SDK integration workflow (2026-11-17)
 
 `sdk-integration.yml` ([guide](../guides/sdk_ci.md)) builds `crt-dev-release` per host and verifies the asset set with `tools/ci_sdk_release.py` (a verifier that shares no code
-with the producer). **Status: written and locally exercised on Linux/x86_64 only; no GitHub-hosted run exists yet.** No host other than Linux/x86_64 has run any of it.
+with the producer). The initial Linux/x86_64 rehearsal below preceded hosted runs.
 
 Local evidence (Linux/x86_64, LLVM 21.1.8, clean `git worktree` of `ded8e99`, `out/sdk-ci`, Release, tag `v0.0.1-ci.local1`):
 
@@ -889,6 +889,53 @@ Local evidence (Linux/x86_64, LLVM 21.1.8, clean `git worktree` of `ded8e99`, `o
 - Against the real published Preview `v0.0.1-preview.20261110.4` the verifier reproduces the documented manifest pin `983dbcf1...b2c3` and content identity `22107183...ca81`; 15 verifier tests (11 tamper cases: changed archive byte, missing/extra file, wrong commit/version/target,
   false install metadata, non-portable or unbound contract, path escape, hard link, outside-root member, VERSION mismatch) and 7 workflow rule tests pass.
 
-Not covered: any hosted run (Linux/aarch64, macOS/arm64, Windows/x64 are untested here, including the macOS Seatbelt and Windows restricted-token paths of the external consumer and the Windows LLVM installer step); the CLI install smoke (S2); the release workflow (S3);
-timing or cache behaviour on runners. Hosted run IDs are recorded here when they exist.
+That initial rehearsal did not cover hosted execution, the CLI install smoke (S2), or the release workflow (S3).
+
+### macOS dyld investigation and local replay (2026-11-17)
+
+[Hosted run 44024081269](https://github.com/webos21/crt/actions/runs/44024081269) used a build-wide
+`DYLD_LIBRARY_PATH`, which could replace the Apple Clang process's system libc++ with the staged
+SDK copy. `73c5449` switched configure/build to `DYLD_FALLBACK_LIBRARY_PATH`, but
+[44025840329](https://github.com/webos21/crt/actions/runs/44025840329) still failed starting
+`nlohmann-json/roundtrip-static`: dyld could not resolve `__ZnamSt19__type_descriptor_t`.
+[44027742693](https://github.com/webos21/crt/actions/runs/44027742693) at `1c441e9` retained that
+failure despite the compiler flag fix. Its verifier and both Linux legs passed; Windows/x64
+failed separately in the external consumer. On that hosted macOS/Xcode 26.6 run curl already
+reported `mbedtls_ssl_init ... yes` and `checking runtime libs availability... fine`.
+
+Replayed clean `1c441e9d31e0ac035e8c1f38c9c12435f48e7c45` on macOS 27.2.1/arm64,
+Xcode 27.2 (Apple clang `2100.4.1.1`), with the workflow's Release configuration and local
+version `v0.0.1-ci.local20261117`. The source inputs came from the pinned caches and the
+checked xz archive; the compiled outputs were fresh. The hosted JSON program's failure did
+not reproduce on this compiler: both JSON variants ran and neither imported a typed allocation
+symbol. A native Apple-Clang array-allocation control compiled with typed allocation explicitly
+enabled did reproduce the **same missing symbol and SIGABRT** under the old `port_test_env()`.
+It passed with neither path variable, with the configure fallback, and with the corrected
+port-test environment. `DYLD_PRINT_LIBRARIES` showed that the old port-test environment still
+forced CRT libc++/libc++abi over the Apple images even for static JSON. A shared JSON consumer
+instead imports CRT's explicit `@rpath/libc++.1.dylib` and `@rpath/libc++abi.1.dylib`; both
+the CRT dependencies and Apple's own system images can coexist with fallback-only lookup.
+
+The fix uses fallback-only search in macOS port tests while preserving additional port directories
+ahead of the generic prefix. The packaged Dev consumer no longer uses either dyld search override;
+it must resolve its declared dependencies through its own load commands. No SDK code, recipe,
+or ABI change is required. Local curl's real mbedTLS configure probe compiled and ran (both
+exit 0 in `config.log`); the three mbedTLS dylibs have `@rpath` install IDs.
+
+- **Clean baseline producer:** `crt-dev-release` and independent byte verification pass,
+  including archive extraction and all four declared assets. Manifest SHA-256
+  `6767baba696635b61acae7f9bf4ca06ef1c499ff762534e83634e198319ca047`;
+  installed content `51e426abb48dfd626d2b1b7faddfc09c6d733873be883a6dfc7cd526528c9650`.
+  The first local fetch lacked network access; the first loopback test was denied by
+  the development sandbox. A cache-backed build and a loopback-enabled retry succeeded.
+- **Patched test harness, same SDK bytes:** cJSON, nlohmann-json, xz and mbedTLS static/shared
+  port tests pass (8/8). Existing curl/OpenSSL shared IPv4 and IPv6 tests also pass and map
+  their dedicated curl dylib. From the independently extracted SDK, the Seatbelt external
+  consumer passes with original SDK and producer hidden, unchanged payload, and static/shared
+  HTTPS/inflate plus trust negatives without dyld overrides.
+
+Local evidence: `out/sdk-ci-macos-local-20261117/` (producer logs, `sdk-verification.json`,
+`patched-port-replay/`, `external-patched/result.json`). This is not a new clean release
+of the patched tooling or a hosted Xcode 26.6 pass. S1 remains open until a hosted run
+exercises the fix and the separate Windows failure is resolved; no publication or CLI pin change.
 

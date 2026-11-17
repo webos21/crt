@@ -24,6 +24,9 @@ on:
       - 'libdl/**'
       - 'libstdc\+\+/**'
       - 'porting/recipes/**'
+      - 'tools/crt-cc'
+      - 'tools/crt-c\+\+'
+      - 'tools/crt-port-build.py'
       - 'tools/build_dev_sdk.py'
       - 'tools/crt_dev_profile.py'
       - 'tools/crt_sdk_*.py'
@@ -33,6 +36,7 @@ on:
       - 'tools/verify_dist.py'
       - 'tools/ci_sdk_release.py'
       - 'tools/test_ci_sdk_release.py'
+      - 'tools/test_crt_port_build_env.py'
       - 'tools/test_dev_sdk*.py'
 
 permissions:
@@ -63,7 +67,9 @@ jobs:
           python-version: '3.12'
 
       - name: Tests of the asset verifier and the workflow pin rules
-        run: python -m unittest discover -s tools -p "test_ci_sdk_release.py" && python -m unittest discover -s tools -p "test_sdk_workflows.py"
+        run: |
+          python -m unittest discover -s tools -p "test_ci_sdk_release.py"
+          python -m unittest tools.test_sdk_workflows tools.test_crt_port_build_env
 
   sdk:
     name: sdk (${{ matrix.host }})

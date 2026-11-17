@@ -73,6 +73,11 @@ def main():
     env = runtime_env(sdk, manifest)
     windows = manifest["target"]["os"] == "windows"
     macos = manifest["target"]["os"] == "macos"
+    if macos:
+        # The packaged SDK has relocatable load commands; prove that they
+        # work without replacing Apple's libc++ or masking missing RPATHs.
+        env.pop("DYLD_LIBRARY_PATH", None)
+        env.pop("DYLD_FALLBACK_LIBRARY_PATH", None)
     owned = macos_bindings.owned_symbols(sdk) if macos else {}
     flags = subprocess.CREATE_NO_WINDOW if windows else 0
     openssl = shutil.which("openssl")
@@ -132,8 +137,8 @@ def main():
             run_env = dict(compile_env)
             if windows:
                 run_env["PATH"] = str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32")
-            else:
-                run_env["LD_LIBRARY_PATH" if manifest["target"]["os"] == "linux" else "DYLD_LIBRARY_PATH"] = str(sdk / "lib")
+            elif not macos:
+                run_env["LD_LIBRARY_PATH"] = str(sdk / "lib")
             cases = {}
             # No globally installed CA bundle may grant trust. The valid CA is
             # deliberately present in ambient variables during the negative.

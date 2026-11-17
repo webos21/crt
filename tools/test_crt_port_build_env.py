@@ -1,4 +1,4 @@
-"""The loader search path crt-port-build.py gives a port's configure must not let the port prefix shadow the build host's libraries."""
+"""Port runtime search must not shadow the host's macOS libraries."""
 import importlib.util
 import os
 from pathlib import Path
@@ -32,6 +32,15 @@ class RuntimeLibrarySearchTest(unittest.TestCase):
         env = {}
         port_build.apply_runtime_library_search(env, 'macos', LIB)
         self.assertEqual(env['DYLD_FALLBACK_LIBRARY_PATH'].split(os.pathsep), [LIB, '/usr/local/lib', '/usr/lib'])
+
+    def test_macos_port_tests_keep_fallback_and_prefer_port_specific_dirs(self):
+        original = {'DYLD_LIBRARY_PATH': '/ambient-override',
+                    'DYLD_FALLBACK_LIBRARY_PATH': os.pathsep.join([LIB, '/ambient-fallback'])}
+        env = port_build.port_test_env(original, Path(LIB).parent, 'macos', ['/port/one', '/port/two'])
+        self.assertNotIn('DYLD_LIBRARY_PATH', env)
+        self.assertEqual(env['DYLD_FALLBACK_LIBRARY_PATH'].split(os.pathsep),
+                         ['/port/one', '/port/two', LIB, '/ambient-fallback'])
+        self.assertEqual(original['DYLD_LIBRARY_PATH'], '/ambient-override')
 
     def test_linux_keeps_its_ld_library_path_in_front(self):
         env = {'LD_LIBRARY_PATH': '/ambient'}

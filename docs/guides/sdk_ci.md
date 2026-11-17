@@ -69,3 +69,25 @@ CRT_SDK_VERIFY_REAL_ASSETS=<dir with a published Preview's assets> python3 -m un
 The build directory must be `<checkout>/out/<name>` (the workflow uses `out/sdk-ci`): `tools/crt-port-build.py` derives its port source
 root from that shape, and an external `-B` fails with "source not found". The release collector requires a clean tree and a checkout equal to the SDK's producer commit, so a local build for `crt-dev-release`
 uses a clean `git worktree` of the commit under test.
+
+### Replaying a macOS port-test failure
+
+After the build reaches a port test, reuse the retained `dev-*` directory under
+`out/sdk-ci/development-sdk-work/` instead of rebuilding libc++ and the network ports.
+On the retained staging SDK (not a previously published archive):
+
+```bash
+python3 tools/crt-port-build.py --sdk-root "$work/dev" --target-os macos --target-arch aarch64 \
+    --source-root "$work/port-sources" --work-root "$work/port-build-utilities" \
+    --install-prefix "$work/dev" --port nlohmann-json --test
+otool -L "$work/port-build-utilities/tests/nlohmann-json/roundtrip-static"
+otool -L "$work/port-build-utilities/tests/nlohmann-json/roundtrip-shared"
+```
+
+Use the actual retained directory for `work`. `otool -L` reports declared imports;
+`DYLD_PRINT_LIBRARIES=1` on direct execution shows the mapped images. Do not set
+`DYLD_LIBRARY_PATH` to the SDK globally: even a static CRT consumer can load Apple
+libc++ through libSystem. Check curl's `port-build-curl/work/curl/config.log` for
+the actual mbedTLS `conftest` link and execution. See the
+[macOS replay](../acceptance/release_qualification.md#macos-dyld-investigation-and-local-replay-2026-11-17)
+for the native versus hosted scope.

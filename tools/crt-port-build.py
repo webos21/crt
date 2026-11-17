@@ -731,33 +731,9 @@ def make_env(root, preset_build_dir, work_build_dir, sysroot, port_prefix, targe
     env["LIBS"] = env.get("CRT_EXTRA_LIBS", "")
     env["DESTDIR"] = ""
     env["CRT_PORT_BUILD_DIR"] = build_dir_env
-    # DYLD_LIBRARY_PATH/LD_LIBRARY_PATH: a runtime-loader fallback search
-    # path pointing at this port's shared-library install dir, alongside
-    # the -Wl,-rpath flag above -- needed for real, not just belt-and-
-    # suspenders: found while porting curl on macOS, where its own
-    # configure runs a real "checking runtime libs availability" probe
-    # (compiles AND EXECUTES a tiny test program linked against
-    # -lmbedtls/-lmbedx509/-lmbedcrypto/-lz) as part of detecting the
-    # mbedTLS backend. That probe failed outright ("one or more libs
-    # available at link-time are not available runtime") because
-    # mbedtls's own hand-written library/Makefile builds its .dylib
-    # files with no explicit -install_name at all (unlike every other
-    # shared-library recipe here, which drives real GNU Libtool and
-    # gets a correct one automatically) -- ld64's default records a
-    # bare "libmbedcrypto.dylib" with no @rpath/absolute-path prefix at
-    # all, which dyld can never resolve via LC_RPATH (macOS's rpath
-    # mechanism only helps references already prefixed "@rpath/...";
-    # unlike Linux's DT_RPATH/DT_RUNPATH, it does nothing for a bare
-    # name) regardless of the -Wl,-rpath flag already in LDFLAGS above.
-    # This project's own run_port_tests()/port_test_env() already set
-    # this same env var for *running* a port's own test binary
-    # afterward (which is why mbedtls's own shared-library test already
-    # passed on macOS despite this) -- but configure's own internal
-    # runtime probes, run as part of the *build* step (not the test
-    # step), never inherited it. Setting it here, once, generically,
-    # covers both without needing an mbedtls-specific workaround.
-    # (macOS now uses DYLD_FALLBACK_LIBRARY_PATH, which finds the bare install names above without shadowing the build
-    # host's own libraries; see apply_runtime_library_search.)
+    # Configure probes can execute their linked programs. Prefer encoded
+    # load paths (the macOS mbedTLS recipe supplies @rpath install names),
+    # with a search path for ports that still use bare names.
     apply_runtime_library_search(env, target_os, f"{port_prefix_env}/lib")
     return env
 
@@ -767,15 +743,15 @@ MACOS_DEFAULT_FALLBACK_DIRS = ("$HOME/lib", "/usr/local/lib", "/usr/lib")
 
 
 def apply_runtime_library_search(env, target_os, lib_dir):
-    """Let configure's own runtime probes find the port prefix's libraries without letting them shadow the build host's.
+    """Supply a runtime search path for configure probes and port tests.
 
     Linux keeps LD_LIBRARY_PATH. macOS must NOT use DYLD_LIBRARY_PATH: it is searched *before* a library's own path, so when the
     prefix is the Development SDK itself (which carries CRT's libc++.1.dylib) Xcode's clang, which configure runs as a host
     tool, loaded CRT's libc++ instead of the system one and died on `Symbol not found: __ZNSt12length_errorD1Ev`
     (hosted macOS run 44024081269, zlib configure). DYLD_FALLBACK_LIBRARY_PATH is searched only after the normal lookup, so a
-    library with a real path (/usr/lib/libc++.1.dylib) is never replaced, while a bare install name such as mbedtls's
-    `libmbedcrypto.dylib` (what the probe needs) is still found. The dyld defaults are listed explicitly because setting the
-    variable replaces them.
+    library with a real path (/usr/lib/libc++.1.dylib) is not replaced by the
+    SDK copy, while a bare install name is still found. The dyld defaults
+    are listed explicitly because setting the variable replaces them.
     """
     if target_os == "linux":
         existing = env.get("LD_LIBRARY_PATH", "")
@@ -1842,8 +1818,7 @@ def build_android_host_tool_port(preset_build_dir, work, port_prefix, recipe, en
 
 
 def port_test_env(env, port_prefix, target_os, extra_dirs=()):
-    """extra_dirs go first: a port installed in its own subdirectory (curl-openssl) whose
-    sonames collide with another port's in <prefix>/lib must win the loader search."""
+    """Search extra_dirs before <prefix>/lib when resolving bare names."""
     test_env = env.copy()
     lib_dir = port_prefix / "lib"
     extra = [Path(d) for d in extra_dirs]
@@ -1851,8 +1826,12 @@ def port_test_env(env, port_prefix, target_os, extra_dirs=()):
         name = "LD_LIBRARY_PATH"
         search_dirs = extra + [lib_dir]
     elif target_os == "macos":
-        name = "DYLD_LIBRARY_PATH"
-        search_dirs = extra + [lib_dir]
+        # Even a statically linked CRT C++ program can load Apple libc++
+        # via libSystem. Do not shadow that image; shared CRT consumers
+        # find the intentional CRT dependency via its encoded @rpath.
+        for directory in reversed(extra + [lib_dir]):
+            apply_runtime_library_search(test_env, target_os, str(directory))
+        return test_env
     elif target_os == "windows":
         name = "PATH"
         search_dirs = [lib_dir, port_prefix / "bin"]
