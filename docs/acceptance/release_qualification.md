@@ -996,6 +996,16 @@ The verifier suite's synthetic Linux tar fixtures run on Ubuntu in CI. Four of
 those cases fail on this Windows host at the tar symlink check.
 
 Local receipts are in `out/sdk-integration-8/`, including `verification-local.json`,
-`baseline/consumer.log`, and `fixed/result.json`. The hosted Windows job with the
-patch still needs a run before closing the S1 matrix.
+`baseline/consumer.log`, and `fixed/result.json`.
+
+### Hosted SDK Integration #9 confirmation (2026-11-17)
+
+[SDK Integration #9](https://github.com/webos21/crt/actions/runs/44038886641)
+passes at `f7d3c1d28f3ee9a033ef2124c74acf4cd105c7df`. The verifier tests and SDK
+jobs for Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64 all pass.
+The [Windows job](https://github.com/webos21/crt/actions/runs/44038886641/job/133888411695)
+builds and verifies `v0.0.1-ci.44038886641`, passes the restricted-token external
+consumer stage that failed in #8, and uploads the assets and verification receipt.
+[Core CI #515](https://github.com/webos21/crt/actions/runs/44038886604) also passes
+all five native jobs at that commit.
 

@@ -103,10 +103,8 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
   `tools/test_sdk_workflows.py` (SHA-pinned actions, read-only permissions, valid CI tag, scripts and trigger paths exist). Still open:
   the published CLI Preview used as consumer (S2) in `.github/ci/sdk-pins.json` once a step reads it; record which checks are required
   (`ci.yml` stays; `sdk-integration` is *not* required at first); list unsupported OS/arch pairs as unverified, not skipped silently.
-- [ ] **S1** `sdk-integration.yml` (manual + changed-path trigger; Linux x86_64/aarch64, macOS/arm64, Windows/x64): build `crt-dev-release`
-  with a CI-only version tag, then `tools/ci_sdk_release.py verify` over the assets (SHA256SUMS, release manifest, toolchain contract,
-  install metadata, no host path in the contract), extract in a clean directory outside the build tree and run the existing external
-  C/C++ consumer. Upload the assets as artifacts with their digests. Record the GitHub Actions run IDs in acceptance.
+- [x] **S1** The four-host SDK integration matrix passes build, asset verification, external consumption and artifact upload.
+  [Hosted acceptance](docs/acceptance/release_qualification.md#hosted-sdk-integration-9-confirmation-2026-11-17).
 - [ ] **S2** Consumer smoke by the pinned, signature-checked published CLI Preview: `sdk install` of the produced archive with its
   manifest pin, then C and C++ `new`/`build`/`test`/`run` and a warm rebuild (Linux first; macOS/Windows with their Preview CLIs).
 - [ ] **S3** `sdk-release.yml` (manual, `dry_run` default true): `package` (clean commit on `main` with a green gate, same build as S1) ->

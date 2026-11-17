@@ -16,7 +16,8 @@ Reproduced SDK Integration #8 on Windows/x64 with Python 3.12.10 and the
 actual CI SDK archive. Create the test PKI directory under the restricted
 workspace so it inherits the run SID grant. Both C++ link modes pass HTTPS,
 inflate and trust-rejection checks while the producer and original SDK stay
-inaccessible. [Windows replay evidence](docs/acceptance/release_qualification.md#windows-sdk-integration-8-local-replay-2026-11-17).
+inaccessible. SDK Integration #9 passes the full hosted matrix, including the
+Windows external consumer, and closes S1. [Local and hosted evidence](docs/acceptance/release_qualification.md#windows-sdk-integration-8-local-replay-2026-11-17).
 
 ### Keep macOS Dev SDK tests from overriding Apple libc++
 
