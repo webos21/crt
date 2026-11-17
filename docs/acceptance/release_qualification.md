@@ -966,3 +966,36 @@ prefix deduplication and that the caller's environment is unchanged. The local
 suite and an explicit `PureWindowsPath`/semicolon replay pass. The production
 loader policy is unchanged by this test fix.
 
+### Windows SDK Integration #8 local replay (2026-11-17)
+
+[SDK Integration #8, Windows/x64](https://github.com/webos21/crt/actions/runs/44035134694/job/133876148863)
+built and verified the Dev SDK from `1295d5d7304f5377e77ed365b7badd25ffa7fa95`.
+The verifier and Linux/macOS jobs passed. The Windows external consumer passed
+the visibility probe, then raised `PermissionError` writing `openssl.cnf` in its
+PKI directory.
+
+On Windows/x64 with Python 3.12.10, LLVM 22.1.8 and Windows SDK
+`10.0.26100.0/um/x64`, `ci_sdk_release.py verify` independently verified and
+extracted the same four CI assets. The manifest pin is
+`30be2982253e698acdd236a9b10b9339c46a0d5649337b6564d9d1176999d470` and the
+installed content identity is
+`a4136eb4c202f3d9915f59b71c33245172311764e214bd8ea7fff03c11717756`.
+The original consumer reproduced the same error. Python 3.12.4 and later apply
+a protected Windows ACL to `mkdtemp`'s `0700` directory. The failed directory's
+ACL listed Owner Rights, SYSTEM and Administrators. Its parent also granted
+access to the run SID required by the restricted token.
+
+The Windows restricted consumer now creates a fresh `pki` directory that inherits
+the private workspace ACL. With the same extracted SDK, both C++ variants pass
+HTTPS and inflate with the valid CA and reject the wrong, missing and malformed
+CA cases (8/8). The visibility probe confirms that the producer and original SDK
+are unreadable, including the protected file checks in descendant processes. The
+original and relocated SDK inventories compare equal before and after the replay.
+The Windows ZIP verifier fixture and 55 related unit tests also pass locally.
+The verifier suite's synthetic Linux tar fixtures run on Ubuntu in CI. Four of
+those cases fail on this Windows host at the tar symlink check.
+
+Local receipts are in `out/sdk-integration-8/`, including `verification-local.json`,
+`baseline/consumer.log`, and `fixed/result.json`. The hosted Windows job with the
+patch still needs a run before closing the S1 matrix.
+

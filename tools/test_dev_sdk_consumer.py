@@ -83,7 +83,14 @@ def main():
     openssl = shutil.which("openssl")
     if not openssl:
         raise ValueError("native OpenSSL build-host tool required for the fresh test PKI")
-    pki = Path(tempfile.mkdtemp(prefix="pki-", dir=work))
+    if windows and os.environ.get("CRT_TEST_ISOLATION") == "windows-restricted-token":
+        # The fresh external workspace has an inheritable grant for the run SID.
+        # Python 3.12.4+ gives mkdtemp's 0700 directory its own ACL on Windows,
+        # which omits that SID and prevents the restricted child from writing to it.
+        pki = work / "pki"
+        pki.mkdir()
+    else:
+        pki = Path(tempfile.mkdtemp(prefix="pki-", dir=work))
     make_pki(pki, openssl)
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):

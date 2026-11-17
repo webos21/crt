@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-17
 
+### Preserve the Windows SDK consumer's inherited test ACL
+
+Reproduced SDK Integration #8 on Windows/x64 with Python 3.12.10 and the
+actual CI SDK archive. Create the test PKI directory under the restricted
+workspace so it inherits the run SID grant. Both C++ link modes pass HTTPS,
+inflate and trust-rejection checks while the producer and original SDK stay
+inaccessible. [Windows replay evidence](docs/acceptance/release_qualification.md#windows-sdk-integration-8-local-replay-2026-11-17).
+
 ### Keep macOS Dev SDK tests from overriding Apple libc++
 
 Replayed `crt-dev-release` at `1c441e9` on macOS 27.2.1/Xcode 27.2. The full local producer
