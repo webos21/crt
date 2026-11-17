@@ -203,6 +203,19 @@ jobs:
           --keep-extracted "$RUNNER_TEMP/sdk-extracted"
           --json "$RUNNER_TEMP/sdk-verification.json"
 
+      - name: Make the producer checkout and the extracted SDK private to the runner user (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # tools/crt_windows_external.py hides the producer by running the consumer under a restricted token, which still passes
+          # whatever Users/Everyone/the logon SID may read. A checkout under a developer's profile grants those nothing, but a hosted
+          # runner's workspace (D:\a) inherits broad read grants and was reported "still visible". Give both roots the access a
+          # developer profile has (this user, SYSTEM, Administrators) so the proof tests what it claims; its denial check is unchanged.
+          foreach ($path in @($env:GITHUB_WORKSPACE, (Join-Path $env:RUNNER_TEMP 'sdk-extracted'))) {
+            icacls $path /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "icacls failed for $path" }
+          }
+
       - name: External consumer of the extracted archive with the producer checkout hidden
         shell: bash
         run: >

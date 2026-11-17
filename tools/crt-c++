@@ -399,6 +399,14 @@ case "$target_os" in
     common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1"
     if [ "$is_asm_source" -eq 0 ]; then
       common_flags="$common_flags -U__APPLE__"
+      # Apple clang (Xcode 26) compiles `new T[n]` to the typed allocation function
+      # `operator new[](size_t, std::__type_descriptor_t)`, which only Apple's own libc++ defines. This project's imported libc++
+      # (built with the same flag, tools/crt-libcxx-build.py) does not, so a program built against it died at load with
+      # `dyld: Symbol not found: __ZnamSt19__type_descriptor_t` (hosted macOS run 44025840329, nlohmann-json roundtrip-static).
+      # A compiler without the flag has no typed allocation either, so the flag is added only where the compiler knows it.
+      if "$cxx" -fno-typed-cxx-new-delete -x c++ -fsyntax-only /dev/null >/dev/null 2>&1; then
+        common_flags="$common_flags -fno-typed-cxx-new-delete"
+      fi
       if [ "$want_real_apple_sdk" -eq 1 ]; then
         # Cancels the -U__APPLE__ just added, for this compile only -- see
         # -fcrt-real-apple-sdk's own top comment (item 2) for why real
