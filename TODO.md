@@ -120,6 +120,15 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
 - [ ] **S5** CLI adopts it through the existing pin promotion ([policy](https://github.com/webos21/crt-cli/blob/main/docs/guides/development.md#ci-pin-promotion));
   producer->consumer order: publish, sign, then update the CLI lock.
 - [ ] **S6** (later) Full SDK release workflow reusing S1-S4 once the Dev SDK flow is stable; not scheduled.
+- [ ] **S7** Windows/arm64 first Dev SDK Preview and first CLI through the
+  [first-host bootstrap](docs/guides/sdk_ci.md#first-host-bootstrap-a-host-without-a-published-cli) (no published ARM64 CLI exists, so S2 cannot run for the
+  first Preview). The exception is narrow, noted in the release notes and ends when the host is pinned. Local candidates are path evidence only, not promoted.
+  - [x] Steps 1-2 as code: `windows-arm64` offered by `sdk-release.yml` (`windows-11-arm`, ARM64 MSVC/LLVM), S2 recorded `NOT RUN` with the source-hidden native
+    consumer of the extracted archive in its place, rules enforced by `plan`/`publish` and the workflow tests. Not yet run on a hosted runner.
+  - [ ] Step 2 hosted: CI of this change and a `dry_run: true` release of `windows-arm64` (package, verify with the NOT RUN record, approved draft deleted by hand).
+  - [ ] Step 3: the first Windows/arm64 Dev SDK Preview from a clean reviewed commit, `release` approval, owner signature, public replay.
+  - [ ] Steps 4-5 (crt-cli owns them): first ARM64 CLI built from the published SDK and published as a bootstrap; CLI pins and ARM64 CI row; crt pin `windows-aarch64`.
+  - [ ] Step 6: SDK and CLI dry runs on the normal gate with S2 by the published ARM64 CLI; close the exception.
 
 #### Remaining host qualification
 

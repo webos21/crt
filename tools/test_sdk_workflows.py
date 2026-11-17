@@ -133,6 +133,53 @@ class ReleaseWorkflowRulesTest(unittest.TestCase):
             self.assertIn(flag, (ROOT / '.github/workflows/sdk-integration.yml').read_text(encoding='utf-8'))
 
 
+class ReleaseHostRulesTest(unittest.TestCase):
+    """The release workflow, the publication driver and the integration matrix describe the same hosts, and the first-host bootstrap exception stays explicit."""
+    TEXT = (ROOT / '.github/workflows/sdk-release.yml').read_text(encoding='utf-8')
+
+    @staticmethod
+    def hosts():
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import ci_sdk_publish
+        return ci_sdk_publish.HOSTS
+
+    @staticmethod
+    def matrix_rows():
+        return MatrixHostRulesTest().rows()  # the one text parser of the integration matrix
+
+    def test_the_host_choices_are_exactly_the_hosts_of_the_publication_driver(self):
+        choices = re.search(r'(?m)^        options: \[([^\]]+)\]$', self.TEXT)
+        self.assertIsNotNone(choices)
+        self.assertEqual(sorted(h.strip() for h in choices.group(1).split(',')), sorted(self.hosts()))
+
+    def test_every_windows_host_passes_the_toolchain_inputs_of_its_integration_row(self):
+        rows = self.matrix_rows()
+        for host, info in self.hosts().items():
+            if info['os'] != 'windows':
+                continue
+            row = rows['%s-%s' % (info['os'], info['arch'])]
+            self.assertEqual(info['runner'], row['runner'], host)
+            self.assertEqual(info['msvc_arch'], row['msvc_arch'], host)
+            self.assertEqual(info['llvm_asset'], row['llvm_asset'], host)
+        # package and verify both install the host tools with the inputs the plan job derived from that table
+        self.assertEqual(2, self.TEXT.count('msvc_arch: ${{ needs.plan.outputs.msvc_arch }}'))
+        self.assertEqual(2, self.TEXT.count('llvm_asset: ${{ needs.plan.outputs.llvm_asset }}'))
+
+    def test_the_bootstrap_host_is_the_host_the_integration_matrix_marks_cli_preview_none(self):
+        marked = sorted('%s-%s' % (i['os'], i['arch']) for i in self.hosts().values() if i.get('bootstrap'))
+        unpinned = sorted('%s-%s' % (r['os'], r['arch']) for r in self.matrix_rows().values() if r.get('cli_preview') == 'none')
+        self.assertEqual(marked, unpinned)
+
+    def test_the_published_cli_smoke_is_conditional_and_a_bootstrap_run_says_not_run_and_uses_the_source_hidden_consumer(self):
+        verify = ReleaseWorkflowRulesTest().jobs()['verify']
+        self.assertRegex(verify, r"(?s)- name: Consumer smoke on the packaged bytes\n        if: needs\.plan\.outputs\.smoke_cli == 'pinned'\n")
+        self.assertRegex(verify, r"(?s)- name: Record that the consumer smoke was not run[^\n]*\n        if: needs\.plan\.outputs\.smoke_cli == 'none'\n")
+        self.assertIn('NOT RUN (first-host bootstrap)', verify)
+        self.assertRegex(verify, r"(?s)- name: External consumer of the extracted archive[^\n]*\n        if: needs\.plan\.outputs\.smoke_cli == 'none'\n.*?tools/test_dev_sdk_external\.py")
+        self.assertIn('--keep-extracted "$RUNNER_TEMP/sdk-extracted"', verify)
+
+
 class MatrixHostRulesTest(unittest.TestCase):
     """Every matrix host either has a pinned published CLI Preview for the consumer smoke or says, explicitly, that it has none."""
     TEXT = (ROOT / '.github/workflows/sdk-integration.yml').read_text(encoding='utf-8')

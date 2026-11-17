@@ -115,12 +115,13 @@ CI success is necessary, never publication authority. The workflow is manual (`w
 | --- | --- | --- | --- |
 | `plan` | ubuntu-24.04 | read (+ `actions: read`) | refuses the request unless: host/date/serial are valid, the commit is a full SHA that is an ancestor of `origin/main` and has a successful `CI` run (a docs-only commit, which `ci.yml` does not run for, is covered by its nearest ancestor with a run, provided every commit passed over changed only `*.md` or `docs/**`; `porting/**` counts as code here), no release of that tag exists, the notes are a `docs/releases/*.md` file at that commit that renders, and the `release` environment **has required reviewers** (GitHub auto-creates a missing environment with no approval, so its absence must fail, not pass) |
 | `package` | the host's runner | read | builds exactly that commit with `crt-dev-release` under the real tag; `ci_sdk_release.py verify` on the result; uploads the six assets |
-| `verify` | a fresh runner of the same host | read | downloads the artifact, re-verifies it, and runs the S2 consumer smoke (pinned CLI Preview installs the packaged archive; C and C++ build/test/run, cold and warm) |
+| `verify` | a fresh runner of the same host | read | downloads the artifact, re-verifies it, and runs the S2 consumer smoke (pinned CLI Preview installs the packaged archive; C and C++ build/test/run, cold and warm); a first host without a published CLI records S2 as `NOT RUN` and runs the source-hidden native consumer of the extracted archive instead |
 | `publish` | ubuntu-24.04 | **write**, behind environment `release` | waits for a reviewer, re-verifies the bytes, stages a draft, downloads it back and compares every byte, then (not in a dry run) publishes a non-latest prerelease. Never rebuilds, never overwrites |
 
 A dry run goes through the same approval and stops at the verified draft; delete that draft by hand. The tag is
 `v0.0.1-preview.<date>.<os>.<arch>.<serial>` (for example `v0.0.1-preview.20261118.linux.x64.1`; a prerelease identifier cannot contain `_`).
-Host keys: `linux-x64`, `linux-arm64`, `macos-arm64`, `windows-x64`; Windows/arm64 has no consumer smoke yet and is not offered.
+Host keys: `linux-x64`, `linux-arm64`, `macos-arm64`, `windows-x64` and `windows-arm64`. The last one has no published crt-cli yet and takes the
+[first-host bootstrap](#first-host-bootstrap-a-host-without-a-published-cli) path below; every other host runs the normal consumer smoke.
 
 **Notes** are a reviewed file: copy `docs/releases/sdk_release_notes_template.md` to `docs/releases/release_notes_<tag>.md` in a commit that precedes the release
 commit. The workflow fills `{{TAG}} {{COMMIT}} {{TARGET}} {{MANIFEST_SHA256}} {{MANIFEST_BYTES}} {{CONTENT_SHA256}} {{ASSET_TABLE}}` from the verified bytes; any other token,
@@ -129,3 +130,42 @@ or a template without the pins, stops it.
 **One-time setup** (repository settings, done by the owner): create the `release` environment with the owner as required reviewer.
 Publication does not authenticate the publisher: the owner signs the archive offline and attaches `.sig`
 ([procedure](../security/publisher_signing.md)); the consumer pin moves only after that.
+
+
+## First-host bootstrap (a host without a published CLI)
+
+The normal gate has a circle on a host's very first Preview: the CRT release check needs a published, signed crt-cli for that host to install the
+archive (S2), and the crt-cli release build needs the published, signed Dev SDK of that host. `windows-arm64` is the only host in that state
+(`sdk-pins.json` has no `windows-aarch64` entry). The circle is broken once, for one SDK Preview, by an exception that is **narrow, visible and
+self-ending**; the four hosts with a published CLI keep their gate unchanged.
+
+**What replaces S2, and what is never claimed.** The packaged bytes are still re-verified from scratch on a second runner (`ci_sdk_release.py verify`:
+asset set, digests, install metadata, portable contract, no runner paths), and the *extracted archive* is consumed by the source-hidden native C/C++
+consumer (`tools/test_dev_sdk_external.py`, restricted token with the producer checkout inaccessible). That proves the SDK is complete and usable
+without CRT's sources. It does **not** prove that crt-cli installs it: the job summary says `NOT RUN (first-host bootstrap)`, the reviewed notes must say
+so, and no receipt of the missing smoke exists. A pass of this path is never described as an S2 pass.
+
+**Rules enforced in code** (`smoke_policy` in `tools/ci_sdk_publish.py`, run by `plan` and again by `publish`; tested in `tools/test_ci_sdk_publish.py`
+and `tools/test_sdk_workflows.py`):
+
+1. Only a host marked `bootstrap` in `HOSTS` may run without a pinned CLI; any other host without a pin is refused (a deleted pin cannot silently
+   turn the smoke off).
+2. The reviewed notes must contain the exact sentence `Consumer smoke by the published CLI: NOT RUN (first-host bootstrap)`; without it the release
+   is refused before anything is built.
+3. A `bootstrap` host that has gained a pin is refused until the mark is removed: the exception ends the moment the first CLI is pinned, and the next
+   Preview of that host runs the normal smoke.
+4. The marked host and the `cli_preview: none` row of `sdk-integration.yml` must be the same host.
+
+**Order for the first Windows/arm64 Preview and its CLI.** Each step needs the previous step's published, signed bytes; none of them is performed
+by a workflow without a human, and a failed step is retained, not retried until green.
+
+| Step | Who | Gate / evidence |
+| --- | --- | --- |
+| 1. Policy | reviewed commit | this section and the tests above; owner approval of the exception |
+| 2. Workflow wiring | reviewed commit, hosted CI on a PR | `windows-arm64` is offered by `sdk-release.yml`; a dry run of `plan`/`package`/`verify` on that host with the NOT RUN record |
+| 3. First SDK Preview | owner starts `sdk-release.yml` (`dry_run` first), a `release` reviewer approves, owner signs offline | a clean commit built by the workflow, never an earlier local candidate; the run IDs, approval and signature are recorded in [release qualification](../acceptance/release_qualification.md) |
+| 4. First CLI | crt-cli bootstrap procedure, from the *published, signed* SDK only | seed -> self-build, native tests, package, isolated run, public SDK acquisition; the CLI's own bootstrap publication and signature |
+| 5. Pins | crt-cli, then crt | exact SDK + CLI pair in `docs/compatibility.md`; crt-cli pins and enables its ARM64 CI row; crt adds `windows-aarch64` to `sdk-pins.json` and drops `cli_preview: none` and `bootstrap` in the same reviewed commit |
+| 6. Normal path | both | SDK and CLI release dry runs pass on the normal gate, including S2 with the published ARM64 CLI; the exception is closed |
+
+Local candidates (an earlier rehearsal SDK or a locally built CLI) remain path-validation evidence only and are never promoted.
