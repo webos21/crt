@@ -73,5 +73,48 @@ class WorkflowRulesTest(unittest.TestCase):
             self.assertTrue((ROOT / 'tools' / name).is_file(), name)
 
 
+class MatrixHostRulesTest(unittest.TestCase):
+    """Every matrix host either has a pinned published CLI Preview for the consumer smoke or says, explicitly, that it has none."""
+    TEXT = (ROOT / '.github/workflows/sdk-integration.yml').read_text(encoding='utf-8')
+
+    def rows(self):
+        block = re.search(r'(?ms)^        include:\n(.*?)^    steps:', self.TEXT)
+        self.assertIsNotNone(block, 'no matrix include list')
+        rows = {}
+        for row in re.split(r'(?m)^          - host: ', block.group(1))[1:]:
+            fields = dict(re.findall(r'^\s*([a-z_]+):\s*(\S+)\s*$', 'host: ' + row, re.M))
+            rows[fields['host']] = fields
+        return rows
+
+    def test_a_host_without_a_pin_declares_cli_preview_none_and_a_pinned_host_does_not(self):
+        import json
+        pinned = set(json.loads((ROOT / '.github/ci/sdk-pins.json').read_text(encoding='utf-8'))['hosts'])
+        rows = self.rows()
+        self.assertTrue(rows)
+        for host, fields in rows.items():
+            if host in pinned:
+                self.assertNotIn('cli_preview', fields, '%s has a pin, so its consumer smoke must run' % host)
+            else:
+                self.assertEqual(fields.get('cli_preview'), 'none', '%s has no sdk-pins.json entry and does not say so' % host)
+
+    def test_a_pin_without_a_matrix_host_is_stale(self):
+        import json
+        pinned = set(json.loads((ROOT / '.github/ci/sdk-pins.json').read_text(encoding='utf-8'))['hosts'])
+        self.assertLessEqual(pinned, set(self.rows()))
+
+    def test_every_matrix_host_names_its_toolchain_inputs(self):
+        for host, fields in self.rows().items():
+            for key in ('runner', 'preset', 'os', 'arch'):
+                self.assertIn(key, fields, '%s lacks %s' % (host, key))
+            if fields['os'] == 'windows':
+                for key in ('msvc_arch', 'llvm_asset'):
+                    self.assertIn(key, fields, '%s lacks %s' % (host, key))
+        self.assertIn('windows-aarch64', self.rows())
+
+    def test_the_not_run_step_exists_and_the_smoke_step_is_conditional(self):
+        self.assertRegex(self.TEXT, r"(?m)^        if: matrix\.cli_preview == 'none'$")
+        self.assertRegex(self.TEXT, r"(?m)^        if: matrix\.cli_preview != 'none'$")
+
+
 if __name__ == '__main__':
     unittest.main()

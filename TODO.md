@@ -104,6 +104,8 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
   the published CLI Preview used as consumer is now in `.github/ci/sdk-pins.json` (read by S2's smoke); record which checks are required
   (`ci.yml` stays; `sdk-integration` is *not* required at first); list unsupported OS/arch pairs as unverified, not skipped silently.
 - [x] **S1** The four-host SDK integration matrix passes build, asset verification, external consumption and artifact upload.
+  - [x] Windows/arm64 row (`windows-aarch64` on `windows-11-arm`) with the consumer smoke explicitly not run until a `win-arm64` crt-cli Preview is
+    published and pinned ([hosted run](docs/acceptance/release_qualification.md#hosted-windowsarm64-sdk-integration-2026-11-17)).
   [Hosted acceptance](docs/acceptance/release_qualification.md#hosted-sdk-integration-9-confirmation-2026-11-17).
 - [x] **S2** Consumer smoke by the pinned, signature-checked published CLI Preview: `sdk install` of the produced archive with its
   manifest pin, then C and C++ `new`/`build`/`test`/`run` and a warm rebuild, on all four hosts with their Preview CLIs.
