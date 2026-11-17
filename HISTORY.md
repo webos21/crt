@@ -15,7 +15,8 @@ substantive update.
 `.github/workflows/sdk-release.yml` plans, packages, verifies on a separate runner (S2 smoke on the packaged bytes) and publishes through
 `tools/ci_sdk_publish.py` behind the `release` environment, with `dry_run` true by default; the plan refuses a run whose environment has no required
 reviewers. Writing the tests found and fixed trailing-newline acceptance (`$` vs `fullmatch`) in the verifier's version and commit checks and a notes
-template whose own comment contained an unfillable token. Local only: the fake-`gh` flow tests pass; no hosted run yet.
+template whose own comment contained an unfillable token. The fake-`gh` flow tests pass and a hosted Linux/x64 dry run passes through the reviewer approval
+([evidence](docs/acceptance/release_qualification.md#hosted-sdk-release-dry-run-s3-2026-11-17)); S3 is closed.
 
 ### Add the Dev SDK consumer smoke by the published CLI Preview (S2)
 

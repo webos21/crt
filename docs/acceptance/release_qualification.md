@@ -1047,3 +1047,18 @@ workflow's private-root step. On `windows-latest` (workspace on `D:`) the check
 runs at that commit pass ([#523](https://github.com/webos21/crt/actions/runs/44053976318), push; #524, pull request).
 
 Not covered: the consumer smoke for Windows/arm64 (S2) and `sdk-release.yml` (S3). The CI tag build is not a Preview and no asset was published.
+
+### Hosted SDK release dry run (S3, 2026-11-17)
+
+[SDK release run 44084361895](https://github.com/webos21/crt/actions/runs/44084361895) at `74ae0f2f28938f256ea520b0c722b2e0c627c7e7` (`host=linux-x64`,
+`date=20261117`, `serial=1`, `dry_run=true`, notes `docs/releases/sdk_release_notes_template.md`) passes `plan`, `package`, `verify` and `publish`.
+
+- `plan` accepted the commit (on `main`, successful CI) only after the `release` environment existed with a required reviewer.
+- `package` built `v0.0.1-preview.20261117.linux.x64.1` with `crt-dev-release` and verified it from its bytes (about 7 minutes).
+- `verify` on a separate runner re-verified the downloaded files and ran the S2 smoke: the pinned CLI `v0.1.0-preview.20261116.linux-x86_64.1` installed the packaged
+  archive and built, tested and ran C and C++. Manifest SHA-256 `ced522fbc37da1869cc63171283d7c19ace8019a1d018beb1291bb8713acd40b` (1753 bytes), content
+  `1f9d8abecdf4f1489e68229f9c47031005fd057f390299c998f1b3b0c4b33d7c`.
+- `publish` waited for the `release` environment: reviewer `webos21` approved it (comment `OK`). It staged a **draft** prerelease targeting `74ae0f2` with the six
+  assets, downloaded it back and compared every byte, then stopped (dry run). The rendered notes carry the manifest pin, content identity and asset table.
+
+Not covered: no non-draft publication, no other host's dry run, no publisher signature, no consumer pin change. The dry-run draft must be deleted by hand; it is not a Preview.
