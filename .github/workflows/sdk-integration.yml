@@ -162,6 +162,17 @@ jobs:
           if (-not (Test-Path $llvmBin)) { throw "LLVM was not installed at $llvmBin" }
           Add-Content -Path $env:GITHUB_PATH -Value $llvmBin
 
+      - name: Locate the Windows SDK import libraries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # The toolchain contract export links a freestanding probe and needs the um/<arch> import-library directory (kernel32.lib).
+          # msvc-dev-cmd put the Windows SDK library directories on LIB.
+          $um = $env:LIB -split ';' | Where-Object { $_ -match '\\um\\${{ matrix.msvc_arch }}\\?$' -and (Test-Path (Join-Path $_ 'kernel32.lib')) } | Select-Object -First 1
+          if (-not $um) { throw "no um\${{ matrix.msvc_arch }} directory with kernel32.lib on LIB: $env:LIB" }
+          Write-Host "Windows SDK import libraries: $um"
+          Add-Content -Path $env:GITHUB_ENV -Value "CRT_WINDOWS_SDK_LIBPATH=$um"
+
       - name: Report the toolchain
         shell: bash
         run: |
@@ -225,6 +236,17 @@ jobs:
           PY
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the port build logs of a failed build
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-${{ matrix.host }}-${{ github.sha }}-port-logs
+          path: |
+            out/sdk-ci/development-sdk-work/**/configure.log
+            out/sdk-ci/development-sdk-work/**/config.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Keep the assets and their verification
         if: always()
