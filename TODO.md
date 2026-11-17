@@ -105,8 +105,9 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
   (`ci.yml` stays; `sdk-integration` is *not* required at first); list unsupported OS/arch pairs as unverified, not skipped silently.
 - [x] **S1** The four-host SDK integration matrix passes build, asset verification, external consumption and artifact upload.
   [Hosted acceptance](docs/acceptance/release_qualification.md#hosted-sdk-integration-9-confirmation-2026-11-17).
-- [ ] **S2** (implemented; hosted run pending) Consumer smoke by the pinned, signature-checked published CLI Preview: `sdk install` of the produced archive with its
-  manifest pin, then C and C++ `new`/`build`/`test`/`run` and a warm rebuild (Linux first; macOS/Windows with their Preview CLIs).
+- [x] **S2** Consumer smoke by the pinned, signature-checked published CLI Preview: `sdk install` of the produced archive with its
+  manifest pin, then C and C++ `new`/`build`/`test`/`run` and a warm rebuild, on all four hosts with their Preview CLIs.
+  [Hosted acceptance](docs/acceptance/release_qualification.md#hosted-cli-consumer-smoke-s2-2026-11-17).
 - [ ] **S3** `sdk-release.yml` (manual, `dry_run` default true): `package` (clean commit on `main` with a green gate, same build as S1) ->
   `verify` (separate runner, S2 on the packaged bytes) -> approval-gated `publish` in a `release` environment (draft, re-download,
   byte compare, then non-latest prerelease). Notes from a reviewed template with digest tokens; tag = the source commit. Dry run first.
