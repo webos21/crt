@@ -1009,6 +1009,25 @@ consumer stage that failed in #8, and uploads the assets and verification receip
 [Core CI #515](https://github.com/webos21/crt/actions/runs/44038886604) also passes
 all five native jobs at that commit.
 
+
+### Hosted CLI consumer smoke (S2, 2026-11-17)
+
+[SDK integration run 44047616943](https://github.com/webos21/crt/actions/runs/44047616943) at
+`1554ebeded2db1151c4ada3507326efd8d925c78` passes on all four hosts. In each, the CLI Preview pinned in
+`.github/ci/sdk-pins.json` matched its size, SHA-256 and publisher signature (`openssl`, pinned key fingerprint),
+installed the Dev SDK just built (`v0.0.1-ci.44047616943`) from its manifest SHA-256, and built, tested and ran a
+C and a C++ project. Each project's cold build executed 3 steps and its warm rebuild reused 3 and executed none.
+
+| Host | CLI Preview | Installed content (first 12) |
+| --- | --- | --- |
+| Linux/x86_64 | `v0.1.0-preview.20261116.linux-x86_64.1` | `b95cc599008c` |
+| Linux/aarch64 | `v0.1.0-preview.20261116.linux-arm64.1` | `8fd801fbb348` |
+| macOS/arm64 | `v0.1.0-preview.20261117.macos-arm64.1` | `5191e76c82c8` |
+| Windows/x64 | `v0.1.0-preview.20261117.windows-x86_64.1` | `1e18830b05b0` |
+
+Not covered: the CLI's own pins (`crt.lock`) are not exercised, only a first build that selects the one installed SDK;
+Windows/arm64, macOS/x86_64 and Linux/riscv remain unverified; nothing was published.
+
 ## Hosted Windows/arm64 SDK integration (2026-11-17)
 
 `sdk-integration.yml` gained a `windows-aarch64` row on `windows-11-arm` (image `windows-11-vs2026-arm64` 20261112.217.1, MSVC arm64 developer environment, native
