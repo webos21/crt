@@ -34,12 +34,15 @@ class RuntimeLibrarySearchTest(unittest.TestCase):
         self.assertEqual(env['DYLD_FALLBACK_LIBRARY_PATH'].split(os.pathsep), [LIB, '/usr/local/lib', '/usr/lib'])
 
     def test_macos_port_tests_keep_fallback_and_prefer_port_specific_dirs(self):
+        port_prefix = Path(LIB).parent
+        lib_dir = str(port_prefix / 'lib')
+        extra_dirs = [str(Path('/port/one')), str(Path('/port/two'))]
         original = {'DYLD_LIBRARY_PATH': '/ambient-override',
-                    'DYLD_FALLBACK_LIBRARY_PATH': os.pathsep.join([LIB, '/ambient-fallback'])}
-        env = port_build.port_test_env(original, Path(LIB).parent, 'macos', ['/port/one', '/port/two'])
+                    'DYLD_FALLBACK_LIBRARY_PATH': os.pathsep.join([lib_dir, '/ambient-fallback'])}
+        env = port_build.port_test_env(original, port_prefix, 'macos', extra_dirs)
         self.assertNotIn('DYLD_LIBRARY_PATH', env)
         self.assertEqual(env['DYLD_FALLBACK_LIBRARY_PATH'].split(os.pathsep),
-                         ['/port/one', '/port/two', LIB, '/ambient-fallback'])
+                         extra_dirs + [lib_dir, '/ambient-fallback'])
         self.assertEqual(original['DYLD_LIBRARY_PATH'], '/ambient-override')
 
     def test_linux_keeps_its_ld_library_path_in_front(self):

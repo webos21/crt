@@ -17,8 +17,10 @@ and byte verification pass; curl's configure executes the mbedTLS probe successf
 A typed-allocation control reproduces the hosted dyld symbol failure under the old port-test
 environment. Use fallback-only search for port tests and no dyld search override in the
 relocated Dev consumer. Static/shared port and Seatbelt consumer replays pass against the
-same SDK bytes. [Evidence](docs/acceptance/release_qualification.md#macos-dyld-investigation-and-local-replay-2026-11-17);
-hosted confirmation remains open.
+same SDK bytes. [Hosted macOS](docs/acceptance/release_qualification.md#hosted-macos-confirmation-and-core-ci-fixture-follow-up-2026-11-17)
+also passes at `eb6acb1`. Core CI #513's Windows-only assertion came from mixed
+path representations in the new unit test; normalize the fixture without
+changing production lookup. The separate Windows SDK consumer remains open.
 
 ### Dev SDK integration workflow and the independent asset verifier
 

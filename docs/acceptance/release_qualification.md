@@ -935,7 +935,34 @@ exit 0 in `config.log`); the three mbedTLS dylibs have `@rpath` install IDs.
   HTTPS/inflate plus trust negatives without dyld overrides.
 
 Local evidence: `out/sdk-ci-macos-local-20261117/` (producer logs, `sdk-verification.json`,
-`patched-port-replay/`, `external-patched/result.json`). This is not a new clean release
-of the patched tooling or a hosted Xcode 26.6 pass. S1 remains open until a hosted run
-exercises the fix and the separate Windows failure is resolved; no publication or CLI pin change.
+`patched-port-replay/`, `external-patched/result.json`). The local clean archive predates
+the test-environment changes; the hosted replay below exercises them together.
+
+### Hosted macOS confirmation and core CI fixture follow-up (2026-11-17)
+
+[SDK integration run 44033122248, macOS job 133869589017](https://github.com/webos21/crt/actions/runs/44033122248/job/133869589017)
+passes on `eb6acb1dcc84ba796531f0c43297874fd2a66841` with Xcode 26.6
+(Apple clang `2100.1.1.101`). The curl mbedTLS runtime probe reports `fine`;
+both nlohmann-json variants print `json_roundtrip: ok`. Build, independent
+asset verification, and external Seatbelt consumption of the extracted Dev SDK
+all pass, including static/shared HTTPS and trust negatives. The CI-only build
+`v0.0.1-ci.44033122248` has manifest SHA-256
+`aef5854bcafbe2153893159ece4ba0935d8dd0b59bf029ff50ab155424a12e3a` and
+content identity `3f612ad1ea025961ecf71ebcac0efa01cbfb064bde45ebd049cb7180ad72bc12`.
+The two Linux SDK jobs also pass. This closes the hosted macOS regression only;
+no release publication or CLI pin change is implied.
+The same run's [Windows/x64 job](https://github.com/webos21/crt/actions/runs/44033122248/job/133869589154)
+passes asset build and byte verification but fails the external fixture with
+`PermissionError` writing `pki-*/openssl.cnf` under the restricted token.
+The full S1 matrix remains open.
+
+[Core CI #513](https://github.com/webos21/crt/actions/runs/44033122204) passes
+both Linux legs and macOS. Both Windows legs fail the new macOS port-environment
+unit test: the fixture mixes literal POSIX paths with native `pathlib.Path`
+strings, so Windows produces backslashes and retains a duplicate prefix.
+Normalize the fixture inputs and expected values through the same native path
+representation. The test still checks override removal, exact fallback order,
+prefix deduplication and that the caller's environment is unchanged. The local
+suite and an explicit `PureWindowsPath`/semicolon replay pass. The production
+loader policy is unchanged by this test fix.
 
