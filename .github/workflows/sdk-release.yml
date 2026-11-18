@@ -7,7 +7,10 @@ name: SDK release
 #   package  builds exactly that commit with `crt-dev-release` under the real tag, then checks the asset set from its bytes
 #            (no write permission);
 #   verify   on a separate fresh runner: independent re-verification of the downloaded bytes and the consumer smoke by the
-#            pinned, signature-checked published CLI Preview installing that archive (no write permission);
+#            pinned, signature-checked published CLI Preview installing that archive (no write permission). A host that has no
+#            published CLI yet (tools/ci_sdk_publish.py: `bootstrap`, today windows-arm64) cannot run that smoke: it is recorded as
+#            NOT RUN, the reviewed notes must say so, and the source-hidden native consumer of the extracted archive stands in;
+#            the exception ends the moment the host has a pin (docs/guides/sdk_ci.md, "First-host bootstrap");
 #   publish  waits for approval on the `release` environment, re-verifies the bytes, stages a draft, downloads it back and
 #            compares every byte, and only then publishes a non-latest prerelease. It is the only job with `contents: write`
 #            and never rebuilds.
@@ -21,7 +24,7 @@ on:
       host:
         description: Host to release
         type: choice
-        options: [linux-x64, linux-arm64, macos-arm64, windows-x64]
+        options: [linux-x64, linux-arm64, macos-arm64, windows-x64, windows-arm64]
         required: true
       commit:
         description: Full 40-character commit SHA on main to build (a branch or tag is refused)
@@ -67,6 +70,9 @@ jobs:
       arch: ${{ steps.plan.outputs.arch }}
       preset: ${{ steps.plan.outputs.preset }}
       smoke_host: ${{ steps.plan.outputs.smoke_host }}
+      msvc_arch: ${{ steps.plan.outputs.msvc_arch }}
+      llvm_asset: ${{ steps.plan.outputs.llvm_asset }}
+      smoke_cli: ${{ steps.plan.outputs.smoke_cli }}
     steps:
       - name: Check out exactly the requested commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -119,6 +125,8 @@ jobs:
         uses: ./.github/actions/sdk-host-tools
         with:
           github_token: ${{ github.token }}
+          msvc_arch: ${{ needs.plan.outputs.msvc_arch }}
+          llvm_asset: ${{ needs.plan.outputs.llvm_asset }}
 
       - name: Configure the release build
         shell: bash
@@ -176,6 +184,8 @@ jobs:
         uses: ./.github/actions/sdk-host-tools
         with:
           github_token: ${{ github.token }}
+          msvc_arch: ${{ needs.plan.outputs.msvc_arch }}
+          llvm_asset: ${{ needs.plan.outputs.llvm_asset }}
 
       - name: Download the release files from the package job
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -193,9 +203,48 @@ jobs:
         run: >
           python tools/ci_sdk_release.py verify
           --assets "$RUNNER_TEMP/release-files" --os "$OS" --arch "$ARCH" --version "$TAG" --commit "$COMMIT"
+          --keep-extracted "$RUNNER_TEMP/sdk-extracted"
           --json "$RUNNER_TEMP/sdk-release-verification.json"
 
+      - name: Record that the consumer smoke was not run (first-host bootstrap, no published CLI Preview for this host)
+        if: needs.plan.outputs.smoke_cli == 'none'
+        shell: bash
+        env:
+          SMOKE_HOST: ${{ needs.plan.outputs.smoke_host }}
+        run: |
+          echo "::notice title=Consumer smoke not run::$SMOKE_HOST has no published, pinned crt-cli Preview; S2 is pending for this host."
+          {
+            echo "### Consumer smoke by the published CLI ($SMOKE_HOST): NOT RUN (first-host bootstrap)"
+            echo
+            echo "No published crt-cli Preview is pinned for this host in \`.github/ci/sdk-pins.json\`. The packaged bytes were re-verified and the"
+            echo "source-hidden native consumer of the extracted archive ran below; installation by the CLI is unverified, and the reviewed notes say so."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Make the producer checkout and the extracted SDK private to the runner user (Windows)
+        if: needs.plan.outputs.smoke_cli == 'none' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Same preparation as sdk-integration.yml (its comment has the measurement): the restricted token of the external-consumer
+          # proof still passes whatever Users/Authenticated Users/Everyone may read, and the hosted image's workspace grants those.
+          foreach ($path in @($env:GITHUB_WORKSPACE, (Join-Path $env:RUNNER_TEMP 'sdk-extracted'))) {
+            icacls $path /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "icacls failed for $path" }
+            icacls $path /remove:g "*S-1-5-32-545" "*S-1-5-11" "*S-1-1-0" | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "icacls could not remove the broad grants from $path" }
+            Write-Host "ACL of ${path}:"
+            icacls $path | Out-Host
+          }
+
+      - name: External consumer of the extracted archive with the producer checkout hidden (first-host bootstrap)
+        if: needs.plan.outputs.smoke_cli == 'none'
+        shell: bash
+        run: >
+          python tools/test_dev_sdk_external.py
+          --sdk-root "$RUNNER_TEMP/sdk-extracted/dev"
+          --output "$RUNNER_TEMP/sdk-external"
+
       - name: Consumer smoke on the packaged bytes
+        if: needs.plan.outputs.smoke_cli == 'pinned'
         shell: bash
         env:
           SMOKE_HOST: ${{ needs.plan.outputs.smoke_host }}
@@ -215,11 +264,14 @@ jobs:
           import json, os
           temp = os.environ['RUNNER_TEMP']
           v = json.load(open(temp + '/sdk-release-verification.json'))
-          s = json.load(open(temp + '/sdk-cli-smoke.json'))
           print('### Verified packaged assets: %s' % v['version'])
           print('- manifest `%s` %d bytes, SHA-256 `%s`' % (v['manifest']['name'], v['manifest']['size'], v['manifest']['sha256']))
           print('- installed content `%s`' % v.get('content_sha256'))
-          print('- consumer smoke by `%s`: C and C++ cold/warm build, test and run passed' % s['cli']['release'])
+          if os.path.exists(temp + '/sdk-cli-smoke.json'):
+              s = json.load(open(temp + '/sdk-cli-smoke.json'))
+              print('- consumer smoke by `%s`: C and C++ cold/warm build, test and run passed' % s['cli']['release'])
+          else:
+              print('- consumer smoke by the published CLI: **NOT RUN (first-host bootstrap)**; source-hidden native consumer of the extracted archive: passed')
           PY
 
       - name: Keep the verification receipts
@@ -229,6 +281,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sdk-release-verification.json
             ${{ runner.temp }}/sdk-cli-smoke.json
+            ${{ runner.temp }}/sdk-external/result.json
           if-no-files-found: error
           retention-days: 14
 

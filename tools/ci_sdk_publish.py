@@ -25,12 +25,19 @@ import ci_sdk_release  # noqa: E402
 
 BASE_VERSION = '0.0.1'
 # host key -> OS, architecture, hosted runner, and the dotted host label carried by the tag (a prerelease identifier allows no `_`).
+# `msvc_arch` and `llvm_asset` feed .github/actions/sdk-host-tools on Windows and must equal the sdk-integration.yml row of the host
+# (tools/test_sdk_workflows.py); `bootstrap` marks a host that has no published, pinned crt-cli Preview yet (see `smoke_policy`).
 HOSTS = {
     'linux-x64': {'os': 'linux', 'arch': 'x86_64', 'runner': 'ubuntu-26.04', 'label': 'linux.x64'},
     'linux-arm64': {'os': 'linux', 'arch': 'aarch64', 'runner': 'ubuntu-26.04-arm', 'label': 'linux.arm64'},
     'macos-arm64': {'os': 'macos', 'arch': 'aarch64', 'runner': 'macos-latest', 'label': 'macos.arm64'},
-    'windows-x64': {'os': 'windows', 'arch': 'x86_64', 'runner': 'windows-latest', 'label': 'windows.x64'},
+    'windows-x64': {'os': 'windows', 'arch': 'x86_64', 'runner': 'windows-latest', 'label': 'windows.x64', 'msvc_arch': 'x64', 'llvm_asset': 'win64'},
+    'windows-arm64': {'os': 'windows', 'arch': 'aarch64', 'runner': 'windows-11-arm', 'label': 'windows.arm64', 'msvc_arch': 'arm64',
+                      'llvm_asset': 'woa64', 'bootstrap': True},
 }
+# The statement a first-host release's reviewed notes must carry verbatim: the consumer smoke by a published CLI did not run.
+BOOTSTRAP_MARKER = 'Consumer smoke by the published CLI: NOT RUN (first-host bootstrap)'
+PINS_FILE = Path(__file__).resolve().parent.parent / '.github' / 'ci' / 'sdk-pins.json'
 COMMIT_RE = re.compile(r'[0-9a-f]{40}')
 TOKEN_RE = re.compile(r'\{\{[A-Z0-9_]+\}\}')
 NOTES_TOKENS = ('{{TAG}}', '{{COMMIT}}', '{{MANIFEST_SHA256}}', '{{MANIFEST_BYTES}}', '{{CONTENT_SHA256}}', '{{ASSET_TABLE}}', '{{TARGET}}')
@@ -145,6 +152,31 @@ def ci_gate(commit, runs_for, changed_files, parent_of, depth=20):
     raise ReleaseError('no successful CI run within %d docs-only commits of %s' % (depth, commit))
 
 
+def smoke_policy(host, info, pins_hosts, notes_text):
+    """How the consumer smoke of the packaged bytes is done: `pinned` (a published, signature-checked CLI Preview installs the archive) or
+    `none` (first-host bootstrap: it is *not run*, the notes say so, and the source-hidden native consumer of the extracted archive stands in).
+
+    The exception cannot become the default or outlive its reason. A host that is not marked `bootstrap` must have a pin; a `bootstrap` host
+    that has gained a pin is refused until the mark is removed; and without a pin the reviewed notes must carry BOOTSTRAP_MARKER, so that
+    "no published CLI exercised this archive" is never omitted from what the public reads.
+    """
+    pinned = '%s-%s' % (info['os'], info['arch']) in pins_hosts
+    if info.get('bootstrap'):
+        if pinned:
+            raise ReleaseError('%s has a pinned published CLI Preview, so the first-host bootstrap exception has ended: remove `bootstrap` for it '
+                               'in HOSTS and let the normal consumer smoke run' % host)
+        if BOOTSTRAP_MARKER not in notes_text:
+            raise ReleaseError('%s has no published CLI Preview: the reviewed notes must state "%s"' % (host, BOOTSTRAP_MARKER))
+        return 'none'
+    if not pinned:
+        raise ReleaseError('%s is not a first-host bootstrap and has no pinned CLI Preview in .github/ci/sdk-pins.json' % host)
+    return 'pinned'
+
+
+def load_pins_hosts():
+    return json.loads(PINS_FILE.read_text(encoding='utf-8'))['hosts']
+
+
 def command_plan(args):
     commit = require_commit(args.commit)
     info = names(args.host, args.date, args.serial)
@@ -165,10 +197,13 @@ def command_plan(args):
     notes = Path(require_notes_path(args.notes_file))
     if not notes.is_file() or not notes.read_text(encoding='utf-8').strip():
         raise ReleaseError('the reviewed release notes %s are missing or empty at this commit' % args.notes_file)
-    render_notes(notes.read_text(encoding='utf-8'), tag=info['tag'], commit=commit, manifest={'sha256': '0' * 64, 'size': 0}, content_sha256='0' * 64,
+    notes_text = notes.read_text(encoding='utf-8')
+    render_notes(notes_text, tag=info['tag'], commit=commit, manifest={'sha256': '0' * 64, 'size': 0}, content_sha256='0' * 64,
                  assets=[{'name': 'x', 'size': 0, 'sha256': '0' * 64}], target=info['target'])
+    smoke_cli = smoke_policy(args.host, info, load_pins_hosts(), notes_text)
     outputs = {'tag': info['tag'], 'runner': info['runner'], 'os': info['os'], 'arch': info['arch'], 'smoke_host': '%s-%s' % (info['os'], info['arch']),
-               'preset': '%s-host-ninja-debug' % info['os']}
+               'preset': '%s-host-ninja-debug' % info['os'], 'msvc_arch': info.get('msvc_arch', ''), 'llvm_asset': info.get('llvm_asset', ''),
+               'smoke_cli': smoke_cli}
     for key, value in outputs.items():
         log('%s=%s' % (key, value))
     if args.github_output:
@@ -192,6 +227,7 @@ def command_publish(args):
     template = Path(require_notes_path(args.notes_file)).resolve()
     if not template.is_file():
         raise ReleaseError('the release notes template is missing')
+    smoke_policy(args.host, info, load_pins_hosts(), template.read_text(encoding='utf-8'))
     rendered = render_notes(template.read_text(encoding='utf-8'), tag=info['tag'], commit=commit, manifest=manifest, content_sha256=content,
                             assets=result['assets'], target=info['target'])
     work = Path(args.work).resolve()
