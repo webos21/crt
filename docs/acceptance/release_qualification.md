@@ -1127,6 +1127,32 @@ the published SDK from the six downloaded assets and built, tested, ran and warm
 Not covered: the hosted `sdk-integration.yml` run with the smoke on `windows-11-arm` and the `sdk-release.yml` dry run on the normal gate (S7 step 6)
 are recorded after this change merges.
 
+## zlib.net answered the windows-latest runners with an HTML page (2026-11-18)
+
+[SDK integration run 44250317970](https://github.com/webos21/crt/actions/runs/44250317970) (push to `main` at `722720e`, the merge of pull request 5) failed only in
+`sdk (windows-x86_64)`, in "Build the Development SDK release assets", twice (attempt 1 and the re-run, 06:23 and 06:50 UTC), with `zlib-1.3.1.tar.gz: sha256 mismatch` and a
+different "actual" digest each time (`6e8d8003...`, `58a2e313...`). The other four hosts, including `windows-aarch64`, passed.
+
+A temporary diagnostic workflow on a throwaway branch (deleted; run 44256040729) fetched `https://zlib.net/fossils/zlib-1.3.1.tar.gz` five times on each of three runners with the
+same urllib call as `tools/fetch_ports.py`. `windows-latest` got `HTTP 200`, `Content-Type: text/html`, `Server: openresty`, 12,070 or 12,179 bytes beginning `<!DOCTYPE html>`
+(a different page each time, so a different digest each time) on all five tries; `windows-11-arm` and `ubuntu-latest` got `Server: Apache` and the 1,512,791-byte archive with the
+pinned SHA-256 on all five. A `HEAD` from the maintainer's machine returned the same archive metadata (`Content-Length: 1512791`, `Last-Modified: 2024-01-22`). The page was not
+opened, so a block or challenge page is an inference from the server and type, not an observation of its text.
+
+Cause in the code: `download()` retried only HTTP 429/5xx and connection errors, so an HTTP 200 HTML page was accepted and the digest check, outside the retry loop, failed once.
+`sdk-integration.yml` has no port-download cache (the Core `ci.yml` has one, which is why that job was not affected). The fix (`tools/fetch_ports.py`): a `text/html`
+answer for a non-HTML archive, or bytes that differ from the pin, is rejected and retried up to three times with short backoff and then the next source is tried; a recipe may list
+`source.mirrors`, accepted only with a pinned `sha256`; `porting/recipes/zlib.json` lists the GitHub `madler/zlib` release asset, whose bytes were compared and are identical to the
+pinned archive (same size and SHA-256). Because the SDK ships `tools/fetch_ports.py` and `porting/recipes`, the next SDK's content identity changes with this fix.
+
+Evidence of the fix: unit tests for rejection, retry, mirror fallback and the mirror rules (`tools/test_fetch_ports.py`), and a real run with the primary URL pointed at a 404 that fell
+back to the GitHub mirror and extracted `zlib 1.3.1`.
+
+Hosted result on the fix branch: [SDK integration run 44257152261](https://github.com/webos21/crt/actions/runs/44257152261) (`workflow_dispatch`, 07:20 UTC) succeeded on all five hosts. **It does not
+exercise the fix on `windows-latest`:** in that run `zlib.net` delivered the real archive on the first try (the log shows one `fetch` line and then `zlib 1.3.1:`, no rejection and no
+mirror), so the block of the earlier runs was not present at that time. The hosted evidence is therefore "no regression", not "the fallback worked on the blocked runner"; the fallback
+itself is covered by the unit tests and the local run above.
+
 ## Hosted Windows/arm64 consumer smoke by the pinned CLI (S7 steps 4-5, 2026-11-18)
 
 This is the hosted result that the [consumer-smoke pin record](#windowsarm64-consumer-smoke-pin-s7-steps-4-5-2026-11-18) left open. Pull request 5 (merge
