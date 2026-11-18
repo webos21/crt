@@ -1,26 +1,64 @@
 name: CI
 
+# Documentation-only changes (Markdown, docs/, porting/) skip the build matrix inside the workflow instead of through
+# `paths-ignore`: a workflow that never starts leaves a required check pending forever and would block every
+# documentation-only pull request. `CI gate` always runs and is the single required status check
+# (the `main requires CI gate` ruleset; same shape as crt-cli's `ci.yml`).
 on:
   push:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "porting/**"
+    branches: [main]
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "porting/**"
   workflow_dispatch: {}
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - name: Check out the history needed to classify the change
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify the change
+        id: classify
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Anything that cannot be classified runs the full matrix: skipping is only for a proven documentation-only change.
+          # The documentation set is the former `paths-ignore` list: Markdown anywhere, docs/ and porting/.
+          code=true
+          case "$EVENT" in
+            pull_request) range="$PR_BASE...$PR_HEAD" ;;
+            push)         range="$PUSH_BEFORE..$PUSH_HEAD" ;;
+            *)            range= ;;
+          esac
+          if [ -n "$range" ] && files="$(git diff --name-only "$range" 2>/dev/null)" && [ -n "$files" ]; then
+            if printf '%s\n' "$files" | grep -qvE '(\.md$|^docs/|^porting/)'; then code=true; else code=false; fi
+          fi
+          echo "event=$EVENT range=${range:-none} code=$code"
+          printf '%s\n' "${files:-}" | sed 's/^/changed: /'
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   build-and-test:
     name: ${{ matrix.name }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -301,3 +339,28 @@ jobs:
       - name: Fresh 02-cxx and bounded libcrtgfx acceptance
         if: github.event_name == 'pull_request' && matrix.boundary_acceptance == true
         run: cmake --build --preset ${{ matrix.preset }} --target crtgfx-boundary-acceptance
+
+  # The only required status check. It always runs: a documentation-only change legitimately skips the matrix, but a
+  # code change whose matrix failed, was cancelled or never ran must not pass.
+  gate:
+    name: CI gate
+    needs: [changes, build-and-test]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Decide
+        shell: bash
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          NATIVE: ${{ needs.build-and-test.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+        run: |
+          set -euo pipefail
+          echo "changes=$CHANGES native=$NATIVE code=$CODE"
+          [ "$CHANGES" = success ] || { echo "change classification did not succeed"; exit 1; }
+          if [ "$CODE" = true ]; then
+            [ "$NATIVE" = success ] || { echo "code changed but the native matrix result is '$NATIVE'"; exit 1; }
+          else
+            [ "$NATIVE" = skipped ] || { echo "documentation-only change but the native matrix result is '$NATIVE'"; exit 1; }
+          fi

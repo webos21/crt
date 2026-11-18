@@ -21,10 +21,15 @@ publish -> sign -> update the consumer lock.
 
 | Workflow | Trigger | Does | Publishes |
 | --- | --- | --- | --- |
-| `ci.yml` | push, pull request | the required 5-host build and test gate; **stays the required check** | nothing |
+| `ci.yml` | push to `main`, pull request, manual | the 5-host build and test matrix behind the single required check `CI gate`; a documentation-only change (Markdown, `docs/`, `porting/`) skips the matrix inside the workflow and the gate passes | nothing |
 | `host-tools.yml` | manual | assembles and replays the independent host-tools bundle | nothing (artifacts only) |
 | `sdk-integration.yml` | SDK-relevant push to `main`, weekly, manual | builds `crt-dev-release` on Linux x86_64/aarch64, macOS/arm64 and Windows/x64 and arm64, verifies the asset set from its bytes, runs the extracted archive as an external consumer with the producer checkout hidden | nothing (14-day artifacts) |
 | `sdk-release.yml` | manual, `dry_run` default true | plan -> package -> verify -> approval-gated publish (below) | a non-latest prerelease, only after a `release` environment reviewer approves |
+
+`main` is protected by the repository ruleset `main requires CI gate` (the same shape as crt-cli's): the branch cannot be deleted or force-pushed and the
+`CI gate` status must pass; the repository admin role bypasses it. A required check cannot sit behind `paths-ignore` (a workflow that never starts
+leaves it pending forever), so the classification is a `changes` job and `CI gate` always runs and fails when a code change's matrix failed, was
+cancelled or never ran.
 
 `sdk-integration` is deliberately **not** a required check: it is long (a full SDK build per host) and ci.yml already gates every
 change. A red scheduled or path-triggered run is a regression or a changed external input, not noise.
