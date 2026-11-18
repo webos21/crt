@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-11-18
 
+### Publish the first Windows/arm64 Dev SDK Preview as a first-host bootstrap (S7 steps 2-3)
+
+`windows-arm64` is offered by `sdk-release.yml` (PR 4) with S2 recorded `NOT RUN` and the source-hidden native consumer of the extracted archive in its place.
+A `dry_run: true` run (44220444318) validated the workflow on a hosted runner; its draft was deleted because its zip bytes differ from any later build, and
+`v0.0.1-preview.20261118.windows.arm64.1` was published by run 44224690103 after approval, replayed from public bytes, and signed with the owner's
+publisher key (verified against the pinned key)
+([evidence](docs/acceptance/release_qualification.md#first-windows-arm64-dev-sdk-preview-s7-steps-2-3-2026-11-18)). crt-cli still cannot install it until
+its own first ARM64 bootstrap is published; the pins and the exception's end are S7 steps 4-6.
+
 ### Publish the first automated Dev SDK Preview (S4)
 
 `v0.0.1-preview.20261118.linux.x64.1` was built, verified and published by `sdk-release.yml` (run 44088028759) after reviewer approval; its public bytes

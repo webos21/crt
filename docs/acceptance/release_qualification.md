@@ -1081,3 +1081,27 @@ Not covered: no non-draft publication, no other host's dry run, no publisher sig
 
 Not covered: Ubuntu 24.04/glibc 2.39, Linux/aarch64, macOS, Windows, Full/GFX/Web SDKs, consumer pin promotion (S5).
 
+### First Windows/arm64 Dev SDK Preview (S7 steps 2-3, 2026-11-18)
+
+First-host bootstrap: no published crt-cli Preview exists for Windows/arm64, so the S2 consumer smoke cannot run
+([policy](../guides/sdk_ci.md#first-host-bootstrap-a-host-without-a-published-cli)). The workflow was wired by [PR 4](https://github.com/webos21/crt/pull/4)
+(`c59c0d9`; ten hosted checks passed) and the reviewed notes `docs/releases/release_notes_v0.0.1-preview.20261118.windows.arm64.1.md` landed in `e7c7630`.
+
+- **Dry run** [44220444318](https://github.com/webos21/crt/actions/runs/44220444318) at `e7c763094d96ccba1b524077b24b04b876a91d5b` (`host=windows-arm64`,
+  `date=20261118`, `serial=1`, `dry_run=true`) passed `plan`, `package`, `verify`, `publish` (reviewer `webos21` approved, comment `OK`) and stopped at a verified
+  draft, which was deleted by hand. Its zip was 69,783,428 bytes: archives are not reproducible between runs, so a signature never carries over to another run's bytes.
+- **Publication** [44224690103](https://github.com/webos21/crt/actions/runs/44224690103) (same commit and inputs, `dry_run=false`; `webos21` approved, `OK`) passed all four jobs
+  and published the non-latest prerelease
+  [`v0.0.1-preview.20261118.windows.arm64.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.windows.arm64.1) targeting that commit.
+- In `verify` the published-CLI smoke was **skipped** and `NOT RUN (first-host bootstrap)` was recorded; the ACL preparation and the source-hidden external
+  consumer of the extracted archive (`tools/test_dev_sdk_external.py`) passed. Installation by crt-cli is **not** exercised.
+- Public replay from a fresh directory: `tools/ci_sdk_release.py verify --os windows --arch aarch64 --version v0.0.1-preview.20261118.windows.arm64.1 --commit e7c7630...`
+  passes on the six downloaded assets: manifest `release-manifest-dev-windows-aarch64.json` 1847 bytes, SHA-256
+  `354ab45f94540877dda619d7613937a8caff413ad64fc4aa3f1b88c0a3fceecc`, installed content `3b251637845621ba28d6ba1d9c2f6a5e097f6b328f57054f7e7cb5c5eb52621f`;
+  the archive (69,783,420 bytes) SHA-256 equals the manifest's `d3cd0a6491ffc1ef1c540092c41fcc06f2178de985f73889177ccbc8f7a070b6`.
+- Publisher signature: the owner signed the published zip offline; the 256-byte `.sig` (SHA-256
+  `50ec4f51089a37dc760bdef6e9e58af72a5acb73a90a41f3790cbf5d9cf1c308`) verifies against the public archive with the pinned key (SPKI
+  `59218576...3d43fa2`, RSA-PSS SHA-256, salt 32; `openssl` reports `Verified OK`) and was attached as the seventh asset.
+
+Not covered: installation by crt-cli (S2 stays pending for this host until a CLI is pinned), the Ubuntu/macOS/other-host archives, Full/GFX/Web SDKs
+(Windows/arm64 has no `06-web` collector scope), consumer pin promotion (S7 steps 4-6).

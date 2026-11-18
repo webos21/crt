@@ -124,9 +124,9 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
   [first-host bootstrap](docs/guides/sdk_ci.md#first-host-bootstrap-a-host-without-a-published-cli) (no published ARM64 CLI exists, so S2 cannot run for the
   first Preview). The exception is narrow, noted in the release notes and ends when the host is pinned. Local candidates are path evidence only, not promoted.
   - [x] Steps 1-2 as code: `windows-arm64` offered by `sdk-release.yml` (`windows-11-arm`, ARM64 MSVC/LLVM), S2 recorded `NOT RUN` with the source-hidden native
-    consumer of the extracted archive in its place, rules enforced by `plan`/`publish` and the workflow tests. Not yet run on a hosted runner.
-  - [ ] Step 2 hosted: CI of this change and a `dry_run: true` release of `windows-arm64` (package, verify with the NOT RUN record, approved draft deleted by hand).
-  - [ ] Step 3: the first Windows/arm64 Dev SDK Preview from a clean reviewed commit, `release` approval, owner signature, public replay.
+    consumer of the extracted archive in its place, rules enforced by `plan`/`publish` and the workflow tests.
+  - [x] Steps 2-3: hosted dry run, then `v0.0.1-preview.20261118.windows.arm64.1` published by the workflow, replayed, signed.
+    [Evidence](docs/acceptance/release_qualification.md#first-windows-arm64-dev-sdk-preview-s7-steps-2-3-2026-11-18).
   - [ ] Steps 4-5 (crt-cli owns them): first ARM64 CLI built from the published SDK and published as a bootstrap; CLI pins and ARM64 CI row; crt pin `windows-aarch64`.
   - [ ] Step 6: SDK and CLI dry runs on the normal gate with S2 by the published ARM64 CLI; close the exception.
 
