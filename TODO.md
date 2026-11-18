@@ -99,10 +99,10 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
 ([roadmap](docs/security/publisher_signing.md)). Design and procedure go in `docs/guides/sdk_ci.md`; evidence in
 [release qualification](docs/acceptance/release_qualification.md).
 
-- [ ] **S0** Pin the CI inputs the producer trusts: Action commits and the LLVM versions are literals in the workflow, enforced by
-  `tools/test_sdk_workflows.py` (SHA-pinned actions, read-only permissions, valid CI tag, scripts and trigger paths exist). Still open:
-  the published CLI Preview used as consumer is now in `.github/ci/sdk-pins.json` (read by S2's smoke); record which checks are required
-  (`ci.yml` stays; `sdk-integration` is *not* required at first); list unsupported OS/arch pairs as unverified, not skipped silently.
+- [x] **S0** Pin the CI inputs the producer trusts: Action commits and the LLVM versions are literals in the workflow, enforced by
+  `tools/test_sdk_workflows.py` (SHA-pinned actions, read-only permissions, valid CI tag, scripts and trigger paths exist); the published CLI Previews
+  are in `.github/ci/sdk-pins.json`; `CI gate` is the one required check through the `main requires CI gate` ruleset, `sdk-integration` is not; unsupported
+  OS/arch pairs are listed as unverified ([guide](docs/guides/sdk_ci.md)).
 - [x] **S1** The four-host SDK integration matrix passes build, asset verification, external consumption and artifact upload.
   - [x] Windows/arm64 row (`windows-aarch64` on `windows-11-arm`) with the consumer smoke explicitly not run until a `win-arm64` crt-cli Preview is
     published and pinned ([hosted run](docs/acceptance/release_qualification.md#hosted-windowsarm64-sdk-integration-2026-11-17)).
@@ -113,15 +113,14 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
 - [x] **S3** `sdk-release.yml` (manual, `dry_run` default true): `package` (clean commit on `main` with a green gate, same build as S1) ->
   `verify` (separate runner, S2 on the packaged bytes) -> approval-gated `publish` in a `release` environment (draft, re-download,
   byte compare, then non-latest prerelease). Notes from a reviewed template with digest tokens; tag = the source commit. Dry run first.
-  [Hosted dry run](docs/acceptance/release_qualification.md#hosted-sdk-release-dry-run-s3-2026-11-17) on Linux/x64 only; the other hosts' dry runs are not yet run.
+  [Hosted dry run](docs/acceptance/release_qualification.md#hosted-sdk-release-dry-run-s3-2026-11-17) on Linux/x64; every other host's first publication starts with its own `dry_run: true` run (Windows/arm64 did).
 - [x] **S4** One real Dev SDK Preview published by `sdk-release.yml`; public bytes re-downloaded and checked; owner signs the archive
   offline and `.sig` is attached (publisher signing procedure); acceptance records run IDs, approval and what was not covered.
   [Evidence](docs/acceptance/release_qualification.md#first-automated-dev-sdk-preview-s4-2026-11-18): `v0.0.1-preview.20261118.linux.x64.1`, signed.
 - [x] **S5** CLI adopts it through the existing pin promotion ([policy](https://github.com/webos21/crt-cli/blob/main/docs/guides/development.md#ci-pin-promotion));
   producer->consumer order: publish, sign, then update the CLI lock.
   Adopted by [crt-cli#17](https://github.com/webos21/crt-cli/pull/17) (`CI gate`, `main` push run green on all five legs); [record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#linuxx86_64-sdk-pin-moved-to-the-first-automated-preview-2026-11-18).
-- [ ] **S6** (later) Full SDK release workflow reusing S1-S4 once the Dev SDK flow is stable; not scheduled.
-- [ ] **S7** Windows/arm64 first Dev SDK Preview and first CLI through the
+- [x] **S7** Windows/arm64 first Dev SDK Preview and first CLI through the
   [first-host bootstrap](docs/guides/sdk_ci.md#first-host-bootstrap-a-host-without-a-published-cli) (no published ARM64 CLI exists, so S2 cannot run for the
   first Preview). The exception is narrow, noted in the release notes and ends when the host is pinned. Local candidates are path evidence only, not promoted.
   - [x] Steps 1-2 as code: `windows-arm64` offered by `sdk-release.yml` (`windows-11-arm`, ARM64 MSVC/LLVM), S2 recorded `NOT RUN` with the source-hidden native
@@ -133,7 +132,8 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
     ([evidence](docs/acceptance/release_qualification.md#windowsarm64-consumer-smoke-pin-s7-steps-4-5-2026-11-18)).
   - [x] S2 by the published ARM64 CLI ran and passed on `windows-11-arm` in a hosted `sdk-integration.yml` dispatch
     ([evidence](docs/acceptance/release_qualification.md#hosted-windowsarm64-consumer-smoke-by-the-pinned-cli-s7-steps-4-5-2026-11-18)).
-  - [ ] Step 6: `sdk-release.yml` dry run for `windows-arm64` on the normal gate, and the next ARM64 CLI Preview built by `release.yml`; close the exception.
+  - [x] Step 6: the exception is closed: `bootstrap` and `cli_preview: none` are gone, so `windows-arm64` takes the normal gate (S2 by the pinned ARM64 CLI passed hosted).
+    The ARM64 CLI's own `release.yml` Preview belongs to crt-cli; the next ARM64 SDK publication starts with the usual `dry_run: true`.
 
 #### Remaining host qualification
 
@@ -208,8 +208,12 @@ applicable D5/D6 capabilities, not completion of every tranche or D7 approval
 
 - [ ] **3.3** Support CLI self-upgrade staging, diagnosis, native activation and
   rollback without changing project SDK/port pins; it does not block D3.
-- [ ] Complete Full-stage (`06-web`) install metadata/size limits and general
-  stage/profile/version/update selection contracts when their consumer increment starts.
+- [ ] **Full SDK delivery** (formerly S6): a Full SDK release workflow reusing the Dev SDK flow (S1-S5), once that flow is stable. Not scheduled; prerequisites:
+  the Full-stage (`06-web`) install metadata/size limits and general stage/profile/version/update selection contracts when their consumer increment starts;
+  the Full source/license/security/assembly review (Tranche 7.3 keeps it separate); the hosted runners' time/disk limits for Skia/FFmpeg/WebKit; and per-host scope
+  (Windows/arm64 has no `06-web` collector scope, Linux/aarch64 `06-web` is an x86_64 cross target). Policy:
+  [Full SDK and Development SDK](docs/design/sdk_development_contract.md#full-sdk-and-development-sdk-adopted-direction-2026-10-22); evidence: Full collection in
+  [release qualification](docs/acceptance/release_qualification.md); procedure: [distribution](docs/guides/distribution.md#stage-production).
 - [ ] Expand the new workflow to additional native pairs before advertising it;
   retain existing five-pair results at their original artifact/source identities.
 
