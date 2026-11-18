@@ -10,6 +10,18 @@ substantive update.
 
 ## 2026-11-18
 
+### Close the Dev SDK GitHub CI/CD group (S0-S7)
+
+The producer-side CI/CD for the Dev SDK is complete and its TODO group is retired: four-host integration (S1) with the consumer smoke by each host's pinned,
+signature-checked CLI Preview (S2, Windows/arm64 included), the manual approval-gated `sdk-release.yml` (S3), the first automated Previews for Linux/x64
+(S4) and Windows/arm64 (S7, through the first-host bootstrap, now ended: `bootstrap` and `cli_preview: none` are removed and the host takes the normal gate),
+and the CLI pin adoption (S5). S0 closes with the required check: `ci.yml` gained a `changes`/`CI gate` pair (PR 8) so a documentation-only change skips the
+matrix without leaving a required check pending, and the repository ruleset `main requires CI gate` (identical to crt-cli's: no delete, no non-fast-forward, required
+`CI gate`, admin bypass) is active on `main`. Left open on purpose: every other host's first publication starts with its own `dry_run: true` run, the ARM64 CLI's own
+`release.yml` Preview belongs to crt-cli, `porting/**` still counts as documentation for the gate (as it did under `paths-ignore`), and the Full SDK release workflow
+(was S6) moved to the Planned "Full SDK delivery" item. Evidence: [release qualification](docs/acceptance/release_qualification.md), procedure
+[sdk_ci.md](docs/guides/sdk_ci.md).
+
 ### Publish the first Windows/arm64 Dev SDK Preview as a first-host bootstrap (S7 steps 2-3)
 
 `windows-arm64` is offered by `sdk-release.yml` (PR 4) with S2 recorded `NOT RUN` and the source-hidden native consumer of the extracted archive in its place.

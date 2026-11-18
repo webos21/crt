@@ -3,7 +3,7 @@
 This guide owns how GitHub Actions builds, verifies and (later) publishes the **Development SDK** of this repository. The
 contract of the SDK itself is the [SDK development contract](../design/sdk_development_contract.md); evidence of what actually ran
 is in [release qualification](../acceptance/release_qualification.md) and the [SDK acceptance](../acceptance/sdk_split_acceptance.md).
-Open work and order are in [TODO](../../TODO.md#dev-sdk-github-cicd-integration-and-release-workflows). Full SDK delivery is a later,
+The completed work and its order are in [HISTORY](../../HISTORY.md#close-the-dev-sdk-github-cicd-group-s0-s7); the Full SDK follow-up is in [TODO](../../TODO.md#sdk-workflow-beyond-the-first-preview). Full SDK delivery is a later,
 separate step that reuses this flow.
 
 ## Roles and who builds what

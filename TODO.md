@@ -89,52 +89,6 @@ Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`; these are not artifact locks.
 Follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review);
 the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
-#### Dev SDK GitHub CI/CD (integration and release workflows)
-
-The producer-side counterpart of `crt-cli`'s `integration.yml`/`release.yml`; the CLI repository's final artifact is an executable, CRT's
-is the SDK, so CRT builds and verifies the SDK once and the CLI consumes the *published* bytes (no duplicate builds of one source). Scope
-is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage items in Planned stay separate. Existing pieces to reuse:
-`ci.yml` (5-host build/test gate, stays the required check), `host-tools.yml` (manual producer workflow, publishes nothing), the
-`crt-dev-release` target / `tools/crt_sdk_release.py` (assets, manifest, toolchain contract), publisher signing
-([roadmap](docs/security/publisher_signing.md)). Design and procedure go in `docs/guides/sdk_ci.md`; evidence in
-[release qualification](docs/acceptance/release_qualification.md).
-
-- [x] **S0** Pin the CI inputs the producer trusts: Action commits and the LLVM versions are literals in the workflow, enforced by
-  `tools/test_sdk_workflows.py` (SHA-pinned actions, read-only permissions, valid CI tag, scripts and trigger paths exist); the published CLI Previews
-  are in `.github/ci/sdk-pins.json`; `CI gate` is the one required check through the `main requires CI gate` ruleset, `sdk-integration` is not; unsupported
-  OS/arch pairs are listed as unverified ([guide](docs/guides/sdk_ci.md)).
-- [x] **S1** The four-host SDK integration matrix passes build, asset verification, external consumption and artifact upload.
-  - [x] Windows/arm64 row (`windows-aarch64` on `windows-11-arm`) with the consumer smoke explicitly not run until a `win-arm64` crt-cli Preview is
-    published and pinned ([hosted run](docs/acceptance/release_qualification.md#hosted-windowsarm64-sdk-integration-2026-11-17)).
-  [Hosted acceptance](docs/acceptance/release_qualification.md#hosted-sdk-integration-9-confirmation-2026-11-17).
-- [x] **S2** Consumer smoke by the pinned, signature-checked published CLI Preview: `sdk install` of the produced archive with its
-  manifest pin, then C and C++ `new`/`build`/`test`/`run` and a warm rebuild, on all four hosts with their Preview CLIs.
-  [Hosted acceptance](docs/acceptance/release_qualification.md#hosted-cli-consumer-smoke-s2-2026-11-17).
-- [x] **S3** `sdk-release.yml` (manual, `dry_run` default true): `package` (clean commit on `main` with a green gate, same build as S1) ->
-  `verify` (separate runner, S2 on the packaged bytes) -> approval-gated `publish` in a `release` environment (draft, re-download,
-  byte compare, then non-latest prerelease). Notes from a reviewed template with digest tokens; tag = the source commit. Dry run first.
-  [Hosted dry run](docs/acceptance/release_qualification.md#hosted-sdk-release-dry-run-s3-2026-11-17) on Linux/x64; every other host's first publication starts with its own `dry_run: true` run (Windows/arm64 did).
-- [x] **S4** One real Dev SDK Preview published by `sdk-release.yml`; public bytes re-downloaded and checked; owner signs the archive
-  offline and `.sig` is attached (publisher signing procedure); acceptance records run IDs, approval and what was not covered.
-  [Evidence](docs/acceptance/release_qualification.md#first-automated-dev-sdk-preview-s4-2026-11-18): `v0.0.1-preview.20261118.linux.x64.1`, signed.
-- [x] **S5** CLI adopts it through the existing pin promotion ([policy](https://github.com/webos21/crt-cli/blob/main/docs/guides/development.md#ci-pin-promotion));
-  producer->consumer order: publish, sign, then update the CLI lock.
-  Adopted by [crt-cli#17](https://github.com/webos21/crt-cli/pull/17) (`CI gate`, `main` push run green on all five legs); [record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#linuxx86_64-sdk-pin-moved-to-the-first-automated-preview-2026-11-18).
-- [x] **S7** Windows/arm64 first Dev SDK Preview and first CLI through the
-  [first-host bootstrap](docs/guides/sdk_ci.md#first-host-bootstrap-a-host-without-a-published-cli) (no published ARM64 CLI exists, so S2 cannot run for the
-  first Preview). The exception is narrow, noted in the release notes and ends when the host is pinned. Local candidates are path evidence only, not promoted.
-  - [x] Steps 1-2 as code: `windows-arm64` offered by `sdk-release.yml` (`windows-11-arm`, ARM64 MSVC/LLVM), S2 recorded `NOT RUN` with the source-hidden native
-    consumer of the extracted archive in its place, rules enforced by `plan`/`publish` and the workflow tests.
-  - [x] Steps 2-3: hosted dry run, then `v0.0.1-preview.20261118.windows.arm64.1` published by the workflow, replayed, signed.
-    [Evidence](docs/acceptance/release_qualification.md#first-windows-arm64-dev-sdk-preview-s7-steps-2-3-2026-11-18).
-  - [x] Steps 4-5 as code: first ARM64 CLI built from the published SDK and published and signed as a bootstrap, crt-cli pins and ARM64 CI row (crt-cli PR 19), crt pin
-    `windows-aarch64` with `cli_preview: none` and the `bootstrap` mark removed in one change
-    ([evidence](docs/acceptance/release_qualification.md#windowsarm64-consumer-smoke-pin-s7-steps-4-5-2026-11-18)).
-  - [x] S2 by the published ARM64 CLI ran and passed on `windows-11-arm` in a hosted `sdk-integration.yml` dispatch
-    ([evidence](docs/acceptance/release_qualification.md#hosted-windowsarm64-consumer-smoke-by-the-pinned-cli-s7-steps-4-5-2026-11-18)).
-  - [x] Step 6: the exception is closed: `bootstrap` and `cli_preview: none` are gone, so `windows-arm64` takes the normal gate (S2 by the pinned ARM64 CLI passed hosted).
-    The ARM64 CLI's own `release.yml` Preview belongs to crt-cli; the next ARM64 SDK publication starts with the usual `dry_run: true`.
-
 #### Remaining host qualification
 
 - [ ] **Independent host-tools public Preview** (CLI D1 integration input; request
