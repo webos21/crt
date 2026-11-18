@@ -81,7 +81,17 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def download(url, archive_path):
+class DownloadRejected(SystemExit):
+    """The server answered, but not with the archive: an HTML page or bytes that do not match the pin."""
+
+
+# A wrong answer is not a transient outage, so it gets few, short retries before the next candidate source is tried (2026-11-18: zlib.net
+# answered HTTP 200 with a ~12 KB text/html page, a different one on every request, to the windows-latest runners for hours, while every other
+# runner got the archive; the downloader accepted the page and only the later digest check failed, once, with no retry and no other source).
+REJECT_ATTEMPTS = 3
+
+
+def download(url, archive_path, sha256=None):
     if os.path.exists(archive_path):
         return
     tmp_path = archive_path + ".tmp"
@@ -100,12 +110,28 @@ def download(url, archive_path):
     # matters on a cold cache (a recipe's first fetch, or one just bumped).
     attempts = 8
     max_delay = 60
+    rejects = 0
     for attempt in range(1, attempts + 1):
         print(f"fetch {url}" + (f" (attempt {attempt}/{attempts})" if attempt > 1 else ""))
         try:
             with urllib.request.urlopen(url, timeout=120) as response, open(tmp_path, "wb") as out:
                 shutil.copyfileobj(response, out)
-            break
+                content_type = response.headers.get_content_type()
+            rejected = None
+            if content_type == "text/html" and not archive_path.lower().endswith((".html", ".htm")):
+                rejected = "an HTML page (content-type text/html) instead of the archive, probably a block or challenge page"
+            elif sha256 is not None and sha256_file(tmp_path) != sha256:
+                rejected = "bytes whose SHA-256 differs from the pin"
+            if rejected is None:
+                break
+            os.remove(tmp_path)
+            rejects += 1
+            if rejects >= REJECT_ATTEMPTS or attempt == attempts:
+                raise DownloadRejected(f"{url}: received {rejected} ({rejects} times)")
+            delay = 5 * 2 ** (rejects - 1)
+            print(f"  received {rejected}; retrying in {delay}s", flush=True)
+            time.sleep(delay)
+            continue
         except urllib.error.HTTPError as exc:
             retryable = exc.code == 429 or 500 <= exc.code < 600
             error = f"HTTP {exc.code}"
@@ -120,6 +146,26 @@ def download(url, archive_path):
         print(f"  {error}; retrying in {delay}s", flush=True)
         time.sleep(delay)
     os.replace(tmp_path, archive_path)
+
+
+def fetch_source(source, archive_path):
+    """Download one recipe source, trying its optional `mirrors` after `url` when a source fails or answers with the wrong bytes.
+
+    A mirror is only a different place to get the same pinned bytes: it is refused unless the recipe pins a SHA-256, so it can never
+    widen what the build trusts.
+    """
+    mirrors = source.get("mirrors", [])
+    if mirrors and source.get("sha256") is None:
+        raise SystemExit(f"{source['archive']}: mirrors are only allowed with a pinned sha256")
+    failures = []
+    for url in [source["url"], *mirrors]:
+        try:
+            download(url, archive_path, source.get("sha256"))
+            return
+        except SystemExit as exc:
+            failures.append(str(exc))
+            print(f"  source failed: {exc}", flush=True)
+    raise SystemExit(f"{source['archive']}: no source delivered the archive\n" + "\n".join(failures))
 
 
 def fix_windows_symlink_targets(root):
@@ -270,7 +316,7 @@ def main():
     for recipe in selected_recipes:
         source = recipe["source"]
         archive_path = os.path.join(cache, source["archive"])
-        download(source["url"], archive_path)
+        fetch_source(source, archive_path)
         actual = sha256_file(archive_path)
         expected = source["sha256"]
         if expected is not None and actual != expected:
