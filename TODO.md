@@ -131,7 +131,9 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
   - [x] Steps 4-5 as code: first ARM64 CLI built from the published SDK and published and signed as a bootstrap, crt-cli pins and ARM64 CI row (crt-cli PR 19), crt pin
     `windows-aarch64` with `cli_preview: none` and the `bootstrap` mark removed in one change
     ([evidence](docs/acceptance/release_qualification.md#windowsarm64-consumer-smoke-pin-s7-steps-4-5-2026-11-18)).
-  - [ ] Step 6: SDK and CLI dry runs on the normal gate with S2 by the published ARM64 CLI; close the exception.
+  - [x] S2 by the published ARM64 CLI ran and passed on `windows-11-arm` in a hosted `sdk-integration.yml` dispatch
+    ([evidence](docs/acceptance/release_qualification.md#hosted-windowsarm64-consumer-smoke-by-the-pinned-cli-s7-steps-4-5-2026-11-18)).
+  - [ ] Step 6: `sdk-release.yml` dry run for `windows-arm64` on the normal gate, and the next ARM64 CLI Preview built by `release.yml`; close the exception.
 
 #### Remaining host qualification
 
