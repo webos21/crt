@@ -1152,3 +1152,19 @@ Hosted result on the fix branch: [SDK integration run 44257152261](https://githu
 exercise the fix on `windows-latest`:** in that run `zlib.net` delivered the real archive on the first try (the log shows one `fetch` line and then `zlib 1.3.1:`, no rejection and no
 mirror), so the block of the earlier runs was not present at that time. The hosted evidence is therefore "no regression", not "the fallback worked on the blocked runner"; the fallback
 itself is covered by the unit tests and the local run above.
+
+## Hosted Windows/arm64 consumer smoke by the pinned CLI (S7 steps 4-5, 2026-11-18)
+
+This is the hosted result that the [consumer-smoke pin record](#windowsarm64-consumer-smoke-pin-s7-steps-4-5-2026-11-18) left open. Pull request 5 (merge
+`722720e`) pinned crt-cli `v0.1.0-preview.20261118.windows-arm64.1` for `windows-aarch64` and removed the first-host exception. `sdk-integration.yml` does not run
+on pull-request events, so it was dispatched by hand on the pull-request branch before the merge:
+[run 44247639474](https://github.com/webos21/crt/actions/runs/44247639474) at `359f7f8` (`workflow_dispatch`), all six jobs succeeded (the verifier tests and the five hosts).
+
+In `sdk (windows-aarch64)` (`windows-11-arm`, 05:56:06-06:17:09 UTC): the assets were re-verified from their bytes (`OK windows-aarch64 v0.0.1-ci.44247639474`, a CI label
+that is never a Preview name); the external consumer of the extracted archive with the producer checkout hidden passed; the "not run" record step was **skipped** and
+"Consumer smoke by the pinned, signature-checked published CLI Preview" **ran and passed**: `OK windows-aarch64: pinned CLI v0.1.0-preview.20261118.windows-arm64.1 installed the
+produced SDK v0.0.1-ci.44247639474 and built/tested/ran C and C++ (cold and warm)`. The other four hosts passed unchanged.
+The `CI` checks on the pull-request head (the five-host build matrix) were green as well.
+
+Not covered: a `sdk-release.yml` dry run of `windows-arm64` through the normal gate (the smoke is no longer excused for it), which is S7 step 6 and builds a new SDK; the
+hosted smoke exercises a CI-built SDK, not the published `20261118` one (that pairing was exercised locally and recorded in the pin record).
