@@ -128,7 +128,9 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
     consumer of the extracted archive in its place, rules enforced by `plan`/`publish` and the workflow tests.
   - [x] Steps 2-3: hosted dry run, then `v0.0.1-preview.20261118.windows.arm64.1` published by the workflow, replayed, signed.
     [Evidence](docs/acceptance/release_qualification.md#first-windows-arm64-dev-sdk-preview-s7-steps-2-3-2026-11-18).
-  - [ ] Steps 4-5 (crt-cli owns them): first ARM64 CLI built from the published SDK and published as a bootstrap; CLI pins and ARM64 CI row; crt pin `windows-aarch64`.
+  - [x] Steps 4-5 as code: first ARM64 CLI built from the published SDK and published and signed as a bootstrap, crt-cli pins and ARM64 CI row (crt-cli PR 19), crt pin
+    `windows-aarch64` with `cli_preview: none` and the `bootstrap` mark removed in one change
+    ([evidence](docs/acceptance/release_qualification.md#windowsarm64-consumer-smoke-pin-s7-steps-4-5-2026-11-18)).
   - [ ] Step 6: SDK and CLI dry runs on the normal gate with S2 by the published ARM64 CLI; close the exception.
 
 #### Remaining host qualification

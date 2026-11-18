@@ -95,38 +95,43 @@ class SmokePolicyTest(unittest.TestCase):
     """The consumer smoke is by a pinned, published CLI, except for exactly one stated, unpinned first host."""
     PINS = {'linux-x86_64': {}, 'linux-aarch64': {}, 'macos-aarch64': {}, 'windows-x86_64': {}}
     NOTES = 'Preview.' + chr(10) + publish.BOOTSTRAP_MARKER + chr(10)
+    # No host is marked `bootstrap` now; the rule stays for a future first host, so it is exercised on a copy of a real host entry.
+    FIRST = dict(publish.HOSTS['windows-arm64'], bootstrap=True)
+    UNPINNED = {'linux-x86_64': {}, 'linux-aarch64': {}, 'macos-aarch64': {}, 'windows-x86_64': {}}
 
     def policy(self, host, pins=None, notes=''):
         return publish.smoke_policy(host, publish.HOSTS[host], self.PINS if pins is None else pins, notes)
 
     def test_a_pinned_host_uses_the_published_cli_whatever_the_notes_say(self):
-        for host in ('linux-x64', 'linux-arm64', 'macos-arm64', 'windows-x64'):
-            self.assertEqual('pinned', self.policy(host), host)
-            self.assertEqual('pinned', self.policy(host, notes=self.NOTES), host)
+        pins = dict(self.PINS, **{'windows-aarch64': {}})
+        for host in ('linux-x64', 'linux-arm64', 'macos-arm64', 'windows-x64', 'windows-arm64'):
+            self.assertEqual('pinned', self.policy(host, pins=pins), host)
+            self.assertEqual('pinned', self.policy(host, pins=pins, notes=self.NOTES), host)
 
     def test_the_first_host_runs_without_a_cli_only_when_the_notes_say_so(self):
-        self.assertEqual('none', self.policy('windows-arm64', notes=self.NOTES))
+        self.assertEqual('none', publish.smoke_policy('windows-arm64', self.FIRST, self.UNPINNED, self.NOTES))
         for notes in ('', 'Consumer smoke: passed', publish.BOOTSTRAP_MARKER.replace('NOT RUN', 'passed'), publish.BOOTSTRAP_MARKER.lower()):
             with self.assertRaises(publish.ReleaseError, msg=notes):
-                self.policy('windows-arm64', notes=notes)
+                publish.smoke_policy('windows-arm64', self.FIRST, self.UNPINNED, notes)
 
     def test_the_exception_ends_when_the_host_gains_a_pin(self):
         pins = dict(self.PINS, **{'windows-aarch64': {}})
         with self.assertRaises(publish.ReleaseError):
-            self.policy('windows-arm64', pins=pins, notes=self.NOTES)
-        self.assertEqual('pinned', publish.smoke_policy('windows-arm64', {k: v for k, v in publish.HOSTS['windows-arm64'].items() if k != 'bootstrap'}, pins, ''))
+            publish.smoke_policy('windows-arm64', self.FIRST, pins, self.NOTES)
+        self.assertEqual('pinned', publish.smoke_policy('windows-arm64', publish.HOSTS['windows-arm64'], pins, ''))
 
     def test_a_host_that_is_not_marked_bootstrap_can_never_skip_the_cli(self):
-        for host in ('linux-x64', 'linux-arm64', 'macos-arm64', 'windows-x64'):
-            pins = {key: value for key, value in self.PINS.items() if key != '%s-%s' % (publish.HOSTS[host]['os'], publish.HOSTS[host]['arch'])}
+        for host in ('linux-x64', 'linux-arm64', 'macos-arm64', 'windows-x64', 'windows-arm64'):
+            pins = {key: value for key, value in dict(self.PINS, **{'windows-aarch64': {}}).items()
+                    if key != '%s-%s' % (publish.HOSTS[host]['os'], publish.HOSTS[host]['arch'])}
             with self.assertRaises(publish.ReleaseError, msg=host):
                 self.policy(host, pins=pins, notes=self.NOTES)
 
-    def test_only_the_first_arm64_windows_host_is_marked_and_the_pins_file_agrees(self):
-        self.assertEqual(['windows-arm64'], [host for host, info in publish.HOSTS.items() if info.get('bootstrap')])
+    def test_no_host_is_marked_bootstrap_any_more_and_the_pins_file_has_every_host(self):
+        self.assertEqual([], [host for host, info in publish.HOSTS.items() if info.get('bootstrap')])
         pins = publish.load_pins_hosts()
         for host, info in publish.HOSTS.items():
-            self.assertEqual(not info.get('bootstrap'), '%s-%s' % (info['os'], info['arch']) in pins, host)
+            self.assertIn('%s-%s' % (info['os'], info['arch']), pins, host)
 
     def test_the_windows_hosts_name_their_toolchain_inputs_and_the_others_do_not_need_them(self):
         for host, info in publish.HOSTS.items():

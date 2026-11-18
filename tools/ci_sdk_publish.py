@@ -26,14 +26,15 @@ import ci_sdk_release  # noqa: E402
 BASE_VERSION = '0.0.1'
 # host key -> OS, architecture, hosted runner, and the dotted host label carried by the tag (a prerelease identifier allows no `_`).
 # `msvc_arch` and `llvm_asset` feed .github/actions/sdk-host-tools on Windows and must equal the sdk-integration.yml row of the host
-# (tools/test_sdk_workflows.py); `bootstrap` marks a host that has no published, pinned crt-cli Preview yet (see `smoke_policy`).
+# (tools/test_sdk_workflows.py); `bootstrap` marks a host that has no published, pinned crt-cli Preview yet (see `smoke_policy`). No host is
+# marked now: Windows/arm64 was the first and lost the mark when its Preview was pinned.
 HOSTS = {
     'linux-x64': {'os': 'linux', 'arch': 'x86_64', 'runner': 'ubuntu-26.04', 'label': 'linux.x64'},
     'linux-arm64': {'os': 'linux', 'arch': 'aarch64', 'runner': 'ubuntu-26.04-arm', 'label': 'linux.arm64'},
     'macos-arm64': {'os': 'macos', 'arch': 'aarch64', 'runner': 'macos-latest', 'label': 'macos.arm64'},
     'windows-x64': {'os': 'windows', 'arch': 'x86_64', 'runner': 'windows-latest', 'label': 'windows.x64', 'msvc_arch': 'x64', 'llvm_asset': 'win64'},
     'windows-arm64': {'os': 'windows', 'arch': 'aarch64', 'runner': 'windows-11-arm', 'label': 'windows.arm64', 'msvc_arch': 'arm64',
-                      'llvm_asset': 'woa64', 'bootstrap': True},
+                      'llvm_asset': 'woa64'},
 }
 # The statement a first-host release's reviewed notes must carry verbatim: the consumer smoke by a published CLI did not run.
 BOOTSTRAP_MARKER = 'Consumer smoke by the published CLI: NOT RUN (first-host bootstrap)'

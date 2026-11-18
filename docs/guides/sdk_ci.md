@@ -63,10 +63,10 @@ Not proven here: Full SDK content, GPU/window/media behaviour, publisher authent
 - Every script a workflow names and every push trigger path must exist.
 - Unsupported OS/architecture pairs (macOS/x86_64, Linux/riscv) are **unverified**, not silently skipped: they have no matrix row and the
   guide above says so.
-- Windows/arm64 (`windows-aarch64`, `windows-11-arm`) has a matrix row, but no published crt-cli Preview exists for it, so
-  `.github/ci/sdk-pins.json` has no pin and the consumer smoke (S2) cannot run. Its row says `cli_preview: none`: the run logs a notice
-  and a "NOT RUN" summary line instead of silently passing, and `tools/test_sdk_workflows.py` fails if a host has neither a pin nor that
-  field, or both. Adopt the host by adding its pin and deleting the field together.
+- Windows/arm64 (`windows-aarch64`, `windows-11-arm`) has a matrix row and, since the first crt-cli Preview for it
+  (`v0.1.0-preview.20261118.windows-arm64.1`) was pinned in `.github/ci/sdk-pins.json`, the same consumer smoke (S2) as every other host. The
+  `cli_preview: none` field is the mechanism for a host that has no pin yet: the run logs a notice and a "NOT RUN" summary line instead of
+  silently passing, and `tools/test_sdk_workflows.py` fails if a host has neither a pin nor that field, or both. No row uses it now.
 - The Windows isolation proof (the extracted archive consumed under a restricted token with the producer hidden) needs the producer checkout
   and the extracted SDK to be private to the runner user. On `windows-11-arm` the workspace is under `C:` and keeps `Users` and
   `Authenticated Users` entries after `icacls /inheritance:r` (which copies inherited entries) and `/grant:r` (which replaces only the accounts it

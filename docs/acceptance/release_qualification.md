@@ -1105,3 +1105,24 @@ First-host bootstrap: no published crt-cli Preview exists for Windows/arm64, so 
 
 Not covered: installation by crt-cli (S2 stays pending for this host until a CLI is pinned), the Ubuntu/macOS/other-host archives, Full/GFX/Web SDKs
 (Windows/arm64 has no `06-web` collector scope), consumer pin promotion (S7 steps 4-6).
+
+## Windows/arm64 consumer-smoke pin (S7 steps 4-5, 2026-11-18)
+
+crt-cli built its first ARM64 CLI from the published, signed Dev SDK `v0.0.1-preview.20261118.windows.arm64.1` (built by hand: a host's first CLI
+Preview cannot come from its release workflow, which needs a bootstrap pin) and published it as `v0.1.0-preview.20261118.windows-arm64.1` at crt-cli
+`2a02585`, with the owner's detached signature attached. Its record is in the CLI repository's `docs/acceptance/ci_acceptance.md`; crt-cli PR 19 pinned
+the SDK and this Preview and added its `windows-11-arm` row, and its hosted `native (win-arm64)` leg passed (`CI PASS (win-arm64)`).
+
+This change, in one reviewed commit: `windows-aarch64` is added to `.github/ci/sdk-pins.json` (archive 5,234,024 bytes, SHA-256
+`c5ff710532c0ff9191ae373b48a8f8fe5ceb04bea70647989f9146e255e46e11`, signature SHA-256
+`b72eb649d476673d784a6f4f84c090f73da9df505372cfc9005d19fa2a2da5e6`, re-derived from the downloaded release bytes); `cli_preview: none` is removed from its
+row in `sdk-integration.yml`; the `bootstrap` mark is removed from its `HOSTS` entry in `tools/ci_sdk_publish.py`. The tests that exercised the exception
+on that host now exercise it on a copy of the host entry, and a new check requires that no host is marked and every host has a pin.
+
+Local evidence on native Windows/arm64: `tools/test_ci_sdk_publish.py`, `tools/test_sdk_workflows.py` and `tools/test_ci_sdk_cli_smoke.py` pass;
+`tools/ci_sdk_cli_smoke.py --host windows-aarch64` downloaded the pinned CLI from the public release, verified its signature with the pinned key, installed
+the published SDK from the six downloaded assets and built, tested, ran and warm-rebuilt a C and a C++ project: `OK windows-aarch64`. Four
+`test_ci_sdk_release.VerifyTest` cases fail in this local checkout both before and after this change (not investigated here).
+
+Not covered: the hosted `sdk-integration.yml` run with the smoke on `windows-11-arm` and the `sdk-release.yml` dry run on the normal gate (S7 step 6)
+are recorded after this change merges.
