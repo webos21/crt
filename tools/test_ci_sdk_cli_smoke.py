@@ -16,7 +16,7 @@ OPENSSL = shutil.which('openssl')
 
 class PinFileTest(unittest.TestCase):
     def test_every_supported_host_pins_a_signed_published_cli(self):
-        self.assertEqual(sorted(PINS['hosts']), ['linux-aarch64', 'linux-x86_64', 'macos-aarch64', 'windows-x86_64'])
+        self.assertEqual(sorted(PINS['hosts']), ['linux-aarch64', 'linux-x86_64', 'macos-aarch64', 'windows-aarch64', 'windows-x86_64'])
         for host, pin in PINS['hosts'].items():
             self.assertRegex(pin['sha256'], r'^[0-9a-f]{64}$', host)
             self.assertRegex(pin['signature']['sha256'], r'^[0-9a-f]{64}$', host)

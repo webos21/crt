@@ -106,9 +106,6 @@ jobs:
             arch: x86_64
             msvc_arch: x64
             llvm_asset: win64
-          # No crt-cli Preview exists for Windows/arm64 yet, so .github/ci/sdk-pins.json has no pin for it and the consumer smoke
-          # cannot run: `cli_preview: none` makes that an explicit "not run" in the log and summary (never a silent skip) and
-          # tools/test_sdk_workflows.py requires every other host to have its pin. Remove the field with the pin.
           - host: windows-aarch64
             runner: windows-11-arm
             preset: windows-host-ninja-debug
@@ -116,7 +113,6 @@ jobs:
             arch: aarch64
             msvc_arch: arm64
             llvm_asset: woa64
-            cli_preview: none
     steps:
       - name: Check out the producer commit under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
