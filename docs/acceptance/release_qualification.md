@@ -1062,3 +1062,22 @@ Not covered: the consumer smoke for Windows/arm64 (S2) and `sdk-release.yml` (S3
   assets, downloaded it back and compared every byte, then stopped (dry run). The rendered notes carry the manifest pin, content identity and asset table.
 
 Not covered: no non-draft publication, no other host's dry run, no publisher signature, no consumer pin change. The dry-run draft must be deleted by hand; it is not a Preview.
+
+### First automated Dev SDK Preview (S4, 2026-11-18)
+
+[SDK release run 44088028759](https://github.com/webos21/crt/actions/runs/44088028759) at `21ef266080760216f525c3725a652b5f1af4741c` (`host=linux-x64`,
+`date=20261118`, `serial=1`, `dry_run=false`, reviewed notes `docs/releases/release_notes_v0.0.1-preview.20261118.linux.x64.1.md`) passes `plan`, `package`,
+`verify` and `publish` and publishes the non-latest prerelease
+[`v0.0.1-preview.20261118.linux.x64.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.linux.x64.1) targeting that commit.
+
+- `publish` waited for the `release` environment: reviewer `webos21` approved it (comment `Good to go`).
+- Public bytes were downloaded again and `tools/ci_sdk_release.py verify --os linux --arch x86_64 --version v0.0.1-preview.20261118.linux.x64.1 --commit 21ef266...`
+  passes: manifest `release-manifest-dev-linux-x86_64.json` 1753 bytes, SHA-256 `b76aea28cd516628b83f75f2f513cc1d5d1bcddfad380eb485efaeb95a45a641`, content
+  `3008315d40f5785226ecb26aee9a746ddc7fe8513d1ac895e7f4ce77eb057a79`; the archive SHA-256 equals the manifest's
+  (`6681afce6acd3efac4892f0505b059c7d55504bc25b280eff718cd23df49f710`).
+- Publisher signature: the owner signed the archive offline; the 256-byte `.sig` (SHA-256 `a15eb9457ca9ff626169eba1f93cb03fdd69564a0836f417e6eaab35b578e50b`)
+  verifies against the public archive with the pinned key (SPKI `59218576...3d43fa2`, RSA-PSS SHA-256, salt 32) and was attached as the seventh asset, then
+  downloaded back and compared. The verifier does not list the `.sig`, so it is checked on the six release assets only.
+
+Not covered: Ubuntu 24.04/glibc 2.39, Linux/aarch64, macOS, Windows, Full/GFX/Web SDKs, consumer pin promotion (S5).
+

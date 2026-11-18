@@ -8,6 +8,14 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-18
+
+### Publish the first automated Dev SDK Preview (S4)
+
+`v0.0.1-preview.20261118.linux.x64.1` was built, verified and published by `sdk-release.yml` (run 44088028759) after reviewer approval; its public bytes
+re-verify, and the owner's offline publisher signature was verified against the pinned key and attached
+([evidence](docs/acceptance/release_qualification.md#first-automated-dev-sdk-preview-s4-2026-11-18)); S4 is closed. The consumer pin (S5) is not yet updated.
+
 ## 2026-11-17
 
 ### Add the manual, approval-gated Dev SDK release workflow (S3)
