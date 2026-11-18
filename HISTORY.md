@@ -19,6 +19,10 @@ publisher key (verified against the pinned key)
 ([evidence](docs/acceptance/release_qualification.md#first-windows-arm64-dev-sdk-preview-s7-steps-2-3-2026-11-18)). crt-cli still cannot install it until
 its own first ARM64 bootstrap is published; the pins and the exception's end are S7 steps 4-6.
 
+### Adopt the first automated Dev SDK Preview in the CLI CI (S5)
+
+crt-cli#17 moved only the Linux/x86_64 SDK pin to `v0.0.1-preview.20261118.linux.x64.1` after publish and signature; pin check `OK` for all hosts, `CI gate` and the `main` push run green, both Ubuntu legs 913 / 221 / 114 / 142 with the signature verified ([CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#linuxx86_64-sdk-pin-moved-to-the-first-automated-preview-2026-11-18)); S5 is closed.
+
 ### Publish the first automated Dev SDK Preview (S4)
 
 `v0.0.1-preview.20261118.linux.x64.1` was built, verified and published by `sdk-release.yml` (run 44088028759) after reviewer approval; its public bytes

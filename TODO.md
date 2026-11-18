@@ -117,8 +117,9 @@ is the Dev SDK; Full SDK follows only after this is stable, and the Full-stage i
 - [x] **S4** One real Dev SDK Preview published by `sdk-release.yml`; public bytes re-downloaded and checked; owner signs the archive
   offline and `.sig` is attached (publisher signing procedure); acceptance records run IDs, approval and what was not covered.
   [Evidence](docs/acceptance/release_qualification.md#first-automated-dev-sdk-preview-s4-2026-11-18): `v0.0.1-preview.20261118.linux.x64.1`, signed.
-- [ ] **S5** CLI adopts it through the existing pin promotion ([policy](https://github.com/webos21/crt-cli/blob/main/docs/guides/development.md#ci-pin-promotion));
+- [x] **S5** CLI adopts it through the existing pin promotion ([policy](https://github.com/webos21/crt-cli/blob/main/docs/guides/development.md#ci-pin-promotion));
   producer->consumer order: publish, sign, then update the CLI lock.
+  Adopted by [crt-cli#17](https://github.com/webos21/crt-cli/pull/17) (`CI gate`, `main` push run green on all five legs); [record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#linuxx86_64-sdk-pin-moved-to-the-first-automated-preview-2026-11-18).
 - [ ] **S6** (later) Full SDK release workflow reusing S1-S4 once the Dev SDK flow is stable; not scheduled.
 - [ ] **S7** Windows/arm64 first Dev SDK Preview and first CLI through the
   [first-host bootstrap](docs/guides/sdk_ci.md#first-host-bootstrap-a-host-without-a-published-cli) (no published ARM64 CLI exists, so S2 cannot run for the
