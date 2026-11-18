@@ -1146,4 +1146,9 @@ answer for a non-HTML archive, or bytes that differ from the pin, is rejected an
 pinned archive (same size and SHA-256). Because the SDK ships `tools/fetch_ports.py` and `porting/recipes`, the next SDK's content identity changes with this fix.
 
 Evidence of the fix: unit tests for rejection, retry, mirror fallback and the mirror rules (`tools/test_fetch_ports.py`), and a real run with the primary URL pointed at a 404 that fell
-back to the GitHub mirror and extracted `zlib 1.3.1`. The hosted check on `windows-latest` is recorded below once it exists.
+back to the GitHub mirror and extracted `zlib 1.3.1`.
+
+Hosted result on the fix branch: [SDK integration run 44257152261](https://github.com/webos21/crt/actions/runs/44257152261) (`workflow_dispatch`, 07:20 UTC) succeeded on all five hosts. **It does not
+exercise the fix on `windows-latest`:** in that run `zlib.net` delivered the real archive on the first try (the log shows one `fetch` line and then `zlib 1.3.1:`, no rejection and no
+mirror), so the block of the earlier runs was not present at that time. The hosted evidence is therefore "no regression", not "the fallback worked on the blocked runner"; the fallback
+itself is covered by the unit tests and the local run above.
