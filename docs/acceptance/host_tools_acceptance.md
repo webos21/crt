@@ -554,3 +554,58 @@ the payload nor the replay policy was weakened. Two Windows extraction attempts 
 This producer replay does not hide source/SDK paths from reads, exercise CLI selection or its fail-closed controls, or run the CLI's five port
 suites. Those remain consumer-owned acceptance. Hosted Windows replay is prior producer evidence, not a new Windows replay on this Mac.
 No private-DLL search-path qualification, Developer ID/notarization, consumer pin promotion or STATUS update is claimed.
+
+## Windows/x86_64 host-tools public signature and native replay (2026-11-19)
+
+Native Windows 11 Pro (10.0.26100) x64 verification of the public
+[Windows/x86_64 host-tools Preview](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261119.windows-x86_64.1) (published
+`2026-11-19T00:35:11Z`). Inputs are the unauthenticated public downloads, not a rebuilt candidate: Python `urllib`, HTTPS only, TLS >= 1.2 with peer and hostname
+verification against the Windows certificate store, proxies disabled, no credentials, exactly one redirect per file and only to `release-assets.githubusercontent.com`
+(temporary signed URLs are not recorded). Verifier checkouts: CRT `84eec172`, `crt-cli` `c79d57c`.
+
+| Public asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.1.0-hosttools.20261119.windows-x86_64.1.tar.xz` | 784724 | `bd65a2b8d1a5b7865110233bb47a1d13ea56724ad76593333cc349bb0980a210` |
+| `crt-v0.1.0-hosttools.20261119.windows-x86_64.1.tar.xz.sig` | 256 | `72f522291148d0e5fae696d2783eb32153b4513c8c45498d557ed60326896695` |
+| `host-tools-release-record-windows-x86_64.json` | 3446 | `5f7b05861e9d0c2e2d7808a955224317d6a5c054f3123f7005546609bd6b4841` |
+| `SHA256SUMS-host-tools-windows-x86_64` | 121 | `f7aaceb3305b2d2d4c32b240178957ba4029ae54328fdd2d16ad36316c24cf9b` |
+
+All four equal the sizes and digests on the release page; the archive equals the `SHA256SUMS` line and the record's `consumer_pin`.
+
+### Publisher signature (two independent verifiers)
+
+1. **openssl 3 (Strawberry Perl build), 9/9.** The repository key file has SPKI SHA-256 `59218576956e493476bc36f7385d8e01a03ff9b92946a531b013ad3937d43fa2` (RSA 2048, the
+   [published fingerprint](../security/publisher_signing.md)); the signed fingerprint notice `fingerprint-notice-2026-11-16.txt` verifies with that key and names the same fingerprint;
+   the detached signature (256 bytes) verifies over the public archive (`Verified OK`, RSA-PSS SHA-256, MGF1 SHA-256, salt 32). Negative controls refuse, each for its own reason: the same
+   signature over a one-bit-changed archive, a one-bit-changed signature, a different temporary RSA key, and a PKCS#1 v1.5 signature by another key.
+2. **The published `crt-cli` itself, 8/8.** The executable of the public
+   [`crt-cli` Preview 20261117 (Windows x86_64)](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261117.windows-x86_64.1) (archive
+   `02396e04cd4775cb7cfd65bd5c0e2c8975c4fa5b4ad18cfa039f65bf5cdd706f`, itself signature-verified with the same key; executable `feb9779109892cf73235307617398e8dfe70bdadcc86d3dff22ba04642c84df1`) runs
+   `fetch --url <public URL> --ca-file <57 roots exported from the Windows store> --sha256 <pin> --size 784724 --redirect-policy github-release --publisher-key <pem> --signature <sig>`:
+   the real public URL is fetched, the integrity is `pinned-digest`, the reply reports the publisher algorithm `rsa-pss-sha256` and `signature_verified`, and the output equals the separately
+   downloaded archive. A swapped signature (the Windows/aarch64 archive's) and a one-bit-changed signature fail as `publisher_signature_invalid` (stage `authenticate`, `published: false`);
+   a wrong archive digest fails as `digest_mismatch`; none of the three leaves an output file.
+
+Limit unchanged from the [signing policy](../security/publisher_signing.md): the key file, the notice and the releases share one GitHub account, so the check is as strong as the fingerprint copies
+recorded independently (the project blog post), which this run did not re-fetch. The record and checksum file are unsigned. Keep the digest pins. This is not Authenticode.
+
+### Native behavior on this host
+
+`create_host_tools_release.py verify` (archive/record agreement, safe extraction, complete inventory, content and manifest identity, native image checks) passes; manifest SHA-256
+`cd6cb75e91b8f9202cda82876de9898e19fb4aeb01be981ebcfde9eabb7b7e00`, content `dc106db47ed8bcbb56bdd6da0415dce527653fcb42b0c54bdc1402dca74c35fe` (209 inventory files, 179 executables and aliases, 77 applets), source SDK
+`v0.0.1-preview.20261110.windows.1` (content `5bb55372ec10e3cfa24c84de981a7130f56aeb57ef0d43d5da22a65036dec7ef`). `replay_host_tools_windows.py` passes **18/18** from a space/Hangul-named copy with no `PATH` and only the system root
+(shell status, awk, GNU make, printf/echo/expr/basename/uname, redirection/cat/sort/wc/ls, every declared executable and alias started without a loader failure, signal or fatal status). All **90** PE images import only `KERNEL32.dll` and
+`api-ms-win-core-synch-l1-2-0.dll` (no private runtime DLL) and none has a certificate table (no Authenticode). The four producer modules pass 35 tests (1 skipped).
+
+```text
+python tools/create_host_tools_release.py verify --archive <archive> --record <record> --extract-to <new-dir>
+python tools/replay_host_tools_windows.py --bundle <new-dir>/crt-host-tools-windows-x86_64 --output <new-evidence-dir>
+python -m unittest tools.test_host_tools tools.test_host_tools_release tools.test_ci_host_tools_release tools.test_host_tools_replay_common
+```
+
+The consumer-owned replays (fail-closed controls and the five port suites on this exact artifact) are recorded by the
+[CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsx64-published-host-tools-consumer-replay-2026-11-19).
+Evidence: `C:\Users\Lee\s12\` (downloads and receipts, `signature-openssl.json`, `cli-fetch-signature.json`, `ht-replay/`), outside both repositories.
+
+Not claimed: Windows/arm64 (a separate release), network or file-system denial (Windows has no unprivileged sandbox here; isolation is the empty environment, the relocated copy and, for the consumer replays, a
+restricted token with process accounting), a job rootfs without Developer Mode, private-DLL search-path qualification (this bundle ships none), consumer pin promotion or STATUS.

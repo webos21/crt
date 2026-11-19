@@ -10,6 +10,12 @@ substantive update.
 
 ## 2026-11-19
 
+### Verify the Windows/x86_64 host-tools release natively
+
+Downloaded the public `v0.1.0-hosttools.20261119.windows-x86_64.1` assets without authentication (digests equal the release page and record) and verified the publisher signature two ways: `openssl` (9/9, four refusals) and the published `crt-cli` Preview's
+`fetch --publisher-key --signature` (`signature_verified`, three refusals leaving no output). The producer verify and the Windows replay pass 18/18, all 90 PE images import only the two OS libraries and carry no Authenticode, and the CLI's 32 fail-closed controls and
+its port suites (142/36/97/83/33/21 checks plus a real `port build zlib`) pass on this exact bundle under a restricted token. Nothing was rebuilt or replaced. [Evidence](host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19).
+
 ### Attach macOS/Windows host-tools signatures and replay the public macOS bundle
 
 Attached the owner's three detached signatures to the corresponding `v0.1.0-hosttools.20261119.<host>.1` releases

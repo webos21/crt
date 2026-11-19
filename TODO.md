@@ -97,7 +97,8 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#linuxx86_64-preview-bundle-rehearsal-from-the-public-dev-sdk-2026-11-16).
   Signed public bundles exist for all five native hosts; the macOS/Windows publication and native macOS replay are in
   [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#macoswindows-host-tools-publication-signatures-and-macos-replay-2026-11-19).
-  Open: per-host CLI pin adoption and hosted integration/port-suite evidence, not producer publication.
+  The Windows/x86_64 bundle's signature and native behavior were re-verified from the public bytes, and the CLI's fail-closed controls and port suites pass on it
+  ([record](host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19)). Open: per-host CLI pin adoption and hosted integration evidence for the other hosts, not producer publication.
 
 - [ ] Qualify an independent Windows/x64 host-tools bundle with actual private
   DLLs: initial-load closure and search-path collisions. The existing static

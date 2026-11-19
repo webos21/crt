@@ -63,6 +63,10 @@ specified RSA-PSS parameters (256-byte signatures). Archive/signature digests, n
 The original release records remain unchanged: their `not_verified` field describes the pre-signing packaging step, not a failed check of
 the subsequently attached signature. The records and checksum files themselves are not signed.
 
+2026-11-19, later: the Windows/x86_64 signature was verified again natively on Windows from the unauthenticated public download, with `openssl` (9/9 including four
+refusals) and with the public `crt-cli` Preview's `fetch --publisher-key --signature` (`signature_verified`; a swapped, a bit-changed and a wrong-digest control are refused with no output). Record:
+[host-tools acceptance](../acceptance/host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19). The fingerprint-copy limit above is unchanged.
+
 ## What a signature does and does not establish
 
 - It establishes that the holder of the private key signed exactly those bytes, provided the verifier obtained the public key independently.
