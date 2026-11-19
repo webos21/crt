@@ -95,14 +95,15 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   [`crt_host_tools_publication_request.md`](https://github.com/webos21/crt-cli/blob/main/docs/crt_host_tools_publication_request.md)).
   Contract, assembler `--promotion preview`, release packer/verifier and Linux/x86_64 rehearsal are recorded in
   [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#linuxx86_64-preview-bundle-rehearsal-from-the-public-dev-sdk-2026-11-16).
-  Published for Linux/x86_64 and Linux/aarch64 as `v0.1.0-hosttools.20261116.linux-<arch>.1` (see the acceptance record).
-  Open: the CLI pins the six fields and runs its hosted integration; aarch64 CLI/port-suite evidence.
+  Signed public bundles exist for all five native hosts; the macOS/Windows publication and native macOS replay are in
+  [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#macoswindows-host-tools-publication-signatures-and-macos-replay-2026-11-19).
+  Open: per-host CLI pin adoption and hosted integration/port-suite evidence, not producer publication.
 
 - [ ] Qualify an independent Windows/x64 host-tools bundle with actual private
   DLLs: initial-load closure and search-path collisions. The existing static
   closure does not cover this [remaining gate](docs/acceptance/host_tools_acceptance.md#native-scope-and-remaining-gates).
-- [ ] Replay independent host tools on Windows/arm64 and separately qualify its
-  D3 zlib source-port path; completed D2/SDK evidence does not close these gates
+- [ ] Qualify the Windows/arm64 CLI consumer and D3 zlib source-port path with the
+  published independent host tools; hosted producer replay passes, but does not close these consumer gates
   ([host-tools scope](docs/acceptance/host_tools_acceptance.md#native-scope-and-remaining-gates),
   [bounded D3 scope](docs/acceptance/sdk_split_acceptance.md#d3-adapter-contract-approval-2026-11-09)).
 

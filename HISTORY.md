@@ -8,6 +8,21 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-19
+
+### Attach macOS/Windows host-tools signatures and replay the public macOS bundle
+
+Attached the owner's three detached signatures to the corresponding `v0.1.0-hosttools.20261119.<host>.1` releases
+(macOS/aarch64, Windows/x86_64 and Windows/aarch64). Each public archive matches its release-record size/digest; RSA-PSS verification passes
+before upload and after re-download, and each downloaded signature is byte-identical to the supplied file. No archive, checksum or release
+record was replaced. Release notes now distinguish the signed archive from the unsigned packaging record.
+
+On macOS 27.2.1/arm64, the published macOS archive passes extraction/inventory/native-image verification and the relocated Seatbelt replay
+18/18 (empty PATH, space/Hangul bundle path, shell/awk/make/applets and every declared executable alias); 35 focused producer tests pass.
+The four canonical tools import only `/usr/lib/libSystem.B.dylib`. Retained first-attempt sandbox restrictions and the Windows native-host
+verification limit are documented in [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#macoswindows-host-tools-publication-signatures-and-macos-replay-2026-11-19).
+This is not CLI pin adoption, CLI fail-closed/port-suite acceptance, or Windows private-DLL closure qualification. STATUS is unchanged.
+
 ## 2026-11-18
 
 ### Close the Dev SDK GitHub CI/CD group (S0-S7)

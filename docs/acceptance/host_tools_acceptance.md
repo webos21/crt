@@ -492,3 +492,65 @@ digest/size and was executed only by the hosted runner's replay (16/16 on the wo
 exists yet. Publisher authentication stays `not_verified`: trust is the pinned digests.
 
 **Not done.** The CLI pins and hosted integration (five port suites on both Linux runners), aarch64 CLI/port-suite evidence, and macOS/Windows bundles.
+
+## macOS/Windows host-tools publication, signatures and macOS replay (2026-11-19)
+
+Three independent host-tools Previews are public. The Windows candidates came from the successful Windows jobs in
+[run 44427905842](https://github.com/webos21/crt/actions/runs/44427905842) at `56fc914ff4029a5ef0db8d7050418725a9dafc4b`;
+that run's macOS job failed on an unbalanced Seatbelt profile. The corrected macOS candidate came from
+[run 44428128691](https://github.com/webos21/crt/actions/runs/44428128691) at `19b72f340c8160342d793a65aeca7af5e3fefb8d`.
+The release records retain each candidate's clean assembler/packer identity, source SDK, manifest pin and notices.
+
+| Public release | Archive bytes | Archive SHA-256 | Detached signature SHA-256 |
+| --- | ---: | --- | --- |
+| [macOS/aarch64](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261119.macos-aarch64.1) | 583176 | `90c7585a92fc020e05ea69e7bcd752a4df67f060706c87f81822cb11b0c676a1` | `15c2af47b2de52ccf876a0d1c335ba187a92ff92de8b14c2fb52521b0ac3d451` |
+| [Windows/x86_64](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261119.windows-x86_64.1) | 784724 | `bd65a2b8d1a5b7865110233bb47a1d13ea56724ad76593333cc349bb0980a210` | `72f522291148d0e5fae696d2783eb32153b4513c8c45498d557ed60326896695` |
+| [Windows/aarch64](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261119.windows-aarch64.1) | 697220 | `c74ad50ea5f5008d515e1aac3581fa5d73d7acba276ae990a9d3df84599706ee` | `2956f38c0621feae16a0c6f02ca8346cc77423c33f8adcc108d92f7d8d46443f` |
+
+### Publisher authentication from public bytes
+
+The owner supplied three `<archive>.sig` files (256 bytes each). Each signature verified against the corresponding public archive with the
+[pinned publisher key](../security/publisher_signing.md), SPKI SHA-256
+`59218576956e493476bc36f7385d8e01a03ff9b92946a531b013ad3937d43fa2`, RSA-PSS SHA-256/MGF1 SHA-256/salt 32.
+Archive size/SHA-256 also match each published release record. The signatures were attached to their respective releases as new assets;
+all three were downloaded back, compared byte-for-byte with the owner-supplied files and verified again (`Verified OK` for each).
+No existing archive, checksum file or release record was replaced. The release notes were updated to remove the now-obsolete unsigned-archive claim.
+
+The packaging record's original `trust.publisher_authentication: not_verified` is preserved: it records the pre-signing producer step.
+Only consumers that verify the detached signature may report `signature_verified`. The JSON records and checksum files have no detached
+signature of their own; the archive signature does not authenticate every asset in the release.
+
+### Native macOS/arm64 public-bundle replay
+
+Host: macOS 27.2.1 (26B131), arm64; verifier checkout `26c9579`. Input: the downloaded public macOS archive above, not a rebuilt candidate.
+Source SDK provenance is `v0.0.1-preview.20261110.macos.1`; bundle manifest SHA-256
+`27fac5efbb6f846041b471d8b0be8e8004608ef5839ce4a2ef23c62aae8e07b8`, content SHA-256
+`d692809a7b1c244de2b42bd6756f5f4a2c3a3f035373cf82874a0faffb2cc589` (120 inventory files, 90 executable paths/aliases, 77 applets).
+
+`create_host_tools_release.py verify` passes the archive/checksum/record agreement, safe extraction, complete inventory, content and manifest
+identity, and native executable checks. `replay_host_tools_macos.py` passes **18/18** on a separate space/Hangul-named copy under Seatbelt:
+network denied, writes confined to scratch and `/dev`, `PATH=/nonexistent`, with no inherited environment apart from explicit PATH/HOME/TMPDIR.
+The cases exercise shell output/exit status, awk, GNU make, printf/echo/expr/basename/uname, redirection/cat/sort/wc/ls and every declared alias.
+`otool -L` on the four canonical tools (`mksh`, `toybox`, `awk`, `make`) shows only `/usr/lib/libSystem.B.dylib`; this closure has no private dylibs.
+The four focused producer modules pass **35/35** tests.
+
+Reproduce with new extraction/output directories (the tools intentionally reject existing destinations):
+
+```sh
+python3 tools/create_host_tools_release.py verify \
+  --archive <public-archive.tar.xz> --record <public-release-record.json> --extract-to <new-extraction>
+python3 tools/replay_host_tools_macos.py \
+  --bundle <new-extraction>/crt-host-tools-macos-aarch64 --output <new-evidence>
+python3 -m unittest tools.test_host_tools tools.test_host_tools_release tools.test_ci_host_tools_release tools.test_host_tools_replay_common
+```
+
+Evidence is retained in ignored `out/host-tools-public-replay-20261119/`: per-host public downloads and signature-verification output,
+`macos-aarch64/replay-r2/{host-tools-replay.json,policy.sb}`, the replay log and `native-dependencies.log`.
+`replay-r1` is retained as a failed environment attempt: nested `sandbox-exec` returned `sandbox_apply: Operation not permitted` inside the
+agent's sandbox (5/18, not accepted). The identical public bundle passes in `replay-r2`, run on the host with Seatbelt permitted; neither
+the payload nor the replay policy was weakened. Two Windows extraction attempts stopped at the verifier's intentional native-host check
+(`unsupported host-tools manifest/host`); this macOS run claims Windows archive size/digest and signature verification only, not Windows execution.
+
+This producer replay does not hide source/SDK paths from reads, exercise CLI selection or its fail-closed controls, or run the CLI's five port
+suites. Those remain consumer-owned acceptance. Hosted Windows replay is prior producer evidence, not a new Windows replay on this Mac.
+No private-DLL search-path qualification, Developer ID/notarization, consumer pin promotion or STATUS update is claimed.

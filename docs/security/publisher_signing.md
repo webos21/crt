@@ -1,9 +1,9 @@
 # Publisher Signing Key and Roadmap
 
-Owner: CRT. Status: **the key exists and its public half and fingerprint are published here; no release has been signed yet.**
-Every published CRT and `crt-cli` artifact is therefore still `publisher_authentication: not_verified` and trusted only through digests
-a caller pins ([Preview trust policy](../design/dev_preview_trust.md)). Publishing the key does not change that; the first signed
-release does, and only for the assets it signs.
+Owner: CRT. Status: **the public key and fingerprint are published, and selected release archives have detached publisher signatures.**
+Publisher authentication applies only to the exact archive bytes whose signature was verified with the pinned key; it does not extend to
+unsigned release records, checksums, source assets or other releases. Keep digest pins alongside signature verification
+([Preview trust policy](../design/dev_preview_trust.md)). Dated signing records below and the owning acceptance documents identify the signed assets.
 
 ## The publisher key
 
@@ -22,10 +22,9 @@ publishes it**; do not trust a key file merely because it sits beside the artifa
 openssl pkey -pubin -in crt-release-publisher.pub -outform DER | sha256sum
 ```
 
-**Limit of this channel.** For now this repository document is the only publication of the fingerprint. It lives under the same GitHub
-account as the releases, so an account takeover could change both. The fingerprint should also be published on at least one location the
-GitHub account does not control (see Roadmap, step 2); until then a careful user should record the fingerprint once, today, from an
-independent copy of this document, and treat any later change as suspect. The repository's commits are not signed either.
+**Limit of this channel.** This repository and the release assets share a GitHub account, so an account takeover could change both.
+The independent publication locations and signed fingerprint notice are recorded in Roadmap, step 2. Record the fingerprint from those
+channels and treat any later change as suspect. Detached asset signatures do not imply signed repository commits.
 
 ## Signature format (accepted by `crt-cli`)
 
@@ -53,6 +52,16 @@ openssl dgst -sha256 -verify crt-release-publisher.pub \
 The command pair was exercised against `crt-cli` on 2026-11-16 with a temporary key (never the publisher key): a correct signature is
 accepted and reported `publisher_authentication: signature_verified`; a signature by another key and the same signature on a one-bit-changed
 file are both rejected as `publisher_signature_invalid` with nothing published.
+
+## Host-tools signatures added on 2026-11-19
+
+The owner supplied detached signatures for the `20261119` macOS/aarch64, Windows/x86_64 and Windows/aarch64 host-tools archives.
+Each was verified against its public archive before attachment, uploaded as a new `<archive>.sig` asset without replacing accepted bytes,
+then downloaded back, compared byte-for-byte with the supplied signature and verified again. All three use the public key above and the
+specified RSA-PSS parameters (256-byte signatures). Archive/signature digests, native macOS replay and the Windows verification limit are in
+[host-tools acceptance](../acceptance/host_tools_acceptance.md#macoswindows-host-tools-publication-signatures-and-macos-replay-2026-11-19).
+The original release records remain unchanged: their `not_verified` field describes the pre-signing packaging step, not a failed check of
+the subsequently attached signature. The records and checksum files themselves are not signed.
 
 ## What a signature does and does not establish
 
