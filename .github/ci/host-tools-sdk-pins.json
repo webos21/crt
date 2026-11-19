@@ -13,6 +13,24 @@
       "sdk_tag": "v0.0.1-preview.20261110.linux.arm64.2",
       "release_manifest": "release-manifest-dev-linux-aarch64.json",
       "release_manifest_sha256": "ba77b26edfa0413df5e8c17309506d7ae6ecf134ae7e9908e3742bc562067be3"
+    },
+    "macos-aarch64": {
+      "repository": "webos21/crt",
+      "sdk_tag": "v0.0.1-preview.20261110.macos.1",
+      "release_manifest": "release-manifest-dev-macos-aarch64.json",
+      "release_manifest_sha256": "0981110c84e5d24a903dbd3965dbe92eb2fe405edfa89804e3086dfeb75983de"
+    },
+    "windows-x86_64": {
+      "repository": "webos21/crt",
+      "sdk_tag": "v0.0.1-preview.20261110.windows.1",
+      "release_manifest": "release-manifest-dev-windows-x86_64.json",
+      "release_manifest_sha256": "b0fca4c81d29b8eee28e0d9fb7d6e26950b094a8be4f2c091e43922366a46976"
+    },
+    "windows-aarch64": {
+      "repository": "webos21/crt",
+      "sdk_tag": "v0.0.1-preview.20261118.windows.arm64.1",
+      "release_manifest": "release-manifest-dev-windows-aarch64.json",
+      "release_manifest_sha256": "354ab45f94540877dda619d7613937a8caff413ad64fc4aa3f1b88c0a3fceecc"
     }
   }
 }
