@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-11-19
 
+### Verify the Windows/aarch64 public host tools and retain the consumer timeout
+
+Verified the public ARM64 archive with the pinned publisher key (OpenSSL 9/9 and the published ARM64 CLI's four real-URL fetch cases,
+including three refusals with no output). Producer verification and the space/Hangul native replay pass 18/18; all 179 PE file paths are ARM64,
+use only the declared OS imports and have no Authenticode table. The D1 harness now supports both Windows architectures and retains failed
+timeout cases while finishing the remaining checks. D1 completes 31/32: its large-output job times out, including under a longer outer
+observation budget, so full D1 qualification remains open. D3's six suites and the actual `port build zlib` pass 7/7 on this public bundle,
+using an identical-input retained SDK-only contract replay. [Evidence and limits](docs/acceptance/host_tools_acceptance.md#windowsaarch64-host-tools-public-signature-and-native-replay-2026-11-19).
+
 ### Verify the Windows/x86_64 host-tools release natively
 
 Downloaded the public `v0.1.0-hosttools.20261119.windows-x86_64.1` assets without authentication (digests equal the release page and record) and verified the publisher signature two ways: `openssl` (9/9, four refusals) and the published `crt-cli` Preview's

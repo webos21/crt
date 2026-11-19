@@ -329,6 +329,9 @@ artifact. Interactive terminal/job control, source-port/compiler adapters,
 cross-target execution, official trust/metadata policy and public release are
 separate work; no new production consumer lock is adopted here.
 
+The later [public Windows/aarch64 replay](#windowsaarch64-host-tools-public-signature-and-native-replay-2026-11-19)
+adds native producer and D3 evidence for that release; D1's large-output case remains open. It does not qualify Windows private DLLs.
+
 ## macOS/arm64 private-dylib closure replay (2026-11-06)
 
 **Pass for the previously unexercised private-dylib scenario, at this exact
@@ -532,7 +535,7 @@ the Windows/aarch64 bundle manifest SHA-256 is
 `6f7225ac4ffafe4c5651bf025b47d7b58df0939c520dbf40b7a029aa2892b6f1`, from
 Dev SDK `v0.0.1-preview.20261118.windows.arm64.1`. This is hosted producer
 evidence; Windows/arm64 CLI controls, port suites and D3 zlib qualification
-remain open. Subsequent archive signing and native consumer replays are
+were not exercised by that producer run. Subsequent archive signing and native consumer replays are
 recorded separately below.
 
 ### Publisher authentication from public bytes
@@ -647,3 +650,61 @@ Evidence: `C:\Users\Lee\s12\` (downloads and receipts, `signature-openssl.json`,
 
 Not claimed: Windows/arm64 (a separate release), network or file-system denial (Windows has no unprivileged sandbox here; isolation is the empty environment, the relocated copy and, for the consumer replays, a
 restricted token with process accounting), a job rootfs without Developer Mode, private-DLL search-path qualification (this bundle ships none), consumer pin promotion or STATUS.
+
+## Windows/aarch64 host-tools public signature and native replay (2026-11-19)
+
+Host: native Windows/ARM64, OS build `10.0.26300`; verifier CRT `0d9d573b93a7c9edb00af18f2d1351d9e774b6a8`, CLI
+`2460919048c5f95211721c8d4ea4454098ffd54f`. Input is the public
+[Windows/aarch64 Preview](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261119.windows-aarch64.1), not a rebuilt candidate.
+The retained unauthenticated HTTPS downloads record one GitHub asset redirect per file and these identities:
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.1.0-hosttools.20261119.windows-aarch64.1.tar.xz` | 697220 | `c74ad50ea5f5008d515e1aac3581fa5d73d7acba276ae990a9d3df84599706ee` |
+| Archive `.sig` | 256 | `2956f38c0621feae16a0c6f02ca8346cc77423c33f8adcc108d92f7d8d46443f` |
+| `host-tools-release-record-windows-aarch64.json` | 3468 | `1a4b179ca771d0c21057545cc04d99f482ee4dd9290f7bbd0a3bb97bcbbf90c8` |
+| `SHA256SUMS-host-tools-windows-aarch64` | 122 | `40b91be426fd1e8759a4775fad721181fddeabdbfb7eb23cf87bd696049faa05` |
+
+### Publisher authentication
+
+The retained OpenSSL transcript passes **9/9**: the public key's SPKI SHA-256 equals
+`59218576956e493476bc36f7385d8e01a03ff9b92946a531b013ad3937d43fa2`, the signed fingerprint notice and public archive verify,
+and the changed archive/signature and other-key PSS/PKCS#1 v1.5 signatures are refused, with positive controls for the temporary key.
+Parameters are RSA-PSS/SHA-256, MGF1 SHA-256, salt 32; the archive signature is 256 bytes.
+
+The published native [ARM64 CLI Preview](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261118.windows-arm64.1) independently
+passes **4/4 fetch cases** against the real public archive URL. `fetch --publisher-key --signature --redirect-policy github-release`
+reports `signature_verified`; its output matches the archive pin. The x64 archive's signature and a one-bit-changed ARM64 signature fail with
+`publisher_signature_invalid`; a wrong digest fails with `digest_mismatch`. All three refusals leave no output file.
+CLI archive `c5ff710532c0ff9191ae373b48a8f8fe5ceb04bea70647989f9146e255e46e11` and signature
+`b72eb649d476673d784a6f4f84c090f73da9df505372cfc9005d19fa2a2da5e6` match its published pins; OpenSSL verifies that signature with the same key.
+CLI executable SHA-256 is `132c8b5ae15f66ed9dd82fcb5a425160e4d682c008ab218353b7eed30f6d3db8`.
+The explicit Windows-store CA file is `3cb88031f066192761b84355b7a921d18592c1874146aab63ea355ca8fffd0a8`.
+
+The [key-independence limit](../security/publisher_signing.md) remains: key, signed notice and release share a GitHub account;
+the blog fingerprint copy was not fetched again. The release record and checksum file remain unsigned; this is not Authenticode.
+
+### Producer behavior and consumer boundary
+
+`create_host_tools_release.py verify` passes archive/record/inventory/content/native-image validation. Manifest pin:
+`6f7225ac4ffafe4c5651bf025b47d7b58df0939c520dbf40b7a029aa2892b6f1`; content:
+`ffc6c139cae055422113235ac0f3c3189007046bd03cb782a597399dd3368bad`. The source SDK is
+`v0.0.1-preview.20261118.windows.arm64.1`, clean CRT `e7c763094d96ccba1b524077b24b04b876a91d5b`.
+The space/Hangul-path producer replay passes **18/18** with empty PATH. A separate PE scan covers **179 file paths including aliases**
+(four distinct image byte hashes): every path is ARM64 (`0xaa64`), imports only `KERNEL32.dll` and
+`api-ms-win-core-synch-l1-2-0.dll`, and has an empty certificate table. The four focused producer modules run **35 tests, 1 skipped**.
+
+The D1 harness now checks the actual native host and chooses the other Windows architecture for its wrong-host case, replacing two x64 constants.
+It preserves a timed-out case as failed and continues collecting the remaining cases; its final result still fails if any case fails.
+**D1 is 31/32, not accepted as a full pass:** the 10 MiB `dd` stdout case exceeds the harness's 90-second outer limit. A focused run with
+a 900-second outer budget completes in 91.172 seconds, but the unchanged 60-second inner limit returns 124/`timed_out: true`;
+the captured output is correctly capped at 8 MiB with `output_truncated: true`. Direct `dd` (both alias spellings) and the CLI's small
+65,536-byte case succeed. The CLI intentionally relays captured stdout to stderr; those NUL bytes are not evidence of misrouting.
+No runtime fix, longer accepted inner timeout or complete D1 qualification is claimed.
+Consumer combination results and the retained contract replay belong to
+[CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsarm64-published-host-tools-consumer-replay-2026-11-19).
+
+Evidence: ignored `out/host-tools-public-replay-20261119-winarm64/` (downloads, `signature-openssl.log`, `verify.log`, `ht-replay/`,
+`pe-audit.json`, `cli-fetch-signature.json`, replay scripts and consumer logs). Windows isolation is a restricted token, selected inaccessible
+input paths, an empty environment and job-object process accounting; executable/network denial is not available here. This bundle has no private
+DLL, so private-DLL search-path qualification remains open. No CI/default pin, project lock, SDK bytes, public asset or STATUS was changed.

@@ -18,7 +18,7 @@ import time
 
 import crt_windows_external as sandbox
 import crt_windows_trace as trace
-from create_host_tools import verify_bundle
+from create_host_tools import native_host, verify_bundle
 
 
 def digest(path):
@@ -76,7 +76,7 @@ def main():
     before = (tools / 'manifest.json').read_bytes()
     verify_bundle(tools)
     manifest = json.loads(before)
-    assert manifest['host'] == {'os': 'windows', 'arch': 'x86_64'}
+    assert manifest['host'] == native_host()
     permitted = {p.resolve() for p in [cli, package / 'crt-cli.exe', probe, *[tools / p for p in manifest['executable_files']]]}
     readonly_fixture(tools, sid)
     readonly_fixture(package, sid)
@@ -103,7 +103,6 @@ def main():
         stray = [p for p in result['processes'] if not allowed_image(p['image'], permitted)]
         commands.append({'label': label, 'argv': list(map(str, argv)), 'cwd': str(work), **result})
         assert not stray, f'{label}: undeclared process images: {stray[:3]}'
-        assert not result['timed_out'], f'{label}: outer fixture timeout'
         return result['exit_code'], out.read_bytes()
 
     boundary = [probe]
@@ -116,6 +115,12 @@ def main():
 
     def run(label, tail, expected=0, check=None, binary=cli):
         status, stdout = launch(label, [binary, '--json', *tail])
+        if commands[-1]['timed_out']:
+            results.append({'label': label, 'pass': False, 'exit': status,
+                            'reason': 'outer fixture timeout'})
+            print('FAIL ' + label + ': outer fixture timeout', flush=True)
+            save()
+            return None
         reply = json.loads(stdout)
         okay = status == expected if expected is not None else status != 0
         if check:
@@ -210,7 +215,7 @@ printf '%s\\n' tools-ok
     run('missing-make-no-fallback', ['doctor', '--scope', 'environment', *selection], expected=None)
     saved.rename(missing)
     changed = json.loads(before)
-    changed['host']['arch'] = 'aarch64'
+    changed['host']['arch'] = 'aarch64' if manifest['host']['arch'] == 'x86_64' else 'x86_64'
     (tools / 'manifest.json').write_text(json.dumps(changed))
     run('wrong-execution-host', ['doctor', '--scope', 'environment', '--host-tools', tools,
                                '--host-tools-sha256', digest(tools / 'manifest.json')], expected=None)

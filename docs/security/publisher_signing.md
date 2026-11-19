@@ -67,6 +67,11 @@ the subsequently attached signature. The records and checksum files themselves a
 refusals) and with the public `crt-cli` Preview's `fetch --publisher-key --signature` (`signature_verified`; a swapped, a bit-changed and a wrong-digest control are refused with no output). Record:
 [host-tools acceptance](../acceptance/host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19). The fingerprint-copy limit above is unchanged.
 
+2026-11-19, Windows/aarch64: native ARM64 verification also passes OpenSSL's nine checks and the published ARM64 CLI's four public-URL
+`fetch` cases (`signature_verified`; x64-signature, changed-signature and wrong-digest refusals publish no output). The CLI archive's own
+signature verifies with the same pinned key. [Record](../acceptance/host_tools_acceptance.md#windowsaarch64-host-tools-public-signature-and-native-replay-2026-11-19).
+This does not change fingerprint independence, sign the release metadata or provide Authenticode.
+
 ## What a signature does and does not establish
 
 - It establishes that the holder of the private key signed exactly those bytes, provided the verifier obtained the public key independently.
