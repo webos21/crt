@@ -1,7 +1,7 @@
 name: Host tools
 
-# Assembles, packs, verifies and natively replays the independent CRT host-tools bundle for each Linux host from the pinned
-# public Dev SDK Preview (.github/ci/host-tools-sdk-pins.json). Manual only: a bundle release is a deliberate, versioned act.
+# Assembles, packs, verifies and natively replays the independent CRT host-tools bundle for each native host (Linux x86_64 and
+# aarch64, macOS/arm64, Windows x64 and arm64) from the pinned public Dev SDK Preview (.github/ci/host-tools-sdk-pins.json). Manual only: a bundle release is a deliberate, versioned act.
 # It publishes nothing; the artifacts are reviewed, then released by a maintainer. A rehearsal with a dirty tree is impossible
 # here (the checkout is clean), so a green run is a release-candidate result for exactly this commit.
 
@@ -17,6 +17,11 @@ on:
         required: true
         default: '1'
         type: string
+      hosts:
+        description: 'Comma-separated hosts to build (linux-x86_64, linux-aarch64, macos-aarch64, windows-x86_64, windows-aarch64); empty builds all'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -26,18 +31,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  select:
+    name: select hosts
+    runs-on: ubuntu-26.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - name: Choose the hosts to build
+        id: pick
+        env:
+          REQUESTED: ${{ inputs.hosts }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          known = {
+              'linux-x86_64': 'ubuntu-26.04',
+              'linux-aarch64': 'ubuntu-26.04-arm',
+              'macos-aarch64': 'macos-15',
+              'windows-x86_64': 'windows-2022',
+              'windows-aarch64': 'windows-11-arm',
+          }
+          asked = [h.strip() for h in os.environ.get('REQUESTED', '').split(',') if h.strip()] or list(known)
+          unknown = [h for h in asked if h not in known]
+          if unknown:
+              raise SystemExit('unknown host(s): ' + ', '.join(unknown))
+          matrix = {'include': [{'host': h, 'runner': known[h]} for h in asked]}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('matrix=' + json.dumps(matrix) + '\n')
+          PY
+
   bundle:
     name: bundle (${{ matrix.host }})
+    needs: select
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - host: linux-x86_64
-            runner: ubuntu-26.04
-          - host: linux-aarch64
-            runner: ubuntu-26.04-arm
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    env:
+      # Windows runners default to a legacy code page; the replay deliberately uses a path with Hangul.
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out the producer commit under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,9 +86,10 @@ jobs:
           python-version: '3.12'
 
       - name: Unit tests of the assembler, release tooling and driver
-        run: python -m unittest tools.test_host_tools tools.test_host_tools_release tools.test_ci_host_tools_release
+        run: python -m unittest tools.test_host_tools tools.test_host_tools_release tools.test_ci_host_tools_release tools.test_host_tools_replay_common
 
       - name: Install bubblewrap for the isolated replay
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           sudo apt-get update -q

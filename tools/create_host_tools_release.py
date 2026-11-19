@@ -172,9 +172,12 @@ def verify(archive, record_path, extract_to):
     if sha256_file(root / 'manifest.json') != record['bundle']['manifest_sha256'] \
             or manifest['content_sha256'] != record['bundle']['content_sha256'] or manifest['version'] != record['version']:
         raise ValueError('extracted bundle differs from the release record')
-    for relative in manifest['executable_files']:
-        if not (root / relative).stat().st_mode & stat.S_IXUSR:
-            raise ValueError('extraction lost an execute bit: ' + relative)
+    if os.name != 'nt':
+        # Windows file modes carry no execute bit; there, executability is the native image and its .exe name, which
+        # producer.verify_bundle has just re-checked for every declared executable.
+        for relative in manifest['executable_files']:
+            if not (root / relative).stat().st_mode & stat.S_IXUSR:
+                raise ValueError('extraction lost an execute bit: ' + relative)
     return record, root
 
 
