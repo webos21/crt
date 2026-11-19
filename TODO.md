@@ -94,8 +94,9 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 - [x] **Producer prerequisite:** signed independent host-tools Previews are public for all five native hosts; the macOS/Windows
   request [#9 is complete](https://github.com/webos21/crt/issues/9#issuecomment-6998966548).
   [Acceptance and handoff](docs/acceptance/host_tools_acceptance.md#producer-request-9-closure-and-remaining-handoff-2026-11-19).
-- [ ] **CLI-owned integration handoff:** adopt macOS/Windows integration pins and add hosted jobs, including the Windows job-rootfs
-  symlink prerequisite. Native/D3 receipts do not close this [consumer queue](https://github.com/webos21/crt-cli/blob/main/TODO.md#ci-platform-expansion).
+- [x] **CLI-owned integration handoff:** macOS/Windows integration pins and hosted Port/oracle jobs are adopted on CLI main,
+  including actual Windows job-rootfs symlinks. [Consumer hosted evidence](https://github.com/webos21/crt-cli/blob/858c04bda6f29968d91be98cc80c8ca6a9f55936/docs/acceptance/ci_acceptance.md#windowsx64-hosted-port-integration-2026-11-19);
+  [handoff closure](docs/acceptance/host_tools_acceptance.md#consumer-hosted-integration-handoff-completed-2026-11-19).
 
 - [ ] Qualify an independent Windows/x64 host-tools bundle with actual private
   DLLs: initial-load closure and search-path collisions. The existing static

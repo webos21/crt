@@ -726,3 +726,22 @@ and [CLI queue](https://github.com/webos21/crt-cli/blob/main/TODO.md#ci-platform
 This is a scope/status reconciliation of existing evidence, not a runtime change, new native replay, CI/default-pin promotion, SDK/lock
 change or STATUS refresh. The [CLI request record](https://github.com/webos21/crt-cli/blob/2e4c4d1e8fa7df25bdebe1358587b469fce7752e/docs/crt_host_tools_publication_request.md)
 owns the consumer-facing producer handoff; detailed consumer acceptance and compatibility remain CLI-owned.
+
+## Consumer hosted integration handoff completed (2026-11-19)
+
+The CLI-owned macOS/Windows integration handoff above is complete for the public signed bundles: integration pins and hosted Port/oracle
+jobs are adopted on consumer main `f06a036c01c1e71d14df87c1f082b1df816c33c6`, with completion documented at
+`858c04bda6f29968d91be98cc80c8ca6a9f55936`. The owning [CLI acceptance record](https://github.com/webos21/crt-cli/blob/858c04bda6f29968d91be98cc80c8ca6a9f55936/docs/acceptance/ci_acceptance.md#windowsx64-hosted-port-integration-2026-11-19)
+records the exact public inputs, native boundaries, failed fixture attempt and successful artifact checks.
+
+[Integration 44490048419](https://github.com/webos21/crt-cli/actions/runs/44490048419) passes all 11 jobs at consumer
+`9a417fc52073b977dc8e36d7c8c978cd09dbb6f9`, including all five required port suites on Linux/x64, Linux/arm64, macOS/arm64 and Windows/x64.
+Windows hosted qualification includes actual CRT symlink creation, private original inputs, separate-bare-SID execution, static/shared
+consumers, PE imports and unchanged inventories. [Main CI 44493533992](https://github.com/webos21/crt-cli/actions/runs/44493533992)
+passes all six required native rows and `CI gate`; the delta from the integration source to that main revision is documentation only.
+Detailed consumer measurements remain CLI-owned rather than being duplicated here.
+
+This closes the stale producer TODO handoff using observed hosted evidence, not merely the earlier native/D3 receipts. The original #9
+publication record retains its producer-only scope. First scheduled-run observation and further redirect automation remain consumer-owned;
+Windows/arm64 D1 (31/32), private-DLL qualification and Full SDKs stay separate. No producer code, runtime, SDK/host-tools bytes, release,
+consumer pin, root/project lock or STATUS changes, and no runtime test is rerun for this documentation synchronization.

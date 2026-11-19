@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-11-19
 
+### Record the completed CLI hosted integration handoff
+
+The consumer's macOS/Windows integration pins and hosted Port/oracle jobs are adopted on CLI main (`f06a036`, documented at `858c04b`).
+Integration run 44490048419 passes all 11 jobs at `9a417fc`; main CI 44493533992 passes all six native rows and `CI gate`.
+The Windows job proves real symlinks and selected original/bare input denial with the signed public bundle. Check the producer's stale
+CLI-owned handoff item and link the consumer-owned evidence, retaining both the original publication record and the open Windows/arm64 D1
+and private-DLL gates. This is documentation synchronization, not a new producer replay, SDK/pin promotion or STATUS update.
+[Scope and immutable consumer links](docs/acceptance/host_tools_acceptance.md#consumer-hosted-integration-handoff-completed-2026-11-19).
+
 ### Close the host-tools producer publication request (#9)
 
 Closed [#9 as completed](https://github.com/webos21/crt/issues/9#issuecomment-6998966548): the requested macOS/arm64 and Windows/x64
