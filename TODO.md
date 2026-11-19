@@ -98,7 +98,9 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   Signed public bundles exist for all five native hosts; the macOS/Windows publication and native macOS replay are in
   [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#macoswindows-host-tools-publication-signatures-and-macos-replay-2026-11-19).
   The Windows/x86_64 bundle's signature and native behavior were re-verified from the public bytes, and the CLI's fail-closed controls and port suites pass on it
-  ([record](host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19)). Open: per-host CLI pin adoption and hosted integration evidence for the other hosts, not producer publication.
+  ([record](docs/acceptance/host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19)).
+  Local macOS D3 consumer replay passes ([CLI evidence](https://github.com/webos21/crt-cli/blob/144581752cc492f0906fb9e422d6e91663bccb0a/docs/acceptance/sdk_install_acceptance.md#signed-public-host-tools-d3-replay-macosarm64-2026-11-19)).
+  Open: macOS/Windows integration pin adoption and hosted jobs, plus Windows/arm64 consumer/port-suite evidence, not producer publication.
 
 - [ ] Qualify an independent Windows/x64 host-tools bundle with actual private
   DLLs: initial-load closure and search-path collisions. The existing static

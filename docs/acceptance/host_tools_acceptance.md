@@ -555,6 +555,16 @@ This producer replay does not hide source/SDK paths from reads, exercise CLI sel
 suites. Those remain consumer-owned acceptance. Hosted Windows replay is prior producer evidence, not a new Windows replay on this Mac.
 No private-DLL search-path qualification, Developer ID/notarization, consumer pin promotion or STATUS update is claimed.
 
+### CLI D3 consumer follow-up (2026-11-19)
+
+After the producer replay above, current CLI source at `c79d57c4c049ec651076fd648ad0e7b3630a638f` was freshly built and tested with this
+signed public macOS bundle, public SDK `v0.0.1-preview.20261110.macos.1` and signed bootstrap CLI `v0.1.0-preview.20261117.macos-arm64.1`.
+The six input-enabled D3 suites, static/shared consumers and oracle comparison pass, including actual port publication/reuse/verification
+and source-hidden execution. [CLI acceptance](https://github.com/webos21/crt-cli/blob/144581752cc492f0906fb9e422d6e91663bccb0a/docs/acceptance/sdk_install_acceptance.md#signed-public-host-tools-d3-replay-macosarm64-2026-11-19)
+owns the exact inputs, 442 checks, 27/27 replay gates, nine-image binding audit and receipt hashes; the CLI compatibility ledger owns adoption
+scope. Raw evidence is retained in ignored `out/d3-hosttools-macos-20261119/`. No SDK, host-tools or product bytes were changed, and the original
+producer-only result above is not retroactively expanded. Hosted integration and CI pin adoption remain open; this follow-up claims no new Windows run.
+
 ## Windows/x86_64 host-tools public signature and native replay (2026-11-19)
 
 Native Windows 11 Pro (10.0.26100) x64 verification of the public

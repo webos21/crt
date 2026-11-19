@@ -14,7 +14,15 @@ substantive update.
 
 Downloaded the public `v0.1.0-hosttools.20261119.windows-x86_64.1` assets without authentication (digests equal the release page and record) and verified the publisher signature two ways: `openssl` (9/9, four refusals) and the published `crt-cli` Preview's
 `fetch --publisher-key --signature` (`signature_verified`, three refusals leaving no output). The producer verify and the Windows replay pass 18/18, all 90 PE images import only the two OS libraries and carry no Authenticode, and the CLI's 32 fail-closed controls and
-its port suites (142/36/97/83/33/21 checks plus a real `port build zlib`) pass on this exact bundle under a restricted token. Nothing was rebuilt or replaced. [Evidence](host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19).
+its port suites (142/36/97/83/33/21 checks plus a real `port build zlib`) pass on this exact bundle under a restricted token. Nothing was rebuilt or replaced. [Evidence](docs/acceptance/host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19).
+
+### Verify the signed public macOS host-tools bundle through CLI D3
+
+Fresh CLI source at `c79d57c` consumes the signed public macOS Dev SDK, bootstrap CLI and new host-tools Preview. All six D3 suites pass
+(442 checks), with 27/27 replay gates including static/shared port consumers, oracle comparison, publication/reuse/verify, cold/warm self-build
+and source-hidden Seatbelt denial probes. Nine Mach-O images pass CRT binding/mixed-runtime auditing. SDK and host-tools inventories are
+unchanged. The [CLI-owned acceptance](https://github.com/webos21/crt-cli/blob/144581752cc492f0906fb9e422d6e91663bccb0a/docs/acceptance/sdk_install_acceptance.md#signed-public-host-tools-d3-replay-macosarm64-2026-11-19)
+and compatibility ledger own the exact exercised combination; this does not enable hosted integration or change consumer pins.
 
 ### Attach macOS/Windows host-tools signatures and replay the public macOS bundle
 
