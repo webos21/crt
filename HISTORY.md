@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-11-19
 
+### Close the host-tools producer publication request (#9)
+
+Closed [#9 as completed](https://github.com/webos21/crt/issues/9#issuecomment-6998966548): the requested macOS/arm64 and Windows/x64
+Previews are public, signed, clean-provenance bundles with the archive/signature/checksum/release-record handoff and native producer evidence.
+Windows/arm64 is additional coverage outside the original request. Completed publication moves out of the remaining-work item; its terse
+checked prerequisite stays beside the open consumer integration handoff. CLI TODO records the completed native/D3 slices separately from
+hosted integration and the ARM64 D1 large-output timeout (31/32). No test was rerun or failing result relabeled by this documentation closure.
+[Acceptance scope](docs/acceptance/host_tools_acceptance.md#producer-request-9-closure-and-remaining-handoff-2026-11-19).
+
 ### Verify the Windows/aarch64 public host tools and retain the consumer timeout
 
 Verified the public ARM64 archive with the pinned publisher key (OpenSSL 9/9 and the published ARM64 CLI's four real-URL fetch cases,

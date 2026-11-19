@@ -91,18 +91,11 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
 
 #### Remaining host qualification
 
-- [ ] **Independent host-tools public Preview** (CLI D1 integration input; request
-  [`crt_host_tools_publication_request.md`](https://github.com/webos21/crt-cli/blob/main/docs/crt_host_tools_publication_request.md)).
-  Contract, assembler `--promotion preview`, release packer/verifier and Linux/x86_64 rehearsal are recorded in
-  [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#linuxx86_64-preview-bundle-rehearsal-from-the-public-dev-sdk-2026-11-16).
-  Signed public bundles exist for all five native hosts; the macOS/Windows publication and native macOS replay are in
-  [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#macoswindows-host-tools-publication-signatures-and-macos-replay-2026-11-19).
-  The Windows/x86_64 bundle's signature and native behavior were re-verified from the public bytes, and the CLI's fail-closed controls and port suites pass on it
-  ([record](docs/acceptance/host_tools_acceptance.md#windowsx86_64-host-tools-public-signature-and-native-replay-2026-11-19)).
-  Local macOS D3 consumer replay passes ([CLI evidence](https://github.com/webos21/crt-cli/blob/144581752cc492f0906fb9e422d6e91663bccb0a/docs/acceptance/sdk_install_acceptance.md#signed-public-host-tools-d3-replay-macosarm64-2026-11-19)).
-  Windows/aarch64 public signature, producer replay and local D3 pass
-  ([record](docs/acceptance/host_tools_acceptance.md#windowsaarch64-host-tools-public-signature-and-native-replay-2026-11-19)).
-  Open: per-host CLI pin adoption and hosted integration jobs, not producer publication.
+- [x] **Producer prerequisite:** signed independent host-tools Previews are public for all five native hosts; the macOS/Windows
+  request [#9 is complete](https://github.com/webos21/crt/issues/9#issuecomment-6998966548).
+  [Acceptance and handoff](docs/acceptance/host_tools_acceptance.md#producer-request-9-closure-and-remaining-handoff-2026-11-19).
+- [ ] **CLI-owned integration handoff:** adopt macOS/Windows integration pins and add hosted jobs, including the Windows job-rootfs
+  symlink prerequisite. Native/D3 receipts do not close this [consumer queue](https://github.com/webos21/crt-cli/blob/main/TODO.md#ci-platform-expansion).
 
 - [ ] Qualify an independent Windows/x64 host-tools bundle with actual private
   DLLs: initial-load closure and search-path collisions. The existing static

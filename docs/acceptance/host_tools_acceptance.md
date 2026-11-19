@@ -708,3 +708,21 @@ Evidence: ignored `out/host-tools-public-replay-20261119-winarm64/` (downloads, 
 `pe-audit.json`, `cli-fetch-signature.json`, replay scripts and consumer logs). Windows isolation is a restricted token, selected inaccessible
 input paths, an empty environment and job-object process accounting; executable/network denial is not available here. This bundle has no private
 DLL, so private-DLL search-path qualification remains open. No CI/default pin, project lock, SDK bytes, public asset or STATUS was changed.
+
+## Producer request #9 closure and remaining handoff (2026-11-19)
+
+Issue [#9](https://github.com/webos21/crt/issues/9) is **closed as completed** for its producer publication scope
+([completion comment](https://github.com/webos21/crt/issues/9#issuecomment-6998966548)). The requested macOS/arm64 and Windows/x64 bundles
+are public signed Previews; archive, detached signature, checksum and release record supply the six consumer-pin fields, clean provenance
+and `promotion: preview`. Producer questions on closure/dependencies, runners, Windows symlinks, offline signing and independent per-host
+adoption are answered in the issue. The Windows/arm64 publication is additional coverage, not a new completion condition for #9.
+
+The dated records above retain the producer replays and subsequent native public-byte/consumer results. macOS D3, Windows/x64 D1/D3 and
+Windows/arm64 D3 pass for their exact combinations; **Windows/arm64 D1 is still 31/32 and not fully qualified**. Closing #9 does not assert
+otherwise. CLI owns macOS/Windows integration-pin adoption and hosted jobs (including the Windows job-rootfs symlink prerequisite);
+the ARM64 D1 timeout and Windows private-DLL collision gate remain open in the [CRT queue](../../TODO.md#remaining-host-qualification)
+and [CLI queue](https://github.com/webos21/crt-cli/blob/main/TODO.md#ci-platform-expansion).
+
+This is a scope/status reconciliation of existing evidence, not a runtime change, new native replay, CI/default-pin promotion, SDK/lock
+change or STATUS refresh. The [CLI request record](https://github.com/webos21/crt-cli/blob/2e4c4d1e8fa7df25bdebe1358587b469fce7752e/docs/crt_host_tools_publication_request.md)
+owns the consumer-facing producer handoff; detailed consumer acceptance and compatibility remain CLI-owned.
