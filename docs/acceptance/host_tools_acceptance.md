@@ -507,6 +507,34 @@ The release records retain each candidate's clean assembler/packer identity, sou
 | [Windows/x86_64](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261119.windows-x86_64.1) | 784724 | `bd65a2b8d1a5b7865110233bb47a1d13ea56724ad76593333cc349bb0980a210` | `72f522291148d0e5fae696d2783eb32153b4513c8c45498d557ed60326896695` |
 | [Windows/aarch64](https://github.com/webos21/crt/releases/tag/v0.1.0-hosttools.20261119.windows-aarch64.1) | 697220 | `c74ad50ea5f5008d515e1aac3581fa5d73d7acba276ae990a9d3df84599706ee` | `2956f38c0621feae16a0c6f02ca8346cc77423c33f8adcc108d92f7d8d46443f` |
 
+### Hosted producer publication
+
+Issue [#9](https://github.com/webos21/crt/issues/9) requested macOS/arm64 and
+Windows/x64 bundles; the producer also supplied the first independent
+Windows/arm64 bundle. [PR #10](https://github.com/webos21/crt/pull/10), merged as
+`26c9579`, added the workflow's `hosts` selector and `macos-15`, `windows-2022`
+and `windows-11-arm` runners. Each uses its pinned public Dev SDK from
+`.github/ci/host-tools-sdk-pins.json`; Windows inputs are ZIP archives, macOS
+inputs are tar.xz. The driver checks archive members before extraction.
+
+The successful jobs in the runs above assemble with `--promotion preview`,
+pack deterministically, safely extract and verify the bundle, then pass native
+producer replay **18/18** on each of the three hosts. Windows execution uses
+a relocated copy and clean environment; it does not claim network or filesystem
+denial. Neither Windows bundle contains private runtime DLLs; both import only
+`KERNEL32.dll` and `api-ms-win-core-synch-l1-2-0.dll`.
+
+After comparison of draft uploads with the workflow artifacts, all three were
+published as prereleases, not latest releases. Unauthenticated public downloads
+match the workflow artifacts, checksum files and release records. Each record's
+`consumer_pin` retains the six archive/manifest identity fields. In particular,
+the Windows/aarch64 bundle manifest SHA-256 is
+`6f7225ac4ffafe4c5651bf025b47d7b58df0939c520dbf40b7a029aa2892b6f1`, from
+Dev SDK `v0.0.1-preview.20261118.windows.arm64.1`. This is hosted producer
+evidence; Windows/arm64 CLI controls, port suites and D3 zlib qualification
+remain open. Subsequent archive signing and native consumer replays are
+recorded separately below.
+
 ### Publisher authentication from public bytes
 
 The owner supplied three `<archive>.sig` files (256 bytes each). Each signature verified against the corresponding public archive with the

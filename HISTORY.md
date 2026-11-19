@@ -37,6 +37,16 @@ The four canonical tools import only `/usr/lib/libSystem.B.dylib`. Retained firs
 verification limit are documented in [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#macoswindows-host-tools-publication-signatures-and-macos-replay-2026-11-19).
 This is not CLI pin adoption, CLI fail-closed/port-suite acceptance, or Windows private-DLL closure qualification. STATUS is unchanged.
 
+### Publish the independent host-tools Previews for macOS/arm64 and Windows x64/arm64
+
+Extended the manual workflow to macOS/arm64 and Windows x64/arm64 with pinned
+native Dev SDK inputs. All three clean bundles passed hosted producer replay
+18/18 and were published as prereleases after comparison with workflow artifacts.
+Windows/arm64 now has its first independent bundle. The
+[producer record](docs/acceptance/host_tools_acceptance.md#hosted-producer-publication)
+retains this publication step; subsequent signatures and consumer replays are
+recorded above with their own scope.
+
 ## 2026-11-18
 
 ### Close the Dev SDK GitHub CI/CD group (S0-S7)

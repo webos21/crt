@@ -102,8 +102,11 @@ A bundle can be published as a **host-tools Preview** from `webos21/crt` without
 - **Verification.** `create_host_tools_release.py verify` re-checks the archive against the record, extracts it with the stdlib `data` filter
   into a new directory, rejects foreign/special/escaping members and non-deterministic metadata, and re-verifies the extracted bundle's
   inventory, native images and execute bits. Native replay on each host is `tools/replay_host_tools_<os>.py`. The manual
-`.github/workflows/host-tools.yml` runs the whole sequence on `ubuntu-26.04` and `ubuntu-26.04-arm` from the Dev SDK Previews pinned in
-`.github/ci/host-tools-sdk-pins.json` (`tools/ci_host_tools_release.py`) and uploads the candidate; it publishes nothing.
+  `.github/workflows/host-tools.yml` runs the whole sequence on `ubuntu-26.04`, `ubuntu-26.04-arm`, `macos-15`, `windows-2022` and `windows-11-arm`
+  (selectable with its `hosts` input) from the Dev SDK Previews pinned in `.github/ci/host-tools-sdk-pins.json` (`tools/ci_host_tools_release.py`;
+  Windows SDKs are zips, the others tar.xz) and uploads the candidate; it publishes nothing. The host `<os>-<arch>` values are `linux-x86_64`, `linux-aarch64`,
+  `macos-aarch64`, `windows-x86_64` and `windows-aarch64`. On Windows the extracted archive's execute bit cannot be checked from file modes: executability is the `.exe` name and the native
+  image that `verify_bundle` validates.
 
 Producer procedures, exercised native scope and original receipts belong to
 [host-tools acceptance](../acceptance/host_tools_acceptance.md); CLI command/JSON
