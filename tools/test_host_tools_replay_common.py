@@ -55,5 +55,33 @@ class ReplayCommon(unittest.TestCase):
         self.assertFalse(dict(results)['every executable alias starts (no loader failure, signal or fatal status)'])
 
 
+class MacProfile(unittest.TestCase):
+    def test_the_seatbelt_profile_is_balanced_and_denies_network_and_foreign_writes(self):
+        import replay_host_tools_macos as mac
+        text = mac.seatbelt_profile('/tmp/some "scratch" dir')
+        depth = 0
+        quoted = False
+        escaped = False
+        for ch in text:
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif ch == '\\':
+                    escaped = True
+                elif ch == '"':
+                    quoted = False
+                continue
+            if ch == '"':
+                quoted = True
+            elif ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+                self.assertGreaterEqual(depth, 0, text)
+        self.assertEqual(0, depth, text)
+        self.assertIn('(deny network*)', text)
+        self.assertIn('(deny file-write* (require-not (require-any (subpath "/dev") (subpath ', text)
+
+
 if __name__ == '__main__':
     unittest.main()

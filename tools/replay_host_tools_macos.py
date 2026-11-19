@@ -18,6 +18,12 @@ import create_host_tools as producer
 import host_tools_replay_common as common
 
 
+def seatbelt_profile(scratch):
+    """No network; writes allowed only to /dev and the scratch directory."""
+    return ('(version 1)\n(allow default)\n(deny network*)\n'
+            '(deny file-write* (require-not (require-any (subpath "/dev") (subpath {}))))\n'.format(json.dumps(str(scratch))))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bundle', type=Path, required=True, help='extracted bundle directory')
@@ -44,8 +50,7 @@ def main():
     shutil.copytree(bundle, copy, symlinks=True)
     scratch = Path(tempfile.mkdtemp(prefix='host-tools-scratch-', dir=out)).resolve()
     profile = out / 'policy.sb'
-    profile.write_text('(version 1)\n(allow default)\n(deny network*)\n'
-                       '(deny file-write* (require-not (require-any (subpath "/dev") (subpath {})))))\n'.format(json.dumps(str(scratch))))
+    profile.write_text(seatbelt_profile(scratch))
 
     def launch(tool, argv):
         proc = subprocess.run([str(sandbox), '-f', str(profile), str(tool), *argv], capture_output=True, text=True, timeout=60,
