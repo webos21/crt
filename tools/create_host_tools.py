@@ -16,6 +16,7 @@ from crt_dist_prerequisites import external_prerequisites_for
 from crt_elf import runtime_paths, interpreter
 from crt_macho import rpaths as macho_rpaths
 from crt_runtime_notices import install_component, load_registry
+import crt_host_tools_pe
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = 'crt.experimental.host-tools'
@@ -188,6 +189,10 @@ def assemble(sdk, output, version, make_source=None, project=ROOT, promotion='lo
                     name = macho_private_name(dependency, [c for item in external for c in item['components']])
                     if name is None:
                         continue
+                elif host['os'] == 'windows':
+                    name = crt_host_tools_pe.private_dll_name(dependency, allowed)
+                    if name is None:
+                        continue
                 elif name.lower() in allowed:
                     continue
                 target = 'system/bin/' + name
@@ -206,6 +211,8 @@ def assemble(sdk, output, version, make_source=None, project=ROOT, promotion='lo
             # Copied aliases have their own @loader_path; preserve their bytes
             # and expose the same canonical private closure beside each copy.
             link_macho_alias_runtimes(temporary, aliases, tools, dependencies)
+        if host['os'] == 'windows':
+            crt_host_tools_pe.copy_alias_runtimes(temporary, aliases, tools, dependencies, allowed)
         if interpreters:
             external.append({'id': 'linux-elf-loader', 'kind': 'os-runtime', 'required_for': ['host-tools-executable-startup'],
                              'components': [Path(expected_loader).name], 'paths': [expected_loader], 'bundled': False})
@@ -250,6 +257,8 @@ def assemble(sdk, output, version, make_source=None, project=ROOT, promotion='lo
         (temporary / 'manifest.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         # Validate links after all aliases and their targets are present.
         payload_inventory(temporary)
+        if host['os'] == 'windows':
+            crt_host_tools_pe.verify_closure(temporary, result, native_image)
         temporary.rename(output)
         return result
     finally:
@@ -273,6 +282,8 @@ def verify_bundle(root):
         path.resolve(strict=True).relative_to(root)
         if not os.access(path, os.X_OK) or not native_image(path, manifest['host']):
             raise ValueError('host-tool alias is not executable/native: ' + relative)
+    if manifest['host']['os'] == 'windows':
+        crt_host_tools_pe.verify_closure(root, manifest, native_image)
     return manifest
 
 

@@ -86,7 +86,7 @@ jobs:
           python-version: '3.12'
 
       - name: Unit tests of the assembler, release tooling and driver
-        run: python -m unittest tools.test_host_tools tools.test_host_tools_release tools.test_ci_host_tools_release tools.test_host_tools_replay_common
+        run: python -m unittest tools.test_host_tools_pe tools.test_host_tools tools.test_host_tools_release tools.test_ci_host_tools_release tools.test_host_tools_replay_common
 
       - name: Install bubblewrap for the isolated replay
         if: runner.os == 'Linux'

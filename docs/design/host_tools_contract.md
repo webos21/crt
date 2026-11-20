@@ -47,6 +47,23 @@ only the bundle's physical `system/bin`; user/global PATH and build flags are
 not inherited. The existing PAL's rootfs path rules remain in force; this is
 not an OS sandbox for arbitrary scripts.
 
+### PE private runtime closure
+
+Windows private dependencies are flat DLL names and match the execution host.
+The assembler derives the normal/delay import graph from the actual images;
+private OS-runtime shadows, invalid names and non-DLL runtime images are rejected.
+Canonical private DLLs live in `system/bin`. Each copied executable alias needs
+byte-identical copies of its transitive private closure beside that executable:
+initial process loading must not depend on cwd, global PATH or a later CLI hook.
+These copies are ordinary format-1 inventory entries. Verification re-derives
+the graph and checks adjacent closure identities even if an inventory is rebuilt.
+
+The consumer pins and verifies the complete inventory before creating a job.
+Missing or changed private DLLs invalidate that selection; restoration uses the
+same pin. No permanent launcher or global search-path change is introduced.
+Native runtime qualification must prove actual mapped DLL paths and include
+working cwd/PATH collision controls; static bundles alone do not cover this gate.
+
 ### Mach-O private runtime closure
 
 Private images must match the execution host. A macOS private load name is a

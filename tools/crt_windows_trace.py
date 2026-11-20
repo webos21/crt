@@ -76,7 +76,7 @@ def private_directory(path, *sids):
         kernel.LocalFree(descriptor)
 
 
-def run(command, *, work, sid, env, cwd, stdout, stderr, timeout=600):
+def run(command, *, work, sid, env, cwd, stdout, stderr, timeout=600, module_images=None):
     """Run `command` under the restricted token; returns exit code, timeout flag and the process inventory."""
     kernel, advapi = base.api()
     _declare(kernel)
@@ -85,6 +85,15 @@ def run(command, *, work, sid, env, cwd, stdout, stderr, timeout=600):
     process = base.ProcessInfo()
     job = port = w.HANDLE()
     processes, stop = {}, threading.Event()
+    module_images = {Path(path).resolve(): names for path, names in (module_images or {}).items()}
+    module_records, module_threads = [], []
+    def capture_modules(pid, image):
+        from crt_windows_modules import wait_for_modules
+        try:
+            record = wait_for_modules(pid, module_images[Path(image).resolve()])
+        except Exception as error:
+            record = {'pid': pid, 'paths': [], 'error': str(error)}
+        module_records.append(dict(record, image=image))
     base.checked(advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x8B, ctypes.byref(original)))
     try:
         identities = ('S-1-1-0', 'S-1-5-32-545', base.logon_sid(kernel, advapi, original), sid)
@@ -146,6 +155,9 @@ def run(command, *, work, sid, env, cwd, stdout, stderr, timeout=600):
                             image = buffer.value
                         kernel.CloseHandle(handle)
                     processes[pid] = {'pid': pid, 'image': image}
+                    if image and Path(image).resolve() in module_images:
+                        thread = threading.Thread(target=capture_modules, args=(pid, image), daemon=True)
+                        module_threads.append(thread); thread.start()
         watcher = threading.Thread(target=watch, daemon=True)
         watcher.start()
 
@@ -177,8 +189,13 @@ def run(command, *, work, sid, env, cwd, stdout, stderr, timeout=600):
         stop.set()
         watcher.join(5)
         kernel.DeleteProcThreadAttributeList(attribute_list)
-        return {'exit_code': code.value, 'timed_out': timed_out,
-                'processes': sorted(processes.values(), key=lambda item: item['pid'])}
+        for thread in module_threads:
+            thread.join(3)
+        result = {'exit_code': code.value, 'timed_out': timed_out,
+                  'processes': sorted(processes.values(), key=lambda item: item['pid'])}
+        if module_images:
+            result['module_snapshots'] = module_records
+        return result
     finally:
         stop.set()
         for handle in (job, port, process.thread, process.process, restricted, original, *handles):
