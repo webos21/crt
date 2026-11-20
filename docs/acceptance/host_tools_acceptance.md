@@ -419,6 +419,26 @@ It does not publish an all-shared bundle, adopt a new SDK/CI/default/root/projec
 The published static host-tools assets/signatures remain unchanged. Windows/arm64 private DLLs, its D1 large-output timeout,
 general publisher policy and Full SDK acceptance remain separate. No global environment, registry, security setting or STATUS is changed.
 
+### Main adoption and hosted regression
+
+Producer [PR #11](https://github.com/webos21/crt/pull/11) fast-forwards main to the exact tested documentation tip
+`e8724b85587342ac67ff6361ef08217eaec7ca69` after
+[PR CI 44650715305](https://github.com/webos21/crt/actions/runs/44650715305) passes all five native rows and `CI gate`.
+The same exact main revision passes [CI 44651984434](https://github.com/webos21/crt/actions/runs/44651984434), again all five native rows and gate.
+Consumer [PR #31](https://github.com/webos21/crt-cli/pull/31) then fast-forwards CLI main to
+`8af434b603b32b8e5772aa7af07bb2d6c639d5a0`; its documentation-only
+[PR check](https://github.com/webos21/crt-cli/actions/runs/44651799516) and
+[main check](https://github.com/webos21/crt-cli/actions/runs/44652039718) pass changes/gate with the native matrix correctly skipped.
+This is document adoption, not a new current-source CLI runtime replay.
+
+Manual [Host tools 44651665457](https://github.com/webos21/crt/actions/runs/44651665457), `hosts=windows-x86_64`,
+at the same producer tip exercises the changed workflow: **44 cases, 43 pass/one POSIX permission skip**, assembly/pack/verify,
+and native static-bundle **18/18**. Candidate manifest is `30f962f90cba666707307937fb2a211cf3829d57bfba8f74cff317e724c3591a`,
+with the unchanged public static payload `dc106db47ed8bcbb56bdd6da0415dce527653fcb42b0c54bdc1402dca74c35fe`.
+Retained Actions artifact `host-tools-windows-x86_64` (776999 bytes), artifact ZIP digest
+`47ea3e307c26b73d03b2805082dbd2e475fbba56cac18529c91130f48b12ea81`, is a rehearsal candidate, not a newly published asset.
+The hosted static replay and the local 27-case private-DLL replay are separate evidence.
+
 ## macOS/arm64 private-dylib closure replay (2026-11-06)
 
 **Pass for the previously unexercised private-dylib scenario, at this exact

@@ -15,7 +15,8 @@ substantive update.
 Fix the copied-alias initial-load gap by placing byte-identical CRT DLL closure beside each executable copy. Re-derive and verify the PE
 import graph, native DLL identity and adjacent closure before publication and verification, without a manifest version change or launcher.
 Clean implementation `1e489d6` passes the 27-case native producer/CLI replay with real unmodified AWK and private libc/libm, two Unicode relocations,
-eight mapped-module snapshots, working cwd/PATH poison controls, missing/modified DLL refusal and same-pin recovery. Focused tests run 51 cases
+eight mapped-module snapshots, working cwd/PATH poison controls, missing/modified DLL refusal and same-pin recovery. Main adopts `e8724b8`
+with all five native CI rows/gate passing on PR and main; the hosted host-tools regression passes 44 cases (one skip) and static replay 18/18. Focused tests run 51 cases
 (50 pass, one Windows-inapplicable POSIX permission skip); workflow wiring includes the nine new PE cases. Fresh static payload and original SDK/source
 bytes are unchanged. Check the bounded local native gate and retain official all-shared release/SDK-policy/ARM64 distinctions.
 [Exact inputs, receipts, commands and limits](docs/acceptance/host_tools_acceptance.md#windowsx64-private-dll-closure-replay-2026-11-20).
