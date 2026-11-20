@@ -23,9 +23,12 @@ Signed Development SDK Previews (`dev`, `02-cxx`) are available for
 [macOS/arm64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1),
 [Windows/x64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) and
 [Windows/arm64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.windows.arm64.1).
-Signed `crt-cli` Previews are available for the same hosts. Select the SDK explicitly and verify the digest and detached signature.
-[CLI downloads](https://github.com/webos21/crt-cli#download-the-previews) · [SDK installation guide](docs/guides/dev_sdk_preview.md) ·
-[Publisher key](docs/security/publisher_signing.md).
+Signed [CLI Previews](https://github.com/webos21/crt-cli#download-the-previews)
+are available for the same hosts. Use the [SDK installation guide](docs/guides/dev_sdk_preview.md)
+to verify the archive digest and detached signature against the trusted
+[publisher key](docs/security/publisher_signing.md), then select the SDK explicitly.
+Signed [Host Tools Previews](docs/acceptance/host_tools_acceptance.md#host-qualification-closure-2026-11-20)
+are separate downloads for source-port workflows.
 
 [Documentation](docs/README.md) ·
 [Roadmap](docs/design/runtime_roadmap.md) ·
@@ -225,20 +228,19 @@ Web Runtime
 WebRTC, WebGPU, EME/DRM and other large Web capabilities are consumer-driven
 follow-ups, not prerequisites of the accepted Web embedding baseline.
 
-The SDK producer supports Full and Development profiles. The separate
-[crt-cli](https://github.com/webos21/crt-cli) implements native JSON/LLVM project
-builds, local pinned SDK installation, immutable storage and installed-SDK/
-portable-contract selection. The local dev path has records on all five native
-pairs at their exact rehearsal baselines; app builds need no CMake, Python or
-shell. External LLVM/OS SDKs remain prerequisites. CLI currently accepts native
-dev profiles, not general cxx/Full installation. Published CLI Previews support
-caller-pinned HTTPS acquisition and installed-SDK first build without an explicit
-configure step; see the [installation guide](docs/guides/dev_sdk_preview.md).
+CRT can produce the cumulative Full SDK and the smaller Development SDK.
+The public Development SDK is the input to the CLI Preview workflow.
+`crt-cli` installs a pinned SDK, selects an immutable SDK and toolchain binding
+for each project, and uses that binding for native C/C++ builds. Supply the
+external LLVM tools and any required vendor OS SDK.
+[Try the Dev SDK workflow](docs/guides/dev_sdk_preview.md).
 
-The bounded zlib source-port workflow has hosted coverage across all five host pairs.
-The next SDK and CLI work covers SQLite and libpng dependencies, broader SDK-only applications and deployment.
-Full SDK delivery, general updates, self-upgrade and Studio have their own gates.
-[Work queue](TODO.md#crt-developer-experience-sdk---cli---studio) · [Status](STATUS.md#distribution-and-host-scope).
+[crt-vscode](https://github.com/webos21/crt-vscode) is the first editor
+integration and is currently a development scaffold. CRT owns the SDK and
+compiler policy, and `crt-cli` owns the build and the planned editor API.
+The standalone CRT Studio remains a long-term project.
+[Current developer workflow](TODO.md#crt-developer-experience-sdk---cli---vscode) ·
+[Verified distribution scope](STATUS.md#distribution-and-host-scope).
 
 See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
 

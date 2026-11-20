@@ -5,9 +5,11 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-The SDK, CLI and host-tools snapshot was refreshed **2026-11-20** at the owner's request, reviewing CRT `9867851` and CLI `ec498ce`.
-This is a review of recorded evidence and the public release inventory. Unrelated subsystem entries retain the scope of their linked
-acceptance records (last broad review 2026-10-28). Each published artifact keeps its exact build commit and native or cross-host scope.
+The SDK, CLI and host-tools snapshot was reviewed on **2026-11-20** against
+CRT `278c5d9`, CLI `e362a51` and the `crt-vscode` scaffold `b547406`.
+This review uses the work queues, completed work and recorded acceptance results.
+Each result retains its original source revision, artifact identities and host
+scope. Other subsystem entries retain their earlier acceptance scope.
 
 ## Current Baseline
 
@@ -338,6 +340,7 @@ was fixed in the pinned libunwind recipe and replayed with the fixed SDK; its
 old failure is retained. General profiles/Full installation, default publisher
 trust and future artifact promotion remain separate; external LLVM/OS SDKs are prerequisites.
 
+Signed independent Host Tools Previews are recorded for all five host pairs.
 The bounded D3 zlib adapter is approved (CRT `90989ac`). Hosted source-port execution, store, provider, lock and oracle checks pass
 on the five host pairs with pinned public SDKs and signed independent host-tools bundles. The Windows/arm64 public CLI passes D1
 32/32, including the stdout-limit case. The Windows/x64 private-DLL gate covers a local bundle with actual shared AWK, adjacent CRT
@@ -345,7 +348,7 @@ DLLs, collision controls and recovery. The public Windows host-tools bundles use
 [Hosted integration](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/ci_acceptance.md#windowsarm64-hosted-integration-expansion-2026-11-20) · [ARM64 public D1 replay](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/host_environment_acceptance.md#windowsarm64-d1-public-preview-replay-2026-11-20) ·
 [Producer host-tools acceptance](docs/acceptance/host_tools_acceptance.md#host-qualification-closure-2026-11-20).
 
-**Published Dev SDK and CLI Previews** (checked 2026-11-20). These `dev`/`02-cxx` SDK archives and workflow-built CLI archives carry
+**Published Dev SDK and CLI Previews** (recorded through 2026-11-20). These `dev`/`02-cxx` SDK archives and workflow-built CLI archives carry
 detached publisher signatures. Each CLI and SDK retains its own build inputs. See the [publisher-key policy](docs/security/publisher_signing.md).
 
 | Host | Development SDK Preview | Signed workflow CLI Preview |
@@ -363,9 +366,10 @@ passes public C/C++ and signature replay with the listed Dev SDK. [Producer smok
 The Linux/x86_64 `.4` repair retains its [Ubuntu 24.04 and 26.04 loader evidence](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10).
 The newer Linux/x86_64 SDK and Windows/arm64 SDK have independent [workflow release records](docs/acceptance/release_qualification.md).
 Linux/aarch64's [public replay](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10) covers glibc 2.43.
-Use the [installation guide](docs/guides/dev_sdk_preview.md) for external toolchain requirements and explicit SDK selection. The publisher
-signature covers the archive. Authenticode, Developer ID and notarization remain separate platform gates. Pure C shared SDK-provider
-mode remains unqualified (producer 6.4).
+Use the [installation guide](docs/guides/dev_sdk_preview.md) for external toolchain requirements and explicit SDK selection. The detached signature covers the archive. Authenticode, Developer ID and notarization
+remain separate platform gates. The historical Linux pure C shared SDK-provider
+control resolved host libz. Current SDK policy and replay remain open under
+[Tranche 6.4](TODO.md#p0---pure-c-shared-provider-policy-tranche-64--d5).
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -380,9 +384,9 @@ cross scope at WebKit 2.54.2; the Dev SDK Previews above are a separate, Dev-onl
 repairs cache validation and selects new canonical Linux 02/03 source candidates;
 older variants remain historical. Neither that selection nor later D2 rehearsal
 assets constitute a newly promoted public upload set.
-No replacement Full/graphics binary release or Studio adoption has been published; the Dev SDK and CLI Previews above are the only
-current public binaries.
-See the [release guide](docs/guides/release_preview.md#05-ui-and-06-web).
+The recorded public binaries are the Dev SDK, independent Host Tools and CLI
+Previews. The replacement Full/graphics release remains planned.
+[Release scope and prerequisites](docs/guides/release_preview.md#05-ui-and-06-web).
 
 ## Verification Model
 
@@ -579,26 +583,30 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-The next SDK and CLI increments cover SQLite/libpng dependency work, broader SDK-only consumers and deployment.
-The retained Linux SDK C shared control's host libz mapping remains unendorsed under producer policy review 6.4. Full SDK delivery
-and its source, license, security and assembly review retain their own gates.
-[Ordered work](TODO.md#crt-developer-experience-sdk---cli---studio).
+The current producer focus is Dev SDK correctness and release signing.
 
-- CRT supplies exact public artifacts and compiler/recipe policy; the implemented
-  CRT-native CLI owns installation, first-build binding, external-tool diagnosis
-  and acquisition. Studio remains a later consumer.
-- Full-stage install metadata/limits, general updates and CLI self-upgrade stay
-  tracked beyond the first workflow; they do not block the first source port.
-- [Change-impact gates](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05)
-  select focused/integration/native scope. Relevant archive, transaction, trust,
-  PAL and ABI regressions remain pre-merge requirements; no unchanged unrelated
-  Web/GFX rebuild or new five-pair matrix is automatic for every small change.
-- A new public release still needs a coherent exact asset set, current artifact
-  checks and an explicitly authorized publication action. Local rehearsal and
-  the existing Web owner approval do not publish or promote it.
-- Broader CRT/PAL hardening, allocator replacement and deferred upper-runtime
-  extensions remain consumer-driven follow-ups, not reopened Web gates.
+- **P0-01 / Tranche 6.4** covers the Linux pure C shared provider and runtime
+  search policy. Qualify the intended provider with link and loaded-image
+  evidence, or verify explicit rejection of the unsupported mode. Replay the
+  exact candidate with the CLI before adoption.
+  [C shared work](TODO.md#p0---pure-c-shared-provider-policy-tranche-64--d5).
+- **Windows C++ P1-01** covers the Dev profile's curl compile options and
+  `<filesystem>`. The CLI already scopes the options by source. A corrected
+  producer SDK still needs external C++17 replay on Windows x64 and ARM64.
+  [Windows compile options](TODO.md#p1---windows-c-public-compile-options-d5).
+- **SDK signing P1-01 and P1-02** coordinate draft verification and
+  signature-checked finalization with `crt-cli`. The recorded releases use
+  offline signatures attached after publication.
+  [SDK signing](TODO.md#p1---sign-before-publishing-sdks-d6).
 
-Detailed work stays in [TODO](TODO.md), completed decisions in
-[HISTORY](HISTORY.md), and reproducible evidence in the owning acceptance
-document. This snapshot does not replace those sources.
+`crt-vscode` is the first consumer of the planned editor API. The CLI owns
+compilation database export and project-state queries. CRT supplies SDK policy
+and fixtures where the existing provider needs changes. Standalone Studio
+remains a long-term consumer.
+[CRT SDK support](TODO.md#p1---sdk-support-for-the-first-editor-workflow) ·
+[CLI editor API](https://github.com/webos21/crt-cli/blob/main/TODO.md#p0---minimal-public-editor-api-d7-slice-coordinated-with-d5d6).
+
+Broader Linux device and loader coverage, ABI baselines, SQLite/libpng,
+application deployment and Full SDK delivery are in [Planned](TODO.md#planned).
+Per-host evidence and release decisions stay in acceptance records and
+[HISTORY](HISTORY.md).
