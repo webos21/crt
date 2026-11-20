@@ -10,6 +10,12 @@ substantive update.
 
 ## 2026-11-20
 
+### Retire the completed host qualification queue
+
+Remove the completed TODO section after reconciling the consumer's signed Windows/arm64 workflow Preview and D1 32/32 public
+replay, the five-host integration handoff and the Windows/x64 local private-DLL evidence. Refresh the SDK and CLI release snapshot
+and retain the original failure and artifact scope in the owning acceptance records. [Host qualification closure](docs/acceptance/host_tools_acceptance.md#host-qualification-closure-2026-11-20).
+
 ### Qualify Windows/x64 host tools with actual private DLLs
 
 Fix the copied-alias initial-load gap by placing byte-identical CRT DLL closure beside each executable copy. Re-derive and verify the PE

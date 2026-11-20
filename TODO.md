@@ -70,7 +70,7 @@ contracts, explicit Preview pin adoption and Studio integration. Completed Tranc
 [SDK acceptance](docs/acceptance/sdk_split_acceptance.md),
 [source-asset review](docs/acceptance/release_qualification.md#common-source-candidate-selection-2026-11-02)
 and [host-tools acceptance](docs/acceptance/host_tools_acceptance.md).
-Their scoped completion does not close the remaining host qualifications below.
+The completed host qualification is recorded in [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#host-qualification-closure-2026-11-20).
 Full SDK delivery, general updates and self-upgrade remain separate. Scope/replay policy is in the
 [SDK contract](docs/design/sdk_development_contract.md#change-impact-and-first-user-workflow-adopted-2026-11-05).
 Original tranche identifiers map to D0-D7 and are not renumbered; **3.3** remains
@@ -88,20 +88,6 @@ Original reviewed consumer planning baselines: CLI `5fcdc995d231fe2f9dbab4292000
 Studio `27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`; these are not artifact locks.
 Follow the [producer change procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review);
 the CLI repository owns adoption evidence in `docs/compatibility.md`.
-
-#### Remaining host qualification
-
-- [x] **Producer prerequisite:** signed independent host-tools Previews are public for all five native hosts; the macOS/Windows
-  request [#9 is complete](https://github.com/webos21/crt/issues/9#issuecomment-6998966548).
-  [Acceptance and handoff](docs/acceptance/host_tools_acceptance.md#producer-request-9-closure-and-remaining-handoff-2026-11-19).
-- [x] **CLI-owned integration handoff:** macOS/Windows integration pins and hosted Port/oracle jobs are adopted on CLI main,
-  including actual Windows job-rootfs symlinks. [Consumer hosted evidence](https://github.com/webos21/crt-cli/blob/858c04bda6f29968d91be98cc80c8ca6a9f55936/docs/acceptance/ci_acceptance.md#windowsx64-hosted-port-integration-2026-11-19);
-  [handoff closure](docs/acceptance/host_tools_acceptance.md#consumer-hosted-integration-handoff-completed-2026-11-19).
-
-- [x] Qualify the independent Windows/x64 local bundle with actual private DLLs: initial-load closure and cwd/PATH collisions
-  ([native evidence and limits](docs/acceptance/host_tools_acceptance.md#windowsx64-private-dll-closure-replay-2026-11-20)); public static pins are unchanged.
-- [ ] Resolve the Windows/arm64 D1 large-output timeout; consumer replay remains 31/32
-  ([CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsarm64-published-host-tools-consumer-replay-2026-11-19)).
 
 #### Tranche 5. Dependencies, variants, locks and cache (D4)
 

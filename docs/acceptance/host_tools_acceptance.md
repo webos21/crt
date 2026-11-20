@@ -1,7 +1,7 @@
 # Independent Host-tools Acceptance
 
 Producer contract: [experimental host tools](../design/host_tools_contract.md).
-Work queue: [remaining host qualification](../../TODO.md#remaining-host-qualification).
+Completion record: [host qualification closure](#host-qualification-closure-2026-11-20).
 The CLI owns commands, adoption and native execution in its
 [compatibility ledger](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#independent-host-tools-and-d1-linux-adoption-2026-11-02)
 and [D1 evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md).
@@ -824,11 +824,9 @@ are public signed Previews; archive, detached signature, checksum and release re
 and `promotion: preview`. Producer questions on closure/dependencies, runners, Windows symlinks, offline signing and independent per-host
 adoption are answered in the issue. The Windows/arm64 publication is additional coverage, not a new completion condition for #9.
 
-The dated records above retain the producer replays and subsequent native public-byte/consumer results. macOS D3, Windows/x64 D1/D3 and
-Windows/arm64 D3 pass for their exact combinations; **Windows/arm64 D1 is still 31/32 and not fully qualified**. Closing #9 does not assert
-otherwise. CLI owns macOS/Windows integration-pin adoption and hosted jobs (including the Windows job-rootfs symlink prerequisite);
-the ARM64 D1 timeout and Windows private-DLL collision gate remain open in the [CRT queue](../../TODO.md#remaining-host-qualification)
-and [CLI queue](https://github.com/webos21/crt-cli/blob/main/TODO.md#ci-platform-expansion).
+At the time of closure, macOS D3, Windows/x64 D1/D3 and Windows/arm64 D3 had passed for their recorded combinations. The
+original Windows/arm64 D1 replay ended at 31/32. Later hosted integration, D1 and private-DLL outcomes are recorded in the
+[host qualification closure](#host-qualification-closure-2026-11-20). [Original CLI D1 replay](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/host_environment_acceptance.md#windowsarm64-published-host-tools-consumer-replay-2026-11-19).
 
 This is a scope/status reconciliation of existing evidence, not a runtime change, new native replay, CI/default-pin promotion, SDK/lock
 change or STATUS refresh. The [CLI request record](https://github.com/webos21/crt-cli/blob/2e4c4d1e8fa7df25bdebe1358587b469fce7752e/docs/crt_host_tools_publication_request.md)
@@ -852,3 +850,16 @@ This closes the stale producer TODO handoff using observed hosted evidence, not 
 publication record retains its producer-only scope. First scheduled-run observation and further redirect automation remain consumer-owned;
 Windows/arm64 D1 (31/32), private-DLL qualification and Full SDKs stay separate. No producer code, runtime, SDK/host-tools bytes, release,
 consumer pin, root/project lock or STATUS changes, and no runtime test is rerun for this documentation synchronization.
+
+## Host qualification closure (2026-11-20)
+
+The five independent host-tools Previews were published and signed. The CLI adopted the public integration inputs and passed
+all 15 jobs, with pins, redirects and port suites for every host. [CLI integration record](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/ci_acceptance.md#windowsarm64-hosted-integration-expansion-2026-11-20).
+
+The earlier ARM64 D1 timeout was resolved in the CLI's stdout relay. The signed workflow Preview passed all 32 native cases with
+the original deadlines when replayed from the public archive. The earlier 31/32 result remains tied to its original executable.
+[D1 public replay](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/host_environment_acceptance.md#windowsarm64-d1-public-preview-replay-2026-11-20) · [Signed Preview evidence](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/preview_acceptance.md#windowsarm64-workflow-preview-release-2026-11-20).
+
+The Windows/x64 local private-DLL gate passed with actual shared CRT DLLs, adjacent closure and collision checks. This qualifies
+the exact local bundle. The public static bundle, Windows/arm64 private-DLL behavior and any all-shared release retain their own
+artifact scope. [Native private-DLL record](#windowsx64-private-dll-closure-replay-2026-11-20).

@@ -5,15 +5,9 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-SDK/CLI snapshot refreshed at the owner's explicit request: **2026-11-11**,
-reviewing CRT `0d93b7c32b823c0631df4d84e4384c1343ce9561` and CLI
-`6201aa612fd82a83b37a61673504e64f307617cc`, with the public GitHub release inventory checked.
-Unrelated subsystem statements retain their original linked acceptance scope (last broad
-review 2026-10-28). Existing clean assembly baseline `3741ea5` in
-[release qualification](docs/acceptance/release_qualification.md) is not relabeled as a new
-artifact. The published Development SDK Previews and CLI Previews below are separate
-artifacts with their own exact build commits and records. Future STATUS refreshes remain
-explicit requests; TODO owns current work and acceptance original measured inputs/results.
+The SDK, CLI and host-tools snapshot was refreshed **2026-11-20** at the owner's request, reviewing CRT `9867851` and CLI `ec498ce`.
+This is a review of recorded evidence and the public release inventory. Unrelated subsystem entries retain the scope of their linked
+acceptance records (last broad review 2026-10-28). Each published artifact keeps its exact build commit and native or cross-host scope.
 
 ## Current Baseline
 
@@ -344,43 +338,34 @@ was fixed in the pinned libunwind recipe and replayed with the fixed SDK; its
 old failure is retained. General profiles/Full installation, default publisher
 trust and future artifact promotion remain separate; external LLVM/OS SDKs are prerequisites.
 
-D3 zlib source execution/store/provider/lock/oracle has Linux/x86_64,
-macOS/arm64 and Windows/x64 technical evidence, and the bounded adapter contract is
-[approved and adopted](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#d3-bounded-adapter-adoption-2026-11-09)
-(CRT `90989ac`); the macOS common-change replay is closed. Windows/arm64 D3 is a
-separate target. These records do not approve a latest-source five-pair matrix. The CLI
-compatibility ledger owns exact adoption combinations.
+The bounded D3 zlib adapter is approved (CRT `90989ac`). Hosted source-port execution, store, provider, lock and oracle checks pass
+on the five host pairs with pinned public SDKs and signed independent host-tools bundles. The Windows/arm64 public CLI passes D1
+32/32, including the stdout-limit case. The Windows/x64 private-DLL gate covers a local bundle with actual shared AWK, adjacent CRT
+DLLs, collision controls and recovery. The public Windows host-tools bundles use static tools.
+[Hosted integration](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/ci_acceptance.md#windowsarm64-hosted-integration-expansion-2026-11-20) · [ARM64 public D1 replay](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/host_environment_acceptance.md#windowsarm64-d1-public-preview-replay-2026-11-20) ·
+[Producer host-tools acceptance](docs/acceptance/host_tools_acceptance.md#host-qualification-closure-2026-11-20).
 
-**Published Previews (checked 2026-11-11).** GitHub prereleases, none marked latest, none carrying a
-publisher signature (callers pin digests and choose a CA; CLI `publisher_authentication` is `not_verified`):
+**Published Dev SDK and CLI Previews** (checked 2026-11-20). These `dev`/`02-cxx` SDK archives and workflow-built CLI archives carry
+detached publisher signatures. Each CLI and SDK retains its own build inputs. See the [publisher-key policy](docs/security/publisher_signing.md).
 
-| Artifact | Release | Build commit |
+| Host | Development SDK Preview | Signed workflow CLI Preview |
 | --- | --- | --- |
-| Linux/x86_64 Development SDK | [`v0.0.1-preview.20261110.4`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.4) | `448fa32` |
-| Linux/aarch64 Development SDK | [`v0.0.1-preview.20261110.linux.arm64.2`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.linux.arm64.2) | `e6a94ab` |
-| macOS/arm64 Development SDK | [`v0.0.1-preview.20261110.macos.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1) | `445f127` |
-| Windows/x64 Development SDK | [`v0.0.1-preview.20261110.windows.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) | `b31276a` |
-| `crt-cli` Linux/x86_64 and macOS/arm64 | [Linux](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.linux-x86_64.1), [macOS](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.macos-arm64.1) | CLI `dc796f7`, `541b2af` |
-| `crt-cli` Linux/aarch64 | [`v0.1.0-preview.20261111.linux-arm64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261111.linux-arm64.1) | CLI `6a00885` |
-| `crt-cli` Windows/x64 | [Windows](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.windows-x86_64.1) | CLI `a55c0d0` |
+| Linux/x86_64 | [`v0.0.1-preview.20261118.linux.x64.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.linux.x64.1) | [`v0.1.0-preview.20261116.linux-x86_64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261116.linux-x86_64.1) |
+| Linux/aarch64 | [`v0.0.1-preview.20261110.linux.arm64.2`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.linux.arm64.2) | [`v0.1.0-preview.20261116.linux-arm64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261116.linux-arm64.1) |
+| macOS/arm64 | [`v0.0.1-preview.20261110.macos.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1) | [`v0.1.0-preview.20261117.macos-arm64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261117.macos-arm64.1) |
+| Windows/x64 | [`v0.0.1-preview.20261110.windows.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) | [`v0.1.0-preview.20261117.windows-x86_64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261117.windows-x86_64.1) |
+| Windows/arm64 | [`v0.0.1-preview.20261118.windows.arm64.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.windows.arm64.1) | [`v0.1.0-preview.20261120.windows-arm64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261120.windows-arm64.1) |
 
-Each SDK Preview is the `dev`/`02-cxx` artifact with its manifest pin frozen in a reviewed commit before
-publication; the [trust policy](docs/design/dev_preview_trust.md) defines the manual-pin boundary and the per-host
-[acceptance](docs/acceptance/sdk_split_acceptance.md) records the unauthenticated public-download and consumer proofs.
-Use the [installation guide](docs/guides/dev_sdk_preview.md) for downloads and host-specific prerequisites.
-Linux/x86_64 `.4` repairs loader/TLS compatibility and has [both Ubuntu 24.04/glibc 2.39 and Ubuntu 26.04/glibc 2.43 hosted proof](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10);
-the original `.3` remains historical with its compatibility erratum. Linux/aarch64's
-[public SDK proof](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10)
-covers glibc 2.43 only, not the x86_64 older-loader matrix. The source-tag CI's missing compiler-rt failure is
-recorded separately from the qualified public assets; `main` provisions the package and now rejects a native
-Linux/aarch64 configure that cannot find it.
-The CLI Previews acquire their host's SDK directly from GitHub through the opt-in restricted redirect policy
-(Linux/x86_64, Linux/aarch64, macOS/arm64 and Windows/x64 replayed;
-[Linux/aarch64 CLI evidence](https://github.com/webos21/crt-cli/blob/6201aa612fd82a83b37a61673504e64f307617cc/docs/acceptance/preview_acceptance.md#linuxaarch64-cli-preview-release-2026-11-11),
-[Windows CLI evidence](https://github.com/webos21/crt-cli/blob/0cae8c8bc1fee02a31baf230aba703460fe1afa3/docs/acceptance/preview_acceptance.md#windowsx64-cli-preview-release-2026-11-10)). The macOS images carry only the linker's ad-hoc signature (no Developer ID,
-no notarization); a quarantined browser download was not tested. Windows images are not Authenticode-signed;
-SmartScreen/browser reputation was not tested. Windows/arm64 has no published SDK or CLI Preview.
-Pure C shared SDK-provider mode stays unqualified (producer 6.4).
+The Windows/arm64 producer and consumer CI rows use the signed hand-built 20261118 CLI as their bootstrap. The later workflow release
+passes public C/C++ and signature replay with the listed Dev SDK. [Producer smoke](docs/acceptance/release_qualification.md#hosted-windowsarm64-consumer-smoke-by-the-pinned-cli-s7-steps-4-5-2026-11-18) ·
+[CLI release evidence](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/preview_acceptance.md#windowsarm64-workflow-preview-release-2026-11-20).
+
+The Linux/x86_64 `.4` repair retains its [Ubuntu 24.04 and 26.04 loader evidence](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10).
+The newer Linux/x86_64 SDK and Windows/arm64 SDK have independent [workflow release records](docs/acceptance/release_qualification.md).
+Linux/aarch64's [public replay](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10) covers glibc 2.43.
+Use the [installation guide](docs/guides/dev_sdk_preview.md) for external toolchain requirements and explicit SDK selection. The publisher
+signature covers the archive. Authenticode, Developer ID and notarization remain separate platform gates. Pure C shared SDK-provider
+mode remains unqualified (producer 6.4).
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -474,6 +459,8 @@ statuses, and exceptions are maintained in:
 
 ### CRT/PAL
 
+- On the Windows Dev SDK baseline, an independent two-thread file-I/O test reproduced read failures and wrong bytes. The port-store
+  replay uses independent publisher processes. [Reproducer and exact SDK scope](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/ci_acceptance.md#windowsarm64-hosted-integration-expansion-2026-11-20).
 - The built-in Linux/Windows DNS resolver supplies synchronous UDP A-record
   lookup; AAAA queries, TCP fallback, search domains and caching remain open.
   IPv6 literals and sockets already exist; macOS uses the system resolver.
@@ -592,13 +579,10 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-The SDK -> CLI initiative has published Dev SDKs and matching CLI Previews for Linux/x86_64,
-Linux/aarch64, macOS/arm64 and Windows/x64. Next are explicit default/project SDK pin adoption
-against the promoted SDKs and Windows/arm64 Preview qualification. The
-retained Linux SDK C shared control's host libz mapping remains unendorsed under producer policy
-review 6.4. D4 SQLite/libpng work can proceed on frozen contracts. Full SDK delivery and its
-final source/license/security/assembly review stay separate, preserving existing
-approval evidence. Detailed order is in [TODO](TODO.md#crt-developer-experience-sdk---cli---studio).
+The next SDK and CLI increments cover SQLite/libpng dependency work, broader SDK-only consumers and deployment.
+The retained Linux SDK C shared control's host libz mapping remains unendorsed under producer policy review 6.4. Full SDK delivery
+and its source, license, security and assembly review retain their own gates.
+[Ordered work](TODO.md#crt-developer-experience-sdk---cli---studio).
 
 - CRT supplies exact public artifacts and compiler/recipe policy; the implemented
   CRT-native CLI owns installation, first-build binding, external-tool diagnosis
