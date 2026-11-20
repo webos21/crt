@@ -17,18 +17,15 @@ The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-
 > through CRT-owned APIs. See [STATUS](STATUS.md) for accepted host/device scope,
 > limitations and the Web runtime's embedding/security boundary.
 
-The [Linux/x86_64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.4),
+Signed Development SDK Previews (`dev`, `02-cxx`) are available for
+[Linux/x86_64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.linux.x64.1),
 [Linux/aarch64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.linux.arm64.2),
-[macOS/arm64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1), and
-[Windows/x86_64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) Development SDK Previews
-are available for C/C++ development (`dev`, `02-cxx`). See the
-[installation guide](docs/guides/dev_sdk_preview.md). The matching `crt-cli` Previews for
-[Linux/x86_64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.linux-x86_64.1),
-[Linux/aarch64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261111.linux-arm64.1),
-[macOS/arm64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.macos-arm64.1), and
-[Windows/x64](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261110.windows-x86_64.1) acquire their host SDKs directly from GitHub through the explicit redirect policy.
-These are manually pinned prereleases, not signed releases or an automatic update channel.
-Windows/arm64 Preview and Full SDK delivery remain on the separate [work queue](TODO.md#crt-developer-experience-sdk---cli---studio).
+[macOS/arm64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1),
+[Windows/x64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) and
+[Windows/arm64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.windows.arm64.1).
+Signed `crt-cli` Previews are available for the same hosts. Select the SDK explicitly and verify the digest and detached signature.
+[CLI downloads](https://github.com/webos21/crt-cli#download-the-previews) · [SDK installation guide](docs/guides/dev_sdk_preview.md) ·
+[Publisher key](docs/security/publisher_signing.md).
 
 [Documentation](docs/README.md) ·
 [Roadmap](docs/design/runtime_roadmap.md) ·
@@ -238,14 +235,10 @@ dev profiles, not general cxx/Full installation. Published CLI Previews support
 caller-pinned HTTPS acquisition and installed-SDK first build without an explicit
 configure step; see the [installation guide](docs/guides/dev_sdk_preview.md).
 
-The [next user flow](TODO.md#crt-developer-experience-sdk---cli---studio) reviews
-explicit default/project pin adoption against the published Dev SDK/CLI Previews.
-The bounded zlib source-port contract is approved within its recorded Linux/x86_64,
-macOS/arm64 and Windows/x64 scope; SQLite/libpng dependency work follows on fixed
-contracts. Full-stage metadata, general updates, self-upgrade and Studio remain
-separate. Exact exercised combinations and limits are in [STATUS](STATUS.md) and
-the linked acceptance records; historical local rehearsals are not relabeled as
-published artifacts.
+The bounded zlib source-port workflow has hosted coverage across all five host pairs.
+The next SDK and CLI work covers SQLite and libpng dependencies, broader SDK-only applications and deployment.
+Full SDK delivery, general updates, self-upgrade and Studio have their own gates.
+[Work queue](TODO.md#crt-developer-experience-sdk---cli---studio) · [Status](STATUS.md#distribution-and-host-scope).
 
 See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
 

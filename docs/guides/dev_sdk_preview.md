@@ -4,8 +4,9 @@ The [Preview release](https://github.com/webos21/crt/releases/tag/v0.0.1-preview
 Linux/x86_64 Dev SDK `v0.0.1-preview.20261110.4`. LLVM/Clang/LLD are
 external inputs; use LLVM **21** (qualified with **21.1.8**) for TLS descriptor code generation. The SDK
 retains stage `02-cxx`, profile `dev`. Other native Previews have their own sections below:
-[Linux/aarch64](#linuxaarch64), [macOS/arm64](#macosarm64) and [Windows/x86_64](#windowsx86_64).
-Full SDK delivery is separate.
+[Linux/aarch64](#linuxaarch64), [macOS/arm64](#macosarm64), [Windows/x86_64](#windowsx86_64) and [Windows/arm64](#windowsarm64).
+Full SDK delivery is separate. The Linux/x86_64 commands below retain the `.4` example pins.
+The [release snapshot](../../STATUS.md#distribution-and-host-scope) lists the newer Linux/x86_64 Dev SDK Preview.
 
 ## Download and trusted metadata
 
@@ -20,9 +21,9 @@ The independently trusted manifest SHA-256 from the reviewed repository is
 `983dbcf143b1fe227bf519f07ec153ce5baf50e190382222995770affe43b2c3` (1683 bytes). Obtain that pin through
 your trust in the maintainer's repository; do not adopt a checksum merely because
 it was served beside an untrusted payload. The [trust policy](../design/dev_preview_trust.md#linux-loader-repair-policy-adopted-2026-11-10)
-defines the Preview's manual pin/TLS boundary. Publisher signatures/default
-channels are not supplied. Component notices and source pins are inside the SDK;
-the release tag and 02/03 assets retain the corresponding project/upstream inputs.
+defines the original manual pin/TLS boundary. Current signed Dev SDK archives use the detached publisher signature and an
+independently verified key. The commands below retain their explicit SDK pins. [Publisher signing](../security/publisher_signing.md).
+Component notices and source pins are inside the SDK. The release tag and 02/03 assets retain the corresponding project/upstream inputs.
 
 GitHub asset URLs redirect to GitHub storage. The published CLI Previews support
 explicitly pinned `sdk acquire --source` with `"redirect_policy": "github-release"`;
@@ -164,3 +165,18 @@ C and C++ consumers and the shared-loader regression on glibc 2.43; the older gl
 architecture, and pure C shared SDK-provider mode stays unqualified.
 The CLI release record also qualifies pinned GitHub `sdk acquire` through the opt-in `github-release` redirect policy,
 including the native redirect and source/SDK-hidden package replays; manual installation above remains valid.
+
+## Windows/arm64
+
+Use the [signed Windows/arm64 Dev SDK](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.windows.arm64.1)
+with the [signed Windows/arm64 CLI Preview](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261120.windows-arm64.1).
+The native package replay uses ARM64 LLVM 22.1.8 and Windows SDK `10.0.28000.0/um/arm64` import libraries. The Dev SDK is
+`02-cxx`, profile `dev`. The release manifest `release-manifest-dev-windows-aarch64.json` has SHA-256
+`354ab45f94540877dda619d7613937a8caff413ad64fc4aa3f1b88c0a3fceecc`.
+[SDK artifact identities](../acceptance/release_qualification.md) · [CLI package and SDK acquisition replay](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/preview_acceptance.md#windowsarm64-workflow-preview-release-2026-11-20).
+
+For manual installation, keep the ARM64 archive, release manifest and native compiler policy together, and verify the archive's
+detached signature. Follow the same explicit install and first-build steps with ARM64 LLVM paths and the `um/arm64` import-library
+directory. For HTTPS acquisition, use the caller-pinned source format with `redirect_policy: github-release`.
+[CLI installation steps](https://github.com/webos21/crt-cli#try-the-local-workflow) ·
+[HTTPS source contract](https://github.com/webos21/crt-cli/blob/main/docs/reference/bootstrap_contract.md#explicit-pinned-https-sdk-source-experimental-format-0).
