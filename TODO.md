@@ -98,9 +98,8 @@ the CLI repository owns adoption evidence in `docs/compatibility.md`.
   including actual Windows job-rootfs symlinks. [Consumer hosted evidence](https://github.com/webos21/crt-cli/blob/858c04bda6f29968d91be98cc80c8ca6a9f55936/docs/acceptance/ci_acceptance.md#windowsx64-hosted-port-integration-2026-11-19);
   [handoff closure](docs/acceptance/host_tools_acceptance.md#consumer-hosted-integration-handoff-completed-2026-11-19).
 
-- [ ] Qualify an independent Windows/x64 host-tools bundle with actual private
-  DLLs: initial-load closure and search-path collisions. The existing static
-  closure does not cover this [remaining gate](docs/acceptance/host_tools_acceptance.md#native-scope-and-remaining-gates).
+- [x] Qualify the independent Windows/x64 local bundle with actual private DLLs: initial-load closure and cwd/PATH collisions
+  ([native evidence and limits](docs/acceptance/host_tools_acceptance.md#windowsx64-private-dll-closure-replay-2026-11-20)); public static pins are unchanged.
 - [ ] Resolve the Windows/arm64 D1 large-output timeout; consumer replay remains 31/32
   ([CLI evidence](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsarm64-published-host-tools-consumer-replay-2026-11-19)).
 
