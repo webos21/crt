@@ -50,9 +50,6 @@ policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Done
 
-<!-- Preserve the old link from dated snapshots; completed details live in HISTORY. -->
-<a id="relink-kit-test-portability-on-windows"></a>
-
 See [`HISTORY.md`](HISTORY.md) for the full, dated, reverse-chronological
 record of completed work. This section stays empty in `TODO.md` itself. Finished
 top-level work moves to `HISTORY.md`; terse checked prerequisite gates may remain
