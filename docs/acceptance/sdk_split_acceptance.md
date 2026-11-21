@@ -2707,3 +2707,50 @@ unsupported-mode rejection). After review/commit, produce clean immutable
 SDK/contract candidates, replay the affected consumers, then promote producer
 artifacts before changing any consumer pins. Windows C++ public compile options
 and sign-before-publish remain separate ordered work.
+
+
+## Clean Linux/x86_64 C shared SDK candidate (2026-11-21)
+
+A fresh Release build of clean CRT
+[`19bdf3670549b2ac222ba43d632056e364fbec5c`](https://github.com/webos21/crt/commit/19bdf3670549b2ac222ba43d632056e364fbec5c)
+produced `v0.0.1-cshared.20261121.1` with Clang/LLD 21.1.8.
+The Development sidecar records that commit for producer, base and compile
+provenance with both dirty flags false. This build follows the
+[November 20 packaging experiment](#linux-pure-c-shared-provider-correction-2026-11-20).
+The archive and source assets are a local handoff for validation.
+
+| Asset or identity | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Dev archive | 7,692,192 | `1878c1af9cc30459150fea53bb08b571a803a10c3aa7415042c45382c37d461e` |
+| Portable toolchain contract | 403,292 | `058c5aeab08afc0cecfff5c8787d8ef1de26f663020f230159252d415191ea35` |
+| `02-cxx` Linux source asset | 9,115,448 | `403c2d7cd66090537b1031de6423e5efcba2235fa44ac7a522c8238f9e7a54a0` |
+| `03-gfx-simple` Linux source asset | 838,944 | `c530edf9445591b3e016d61ba854e3789f3d20feaf874be585fa526aa5a3fa3d` |
+| Release manifest | 1,683 | `4c8959cce68a12362247ffbf4e660a231c16379f04cc92b47b72cb713a6127d7` |
+| Extracted SDK content | | `2c6739386f477a662ee5493fc0c3e5c0533e29a3b04f2939eac01aeb01f5ec18` |
+
+Configure a fresh build from the identified CRT commit with LLVM 21.1.8 on
+`PATH`. Use `cmake --preset linux-host-ninja-debug -B <fresh-build>` with
+`-DCMAKE_BUILD_TYPE=Release -DCRT_RELEASE_TAG=v0.0.1-cshared.20261121.1`
+and set `CRTGFX_ENABLE_SKIA`, `CRTMEDIA_ENABLE_FFMPEG`, `CRTMEDIA_ENABLE_CURL`
+and `CRTUI_ENABLE_LVGL` to `OFF`. Build `crt-dev-release`, then run
+`tools/ci_sdk_release.py verify` on `<fresh-build>/release/dev` with
+the version, target and full producer commit above. Use `--keep-extracted`
+to supply the independent replay from the archive bytes.
+
+`crt-dev-release` passed the packaged Dev consumer and the new mandatory
+five-case C provider check. Independent asset verification passed. The
+extracted SDK in a path with spaces and Hangul passed all five provider cases
+under host loader 2.43 and the pinned Ubuntu loader 2.39 from the earlier
+record. The report preserves link maps, `DT_NEEDED` and exact loaded images
+and confirms the SDK inventory after execution. `crt-c-test` passed 147/147.
+`crt-cxx-test` passed imported libc++ static/shared string ABI, iostream and
+exception smokes and the shared-loader regression. Focused producer tests ran
+49 cases with two platform skips and 47 passes.
+
+Local assets are at `out/p0-clean-20261121/release/dev`. The sibling evidence
+directory `/home/syszone/GitLocal/crt-p0-clean-20261121` retains build logs,
+`asset-verification.json`, the replay commands and `producer-matrix/result.json`.
+The [CLI adoption record](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#clean-linuxx86_64-c-shared-sdk-candidate-2026-11-21)
+owns the consumer combination. Linux/aarch64 native provider qualification
+and affected macOS/Windows consumer replay remain open, followed by artifact
+promotion and consumer pin adoption.

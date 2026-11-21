@@ -98,11 +98,10 @@ replays the exact SDK candidate and records its adoption.
   emits static C inputs for `executable-shared.link_c`; the later [CLI control](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#linux-d3-common-change-replay-and-macos-handoff-2026-11-09)
   maps host libz. Reproduce against identified current SDK inputs before fixing;
   support the mode correctly or reject it explicitly.
-- [x] Linux/x86_64 correction and local CLI handoff: reproduce the public SDK
-  failure, validate corrected runtime/search policy and reject mixed runtime
-  closures ([evidence](docs/acceptance/sdk_split_acceptance.md#linux-pure-c-shared-provider-correction-2026-11-20)).
-- [ ] Qualify clean producer artifacts and affected native hosts, then hand off
-  immutable SDK/contract identities before consumer pin adoption.
+- [x] Linux/x86_64 correction and clean Dev SDK candidate replay
+  ([evidence](docs/acceptance/sdk_split_acceptance.md#clean-linuxx86_64-c-shared-sdk-candidate-2026-11-21)).
+- [ ] Qualify Linux/aarch64 natively and replay the affected macOS/Windows
+  consumer paths. Promote qualified SDK artifacts before consumer pin adoption.
 - Acceptance: verify the static control and each supported shared mode with link
   maps, ELF `DT_NEEDED` and loaded images. If C shared is unsupported, verify
   explicit rejection before linking and no output artifact. Reject host libz
