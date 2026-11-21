@@ -100,8 +100,10 @@ replays the exact SDK candidate and records its adoption.
   support the mode correctly or reject it explicitly.
 - [x] Linux/x86_64 correction and clean Dev SDK candidate replay
   ([evidence](docs/acceptance/sdk_split_acceptance.md#clean-linuxx86_64-c-shared-sdk-candidate-2026-11-21)).
-- [ ] Qualify Linux/aarch64 natively and replay the affected macOS/Windows
-  consumer paths. Promote qualified SDK artifacts before consumer pin adoption.
+- [x] Native Linux/aarch64 producer policy replay
+  ([hosted evidence](docs/acceptance/sdk_split_acceptance.md#hosted-linux-producer-replay)).
+- [ ] Replay the updated CLI on affected native hosts, including macOS and Windows.
+  Promote qualified SDK artifacts before consumer pin adoption.
 - Acceptance: verify the static control and each supported shared mode with link
   maps, ELF `DT_NEEDED` and loaded images. If C shared is unsupported, verify
   explicit rejection before linking and no output artifact. Reject host libz

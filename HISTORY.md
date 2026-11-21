@@ -15,7 +15,8 @@ substantive update.
 Build `v0.0.1-cshared.20261121.1` from clean CRT `19bdf36` using the standard
 Dev release target. Independently verify the archive, portable policy and
 source assets, then rerun all five C provider cases with both Linux loaders.
-Core 147/147 and imported C++ static/shared smokes pass.
+Core 147/147 and imported C++ static/shared smokes pass. The hosted SDK build
+also passes the new five-case producer gate on both native Linux architectures.
 [Exact inputs, evidence and remaining gates](docs/acceptance/sdk_split_acceptance.md#clean-linuxx86_64-c-shared-sdk-candidate-2026-11-21).
 
 ## 2026-11-20

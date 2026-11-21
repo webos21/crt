@@ -2751,6 +2751,26 @@ Local assets are at `out/p0-clean-20261121/release/dev`. The sibling evidence
 directory `/home/syszone/GitLocal/crt-p0-clean-20261121` retains build logs,
 `asset-verification.json`, the replay commands and `producer-matrix/result.json`.
 The [CLI adoption record](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#clean-linuxx86_64-c-shared-sdk-candidate-2026-11-21)
-owns the consumer combination. Linux/aarch64 native provider qualification
-and affected macOS/Windows consumer replay remain open, followed by artifact
-promotion and consumer pin adoption.
+owns the consumer combination. Replay of the updated CLI on affected hosts
+and artifact promotion before consumer pin adoption remain open.
+
+### Hosted Linux producer replay
+
+[SDK integration run 44859949092](https://github.com/webos21/crt/actions/runs/44859949092)
+builds commit `391ce0a2ec5fff74386a3f709472b9babcd1f532`, whose delta from
+`19bdf36` contains documentation only. Both native Linux rows build
+`v0.0.1-ci.44859949092` and pass the five-case C provider collector gate
+on their host loader, independent archive verification and source-hidden
+Dev consumer checks. The pinned public Nov16 native CLI on each row
+installs the produced SDK and passes C/C++ build, test, run and warm reuse.
+
+| Native row | SDK content SHA-256 | Toolchain contract SHA-256 |
+| --- | --- | --- |
+| [Linux/x86_64](https://github.com/webos21/crt/actions/runs/44859949092/job/136710850800) | `e7a2419159d018eb57375c6fa5debc4f28a1c0a4e47f20ae3ad17a22a02e0d6b` | `2e8dfcf6319524b6929ed5e290cee473a8bd18c4dc41d089965717a8da9d8d59` |
+| [Linux/aarch64](https://github.com/webos21/crt/actions/runs/44859949092/job/136710850852) | `f4ded6f14d3dbee22cf672e258624cd36ac6140b4d65d668ae35a7d47a582f22` | `cc5504ea45ec3e7bb7c0f64a3d6b2fcce85a798fe57a94ad96548cf861f27002` |
+
+The hosted artifacts have their own identities. This closes the Linux/arm64
+producer policy check on the CI build. The updated CLI closure and recipe
+handling have local x86_64 evidence and need their own affected-host replays.
+See the [required CI gate](https://github.com/webos21/crt/actions/runs/44859948924)
+for the general build matrix.
