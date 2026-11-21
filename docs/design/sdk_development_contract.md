@@ -155,6 +155,33 @@ Windows C++ DWARF/Itanium/libunwind contract; do not mix MSVC/GNU C++ runtimes.
 Allow CRT-controlled OS boundaries, not convenient exposure of host standard
 headers/libraries.
 
+### Linux C static/shared provider policy (Tranche 6.4, 2026-11-20)
+
+For native provider format 1, `executable-static.link_c` selects SDK
+`libc.a`/`libm.a`/`libdl.a`; `executable-shared.link_c` selects the corresponding
+SDK `.so` files. Both executable modes retain `crt1.o` and
+`crt1_init_array.o`; `shared-library.link_c` uses the existing PIC/DSO policy
+without executable startup. The wrapper honors `CRT_RUNTIME_LINKAGE`, falling
+back to the legacy `CRT_CXX_RUNTIME_LINKAGE` hint and then `static`. The exporter
+supplies these hints; native application builds consume its declarative argv,
+without executing the wrapper or adding corrective compiler flags in the CLI.
+
+Shared executable search order preserves explicit project/port library paths
+before the SDK `lib` fallback. A matching host SONAME is not an acceptable
+substitute for an SDK or explicitly selected port provider. Shared project,
+SDK and port libraries require a shared-runtime executable across the complete
+project dependency closure; unsupported static-runtime/shared-library mixes
+must fail before configure publishes a binding or build creates outputs.
+Choosing SDK static libraries with a shared runtime remains supported.
+
+The Linux collector executes the installed C policy against static/shared SDK
+zlib, a project DSO and an explicit same-SONAME provider before accepting assets.
+Link maps, ELF dependencies and actual loaded images must agree. This changes
+policy argv and validation, not the provider/lock schema or public ABI.
+[Native Linux evidence and remaining qualification](../acceptance/sdk_split_acceptance.md#linux-pure-c-shared-provider-correction-2026-11-20)
+limit the current acceptance: an unpromoted dirty packaging candidate does not
+qualify a clean new SDK or other native hosts.
+
 ## 5. Host Tools Bundle
 
 ### Adopted Native Consumer Boundary (2026-10-29)

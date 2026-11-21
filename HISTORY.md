@@ -10,6 +10,18 @@ substantive update.
 
 ## 2026-11-20
 
+### Correct the Linux pure-C shared provider and validate the local handoff
+
+Reproduce host-libz/glibc fallback with the signed November 18 SDK. Make the Linux
+C executable wrapper honor static/shared linkage and preserve explicit port search
+precedence before the SDK fallback. Add installed-policy runtime qualification to
+the Linux asset collector and regressions for wrapper argv and incomplete reports.
+A separately identified dirty packaging candidate passes five provider modes with
+two loaders; CLI closure validation, isolated application and actual source-port
+replay pass. Runtime binaries and public pins are unchanged. Tranche 6.4 remains
+open for clean artifacts and affected native-host qualification.
+[Exact identities, commands, results and limits](docs/acceptance/sdk_split_acceptance.md#linux-pure-c-shared-provider-correction-2026-11-20).
+
 ### Retire the completed host qualification queue
 
 Remove the completed TODO section after reconciling the consumer's signed Windows/arm64 workflow Preview and D1 32/32 public

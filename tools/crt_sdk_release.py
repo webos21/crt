@@ -114,7 +114,35 @@ def toolchain_contract(extracted, archive, install):
         raise release.ReleaseError("toolchain contract identity differs from the archive's install metadata")
     if "external_os_sdk" in document:
         raise release.ReleaseError("toolchain contract names a machine path; it must be portable")
+    check_linux_c_provider(extracted, contract, document)
     return contract
+
+
+def check_linux_c_provider(extracted, contract, document):
+    """Qualify the exported C policy, not just the wrapper's intent."""
+    if document.get("target", {}).get("os") != "linux":
+        return
+    evidence = Path(tempfile.mkdtemp(prefix="crt C provider "))
+    try:
+        run([sys.executable, ROOT / "tools/test_c_shared_provider.py", "--sdk-root", extracted,
+             "--contract", contract, "--contract-sha256", dev.digest(contract),
+             "--output", evidence / "result"])
+        result = json.loads((evidence / "result/result.json").read_text())
+        expected = {"static-sdk-static", "shared-sdk-static", "shared-sdk-shared",
+                    "shared-project-dso", "shared-explicit-provider"}
+        cases = result.get("cases", [])
+        if (result.get("passed") is not True or result.get("sdk_unchanged") is not True
+                or result.get("target") != document["target"]
+                or result.get("sdk_content_sha256") != document["sdk_content_sha256"]
+                or result.get("contract_sha256") != dev.digest(contract)
+                or len(cases) != len(expected) or {case.get("name") for case in cases} != expected
+                or any(case.get("passed") is not True or not case.get("executions") for case in cases)):
+            raise release.ReleaseError("Linux C provider qualification is incomplete or mismatched")
+    except Exception:
+        print(f"Linux C provider failure evidence retained: {evidence}", file=sys.stderr)
+        raise
+    else:
+        shutil.rmtree(evidence)
 
 
 def assemble(args, development, full):

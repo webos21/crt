@@ -1032,13 +1032,28 @@ if [ "$target_os" = linux ]; then
       "${CRT_SYSROOT}/lib/libdl.so" \
       "${CRT_SYSROOT}/lib/libclang_rt.builtins.a"
   fi
-  run_cc -nostdlib -nostartfiles -nodefaultlibs \
-    -Wl,-e,_start -Wl,--gc-sections \
-    "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
+  # C and C++ executables must select the same runtime domain. In particular,
+  # a C executable consuming SDK DSOs cannot embed a second static libc.
+  # Keep the C++ variable as a compatibility hint for existing port drivers;
+  # the language-neutral native provider already sets CRT_RUNTIME_LINKAGE.
+  runtime_linkage="${CRT_RUNTIME_LINKAGE:-${CRT_CXX_RUNTIME_LINKAGE:-static}}"
+  case "$runtime_linkage" in
+    static) runtime_suffix=a ;;
+    shared) runtime_suffix=so ;;
+    *) echo "crt-cc: unsupported Linux runtime linkage: $runtime_linkage" >&2; exit 1 ;;
+  esac
+  set -- "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
     "${CRT_SYSROOT}/lib/crt1_init_array.o" -Wl,--start-group \
-    "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
-    "${CRT_SYSROOT}/lib/libdl.a" \
+    "${CRT_SYSROOT}/lib/libc.${runtime_suffix}" "${CRT_SYSROOT}/lib/libm.${runtime_suffix}" \
+    "${CRT_SYSROOT}/lib/libdl.${runtime_suffix}" \
     "${CRT_SYSROOT}/lib/libclang_rt.builtins.a" -Wl,--end-group
+  if [ "$runtime_linkage" = shared ]; then
+    # Explicit project/port RUNPATHs in user argv take precedence. The SDK
+    # fallback then finds its own SONAMEs rather than host libz/glibc.
+    set -- "$@" "-Wl,-rpath,${CRT_SYSROOT}/lib"
+  fi
+  run_cc -nostdlib -nostartfiles -nodefaultlibs \
+    -Wl,-e,_start -Wl,--gc-sections "$@"
 fi
 
 if [ "$target_os" = macos ]; then

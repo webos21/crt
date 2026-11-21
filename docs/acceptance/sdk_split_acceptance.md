@@ -2584,3 +2584,126 @@ and the former silent success makes the test fail.
 Qualification used glibc 2.43; the older glibc 2.39 loader was not exercised on this architecture. No Linux/aarch64 `crt-cli` executable is published (the exact one above is
 not committed). Redirect-aware `sdk acquire` from this URL, Full, other-host and independent host-tools packages, the unqualified pure C shared SDK-provider mode, updates and Studio
 remain in their owning queues. STATUS and default locks are unchanged.
+
+## Linux pure-C shared provider correction (2026-11-20)
+
+This completes the **local Linux/x86_64 slice** of TODO P0-01 / Tranche 6.4,
+reviewed at CRT `6a0f2dea2f62b1819a4a0fcec17d376942d1ca67` and CLI
+`1ad5e57b79ecb5916ab1c089c0b40515d549fc41`, plus the uncommitted changes
+identified below. It does not close the five-host gate or promote an SDK.
+The [producer policy](../design/sdk_development_contract.md#linux-c-staticshared-provider-policy-tranche-64-2026-11-20)
+owns the intended behavior; [CLI adoption](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#linux-c-shared-local-candidate-handoff-2026-11-20)
+owns exercised consumer combinations.
+
+### Original failure and immutable inputs
+
+Use the signed public `v0.0.1-preview.20261118.linux.x64.1` Dev SDK, built from
+CRT `21ef266080760216f525c3725a652b5f1af4741c`. Verify the manifest size/digest,
+archive digest, publisher RSA-PSS signature, SDK inventory and contract pin
+before extraction/selection. Exact baseline identities:
+
+| Input | SHA-256 |
+| --- | --- |
+| `release-manifest-dev-linux-x86_64.json` (1,753 bytes) | `b76aea28cd516628b83f75f2f513cc1d5d1bcddfad380eb485efaeb95a45a641` |
+| SDK archive | `6681afce6acd3efac4892f0505b059c7d55504bc25b280eff718cd23df49f710` |
+| SDK content | `3008315d40f5785226ecb26aee9a746ddc7fe8513d1ac895e7f4ce77eb057a79` |
+| Portable toolchain contract | `602e7a036e8ae2ed064f342121b363dfbe90bf8b0059ad9887297a7f0c8b63d0` |
+
+The original static control succeeds. `executable-shared.link_c` instead embeds
+static C archives and has only `$ORIGIN` RUNPATH. A shared zlib consumer requests
+`libz.so.1` but maps `/usr/lib/x86_64-linux-gnu/libz.so.1.3.1` and GNU `libc.so.6`,
+not the selected SDK providers. The original five-mode matrix retains one static
+pass and four shared failures; earlier records are not reclassified as passes.
+
+### Local candidate provenance
+
+`v0.0.1-cshared.20261120.1` is a **local packaging/policy experiment**, outside
+both repositories. It preserves the clean `21ef266` compile provenance and every
+runtime/port binary byte. Only `VERSION`, `tools/crt-cc` and
+`share/crt/contracts/development.json` change. The sidecar accurately marks
+`producer_working_tree_dirty: true`; producer basis stays `21ef266`, not the
+current review HEAD. The wrapper patch against that basis is SHA-256
+`4091887975a2f523e49c27ae0487f1eb4ad4a35909f0c836c8a5643ad2cc0738`.
+This is not a fresh runtime build, clean candidate or signed release.
+
+| Candidate identity | SHA-256 |
+| --- | --- |
+| SDK content (2,618 entries) | `5a87ccbb9999b0afd5f15f83302d515a32a17f9bf9cd5aaf1b9e2b2e63752bf5` |
+| Portable toolchain contract | `7450128c825a409d24582c0fe9270239059681091778e10449256024aa5dac78` |
+
+`verify_dist.py --stage 02-cxx --profile dev` and portable contract export pass.
+The C++ policy vectors are unchanged. Explicit dirty-SDK opt-in is required;
+all public/CI/default/project pins keep their existing identities.
+
+### Execution and results
+
+The corrected wrapper keeps executable startup in both modes, selects SDK C
+archives or DSOs as requested, and appends the SDK library search path after
+explicit project/port paths. No allocator, TLS, public ABI or upstream source
+changes are made. `tools/test_c_shared_provider.py` compiles from the exported
+public policy argv, without using SDK wrappers at compile/link time, and retains
+link maps, `readelf` output, execution output and `/proc/self/maps`:
+
+| Mode | Required evidence | Result |
+| --- | --- | --- |
+| Static runtime + SDK static zlib | SDK archive link-map inputs, no dynamic CRT/zlib | Pass |
+| Shared runtime + SDK static zlib | SDK libc mapped, no static C archives or dynamic zlib | Pass |
+| Shared runtime + SDK shared zlib | Exact SDK libc and libz mapped | Pass |
+| Shared runtime + project DSO + SDK shared zlib | Constructors, shared errno address, cross-DSO allocation/free, exact SDK images | Pass |
+| Shared runtime + explicit same-SONAME provider | Explicit provider precedes SDK fallback | Pass |
+
+The last producer fixture copies the SDK libz bytes to another directory solely
+to test search precedence; the separate CLI source-port replay below builds real
+pristine upstream zlib. All five executables pass with host GNU loader **2.43**
+and pinned Ubuntu loader **2.39-0ubuntu8.8**, SHA-256
+`cd4df4f3c7b83673d61189bf2eaebd33ca4f2853ab9772b8a25e025ef99b1e81`.
+This is two loader executions on one Linux host, not native Ubuntu 24.04 host
+qualification. Clang/LLD/LLVM ar are **21.1.8**. No `LD_LIBRARY_PATH` is supplied.
+SDK inventory is unchanged after execution.
+
+Focused producer checks pass: wrapper argv **5** (including x86_64/aarch64 argv,
+not ARM execution), exporter **9**, collector gate **3**, and Dev SDK suite
+**32 run, 2 platform skips**. The collector refuses failed, partial, changed-SDK
+or mismatched-identity results and retains failure evidence. Production collection
+still requires a clean matching producer; the dirty experiment is ineligible.
+
+CLI product changes only reject static-runtime executables with shared
+project/SDK/port libraries across their complete dependency closure before
+binding/output creation. No compiler-policy override is added. Fresh SDK-only
+CLI build passes; native suite **949** and isolated C consumer checks **23** pass.
+Actual zlib 1.3.1 source-port replay passes **82 checks / 17 adapter gates**, with
+SDK/source trees hidden, immutable copied inputs and no host shell/interpreter
+executes in native jobs. The selected port's libz loads ahead of the SDK's same
+SONAME, and the SDK control maps the SDK libz. Consumer identities and commands
+remain in the linked CLI record.
+
+### Reproduction and remaining gates
+
+Local evidence root: `/home/syszone/GitLocal/crt-p0-c-shared-20261120`.
+`selected-inputs.json`, `baseline-observation.json`, `baseline-matrix/result.json`,
+`candidate-receipt.json`, `crt-cc.patch`, `final-producer-matrix/result.json`,
+`cli-consumer-result.json`, `native-test.stdout` and `port-project-report/` retain
+inputs, argv, maps, original failures and successful results. An initial CLI
+harness invocation used a directory as the seed executable and failed before
+compilation; the corrected seed path is recorded in `cli-build.json`.
+
+For a separately pinned native Linux candidate, run from the CRT checkout:
+
+```sh
+python3 tools/test_crt_cc_linkage.py
+python3 tools/test_export_cli_toolchain.py
+python3 tools/test_sdk_c_provider_gate.py
+python3 tools/test_c_shared_provider.py --sdk-root /absolute/SDK \
+  --contract /absolute/toolchain.json --contract-sha256 <exact-sha256> \
+  --output /absolute/new-evidence --cc /absolute/clang
+```
+
+Use `--allow-dirty-sdk` only for an explicitly identified local experiment;
+`--loader /absolute/loader` adds a loader probe. A pre-existing output directory
+is refused so prior evidence is preserved. Linux/aarch64 needs native execution;
+argv checks do not qualify it. macOS/Windows need their affected generic CLI
+closure refusals and actual C static/shared policy qualification (or explicit
+unsupported-mode rejection). After review/commit, produce clean immutable
+SDK/contract candidates, replay the affected consumers, then promote producer
+artifacts before changing any consumer pins. Windows C++ public compile options
+and sign-before-publish remain separate ordered work.
