@@ -632,8 +632,8 @@ to hide the difference. Before public assembly/promotion, select a coherent
 exact asset set and rebuild/recollect affected candidates where required.
 The owner subsequently retained common version/OS/stage naming; see the
 [adopted contract](../design/sdk_development_contract.md#common-source-stage-assets-adopted-2026-11-02).
-This is retained under
-[SDK Producer Contract Gate P0](../../TODO.md#crt-developer-experience-sdk---cli---studio).
+The gate that retained this (SDK Producer Contract Gate P0) was later completed and removed from the active queue; see
+[the 2026-11-12 queue cleanup](../../HISTORY.md#remove-completed-sdkcli-gates-from-the-active-work-queue).
 It does not reopen the completed source-hidden SDK split or invalidate an
 individually identified local collection.
 

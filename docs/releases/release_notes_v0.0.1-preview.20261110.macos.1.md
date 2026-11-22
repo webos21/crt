@@ -44,7 +44,7 @@ GitHub release downloads redirect to GitHub asset storage. Current `crt-cli`
 rejects HTTPS redirects; download with a browser or HTTPS client, verify the
 fixed manifest pin, then use native `sdk install`. The current public GitHub URL
 is not advertised as a working `sdk acquire --source` endpoint.
-The [published SDK workflow](../guides/dev_sdk_preview.md#macos-arm64) specifies the
+The [published SDK workflow](../guides/dev_sdk_preview.md#macosarm64) specifies the
 CLI and explicit toolchain inputs. CLI executable publication is a separate step.
 
 C tests pass 146/146; C++ runtime/string-ABI/iostream pass static/shared, Dev

@@ -184,7 +184,7 @@ matrix without leaving a required check pending, and the repository ruleset `mai
 A `dry_run: true` run (44220444318) validated the workflow on a hosted runner; its draft was deleted because its zip bytes differ from any later build, and
 `v0.0.1-preview.20261118.windows.arm64.1` was published by run 44224690103 after approval, replayed from public bytes, and signed with the owner's
 publisher key (verified against the pinned key)
-([evidence](docs/acceptance/release_qualification.md#first-windows-arm64-dev-sdk-preview-s7-steps-2-3-2026-11-18)). crt-cli still cannot install it until
+([evidence](docs/acceptance/release_qualification.md#first-windowsarm64-dev-sdk-preview-s7-steps-2-3-2026-11-18)). crt-cli still cannot install it until
 its own first ARM64 bootstrap is published; the pins and the exception's end are S7 steps 4-6.
 
 ### Adopt the first automated Dev SDK Preview in the CLI CI (S5)
