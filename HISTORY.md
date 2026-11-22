@@ -10,6 +10,11 @@ substantive update.
 
 ## 2026-11-22
 
+### Record the Windows/x64 consumer replay of the CI SDK on a hosted runner (Tranche 6.4)
+
+The x64 artifact of the same CI build (not a release) was consumed by the CLI at `6f7f8b9` on a `windows-2022` runner: the CRT contract replay passed and the new `replay_c_shared_windows.py` passes 36/36; the published `20261110` SDK fails the same six cases and is kept as the
+baseline. Hosted, not a physical x64 machine; macOS, promotion and pin adoption remain open. [Acceptance](docs/acceptance/sdk_split_acceptance.md#windowsx64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22).
+
 ### Record the Windows/arm64 consumer replay of the CI SDK (Tranche 6.4)
 
 The CI-built Windows/arm64 SDK of `5325cea` (not a release) was consumed by the CLI at `44fbf24` on a native machine: its suites pass (native 1,041 checks) and the new `replay_c_shared_windows.py` passes 36/36

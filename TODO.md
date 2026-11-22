@@ -107,7 +107,9 @@ replays the exact SDK candidate and records its adoption.
   ([HISTORY](HISTORY.md), 2026-11-22).
 - [x] Windows/arm64: the clean CI-built SDK of `5325cea` with CLI `44fbf24` (native 1,041 checks; static, shared and shared + project DLL 36/36 with the loaded `libc.dll` equal to the installed SDK's; the
   published `20261118` SDK fails six of the same cases) ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22)).
-- [ ] Replay the updated CLI on the other affected native hosts (macOS and Windows/x64; the Windows/x64 CI artifact of the same run exists).
+- [x] Windows/x64 (hosted `windows-2022`, not a physical machine): the x64 CI artifact of the same build with CLI `6f7f8b9`: native replay passed, 36/36, the published `20261110` SDK fails the same six cases
+  ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22)).
+- [ ] Replay the updated CLI on macOS, and on a physical Windows/x64 machine if hosted evidence is not enough.
   Promote qualified SDK artifacts before consumer pin adoption.
 - Acceptance: verify the static control and each supported shared mode with link
   maps, ELF `DT_NEEDED` and loaded images. If C shared is unsupported, verify
