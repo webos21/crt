@@ -132,6 +132,10 @@ revised SDK is pending. Consumer handoff:
   interaction using an external C++17 consumer on Windows x64 and ARM64.
   [Current options](tools/crt_dev_profile.py) undefine `_WIN32` for curl headers;
   scope them per library or correct the header/platform-macro contract in CRT.
+  - [x] Reproduced on Windows/arm64 against the public SDK `v0.0.1-preview.20261118.windows.arm64.1`: with the profile's `-U_WIN32 ...` the consumer links and
+    `std::filesystem` returns wrong paths; without them `curl.h` needs `winsock2.h`. Fix: empty `consumer_compile_options`, CRT-owned persona shims for
+    `curl/curl.h` and `mbedtls/platform.h` ([contract](docs/design/sdk_development_contract.md)); local Windows/arm64 proof against the real public libraries.
+  - [ ] Hosted `sdk-integration` of the corrected producer on all hosts, then the CLI contract replay against that SDK; record in release qualification.
 - Acceptance: filesystem path types and link/run behavior agree with packaged
   libc++, with curl headers usable in the same consumer. Replay affected CLI
   consumers with the new SDK; do not hide producer flags in CLI or the extension.

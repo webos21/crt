@@ -2,11 +2,13 @@
 #include <zlib.h>
 #include <lzma.h>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <nlohmann/json.hpp>
 #define CJSON_HIDE_SYMBOLS
 #include <cJSON.h>
+#include <mbedtls/platform.h>
 #include <mbedtls/sha256.h>
 #include <crt/platform.h>
 #include <crt/dl.h>
@@ -49,7 +51,21 @@ static bool xz_utility() {
   return !xz_decodes(damaged, sizeof(damaged), rejected) && lzma_version_number() > 0;
 }
 
+// The consumer passes no platform-persona compile option. <curl/curl.h> and <mbedtls/platform.h> are included first on purpose: libc++'s
+// std::filesystem must still agree with the packaged libc++ (a header parsed in the wrong persona gave wrong paths without a link
+// error), the libcurl socket type must be the POSIX int the library was built with, and mbedtls_snprintf must link.
+static bool platform_persona() {
+  namespace fs = std::filesystem;
+  fs::path file("dir/sub/file.txt");
+  char text[32];
+  mbedtls_snprintf(text, sizeof(text), "%d-%s", 7, "ok");
+  return file.filename().string() == "file.txt" && file.parent_path().generic_string() == "dir/sub" &&
+         (fs::path("a") / "b" / "c.txt").generic_string() == "a/b/c.txt" && file.extension().string() == ".txt" &&
+         sizeof(curl_socket_t) == sizeof(int) && std::strcmp(text, "7-ok") == 0;
+}
+
 static bool utilities(const char* program) {
+  if (!platform_persona()) return false;
   nlohmann::json value = {{"integer", 18446744073709551615ULL}, {"text", "space \uD55C\uAE00"}};
   if (nlohmann::json::parse(value.dump()) != value) return false;
   cJSON* parsed = cJSON_Parse("{\"value\":42}");

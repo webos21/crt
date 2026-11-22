@@ -245,14 +245,17 @@ class DevelopmentProfile(unittest.TestCase):
         for name, header in profile.HEADER_PORTS.items():
             self.put(header)
             self.manifest["redistributed_dependencies"].append({"name": name, "kind": "header-only-port", "headers": [header]})
-        for header in ("include/cJSON.h", "include/mbedtls/sha256.h", "include/mbedtls/sha512.h", "include/crt/platform.h", "include/crt/dl.h", "include/lzma.h"):
+        for header in ("include/cJSON.h", "include/mbedtls/sha256.h", "include/mbedtls/sha512.h", "include/crt/platform.h", "include/crt/dl.h", "include/lzma.h",
+                       "include/curl/curl.h", "include/mbedtls/platform.h"):
             self.put(header)
+        profile.apply_persona_shims(self.dev, "windows")
         self.data = {"format": 1, "profile": "dev", "capabilities": profile.CAPABILITIES, "version": "v1.0.0", "target": self.manifest["target"],
                      "producer_source_commit": "a" * 40, "base_source_commit": "a" * 40,
                      "producer_working_tree_dirty": False,
                      "compile_provenance": {"source_commit": "a" * 40, "working_tree_dirty": False},
                      "runtime_sha256": profile.runtime_digests(self.dev),
                      "consumer_compile_options": profile.consumer_options("windows"),
+                     "public_header_personas": profile.persona_records(self.dev, "windows"),
                      "tls_trust": {"mode": "explicit-ca-file", "bundled": False}}
         self.save()
         import shutil
@@ -280,6 +283,59 @@ class DevelopmentProfile(unittest.TestCase):
     def test_valid_profile_and_same_runtime_pair(self):
         self.assertEqual([], profile.check(self.dev, self.manifest))
         release.check_pair(self.dev, self.full, "v1.0.0")
+
+    def test_consumers_need_no_platform_option_and_the_persona_is_scoped_to_two_shim_headers(self):
+        for target_os in ("windows", "linux", "macos"):
+            self.assertEqual([], profile.consumer_options(target_os))
+        self.assertEqual(["include/curl/curl.h", "include/mbedtls/platform.h"], [r["header"] for r in profile.persona_records(self.dev, "windows")])
+        self.assertEqual([], profile.persona_records(self.dev, "linux"))
+        self.assertIn("public-header-persona-1", profile.CAPABILITIES)
+
+    def test_shim_opens_the_persona_window_only_after_libcxx_and_restores_every_macro(self):
+        text = profile.shim_text("include/curl/curl.h")
+        lines = text.splitlines()
+        self.assertLess(lines.index("#include <version> /* libc++ fixes its platform persona here, while _WIN32 is still defined, before the window below */"),
+                        lines.index('#pragma push_macro("_WIN32")'))
+        pushes = [l.split('"')[1] for l in lines if l.startswith("#pragma push_macro")]
+        pops = [l.split('"')[1] for l in lines if l.startswith("#pragma pop_macro")]
+        undefs = [l.split()[1] for l in lines if l.startswith("#undef ")]
+        self.assertEqual(list(profile.PERSONA_MACROS), pushes)
+        self.assertEqual(pushes[::-1], pops)
+        self.assertEqual(pushes, undefs)
+        self.assertLess(lines.index('#include "curl_crt_upstream.h"'), lines.index('#pragma pop_macro("_WIN32")'))
+
+    def test_upstream_header_is_kept_byte_for_byte_and_apply_is_idempotent(self):
+        upstream = self.dev / "include/curl/curl_crt_upstream.h"
+        self.assertEqual("fixture", upstream.read_text())
+        profile.apply_persona_shims(self.dev, "windows")
+        self.assertEqual("fixture", upstream.read_text())
+        self.assertEqual([], profile.check(self.dev, self.manifest))
+
+    def test_apply_refuses_a_header_that_is_not_upstream(self):
+        (self.dev / "include/curl/curl_crt_upstream.h").unlink()   # shim present, upstream gone: not an installed shim
+        with self.assertRaisesRegex(ValueError, "not an upstream header"):
+            profile.apply_persona_shims(self.dev, "windows")
+        (self.dev / "include/mbedtls/platform.h").write_text("tampered")
+        with self.assertRaisesRegex(ValueError, "not the expected shim|not an upstream header"):
+            profile.apply_persona_shims(self.dev, "windows")
+
+    def test_modified_missing_or_unrecorded_shim_is_rejected(self):
+        shim = self.dev / "include/curl/curl.h"
+        original = shim.read_text()
+        shim.write_text(original + "/* edit */\n")
+        self.assertTrue(any("persona" in p for p in profile.check(self.dev, self.manifest)))
+        shim.write_text(original)
+        self.assertEqual([], profile.check(self.dev, self.manifest))
+        (self.dev / "include/mbedtls/platform_crt_upstream.h").write_text("changed upstream bytes")
+        self.assertTrue(any("persona" in p for p in profile.check(self.dev, self.manifest)))   # recorded upstream digest no longer matches
+        (self.dev / "include/mbedtls/platform_crt_upstream.h").unlink()
+        self.assertTrue(any("persona" in p for p in profile.check(self.dev, self.manifest)))
+        self.save_data(consumer_compile_options=["-U_WIN32"])
+        self.assertTrue(any("must be empty" in p for p in profile.check(self.dev, self.manifest)))
+
+    def save_data(self, **changes):
+        self.data.update(changes)
+        self.save()
 
     def test_s5_stale_full_negative_starts_from_a_valid_pair(self):
         release.check_pair(self.dev, self.full, 'v1.0.0')
