@@ -985,6 +985,15 @@ if [ "$target_os" = windows ]; then
   if [ -f "$windows_utf8_manifest" ]; then
     set -- "$@" "-Wl,/manifest:embed" "-Wl,/manifestinput:${windows_utf8_manifest}"
   fi
+  # C and C++ executables select the same runtime domain (tools/crt-c++ does the same): a shared-runtime
+  # executable imports libc.dll like every DLL of its program instead of embedding a second libc. The C++
+  # variable stays a compatibility hint for existing port drivers; the native provider sets the neutral one.
+  runtime_linkage="${CRT_RUNTIME_LINKAGE:-${CRT_CXX_RUNTIME_LINKAGE:-static}}"
+  case "$runtime_linkage" in
+    static) rt_c=libc.a; rt_m=libm.a; rt_dl=libdl.a ;;
+    shared) rt_c=libc_dll.dll.a; rt_m=libm_dll.dll.a; rt_dl=libdl_dll.dll.a ;;
+    *) echo "crt-cc: unsupported Windows runtime linkage: $runtime_linkage" >&2; exit 1 ;;
+  esac
   # shellcheck disable=SC2086
   run_cc -nostdlib -nostartfiles -nodefaultlibs \
     -Wl,/entry:mainCRTStartup -Wl,/subsystem:console -Wl,/OPT:REF -fuse-ld=lld \
@@ -993,8 +1002,8 @@ if [ "$target_os" = windows ]; then
     "${CRT_SYSROOT}/lib/crt1_pseudo_reloc.o" \
     "${CRT_SYSROOT}/lib/crt1_dwarf_safety_net.o" \
     "$@" "${CRT_SYSROOT}/lib/crt1.o" "-L${CRT_SYSROOT}/lib" \
-    "${CRT_SYSROOT}/lib/libc.a" "${CRT_SYSROOT}/lib/libm.a" \
-    "${CRT_SYSROOT}/lib/libdl.a" $windows_system_libs \
+    "${CRT_SYSROOT}/lib/${rt_c}" "${CRT_SYSROOT}/lib/${rt_m}" \
+    "${CRT_SYSROOT}/lib/${rt_dl}" $windows_system_libs \
     "${CRT_SYSROOT}/lib/crt1_ctors_end.o" \
     ${CRT_WINDOWS_SDK_LIBPATH:+"-L${CRT_WINDOWS_SDK_LIBPATH}"}
 fi

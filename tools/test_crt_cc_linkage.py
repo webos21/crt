@@ -1,6 +1,7 @@
-"""Linux C-wrapper argv regressions; fake compiler, no native ARM execution."""
+"""C-wrapper argv regressions (Linux, Windows); fake compiler, no native ARM execution."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -80,6 +81,76 @@ class CLinkage(unittest.TestCase):
         self.assertIn("unsupported Linux runtime linkage", result.stderr)
         self.assertEqual(argv, [])
         self.assertFalse((self.root / "program").exists())
+
+
+@unittest.skipUnless(shutil.which("sh"), "needs a POSIX sh to run the wrapper")
+class WindowsCLinkage(unittest.TestCase):
+    """Windows C executable runtime selection; fake compiler, no Windows execution."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="crt C windows ")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.sdk = self.root / "SDK"
+        (self.sdk / "lib").mkdir(parents=True)
+        for name in ("crt1.o", "crt1_ctors_begin.o", "crt1_ctors_end.o", "crt1_ctors_walker.o",
+                     "crt1_pseudo_reloc.o", "crt1_dwarf_safety_net.o", "libc.a", "libm.a", "libdl.a",
+                     "libc_dll.dll.a", "libm_dll.dll.a", "libdl_dll.dll.a"):
+            (self.sdk / "lib" / name).touch()
+        self.capture = self.root / "argv.json"
+        script = self.root / "recorder.py"
+        script.write_text("import json,os,sys\n"
+            "if sys.argv[1:]==['-print-resource-dir']: print('/resource')\n"
+            "else: json.dump(sys.argv[1:],open(os.environ['CAPTURE'],'w'))\n")
+        self.compiler = self.root / "recorder"
+        self.compiler.write_text('#!/bin/sh\nexec "%s" "%s" "$@"\n' % (Path(sys.executable).as_posix(), script.as_posix()))
+        self.compiler.chmod(0o700)
+
+    def invoke(self, hints=None):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CRT_")}
+        env.update(CRT_SYSROOT=str(self.sdk), CRT_TARGET_OS="windows", CRT_TARGET_ARCH="x86_64",
+                   CRT_HOST_CC=str(self.compiler), CAPTURE=str(self.capture))
+        env.update(hints or {})
+        result = subprocess.run(["sh", str(WRAPPER), "probe.c", "-o", "program.exe"],
+                                env=env, capture_output=True, text=True)
+        argv = json.loads(self.capture.read_text()) if self.capture.exists() else []
+        return result, [a.replace("\\", "/") for a in argv]
+
+    @staticmethod
+    def libs(argv):
+        return [a.rsplit("/", 1)[-1] for a in argv if a.endswith((".a", ".o")) and "/lib/" in a]
+
+    def test_static_default_keeps_static_libc(self):
+        result, argv = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        libs = self.libs(argv)
+        self.assertIn("libc.a", libs)
+        self.assertNotIn("libc_dll.dll.a", libs)
+        self.assertIn("crt1.o", libs)
+
+    def test_shared_runtime_imports_the_dll_and_keeps_startup(self):
+        result, argv = self.invoke({"CRT_RUNTIME_LINKAGE": "shared"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        libs = self.libs(argv)
+        for lib in ("libc_dll.dll.a", "libm_dll.dll.a", "libdl_dll.dll.a", "crt1.o"):
+            self.assertIn(lib, libs)
+        for lib in ("libc.a", "libm.a", "libdl.a"):
+            self.assertNotIn(lib, libs)
+
+    def test_legacy_cxx_hint_and_explicit_neutral_override(self):
+        result, argv = self.invoke({"CRT_CXX_RUNTIME_LINKAGE": "shared"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("libc_dll.dll.a", self.libs(argv))
+        result, argv = self.invoke({"CRT_CXX_RUNTIME_LINKAGE": "shared", "CRT_RUNTIME_LINKAGE": "static"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("libc.a", self.libs(argv))
+
+    def test_invalid_linkage_fails_before_link_and_output(self):
+        result, argv = self.invoke({"CRT_RUNTIME_LINKAGE": "unknown"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported Windows runtime linkage", result.stderr)
+        self.assertEqual(argv, [])
+        self.assertFalse((self.root / "program.exe").exists())
 
 
 if __name__ == "__main__":

@@ -10,6 +10,30 @@ substantive update.
 
 ## 2026-11-22
 
+### Honor the runtime linkage in the Windows C executable wrapper (Tranche 6.4, local candidate)
+
+`tools/crt-cc` ignored `CRT_RUNTIME_LINKAGE` for Windows executables, so the pinned Windows/x64 Dev SDK's
+`executable-shared.link_c` was identical to `executable-static.link_c` (static `libc.a`/`libm.a`/`libdl.a`)
+and a hello-world linked with either produced byte-identical executables importing only `KERNEL32.dll`
+and `api-ms-win-core-synch`. The wrapper now selects `libc_dll.dll.a`/`libm_dll.dll.a`/`libdl_dll.dll.a` for a
+shared runtime, as `tools/crt-c++` already did, accepts the legacy `CRT_CXX_RUNTIME_LINKAGE` hint and rejects
+other values before linking. The exporter needed no change.
+
+Verified on this Windows 11 x64 host (clang/lld 22.1.8) against a local, unpromoted copy of
+`v0.0.1-preview.20261110.windows.1` with only `tools/crt-cc` replaced and its sidecar marked dirty: the exported
+shared policy now links `libc_dll.dll.a`, and the new `tools/test_c_shared_provider_windows.py` passes four
+cases (project DLL build, static runtime, shared runtime, shared runtime + project DLL). The shared executables
+import `libc.dll`, the loaded `libc.dll` is the SDK's `bin\libc.dll`, the executable and the DLL share one libc,
+and the executable fails to start when the SDK `bin` directory is absent from `PATH`. The same script fails the two shared cases against the
+unmodified SDK. `test_crt_cc_linkage.py` (4 new Windows argv cases), `test_sdk_c_provider_gate.py` (5) and
+`test_export_cli_toolchain.py` (9) pass. The Dev collector now runs the Windows check
+(`crt_sdk_release.py`); that path was exercised only by its mocked gate test, not by a real release build.
+
+Limits: this is not a clean SDK candidate, release or promotion; no CLI consumer replay of such a candidate was
+run; Windows has no zlib or explicit same-name provider case (loader search differs from ELF); a C executable that
+sets only `CRT_CXX_RUNTIME_LINKAGE=shared` now also links `libc.dll` (same domain as C++); only Windows/x64 was
+run. Evidence is local: `C:\crt-replay\cand` (`provider-r1`, `baseline-r1`, `toolchain.json`).
+
 ### Record the consumer's Windows/arm64 replay for the pure C shared handoff
 
 No CRT code, SDK or release changed. The CLI's Windows/arm64 port-integration replay at CLI
