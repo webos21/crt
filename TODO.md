@@ -105,7 +105,9 @@ replays the exact SDK candidate and records its adoption.
 - [x] Windows/x64 wrapper correction (`crt-cc` honors the runtime linkage) verified on a local, unpromoted
   candidate; a clean Windows candidate and its CLI replay remain open
   ([HISTORY](HISTORY.md), 2026-11-22).
-- [ ] Replay the updated CLI on affected native hosts, including macOS and Windows.
+- [x] Windows/arm64: the clean CI-built SDK of `5325cea` with CLI `44fbf24` (native 1,041 checks; static, shared and shared + project DLL 36/36 with the loaded `libc.dll` equal to the installed SDK's; the
+  published `20261118` SDK fails six of the same cases) ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22)).
+- [ ] Replay the updated CLI on the other affected native hosts (macOS and Windows/x64; the Windows/x64 CI artifact of the same run exists).
   Promote qualified SDK artifacts before consumer pin adoption.
 - Acceptance: verify the static control and each supported shared mode with link
   maps, ELF `DT_NEEDED` and loaded images. If C shared is unsupported, verify

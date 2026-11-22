@@ -10,6 +10,12 @@ substantive update.
 
 ## 2026-11-22
 
+### Record the Windows/arm64 consumer replay of the CI SDK (Tranche 6.4)
+
+The CI-built Windows/arm64 SDK of `5325cea` (not a release) was consumed by the CLI at `44fbf24` on a native machine: its suites pass (native 1,041 checks) and the new `replay_c_shared_windows.py` passes 36/36
+(static control, shared runtime, shared runtime + project DLL with the loaded `libc.dll` equal to the installed SDK's, a mixed-runtime refusal). The published `20261118` SDK fails six of the same cases and is kept as the baseline.
+Windows/x64 and macOS replays, promotion and pin adoption remain open. [Acceptance](docs/acceptance/sdk_split_acceptance.md#windowsarm64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22).
+
 ### Honor the runtime linkage in the Windows C executable wrapper (Tranche 6.4, local candidate)
 
 `tools/crt-cc` ignored `CRT_RUNTIME_LINKAGE` for Windows executables, so the pinned Windows/x64 Dev SDK's
