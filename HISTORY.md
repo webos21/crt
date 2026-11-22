@@ -8,6 +8,24 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-22
+
+### Record the consumer's Windows/arm64 replay for the pure C shared handoff
+
+No CRT code, SDK or release changed. The CLI's Windows/arm64 port-integration replay at CLI
+`8374470` passes all five port suites against the existing Dev SDK
+`v0.0.1-preview.20261118.windows.arm64.1` (producer `e7c7630`), with CRT `42b8f7a` as the
+local producer reference. The Linux-only wrapper correction `19bdf36` produces no Windows SDK
+candidate, so this replay is not Tranche 6.4 qualification: replay of a new SDK candidate on
+macOS and Windows stays open under P0-01.
+
+The same investigation found two defects in the CLI's store `Lock` (fatal `create_directory`
+contention errors and stealing of a live lock whose `owner` is not yet written), which explain
+the scheduled `ports (win-arm64)` failure in CLI run
+[44898897532](https://github.com/webos21/crt-cli/actions/runs/44898897532). Both are CLI
+code; whether CRT's libc/libc++ `create_directory` behaves correctly under the same race was
+not examined. Exact inputs, counts and limits are in the CLI's HISTORY entry for 2026-11-22.
+
 ## 2026-11-21
 
 ### Qualify a clean Linux/x86_64 C shared Dev SDK candidate
