@@ -2796,3 +2796,24 @@ runtime + project DLL executable does not import `libc.dll` while the DLL does, 
 
 **Not covered.** A release, signing or pin adoption of any Windows SDK carrying the correction; the same CLI replay on Windows/x64 and macOS (the `sdk-windows-x86_64` artifact of the same run exists and was not replayed here); the restricted-token adapter for the
 C replay; Windows C++ `<filesystem>` and the curl compile options (the separate P1-01 item); a Windows zlib or same-name provider case (loader search differs from ELF).
+
+## Windows/x64 consumer replay of the CI SDK for the pure C shared provider (2026-11-22)
+
+The Windows/x64 counterpart of the [Windows/arm64 record](#windowsarm64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22), for the same wrapper correction (`5325cea`). **It ran on a GitHub-hosted `windows-2022` runner, not on a physical x64 machine,**
+and the SDK is the x64 artifact of the same CI build, **not a release**: nothing is promoted, signed or pinned.
+
+**SDK.** The `sdk-windows-x86_64-5325cea...` artifact of [SDK integration run 45002729132](https://github.com/webos21/crt/actions/runs/45002729132): CI label `v0.0.1-ci.45002729132`, manifest SHA-256 `e835d22d2081fd04039bfdd56a3c9b7f31d5fd2b259bfcceac1397115a9a9d4a`,
+installed content `6efb616707f4a4b1387d8cf26f2f24e97d4792b46d538bdfef6242a0a32c96cb`, `bin\libc.dll` `2c02d41cea556b8ece5f00d0b03f1893ddc6ca779bf6615d02d5f2505b9301d0`. Its hosted `sdk (windows-x86_64)` job passed the installed-SDK C provider check (four cases), and `tools/ci_sdk_release.py verify
+--os windows --arch x86_64` reports `OK` on the downloaded bytes, both on the replay runner and on the maintainer's machine from the same artifact.
+
+**CLI replay.** The CLI at `6f7f8b96fd603da127908053c88e2bce719f8b1e` (`src/` identical to `44fbf24`) consumed that SDK on the runner (2026-11-22 14:27:52-14:48:37 GMT, crt-cli [run 45032947370](https://github.com/webos21/crt-cli/actions/runs/45032947370)): CRT's contract replay
+(`replay_cli_contract_windows.py`) passed, with the CLI built by the SDK, self-build cold 21 / 0 reused and warm 0 / 21, ten suites exiting 0 under the restricted token (check counts not captured; only five of the suites are substantive here), and the CLI's
+`replay_c_shared_windows.py` passed **36/36**: static control, shared-runtime executable loading exactly the installed SDK's `bin\libc.dll` and failing to start (`STATUS_DLL_NOT_FOUND`) without the SDK `bin` on `PATH`, shared runtime with a project DLL (one libc, one `errno`), and the refusal of a static
+executable depending on a shared library with no output. Details, hashes and limits are in the [CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-pure-c-shared-sdk-replay-on-a-hosted-runner-2026-11-22).
+
+**The published SDK, as a baseline.** The same driver and CLI against the published `v0.0.1-preview.20261110.windows.1` pass 30/36 with the same six failures as on Windows/arm64: its shared-runtime executable has no `libc.dll` import and loads none, and its shared runtime + project DLL executable does not import `libc.dll`
+while its DLL does, so it does not run. That published SDK is left as it is.
+
+**A workflow finding.** The first run failed in the contract replay's visibility probe because the hosted workspace's inherited read grants were not removed; the retry applies the same preparation as `sdk-integration.yml`, with the probe's denial check unchanged.
+
+**Not covered.** A physical Windows/x64 machine; macOS; a release, signing or pin adoption of any Windows SDK carrying the correction; Windows C++ `<filesystem>` and the curl compile options (the separate P1-01 item); a Windows zlib or same-name provider case. The hosted receipts expire 14 days after the run.
