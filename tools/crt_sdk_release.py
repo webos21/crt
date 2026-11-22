@@ -2,6 +2,7 @@
 """Assemble local Development or Full SDK release assets. Never upload."""
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -115,6 +116,7 @@ def toolchain_contract(extracted, archive, install):
     if "external_os_sdk" in document:
         raise release.ReleaseError("toolchain contract names a machine path; it must be portable")
     check_linux_c_provider(extracted, contract, document)
+    check_windows_c_provider(extracted, contract, document)
     return contract
 
 
@@ -140,6 +142,35 @@ def check_linux_c_provider(extracted, contract, document):
             raise release.ReleaseError("Linux C provider qualification is incomplete or mismatched")
     except Exception:
         print(f"Linux C provider failure evidence retained: {evidence}", file=sys.stderr)
+        raise
+    else:
+        shutil.rmtree(evidence)
+
+
+def check_windows_c_provider(extracted, contract, document):
+    """Qualify the exported Windows C runtime policy: static control, shared libc.dll and a project DLL."""
+    if document.get("target", {}).get("os") != "windows":
+        return
+    os_sdk = os.environ.get("CRT_WINDOWS_SDK_LIBPATH")
+    if not os_sdk:
+        raise release.ReleaseError("Windows C provider qualification needs CRT_WINDOWS_SDK_LIBPATH")
+    evidence = Path(tempfile.mkdtemp(prefix="crt C provider "))
+    try:
+        run([sys.executable, ROOT / "tools/test_c_shared_provider_windows.py", "--sdk-root", extracted,
+             "--contract", contract, "--contract-sha256", dev.digest(contract),
+             "--output", evidence / "result", "--os-sdk", os_sdk])
+        result = json.loads((evidence / "result/result.json").read_text())
+        expected = {"project-dll-build", "static-runtime", "shared-runtime", "shared-project-dll"}
+        cases = result.get("cases", [])
+        if (result.get("passed") is not True or result.get("sdk_unchanged") is not True
+                or result.get("target") != document["target"]
+                or result.get("sdk_content_sha256") != document["sdk_content_sha256"]
+                or result.get("contract_sha256") != dev.digest(contract)
+                or len(cases) != len(expected) or {case.get("name") for case in cases} != expected
+                or any(case.get("passed") is not True for case in cases)):
+            raise release.ReleaseError("Windows C provider qualification is incomplete or mismatched")
+    except Exception:
+        print(f"Windows C provider failure evidence retained: {evidence}", file=sys.stderr)
         raise
     else:
         shutil.rmtree(evidence)

@@ -102,6 +102,9 @@ replays the exact SDK candidate and records its adoption.
   ([evidence](docs/acceptance/sdk_split_acceptance.md#clean-linuxx86_64-c-shared-sdk-candidate-2026-11-21)).
 - [x] Native Linux/aarch64 producer policy replay
   ([hosted evidence](docs/acceptance/sdk_split_acceptance.md#hosted-linux-producer-replay)).
+- [x] Windows/x64 wrapper correction (`crt-cc` honors the runtime linkage) verified on a local, unpromoted
+  candidate; a clean Windows candidate and its CLI replay remain open
+  ([HISTORY](HISTORY.md), 2026-11-22).
 - [ ] Replay the updated CLI on affected native hosts, including macOS and Windows.
   Promote qualified SDK artifacts before consumer pin adoption.
 - Acceptance: verify the static control and each supported shared mode with link
