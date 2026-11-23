@@ -1186,6 +1186,10 @@ the in-build consumer (static and shared runtime, real HTTPS server) and the ext
 Locally on Windows/arm64 (physical), the same code applied to the headers of the public SDK `v0.0.1-ci.45099082349` passes the repository's `test_dev_sdk_consumer.py` (static and shared), the unpatched SDK fails to compile it (the control), and the
 on-disk name of a file opened through `ofstream(u8path("disk-😀.txt"))` is the correct UTF-16 pair D83D DE00.
 
-Not covered: a published SDK carrying the fix (the CI artifact is unsigned and unpromoted); the CLI's own C++17 replay, which still opens files through `path::string()` and should be moved to the direct path open on a promoted SDK; directory and filesystem
+The fix on `main` (`111c351`) is consumed by the CLI on Windows/arm64: the `sdk-integration` run [45131205714](https://github.com/webos21/crt/actions/runs/45131205714) passes all six jobs, and the CLI's C++17 replay, now opening its file with the path itself, passes 22/22 on that run's
+`windows-aarch64` artifact (content `4a22ccd56e04bb3fccc3860636926468b7cdb5bb55381ef05216f7ef17104b43`) while the SDK before the fix fails it at the `ofstream` constructor
+([CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsarm64-direct-path-stream-open-replay-of-the-pal-05-fix-2026-11-23)).
+
+Not covered: a published SDK carrying the fix (the CI artifacts are unsigned and unpromoted); the CLI replay on a physical Windows/x64 machine (the hosted `windows-x86_64` job passes the shared consumer test); directory and filesystem
 operations on names above U+FFFF, which are a separate defect (TODO PAL-06) and are deliberately not used by the test (those names are created and removed through stdio). The `windows-x64` leg of the pull request's `CI` once failed one in-tree libc
 timing check (`bionic_surface_test_runs`: user CPU time advanced), a test this change does not touch; rerunning only that job passed, so it is recorded as a pre-existing timing flake, not a result of this change.

@@ -19,6 +19,8 @@ consumer checks read, write and append through the constructors and `open()`, sp
 ([evidence](docs/acceptance/release_qualification.md#stdfstream-path-open-on-windows-pal-05-2026-11-23), [design](docs/design/cxx_runtime.md#windows-stdfilesystempath-and-stream-opens)). The work also exposed a separate, older defect: libc++'s Windows
 filesystem layer truncates characters above U+FFFF (`create_directory(u8path("😀"))` creates a directory ending in U+F600); that is not fixed here and is tracked as PAL-06.
 
+The CLI's C++17 replay now opens its file with the path itself, and on the CRT `111c351` CI artifact passes 22/22 on Windows/arm64 while the SDK before the fix fails at the `ofstream` constructor ([CLI record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsarm64-direct-path-stream-open-replay-of-the-pal-05-fix-2026-11-23)); Windows/x64 is covered by the hosted job, and the physical x64 replay is open.
+
 ### Close the Windows C++ public compile options item (P1-01)
 
 The Windows/arm64 replay of the corrected Dev profile closes the item. The CLI's `replay_cpp17_consumer_windows.py` consumes the `sdk (windows-aarch64)` CI artifact of `770ed07b` (hosted `sdk-integration` run 45099082349, content
