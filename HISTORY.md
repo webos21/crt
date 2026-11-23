@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-11-23
 
+### Serialize Windows descriptor slots and copy stdio buffers in chunks
+
+The PAL-06 ARM64 CI SDK still reproduced failed reads and wrong bytes from
+two threads opening distinct files. The PAL now serializes descriptor slot
+ownership, replacement and snapshot collection. The original reproducer and a
+new four-thread regression pass with the fix. PAL-01 uses block transfers for
+buffered I/O and for unbuffered descriptor writes. Release temporary-file
+medians are 76.8 to 126.8 MiB/s for buffered writes and 97.9 to 272.8 MiB/s
+for buffered reads. The focused results are 19 passes and one existing skip
+on native ARM64, and 11/11 in x64 emulation. The focused CLI test with the
+original stdio relay captures its expected 8 MiB and exits 0 in 8.625 seconds.
+[Evidence](docs/acceptance/release_qualification.md#windows-descriptor-ownership-and-stdio-block-transfers-2026-11-23).
+
+### Qualify the ARM64 Unicode workflow and decide Windows spawn policy
+
+SDK installation, cold and warm CLI builds and static/shared execution pass
+22/22 in each of two Unicode roots on native ARM64, and 22/22 on x64 under
+emulation. Both public host-tools bundles exercise Unicode paths, with the
+x64 check also under emulation. PAL-03 retains the explicit launcher hint for
+known foreign Windows tools because ordinary PE metadata cannot identify
+support for the CRT child protocol.
+[Evidence and remaining native x64 gate](docs/acceptance/release_qualification.md#windows-unicode-and-native-child-selection-pal-02-and-pal-03-2026-11-23).
+
 ### Convert characters above U+FFFF at the libc++ Windows filesystem boundary (PAL-06)
 
 libc++'s Windows `std::filesystem` truncated every character above U+FFFF to 16 bits. A `path` on this target holds UTF-32 (the 4-byte `wchar_t` the headers produce for `u8path()` and `wstring`) while every Win32 call is UTF-16, and the

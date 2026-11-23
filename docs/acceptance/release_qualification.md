@@ -1210,3 +1210,93 @@ By design and documented in `cxx_runtime.md`: a `std::wstring` that stores a UTF
 Not covered: a published SDK carrying the fix (the CI artifacts are unsigned and unpromoted), a physical Windows/x64 machine (the hosted `windows-x86_64` job covers x64), and symlink creation, which needs a privilege the runners may not grant (`create_symlink` is not in the consumer test).
 
 The `windows-x64` leg of the pull request's `CI` failed once on `bionic_surface_test_runs` (`user CPU time advanced`), a test this change does not touch. Its root cause is the 15.6 ms Windows CPU-time tick and a fixed amount of spinning; it is fixed separately (PR 22, `0871ca6`) and recorded in HISTORY.
+
+### Windows descriptor ownership and stdio block transfers (2026-11-23)
+
+Physical Windows ARM64, OS build 26300, LLVM 22.1.8, Release. Producer base
+`0686ca5`, with the local PAL and stdio changes. The original
+[CLI I/O reproducer](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/ci_acceptance.md#windowsarm64-hosted-integration-expansion-2026-11-20)
+fails on three consecutive invocations against the PAL-06 ARM64 SDK from run
+`45142915867` (content
+`6fc5c4bc20a57edb6f8e345a24e509361c9c5983eb27c7fb1259e10516a5478c`).
+The first invocation reports three failed reads, one wrong byte and three
+failed closes across two threads. It uses `open`, `read` and `close` directly.
+Android Bionic delegates descriptor allocation and release to Linux. The
+Windows PAL owns that bookkeeping and previously scanned and claimed free
+entries without synchronization.
+
+The PAL serializes initialization, slot claim and release, fixed-slot
+replacement, and descriptor snapshot collection. Fork holds the slot lock
+across handle inheritance and the table copy. Each process releases its own
+copy before returning. Concurrent readers on independently owned descriptors
+hold no slot lock while reading. The original two-thread reproducer passes
+five consecutive runs with the replacement PAL object, with zero failures in
+200,000 open/read/close cycles. The new four-thread test exercises 80,000
+cycles per invocation and checks each reader's expected byte. It reports 93
+failures against the CI SDK and passes three consecutive reruns with the fix.
+This coverage
+is for independent descriptor lifetimes. Concurrent use of a descriptor that
+another thread closes or replaces is outside this test.
+
+PAL-01 copies buffered reads and writes in chunks. Pushback, refill and line
+flush boundaries still use the existing stream helpers. Unbuffered
+descriptor-backed writes call the descriptor callback with bounded blocks and
+count the bytes reported before an error. Memory streams and unbuffered custom
+cookies keep their previous callback behavior. The edge suite checks newline
+visibility, multiple pushbacks, refill and the final incomplete element.
+The five stdio suites and the Windows descriptor, socket, eventfd, fork,
+spawn and UTF-8 checks report 19 passes and one existing fork-heap skip in
+the focused 20-test run. A fresh Release build targeting x64 passes 11/11
+focused tests under Windows x64 emulation. It covers the four-thread test,
+descriptor snapshots, fork, spawn, Unicode and the five stdio suites.
+
+`benchmark/stdio_throughput.c` uses `crt-cc -O3`, a 64 KiB buffer and a
+temporary file. The baseline links the existing local PAL-06 SDK, libc.a
+SHA-256 `6785e25e50ae34490e299e98754ca77f1541a20f6683e8af5e77d86ff7e4337c`.
+The candidate adds the Release `stdio.c.obj` as a link input, so only stdio
+changes in this comparison. Three interleaved runs yield these medians:
+
+| Transfer | Baseline MiB/s | Candidate MiB/s |
+| --- | ---: | ---: |
+| Buffered write, including flush | 76.8 | 126.8 |
+| Buffered read | 97.9 | 272.8 |
+| Unbuffered write | 0.1 | 1829.7 |
+
+The buffered write samples vary with file-cache and host load. These results
+measure the stated temporary-file workload. Linux/x86_64 and macOS/arm64
+freestanding compile checks pass. Native execution on those hosts remains open.
+
+The CLI [already switched its public Windows ARM64 relay to descriptor writes](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/host_environment_acceptance.md#windowsarm64-d1-public-preview-replay-2026-11-20).
+To exercise libc itself, a local CLI seed from `ae53896` used the previous
+`fwrite(..., stderr)` relay at the original call site. It linked the PAL-06 CI
+SDK and the single Release stdio object. Under the restricted token, the signed
+public ARM64 host tools ran `dd if=/dev/zero bs=65536 count=160` with the original
+60-second inner and 90-second outer deadlines. It exited 0 in **8.625 seconds**,
+captured exactly **8,388,608** zero bytes, reported truncation without a timeout,
+and started only declared images. The first link attempt was denied access to
+the original object by the input visibility boundary. Relocating the same
+object into the private workspace preserved the boundary.
+
+Evidence is retained in `out/pal-followup/`, including
+`fd-hosted-baseline.log`, `fd-fixed.log`, `stdio-release.log`,
+`d1-stdio/` and `d1-legacy-relay/result.json`. The focused relay run does not
+replace the CLI's full public D1 replay.
+
+### Windows Unicode and native child selection (PAL-02 and PAL-03, 2026-11-23)
+
+The PAL-06 CI SDK from run `45142915867` passes the CLI's external C++17
+consumer in two Unicode work roots on physical Windows ARM64 (22/22 each).
+The x64 SDK and public x64 CLI also pass 22/22 under x64 emulation with x64
+LLVM. The [CLI record](https://github.com/webos21/crt-cli/blob/a9cfa41001d3edd7ce3a2ee084567a53c4a9bc45/docs/acceptance/sdk_install_acceptance.md#windows-unicode-sdk-installation-and-external-c-consumers-pal-02-2026-11-23)
+owns the exact identities, failed tool-architecture attempt and host-tools
+consumer case. The signed ARM64 host-tools bundle passes 18/18 from a path
+containing Hangul, spaces and U+1F600. The native narrow-string test verifies
+the exact UTF-8 argument and environment value in a CRT child. Physical
+Windows/x64 end-to-end replay remains open.
+
+The [Windows spawn policy](../design/windows_fork_emulation.md#native-child-selection-pal-03)
+retains the explicit foreign-child hint. The ARM64 owned-group test exercises
+both launcher modes, the spawn environment test verifies bootstrap transport
+cleanup for a CRT child, and the long-argv test exercises CRT argument
+transport. The wrappers continue to use the hint for their declared external
+LLVM tool boundary.

@@ -55,8 +55,8 @@ def main():
     (evidence / 'result.json').unlink(missing_ok=True)
     work, sid = sandbox.create_work(args.work)
     source = work / 'source'
-    # Spaces yes, Hangul no: Windows narrow paths are ANSI code-page bytes and the imported libc++ rejects non-ASCII
-    # narrow<->wide conversion ("locale not supported"); that gap is recorded in the acceptance document, not hidden.
+    # A caller can put Unicode in --work. Keep the fixed suffix short for the
+    # Windows path-length limit on dependency and generated file names.
     sdk = work / 'SDK space' / 'dev'
     source.mkdir()
     sdk.parent.mkdir()
