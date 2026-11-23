@@ -8044,7 +8044,11 @@ long __crt_sys_sched_yield(void) {
 /* getrusage(RUSAGE_SELF) for libc/src/resource.c: CPU times from GetProcessTimes (100 ns
  * units, returned in microseconds) and the peak working set in KiB (Bionic's ru_maxrss unit).
  * Windows keeps no accounting of terminated children and none per thread here, so those
- * callers get zeros from resource.c. */
+ * callers get zeros from resource.c. The CPU times advance in scheduler ticks of about
+ * 15.6 ms (the same source behind clock_gettime(CLOCK_PROCESS_CPUTIME_ID) and Python's
+ * process_time()): a process that has run for less than a tick can report zero. Callers,
+ * and tests, must not assume a fixed amount of work moves the clock; spin for a bounded
+ * amount of wall time instead (libc/tests/bionic_surface_test.c). */
 long __crt_sys_getrusage_self(long long* user_us, long long* system_us, long* max_rss_kib, long* page_faults) {
   struct crt_win_filetime creation;
   struct crt_win_filetime exit_time;
