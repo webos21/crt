@@ -369,7 +369,7 @@ Linux/aarch64's [public replay](docs/acceptance/sdk_split_acceptance.md#linuxaar
 Use the [installation guide](docs/guides/dev_sdk_preview.md) for external toolchain requirements and explicit SDK selection. The detached signature covers the archive. Authenticode, Developer ID and notarization
 remain separate platform gates. The historical Linux pure C shared SDK-provider
 control resolved host libz. Current SDK policy and replay remain open under
-[Tranche 6.4](TODO.md#p0---pure-c-shared-provider-policy-tranche-64--d5).
+[Tranche 6.4](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23).
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -589,7 +589,7 @@ The current producer focus is Dev SDK correctness and release signing.
   search policy. Qualify the intended provider with link and loaded-image
   evidence, or verify explicit rejection of the unsupported mode. Replay the
   exact candidate with the CLI before adoption.
-  [C shared work](TODO.md#p0---pure-c-shared-provider-policy-tranche-64--d5).
+  [C shared work](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23).
 - **Windows C++ P1-01** covers the Dev profile's curl compile options and
   `<filesystem>`. The CLI already scopes the options by source. A corrected
   producer SDK still needs external C++17 replay on Windows x64 and ARM64.
