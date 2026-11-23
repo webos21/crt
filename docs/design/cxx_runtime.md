@@ -276,11 +276,18 @@ libc++ or added to the CRT libc, and no consumer option is involved. The `__cxx0
 The shared Dev SDK consumer (`libstdc++/tests/development_sdk_consumer.cc`) checks it on every OS in a static and a shared runtime: read, write and
 append through the constructors and `open()`, space, Hangul and supplementary-plane names, failure states and the preservation of an existing file.
 
-**Known limit (TODO PAL-06).** libc++'s own Windows filesystem operations and its `path` narrow/wide conversions (`__char_to_wide`,
-`__wide_to_char`, `crt_win32_wide.h`) still treat the 4-byte `wchar_t` as one UTF-16 unit per element: a character above U+FFFF is truncated to 16 bits
-(`create_directory(u8path("\U0001F600"))` creates a directory whose name ends in U+F600), `path::string()` of such a path is wrong, and
-`path(const char*)` with a 4-byte UTF-8 character throws. Stream opens do not depend on those layers, so a file named with such a character is opened
-correctly (its on-disk name is the UTF-16 pair); a directory operation on it is not.
+**Characters above U+FFFF (fixed 2026-11-23, TODO PAL-06).** A `path` on this target holds UTF-32, one `wchar_t` element per Unicode scalar value, as
+the libc++ headers produce it (`u8path()`, `wstring`, `u8string()`); the Win32 boundary is UTF-16, where such a character is a surrogate pair. The
+helpers in `crt_win32_wide.h` therefore convert, not truncate: `narrow()` splits an element above U+FFFF into a pair (a scratch buffer needs
+`narrow_capacity(len)` = `2 * len + 1` units, and a Win32 length is the returned unit count), `widen()` combines pairs and returns the element count, and
+every one of the recipe's call sites uses those counts. `__char_to_wide` returns the element count in both calls of the header's "measure, then
+convert" idiom, so the string is never resized to the raw UTF-16 unit count. Before the fix a character such as U+1F600 was truncated to 16 bits at
+every boundary: `create_directory(u8path(...))` made a directory whose name ended in U+F600, `path::string()` of it was wrong and `path(const char*)`
+with a 4-byte UTF-8 character threw. The shared Dev SDK consumer (`filesystem_unicode_checks`) now creates, lists, renames, copies, resolves
+(`canonical`, `absolute`, `current_path`) and removes names with U+1F600 and U+20000 on every OS and checks that stdio reaches the same names.
+Limits that remain by design: an element in the surrogate range is passed to the OS unchanged (NTFS allows unpaired surrogates, and such a name must round-trip), so a
+`std::wstring` that stores a UTF-16 pair as two elements is not a valid UTF-32 path (`string()`/`u8string()` of it throw, as before), and a code unit pair that
+two adjacent unpaired surrogate elements happen to form is combined by `widen()`; a value above U+10FFFF becomes U+FFFD.
 
 ## Exceptions, RTTI, And Unwind
 
@@ -527,7 +534,7 @@ is narrower:
 
 1. Add further focused standard-library behavior coverage where host
    adaptation is subtle. Windows `<filesystem>` UTF-32-`wchar_t`-to-UTF-16
-   path handling, the item that used to head this list, is done for characters up to U+FFFF (see the limit above) -- see
+   path handling, the item that used to head this list, is done -- see
    [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s 2026-08-31 entry for the full investigation (a real
    client/library ABI mismatch caused by an existing `<print>` patch's
    translation-unit-global `#undef`, plus several other real bugs found
