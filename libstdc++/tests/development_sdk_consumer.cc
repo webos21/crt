@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <set>
 #include <string>
 #include <system_error>
 #include <nlohmann/json.hpp>
@@ -72,7 +73,7 @@ static bool platform_persona() {
 // in this CRT) and the wide open has to reach the CRT's UTF-8 narrow file-name boundary; on Linux/macOS it is char. The same checks run
 // on every OS: read, write and append through the path constructors and open(); a space, a Hangul and a supplementary-plane name;
 // failure states and the preservation of an existing file. File names with a supplementary-plane character are created and removed
-// through stdio, not std::filesystem: libc++'s own Windows directory operations are a separate item (TODO PAL-06).
+// through stdio here, so the stream open is checked independently of std::filesystem (filesystem_unicode_checks covers that below).
 static bool fstream_path_checks(std::string& why) {
   namespace fs = std::filesystem;
   auto fail = [&](const char* what) { why = what; return false; };
@@ -168,11 +169,86 @@ static bool fstream_path_checks(std::string& why) {
   return true;
 }
 
+// std::filesystem with names above U+FFFF (CRT TODO PAL-06). On Windows path::value_type is the packaged libc++'s 4-byte wchar_t holding
+// UTF-32 and every OS call goes through a UTF-16 boundary: before the fix a character such as U+1F600 was truncated to 16 bits there
+// (create_directory made a directory ending in U+F600), path::string() of it was wrong and path(const char*) threw. The same checks run
+// on every OS: the representation (u8string(), string(), path(const char*)), create/exists/iterate/rename/copy/remove, current_path,
+// canonical, and that stdio reaches the very names the filesystem layer created.
+static bool filesystem_unicode_checks(std::string& why) {
+  namespace fs = std::filesystem;
+  auto fail = [&](const std::string& what) { why = what; return false; };
+  const std::string emoji = "\xF0\x9F\x98\x80";    // U+1F600, one UTF-16 pair
+  const std::string ext_b = "\xF0\xA0\x80\x80";    // U+20000, the first CJK Extension B character
+  const std::string hangul = "\xED\x95\x9C";       // U+D55C, a BMP control that always worked
+  const std::string names[] = {"crt fs " + emoji, "crt fs " + hangul + emoji + " b", "crt fs " + ext_b + hangul + ext_b};
+  std::error_code ec;
+  for (const std::string& u8 : names) {
+    const std::string tag = " [" + std::to_string(u8.size()) + " bytes]";
+    const fs::path dir = fs::u8path(u8);
+    // representation
+    if (dir.u8string() != u8) return fail("u8path(...).u8string() round trip" + tag);
+    if (dir.string() != u8) return fail("u8path(...).string() must be the UTF-8 bytes" + tag);
+    fs::path from_char(u8.c_str());
+    if (from_char != dir || from_char.string() != u8) return fail("path(const char*) with a 4-byte UTF-8 character" + tag);
+    fs::path from_string{std::string(u8)};
+    if (from_string != dir) return fail("path(std::string) with a 4-byte UTF-8 character" + tag);
+    if ((dir / "x").filename().string() != "x" || (dir / "x").parent_path().string() != u8) return fail("append and parent_path keep the name" + tag);
+    // create, exists, is_directory, and stdio reaches the same name
+    fs::remove_all(dir, ec);
+    if (!fs::create_directory(dir, ec) || ec) return fail("create_directory" + tag);
+    if (!fs::exists(dir, ec) || !fs::is_directory(dir, ec)) return fail("exists and is_directory" + tag);
+    {
+      std::FILE* probe = std::fopen((u8 + "/probe.txt").c_str(), "wb");
+      if (!probe) return fail("stdio must open a file in the directory the filesystem layer created" + tag);
+      std::fputs("probe", probe);
+      std::fclose(probe);
+    }
+    if (!fs::exists(dir / "probe.txt", ec) || fs::file_size(dir / "probe.txt", ec) != 5) return fail("the filesystem layer must see the stdio file" + tag);
+    // a stream through the path, the entry names, rename, copy, remove
+    { std::ofstream out(dir / ("f " + u8 + ".txt"), std::ios::binary); if (!out) return fail("ofstream into the directory" + tag); out << "stream"; }
+    std::set<std::string> seen;
+    for (const fs::directory_entry& entry : fs::directory_iterator(dir, ec)) seen.insert(entry.path().filename().string());
+    if (ec || seen != std::set<std::string>({"probe.txt", "f " + u8 + ".txt"})) return fail("directory_iterator must return the exact names" + tag);
+    const fs::path renamed = dir / ("r " + u8 + ".txt");
+    fs::rename(dir / "probe.txt", renamed, ec);
+    if (ec || !fs::exists(renamed, ec) || fs::exists(dir / "probe.txt", ec)) return fail("rename to a name above U+FFFF" + tag);
+    if (!fs::copy_file(renamed, dir / ("c " + u8 + ".txt"), ec) || ec) return fail("copy_file" + tag);
+    if (fs::file_size(dir / ("c " + u8 + ".txt"), ec) != 5) return fail("the copy has the content size" + tag);
+    // the parent directory lists the new directory under the exact name
+    bool listed = false;
+    for (const fs::directory_entry& entry : fs::directory_iterator(".", ec)) listed = listed || entry.path().filename().string() == u8;
+    if (!listed) return fail("the parent directory must list the directory under the exact name" + tag);
+    // canonical, absolute and current_path go through realpath and the working-directory calls
+    fs::path canon = fs::canonical(dir, ec);
+    if (ec || canon.filename().string() != u8) return fail("canonical keeps the last component" + tag);
+    if (fs::absolute(dir).filename().string() != u8) return fail("absolute keeps the last component" + tag);
+    const fs::path before = fs::current_path();
+    fs::current_path(dir, ec);
+    if (ec || fs::current_path().filename().string() != u8) return fail("current_path into the directory" + tag);
+    fs::current_path(before, ec);
+    if (ec || fs::current_path() != before) return fail("current_path back" + tag);
+    // free space and permissions take the directory path to the OS
+    fs::space(dir, ec);
+    if (ec) return fail("space" + tag);
+    fs::permissions(dir, fs::perms::owner_all, ec);
+    if (ec) return fail("permissions" + tag);
+    // everything removed through the same layer, and gone for stdio too
+    if (fs::remove_all(dir, ec) != 4 || ec) return fail("remove_all must remove the directory and its 3 files" + tag);
+    if (fs::exists(dir, ec) || std::fopen((u8 + "/probe.txt").c_str(), "rb")) return fail("the directory must be gone" + tag);
+  }
+  return true;
+}
+
 static bool utilities(const char* program) {
   if (!platform_persona()) return false;
   std::string fstream_why;
   if (!fstream_path_checks(fstream_why)) {
     std::cerr << "development-sdk: fstream path: " << fstream_why << '\n';
+    return false;
+  }
+  std::string filesystem_why;
+  if (!filesystem_unicode_checks(filesystem_why)) {
+    std::cerr << "development-sdk: filesystem unicode: " << filesystem_why << '\n';
     return false;
   }
   nlohmann::json value = {{"integer", 18446744073709551615ULL}, {"text", "space \uD55C\uAE00"}};
