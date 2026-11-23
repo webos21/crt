@@ -214,9 +214,71 @@ to the row values. Build the indicated target and retain both the first error
 and the installed manifest. Verify stage 04 and, where applicable, stage 05.
 Check the transitive shared-object closure, dependency records, applicable
 license and relink payloads, and rebuild each shipped example from a relocated
-package via its `crt-toolchain.cmake`. The native runs remain open. This gate
-applies to the affected Media/UI combinations. Dev SDK qualification follows
-its own inputs and affected checks.
+package via its `crt-toolchain.cmake`.
+
+#### Native result and decision (2026-11-23, CRT `312fec9` plus the uncommitted fix)
+
+The Linux/x86_64 replay at `312fec9` (Ubuntu 26.04, Clang/LLD 21.1.8) reproduced
+two packaging gaps, both rooted in the stage-04 dependency publication being
+all-or-nothing: `create_dist.py` receives the Skia/FFmpeg/curl closure
+(`--media-dependency-prefix`, `--skia-*`) only when all three options are ON.
+
+| Skia | FFmpeg | curl | Before | Now |
+| --- | --- | --- | --- | --- |
+| OFF | OFF | ON | passes (`libcrtmedia.so` has no curl dependency: the transport is compiled only with FFmpeg) | passes, unchanged |
+| OFF | ON | ON | stage 04 fails: `lib/libcrtmedia.so -> undeclared libcurl.so.4` after a full build | `crt-media-dist`/`crt-ui-dist` refused in under a second with a diagnostic |
+| ON | OFF | ON | built and verified, but shipped `libcrtgfx_skia.*`, `libcrtui_skia*.a` and `examples/gfx-skia` without `lib/libskia.a`; the relocated example failed at configure | refused in under a second with the same diagnostic |
+| ON | ON | ON | passes | passes, generated command lines byte-identical |
+
+Decision: the ordinary `crt-media-dist`/`crt-ui-dist` package supports **Skia,
+FFmpeg and curl all OFF, or all ON**, on Linux targets. Evidence: a package
+that ships the FFmpeg-backed `libcrtmedia` also needs the FFmpeg link/runtime
+artifacts, the LGPL relink kit and source offer, FreeType and the curl, Mbed TLS
+and zlib closure; a package that ships the Skia companions needs `libskia.a`,
+its headers and its record. `copy_media_development_dependencies()` and
+`add_redistributed_dependencies()` publish those as one unit and neither takes a
+Skia-less or FFmpeg-less shape. No isolated stage, consumer or release asset
+needs such a package. Making them partial-capable would be a larger change with
+its own manifest, verification and relink-kit variants, so it is not done here
+(see the TODO follow-up).
+
+Enforcement:
+
+- `cmake/crt_media_dist_options.cmake` holds the one predicate. On Linux targets
+  `CMakeLists.txt` replaces `crt-media-dist` and `crt-ui-dist` with a failing
+  target carrying the diagnostic for an unsupported combination, so the
+  refusal happens before the build of the stage prerequisites. Other targets of
+  that tree still build. The first draft refused only `crt-media-dist`, which let `crt-ui-dist`
+  queue its other prerequisites for 4.5 to 8 minutes before the build stopped.
+- `tools/verify_dist.py` (`validate_optional_payload_closure`) rejects any
+  04/05 package that ships Skia payload (`include/crtgfx/skia.h`,
+  `examples/gfx-skia`, `libcrtgfx_skia*`, `libcrtui_skia*`) without
+  `lib/libskia.a` and a `skia` record, or the FFmpeg-backed media-player sample
+  without the `ffmpeg`, `curl`, `mbedtls` and `zlib` records. The old
+  `out/pal04-r4` package passed `verify_dist` before and is rejected now.
+- Tests: `tools/test_media_dist_options.py` runs the exact predicate over all
+  eight combinations and checks the Linux wiring; `OptionalPayloadClosureTests`
+  in `tools/test_verify_dist.py` covers each marker and the passing shapes.
+
+Fresh Release trees under `out/` (all with `CRTMEDIA_ENABLE_CURL=ON`, LVGL ON):
+
+| Tree | Skia/FFmpeg | Target | Result |
+| --- | --- | --- | --- |
+| `pal04-g3` | OFF/ON | `crt-ui-dist`, `crt-media-dist` | refused in 0.6 s with the diagnostic |
+| `pal04-g4` | ON/OFF | `crt-ui-dist`, `crt-media-dist` | refused in 0.6 s with the diagnostic |
+| `pal04-c1` | OFF/OFF | `crt-media-dist` | builds in 6 min 7 s; stage-04 `verify_dist` passes; `gfx-simple`, `gfx-gpu` rebuild from a copy under a space/Hangul path |
+| `pal04-c2` | OFF/OFF | `crt-ui-dist` | builds in 7 min 40 s; 04 and 05 `verify_dist` pass; `gfx-simple`, `gfx-gpu`, `ui-basic` rebuild from the relocated package; `ui-basic` with 30 frames reports `presented=30 pixel_check=pass input_check=pass` |
+| `pal04-cf` | ON/ON | `crt-ui-dist` | builds in 12 min 16 s; 04 and 05 `verify_dist` pass; `gfx-simple`, `gfx-gpu`, `gfx-skia`, `ui-basic`, `media-player` rebuild from the relocated package; `ui-basic` passes as above |
+
+The first `g3`/`g4` runs (before `crt-ui-dist` was also replaced) already
+printed the diagnostic but only after 4 min 33 s and 8 min 10 s.
+`crt-ui-dist`/`crt-media-dist` command lines in the full tree's `build.ninja`
+equal those of a tree configured from the unmodified `312fec9` sources once the
+tree names are normalized. Limits: Linux/x86_64 only; macOS and Windows
+packaging was neither changed nor replayed, so a partial combination there is
+neither refused nor verified; `media-stream` exists only in the isolated stage;
+the `cf` build time was not analyzed for cache effects; packages were not run
+against a display beyond the `ui-basic` 30-frame check.
 
 ### 1. LVGL import and first pixels (Windows/x64 first)
 
