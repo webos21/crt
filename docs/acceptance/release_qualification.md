@@ -1300,3 +1300,118 @@ both launcher modes, the spawn environment test verifies bootstrap transport
 cleanup for a CRT child, and the long-argv test exercises CRT argument
 transport. The wrappers continue to use the hint for their declared external
 LLVM tool boundary.
+
+### macOS/arm64 PAL follow-up replay (2026-11-23)
+
+Replay the Windows/arm64 work after synchronizing CRT `52881f0`, CLI `6704aa8`
+and crt-vscode `119e894`. Host: physical arm64, macOS 27.2.1 (`26B131`),
+Xcode 27.2 (`27B52`), Apple Clang 21. No runtime, upstream, SDK payload,
+consumer option or pin is patched in this replay. The Windows descriptor-table
+lock is not executed on macOS; its native x64 gate stays open.
+
+#### Fresh common-runtime execution
+
+A new `out/pal-replay-macos-20261123/build` uses Ninja/Release, explicit Clang,
+`CRT_TARGET_OS=macos`, `CRT_TARGET_ARCH=host`, imported libc++ off and
+Skia/FFmpeg/curl/LVGL off. `crt-c-build` completes from the fresh tree.
+The normal core CTest filter passes **146/146**. The first sandboxed attempt
+passes 144 and fails the IPv6 and Unix socket tests with `EPERM`; rerunning
+with native socket/resolver access passes all 146. Both logs are retained;
+the permission-denied attempt is not silently counted as a product pass.
+
+Five stdio suites, printf, scanf and its edge matrix are also independently
+compiled against the newly built C runtime in **both static and shared** modes.
+The portable four-thread `windows_fd_concurrency_test.c` is compiled manually
+on macOS and run three times per linkage (80,000 independent open/read/close
+cycles per invocation). All **18 builds / 22 executions** pass. This verifies
+Darwin descriptor behavior, not the Windows table implementation. Nine shared
+executables pass the Mach-O CRT binding/mixed-allocator audit. The nine stdio,
+formatter and CPU-time CTest cases also pass 20 repetitions each.
+
+For a controlled throughput comparison, both executables use the same prior
+macOS SDK (CRT `5325cea`, libc.a SHA-256
+`b74dd81a175e2704dd72e8d3af28e35a21a002d534704796649bdb5155ba3e66`).
+Only the candidate additionally links the fresh Release `stdio.c.o`.
+`benchmark/stdio_throughput.c` is compiled with `-O3`; three interleaved
+temporary-file samples give these medians:
+
+| Transfer | Baseline MiB/s | Stdio-only candidate MiB/s |
+| --- | ---: | ---: |
+| Buffered write, including flush | 201.6 | 302.7 |
+| Buffered read | 342.5 | 1783.0 |
+| Unbuffered write | 0.4 | 3875.3 |
+
+The separately linked all-current core binary also passes all samples. These
+are local cached temporary-file measurements, not storage-device throughput or
+a portable performance threshold. The Windows conversion helper is compiled
+as a pure UTF-32/UTF-16 algorithm on this Mac: 15 boundary values and 9,860
+sampled values pass. That does not execute Win32 APIs. The patch-shape guard
+passes 5/5; Dev SDK unit discovery passes 35 with two skips, and release unit
+tests pass 16 with one skip. Skips are not native acceptance passes.
+
+#### Clean SDK consumer inputs
+
+Use the unmodified `sdk-macos-aarch64-52881f086c44ae22ea257e3d22839ff3b71e1ce7`
+artifact of [integration run 45159161995](https://github.com/webos21/crt/actions/runs/45159161995)
+(all six jobs succeed). Independently verify its archive, install inventory,
+portable contract and source assets before extracting:
+
+- SDK label: `v0.0.1-ci.45159161995`; producer and compile provenance are clean
+  CRT `52881f086c44ae22ea257e3d22839ff3b71e1ce7`.
+- Release-manifest SHA-256:
+  `827aec91e4dea6ad357d0c5e6b573b800d10d45c8a2f548e180c59c8c02bb31d`.
+- Archive SHA-256 (6,137,372 bytes):
+  `7cdd78cb1a422d5296d8c86d1de92897ea3c63d861e7c2d71c3f5de9b92e7090`.
+- Installed content:
+  `2ff2debd24be8a08fe6695af3b401e9e3afbd77abd4b2468f660462a4556534a`.
+- Portable contract:
+  `5f99c145e15c3805df4310178ed80baa74289e42dbd43af72d6714f257675ed1`.
+
+`tools/test_dev_sdk_external.py` passes on this device: the original producer,
+build tree and SDK are unreadable to the relocated consumers under Seatbelt;
+the SDK inventory is unchanged. Static and shared consumers each run the valid
+loopback HTTPS/inflate case and wrong/missing/malformed-CA refusals. Each run
+also executes the shared `development_sdk_consumer.cc` stream and filesystem
+checks, including U+1F600/U+20000 create/list/rename/copy/canonical/current-path/
+permissions/remove operations and direct path-taking stream opens. The same
+test source passes against the older Mac SDK as a control: the original
+Windows-only failure is not relabeled as a macOS defect. Both consumers pass
+CRT binding/import auditing. Imported libc++ smoke, string ABI, iostream and
+exception-register checks pass in static and shared modes (eight executions).
+
+#### CLI contract and Unicode projects
+
+`tools/replay_cli_contract_macos.py` completes against this exact SDK and CLI
+`6704aa8`: cold self-build 21 executed / 0 reused, warm 0 / 21, the native,
+archive, SDK-store, recipe and store-lock suites, SDK/source-hidden bare
+help/version/doctor, a single-executable binding audit and unchanged original
+and relocated SDK inventories. Five input-gated port suites skip; they are not
+new port acceptance. No dirty opt-in or previous-CLI bootstrap loop is used.
+
+A retained external fixture also installs the same pinned SDK through that
+SDK's freshly built CLI seed, then builds and runs static/shared C++ projects
+under `projects space 한글 😀` with the original CRT/CLI trees hidden and no
+network. It copies the identified Dev SDK consumer source and calls its
+`utilities()` checks (streams/filesystem/JSON/SHA-2/xz/PAL), not its HTTPS entry
+point. All nine CLI commands and the denial probe pass; cold builds execute,
+warm builds reuse, and both app binding audits pass. This exercises CLI-owned
+native compile policy rather than calling the shell wrappers. Exact CLI
+identities, suite counts, fixture entry point and limits belong to
+[consumer acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#macosarm64-pal-follow-up-sdk-consumer-replay-2026-11-23)
+and its compatibility ledger. crt-vscode has no affected source change and no
+Extension Development Host or debugger run is claimed.
+
+#### Evidence and remaining gates
+
+Retained root: `out/pal-replay-macos-20261123/`. `inputs.json`, `core-build.log`,
+both `core-ctest*.log`, `core-consumers/result.json`, `core-binding-audit.json`,
+`stdio-repeat.log`, `stdio-throughput.{json,log}`, `wide-boundary-test.cc`,
+`crt_win32_wide.h`, the unit logs, `ci-input/`, `sdk-verification.json`,
+`external-consumer/result.json` and `libcxx-smoke.log` retain exact inputs,
+commands/results and the comparison binaries. `cli-contract/`,
+`replay_cli_cpp.py`, `cli-cpp-consumer/` and `cli-cpp-binding-audit.json` retain
+the external CLI commands, sources, denial probes and consumer results.
+This is CI-artifact and local
+execution evidence, not a signed release, pin adoption or editor acceptance.
+Native Linux stdio execution, physical Windows/x64 follow-ups and Linux
+partial-option Media/UI packaging remain separate gates. STATUS is unchanged.

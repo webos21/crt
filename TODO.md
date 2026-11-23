@@ -75,9 +75,10 @@ Found by the CLI's Windows replay (reproducers and numbers in the CLI's
   on native Windows/x64. ARM64 and x64 emulation pass
   [the measured replay](docs/acceptance/release_qualification.md#windows-unicode-and-native-child-selection-pal-02-and-pal-03-2026-11-23).
   Keep the Windows 10 1903 and foreign-host DLL limits.
-- [ ] **PAL-01** Run native Linux and macOS stdio regressions for the block
-  transfers. ARM64 Release measurements and the focused legacy CLI relay replay
-  are in [acceptance](docs/acceptance/release_qualification.md#windows-descriptor-ownership-and-stdio-block-transfers-2026-11-23).
+- [ ] **PAL-01** Run native Linux stdio regressions for the block transfers.
+  [macOS/arm64 replay](docs/acceptance/release_qualification.md#macosarm64-pal-follow-up-replay-2026-11-23)
+  passes; Windows ARM64 measurements and the legacy CLI relay replay remain in
+  [acceptance](docs/acceptance/release_qualification.md#windows-descriptor-ownership-and-stdio-block-transfers-2026-11-23).
 
 - [ ] **PAL-04** Revalidate meaningful partial-option combinations of ordinary Linux
   `crt-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl

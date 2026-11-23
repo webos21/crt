@@ -10,6 +10,29 @@ substantive update.
 
 ## 2026-11-23
 
+### Replay the Windows PAL follow-up work on macOS/arm64
+
+Synchronize CRT `52881f0`, CLI `6704aa8` and crt-vscode `119e894`. A fresh
+Release core build passes 146/146 native CTest cases; retain the initial two
+sandbox socket refusals separately. Static/shared stdio, formatter and
+independent-fd consumers pass 18 builds and 22 executions, with nine shared
+binding audits and 20 repetitions of nine focused CTest cases. The controlled
+stdio-object comparison improves buffered write/read medians from 201.6/342.5
+to 302.7/1783.0 MiB/s on the same prior Mac SDK; these are cached temporary-file
+measurements, not a device-throughput claim.
+
+Independently verify the clean macOS SDK of integration `45159161995` at the
+same CRT commit. Its relocated static/shared path/Unicode/HTTPS consumers pass
+with the producer and original SDK hidden, and all eight imported-libc++ smoke
+executions pass. Current CLI source self-builds through the SDK and builds/runs
+the same utilities/path fixture through static/shared CLI projects under a
+space/Hangul/U+1F600 path, without corrective flags or host-runtime fallback.
+The full CLI contract replay also passes its five substantive suites and
+SDK-hidden bare execution; input-gated port suites remain skips.
+Only PAL-01's macOS gate closes; Linux stdio, physical Windows/x64 and the Linux
+partial-option packaging gates remain. No runtime/product/pin or STATUS change.
+[Inputs, results, commands and limits](docs/acceptance/release_qualification.md#macosarm64-pal-follow-up-replay-2026-11-23).
+
 ### Serialize Windows descriptor slots and copy stdio buffers in chunks
 
 The PAL-06 ARM64 CI SDK still reproduced failed reads and wrong bytes from
