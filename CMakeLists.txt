@@ -1872,19 +1872,38 @@ if(Python3_Interpreter_FOUND)
       --media-source-root "${CMAKE_BINARY_DIR}/port-tests/src"
       --skia-source "${CRTGFX_SKIA_ROOT}" --skia-library "${CRT_STAGE_SKIA_LIBRARY}")
   endif()
-  crt_add_cached_stage_target(crt-media-dist NAME gfx-media-dist STAGE gfx-media
-    INPUTS "${CRT_DIST_ROOT}/03-gfx-simple"
-    OUTPUTS "${CRT_DIST_ROOT}/04-gfx-media"
-    DEPENDS crt-gfx-dist crt-media-build crt-stage-05-source
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
-      --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
-      --dest "${CRT_DIST_ROOT}/04-gfx-media" --base "${CRT_DIST_ROOT}/03-gfx-simple"
-      --component crt-gfx --component crt-media --cmake "${CMAKE_COMMAND}" --stage 04-gfx-media
-      ${CRT_FULL_MEDIA_DIST_ARGS}
-      --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
-      --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
-    ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
-      --dist "${CRT_DIST_ROOT}/04-gfx-media" --stage 04-gfx-media)
+  # PAL-04: the ordinary package publishes the Skia/FFmpeg/curl closure only as a whole (see
+  # cmake/crt_media_dist_options.cmake). Refuse a partial combination up front, the way crt-ui-dist
+  # refuses CRTUI_ENABLE_LVGL=OFF below; crt-ui-dist depends on this target, so it is refused too.
+  # Linux only: the macOS/Windows packaging was not part of the PAL-04 replay and is left as it was.
+  set(CRT_MEDIA_DIST_OPTION_PROBLEM "")
+  if(CRT_TARGET_OS STREQUAL "linux")
+    include(cmake/crt_media_dist_options.cmake)
+    crt_media_dist_option_problem(CRT_MEDIA_DIST_OPTION_PROBLEM
+      "${CRTGFX_ENABLE_SKIA}" "${CRTMEDIA_ENABLE_FFMPEG}" "${CRTMEDIA_ENABLE_CURL}")
+  endif()
+  if(CRT_MEDIA_DIST_OPTION_PROBLEM)
+    add_custom_target(crt-media-dist
+      COMMAND "${CMAKE_COMMAND}" "-DCRT_FAIL_MESSAGE=${CRT_MEDIA_DIST_OPTION_PROBLEM}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/fail_with_message.cmake"
+      VERBATIM
+      USES_TERMINAL
+    )
+  else()
+    crt_add_cached_stage_target(crt-media-dist NAME gfx-media-dist STAGE gfx-media
+      INPUTS "${CRT_DIST_ROOT}/03-gfx-simple"
+      OUTPUTS "${CRT_DIST_ROOT}/04-gfx-media"
+      DEPENDS crt-gfx-dist crt-media-build crt-stage-05-source
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"
+        --root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}"
+        --dest "${CRT_DIST_ROOT}/04-gfx-media" --base "${CRT_DIST_ROOT}/03-gfx-simple"
+        --component crt-gfx --component crt-media --cmake "${CMAKE_COMMAND}" --stage 04-gfx-media
+        ${CRT_FULL_MEDIA_DIST_ARGS}
+        --stage-recipe "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
+        --target-os "${CRT_TARGET_OS}" --target-arch "${CRT_EFFECTIVE_ARCH_FOR_FLAGS}" ${CRT_DIST_TOOL_ARGS} --archive
+      ++ "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/verify_dist.py"
+        --dist "${CRT_DIST_ROOT}/04-gfx-media" --stage 04-gfx-media)
+  endif()
 
   # 05-ui: crtui (Tranche 0 ships the frozen contract and its headless model).
   add_custom_target(crt-ui-build DEPENDS crtui crtui_shared)
@@ -1919,7 +1938,16 @@ if(Python3_Interpreter_FOUND)
   crt_add_registered_test_dependencies(crt-internal-media-gfx-test "^crtgfx_")
   crt_add_registered_test_dependencies(crt-internal-media-runtime-test "^crtmedia_")
   crt_add_registered_test_dependencies(crt-ui-test "^crtui_")
-  if(NOT CRTUI_ENABLE_LVGL)
+  if(CRT_MEDIA_DIST_OPTION_PROBLEM)
+    # Same refusal as crt-media-dist, without queuing the other crt-ui-dist prerequisites (crtui, the 06-web
+    # source stage, ...) that would otherwise keep building for minutes before the build stops.
+    add_custom_target(crt-ui-dist
+      COMMAND "${CMAKE_COMMAND}" "-DCRT_FAIL_MESSAGE=${CRT_MEDIA_DIST_OPTION_PROBLEM}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/fail_with_message.cmake"
+      VERBATIM
+      USES_TERMINAL
+    )
+  elseif(NOT CRTUI_ENABLE_LVGL)
     # The 05-ui SDK installs the ui-basic sample, which exists only when crtui's private LVGL
     # renderer is built. Fail up front with the reason instead of building 04-gfx-media and then
     # stopping in verify_dist.py on a missing examples/ui-basic/main.c.

@@ -10,6 +10,37 @@ substantive update.
 
 ## 2026-11-23
 
+### Close the Linux partial-option packaging gaps (PAL-04)
+
+Base CRT `312fec9` with the changes uncommitted. The Linux replay reproduced two gaps:
+Skia OFF/FFmpeg ON/curl ON failed stage 04 (`lib/libcrtmedia.so -> undeclared libcurl.so.4`),
+and Skia ON/FFmpeg OFF/curl ON built and verified but shipped `libcrtgfx_skia.*`,
+`libcrtui_skia*.a` and `examples/gfx-skia` without `lib/libskia.a`. Both come from stage-04
+dependency publication being all-or-nothing (`create_dist.py` gets the closure only when all
+three options are ON), so the decision was to declare the ordinary package supported only for
+Skia, FFmpeg and curl all OFF or all ON on Linux, and enforce it: `cmake/crt_media_dist_options.cmake`
+is the one predicate, `CMakeLists.txt` replaces `crt-media-dist` and `crt-ui-dist` with a
+failing target for other combinations (under a second, before any stage build), and
+`verify_dist.py` rejects Skia or FFmpeg-backed payload that lacks `lib/libskia.a` or the
+skia/ffmpeg/curl/mbedtls/zlib records. Shipping a Skia-less or FFmpeg-less closure was not
+chosen: it would add manifest, verification and relink-kit variants no consumer needs.
+
+Verification (fresh Release trees under `out/`, Ubuntu 26.04, Clang/LLD 21.1.8, curl ON,
+LVGL ON): `pal04-g3` (Skia OFF/FFmpeg ON) and `pal04-g4` (Skia ON/FFmpeg OFF) refuse both
+targets in 0.6 s; `pal04-c1` (all OFF, `crt-media-dist`), `pal04-c2` (all OFF, `crt-ui-dist`)
+and `pal04-cf` (all ON, `crt-ui-dist`) build and pass `verify_dist` for 04 and 05; relocated
+space/Hangul copies rebuild `gfx-simple` and `gfx-gpu` (all), `ui-basic` (c2, cf; 30 frames,
+`pixel_check=pass input_check=pass`) and `gfx-skia`/`media-player` (cf). The full tree's
+`crt-media-dist`/`crt-ui-dist` ninja commands are identical to those of a tree configured from
+unmodified `312fec9`. The old `out/pal04-r4` package passed `verify_dist` before and is
+rejected now. `tools.test_verify_dist`, `test_create_dist`, `test_sdk_workflows` and the new
+`test_media_dist_options` pass (61 tests, 5 host skips). A first draft refusing only
+`crt-media-dist` let `crt-ui-dist` run for 4.5 to 8 minutes before stopping, so both are replaced.
+[Evidence and limits](docs/acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23).
+Limits: Linux/x86_64 only; macOS/Windows partial combinations are neither refused nor
+verified; tools-wide `unittest discover` (674 tests) has one error, the argument-requiring script
+`test_cli_fetch_https` (needs `--cli/--output`), unrelated to this change; no libc/ABI, STATUS or pin change.
+
 ### Replay the Windows ARM64 PAL changes on physical Windows/x64
 
 After synchronizing CRT `52881f08`, CLI `6704aa8` and extension `119e894`,

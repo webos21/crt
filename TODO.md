@@ -73,13 +73,14 @@ Found by the CLI's Windows replay (reproducers and numbers in the CLI's
   and [Windows/x64](docs/acceptance/release_qualification.md#native-windowsx64-pal-replay-2026-11-23)
   native replays pass; the ARM64 legacy CLI relay retains its own acceptance.
 
-- [ ] **PAL-04** Revalidate meaningful partial-option combinations of ordinary Linux
-  `crt-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
-  dependency publication already exists; close only reproduced gaps in shared
-  dependency copying/declaration and packaged example rebuilds, not the
-  already-accepted isolated chain
-  ([distribution contract](docs/guides/distribution.md),
-  [fixture and native replay rows](docs/acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23)).
+- [x] **PAL-04** Linux partial-option packaging closed at `312fec9` plus the
+  uncommitted fix: ordinary `crt-media-dist`/`crt-ui-dist` support Skia, FFmpeg and
+  curl all OFF or all ON and refuse other combinations early; `verify_dist`
+  rejects Skia/FFmpeg payload without its dependencies
+  ([distribution](docs/guides/distribution.md),
+  [evidence and limits](docs/acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23)).
+  Not replayed on macOS/Windows. Optional follow-up if a partial package is
+  wanted: publish a Skia-less or FFmpeg-less dependency closure.
 
 
 <a name="crt-developer-experience-sdk---cli---studio"></a>

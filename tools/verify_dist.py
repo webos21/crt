@@ -304,6 +304,39 @@ def validate_external_prerequisites(manifest: dict) -> dict[str, dict]:
     return by_id
 
 
+def validate_optional_payload_closure(dist: Path, redistributed: dict) -> None:
+    """A package that ships Skia or FFmpeg payload must also ship what it needs (PAL-04).
+
+    The ordinary option-OFF package ships neither and is untouched. A package with the Skia bridge/example or the
+    FFmpeg-backed media-player sample but without the matching dependency records and link artifacts (a partial
+    in-tree option combination, or a hand-assembled tree) would pass every other check and then fail to rebuild its
+    own examples, so it is refused here. The binary-dependency audit separately catches an undeclared DT_NEEDED."""
+    def present(directory: str, patterns: tuple[str, ...]) -> list[Path]:
+        return [path for pattern in patterns for path in (dist / directory).glob(pattern)] \
+            if (dist / directory).is_dir() else []
+
+    skia_payload = [relative for relative in ("include/crtgfx/skia.h", "examples/gfx-skia")
+                    if (dist / relative).exists()]
+    skia_payload += [path.relative_to(dist).as_posix() for path in
+                     present("lib", ("*crtgfx_skia*", "*crtui_skia*")) + present("bin", ("*crtgfx_skia*",))]
+    if skia_payload:
+        missing = [name for name in ("skia",) if name not in redistributed]
+        if missing or not (dist / "lib" / "libskia.a").is_file():
+            raise SystemExit(
+                "package ships Skia payload (" + ", ".join(skia_payload[:3]) + ") without its Skia dependency: "
+                "lib/libskia.a and the skia dependency record are required; build with Skia, FFmpeg and curl all "
+                "enabled or all disabled (docs/guides/distribution.md)")
+    ffmpeg_payload = [relative for relative in ("examples/media-player",) if (dist / relative).exists()]
+    ffmpeg_payload += [path.relative_to(dist).as_posix() for path in present("examples/bin", ("crtmedia_player_demo*",))]
+    if ffmpeg_payload:
+        missing = [name for name in ("ffmpeg", "curl", "mbedtls", "zlib") if name not in redistributed]
+        if missing:
+            raise SystemExit(
+                "package ships FFmpeg-backed payload (" + ", ".join(ffmpeg_payload[:2]) + ") without its dependency "
+                "record(s): " + ", ".join(missing) + "; build with Skia, FFmpeg and curl all enabled or all "
+                "disabled (docs/guides/distribution.md)")
+
+
 def validate_ui_stage(dist: Path, manifest: dict, redistributed: dict, suffix: str) -> None:
     """Checks specific to the 05-ui SDK (in-tree and isolated); split out of main()
     so tools/test_verify_dist.py can exercise it on a small fake tree."""
@@ -679,6 +712,8 @@ def main() -> None:
                                         "libcrtgfx_skia.dylib"), "shared crtgfx_skia")
             require_any(dist / "lib", ("*crtmedia*dll*", "libcrtmedia.so*",
                                         "libcrtmedia.dylib"), "shared crtmedia")
+    if args.stage >= "04-gfx-media":
+        validate_optional_payload_closure(dist, redistributed)
     if args.stage >= "05-ui":
         validate_ui_stage(dist, manifest, redistributed, suffix)
     if args.stage == "06-web":

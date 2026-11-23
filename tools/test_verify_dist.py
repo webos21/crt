@@ -13,6 +13,7 @@ from crt_dist_prerequisites import external_prerequisites_for
 from verify_dist import (
     validate_external_prerequisites,
     validate_manifest_schema,
+    validate_optional_payload_closure,
     validate_redistributed_dependencies,
     validate_ui_stage,
 )
@@ -218,6 +219,64 @@ class UiStageTests(unittest.TestCase):
                 del self.redistributed[name]
                 with self.assertRaises(SystemExit):
                     self.check()
+
+
+class OptionalPayloadClosureTests(unittest.TestCase):
+    """PAL-04: Skia/FFmpeg payload without its dependency closure is refused; option-OFF packages are untouched.
+
+    Fixtures mirror the two reproduced Linux packages: ON/OFF/ON shipped libcrtgfx_skia.*, libcrtui_skia*.a and
+    examples/gfx-skia without lib/libskia.a, and an FFmpeg-backed media-player sample needs its dependency records."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.dist = Path(self.temporary.name)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def write(self, relative: str) -> None:
+        path = self.dist / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("test", encoding="utf-8")
+
+    def check(self, names=()) -> None:
+        validate_optional_payload_closure(self.dist, {name: {} for name in names})
+
+    def test_option_off_package_passes(self) -> None:
+        for relative in ("lib/libcrtgfx.a", "lib/libcrtmedia.so", "lib/libcrtui.a", "include/crtui/skia.h"):
+            self.write(relative)
+        self.check()
+
+    def test_skia_payload_without_libskia_is_refused(self) -> None:
+        for relative in ("lib/libcrtgfx_skia.a", "lib/libcrtgfx_skia.so", "lib/libcrtui_skia.a",
+                         "include/crtgfx/skia.h", "examples/gfx-skia/main.cc"):
+            self.write(relative)
+        with self.assertRaisesRegex(SystemExit, "Skia payload.*libskia.a"):
+            self.check()
+        with self.assertRaisesRegex(SystemExit, "Skia payload"):
+            self.check(("skia",))  # the record alone does not replace the library
+
+    def test_each_skia_marker_alone_is_enough_to_require_the_dependency(self) -> None:
+        for relative in ("lib/libcrtgfx_skia.so", "lib/libcrtui_skia_media.a", "bin/crtgfx_skia.dll",
+                         "examples/gfx-skia/main.cc", "include/crtgfx/skia.h"):
+            with self.subTest(marker=relative):
+                self.write(relative)
+                with self.assertRaises(SystemExit):
+                    self.check()
+                (self.dist / relative).unlink()
+
+    def test_skia_payload_with_library_and_record_passes(self) -> None:
+        for relative in ("lib/libcrtgfx_skia.a", "lib/libskia.a", "examples/gfx-skia/main.cc"):
+            self.write(relative)
+        self.check(("skia",))
+
+    def test_ffmpeg_sample_requires_the_network_closure(self) -> None:
+        self.write("examples/media-player/main.c")
+        with self.assertRaisesRegex(SystemExit, "FFmpeg-backed payload.*ffmpeg, curl, mbedtls, zlib"):
+            self.check()
+        with self.assertRaisesRegex(SystemExit, "curl, mbedtls, zlib"):
+            self.check(("ffmpeg",))
+        self.check(("ffmpeg", "curl", "mbedtls", "zlib"))
 
 
 class ExternalPrerequisiteTests(unittest.TestCase):
