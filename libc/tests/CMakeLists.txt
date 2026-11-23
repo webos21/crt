@@ -588,6 +588,9 @@ set_tests_properties(emutls_thread_churn_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "emutls_thread_churn_test: ok"
   TIMEOUT 120)
 if(CRT_TARGET_OS STREQUAL "windows")
+  add_crt_test(windows_fd_concurrency_test windows_fd_concurrency_test.c)
+  set_tests_properties(windows_fd_concurrency_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "windows_fd_concurrency_test: ok" TIMEOUT 60)
   add_crt_test(windows_owned_spawn_group_test windows_owned_spawn_group_test.c)
   set_tests_properties(windows_owned_spawn_group_test_runs PROPERTIES
     PASS_REGULAR_EXPRESSION "windows_owned_spawn_group_test: ok" TIMEOUT 45)

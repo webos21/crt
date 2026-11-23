@@ -669,6 +669,8 @@ __declspec(dllimport) char* CRT_WINAPI GetEnvironmentStringsA(void);
 __declspec(dllimport) BOOL CRT_WINAPI FreeEnvironmentStringsA(char* lpszEnvironmentBlock);
 
 static HANDLE fd_table[CRT_FD_TABLE_SIZE];
+/* Keep a slot's handle and metadata under the same allocator ownership. */
+static crt_spinlock fd_slots_lock = CRT_SPINLOCK_INIT;
 static int fd_kind[CRT_FD_TABLE_SIZE];
 static int fd_flags[CRT_FD_TABLE_SIZE];
 /* O_NONBLOCK, tracked separately from fd_flags (an fcntl "fd flag" --
@@ -2119,6 +2121,7 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
   snapshot->magic = CRT_FD_SNAPSHOT_MAGIC;
   snapshot->version = CRT_FD_SNAPSHOT_VERSION;
   snapshot->capacity = CRT_FD_SNAPSHOT_MAX;
+  crt_spin_lock(&fd_slots_lock);
   for (fd = 0; fd < CRT_FD_TABLE_SIZE; ++fd) {
     HANDLE duplicate = 0;
 
@@ -2149,6 +2152,7 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
       continue;
     }
     if (count == CRT_FD_SNAPSHOT_MAX) {
+      crt_spin_unlock(&fd_slots_lock);
       __crt_fd_snapshot_dispose(snapshot);
       return EMFILE;
     }
@@ -2165,6 +2169,7 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
       if (error == EBADF) {
         continue;
       }
+      crt_spin_unlock(&fd_slots_lock);
       __crt_fd_snapshot_dispose(snapshot);
       return error;
     }
@@ -2176,8 +2181,9 @@ int __crt_fd_snapshot_export(struct crt_fd_snapshot* snapshot) {
         (fd_kind[fd] == CRT_FD_KIND_SOCKET && fd_socket_seqpacket[fd] != 0 ? CRT_FD_SNAPSHOT_FLAG_SEQPACKET : 0);
     snapshot->entries[count].handle = (uintptr_t)duplicate;
     ++count;
+    snapshot->count = count;
   }
-  snapshot->count = count;
+  crt_spin_unlock(&fd_slots_lock);
   return 0;
 }
 
@@ -3309,7 +3315,12 @@ static void time_to_filetime(time_t seconds, long microseconds, struct crt_filet
 }
 
 static void init_fd_table(void) {
-  if (fd_table_initialized) {
+  if (__atomic_load_n(&fd_table_initialized, __ATOMIC_ACQUIRE)) {
+    return;
+  }
+  crt_spin_lock(&fd_slots_lock);
+  if (__atomic_load_n(&fd_table_initialized, __ATOMIC_RELAXED)) {
+    crt_spin_unlock(&fd_slots_lock);
     return;
   }
   fd_table[0] = GetStdHandle(STD_INPUT_HANDLE);
@@ -3321,7 +3332,8 @@ static void init_fd_table(void) {
   fd_flags[0] = 0;
   fd_flags[1] = 0;
   fd_flags[2] = 0;
-  fd_table_initialized = 1;
+  __atomic_store_n(&fd_table_initialized, 1, __ATOMIC_RELEASE);
+  crt_spin_unlock(&fd_slots_lock);
 }
 
 static long init_winsock(void) {
@@ -3530,49 +3542,44 @@ static SOCKET get_fd_socket(int fd) {
   return (SOCKET)(uintptr_t)fd_table[fd];
 }
 
-static int alloc_fd(HANDLE handle) {
+static int alloc_fd_slot(HANDLE handle, int kind, unsigned long long counter, int semaphore) {
   int fd;
 
   init_fd_table();
+  crt_spin_lock(&fd_slots_lock);
   for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
     if (fd_table[fd] == 0) {
       fd_table[fd] = handle;
-      fd_kind[fd] = CRT_FD_KIND_FILE;
+      fd_kind[fd] = kind;
       fd_flags[fd] = 0;
       fd_nonblock[fd] = 0;
       fd_socket_seqpacket[fd] = 0;
       fd_seq_peer_pid[fd] = 0;
       fd_pipe_write_only[fd] = 0;
       fd_termios_shadow_valid[fd] = 0;
+      if (kind == CRT_FD_KIND_EVENTFD) {
+        fd_eventfd_counter[fd] = counter;
+        fd_eventfd_semaphore[fd] = (unsigned char)(semaphore != 0);
+      }
+      crt_spin_unlock(&fd_slots_lock);
       return fd;
     }
   }
+  crt_spin_unlock(&fd_slots_lock);
   return -1;
 }
 
-static int alloc_socket_fd(SOCKET socket_handle) {
-  int fd;
+static int alloc_fd(HANDLE handle) {
+  return alloc_fd_slot(handle, CRT_FD_KIND_FILE, 0, 0);
+}
 
-  init_fd_table();
+static int alloc_socket_fd(SOCKET socket_handle) {
   /* Not inheritable: a descriptor reaches a child through the fd snapshot (a handle duplicated
    * into it) or not at all. CreateProcess(bInheritHandles=TRUE) would otherwise give every child
    * every socket of its parent, close-on-exec ones included, and a connection's peer end held by
    * a process that never uses it keeps the connection from ever reporting EOF. */
   (void)SetHandleInformation((HANDLE)(uintptr_t)socket_handle, 1 /* HANDLE_FLAG_INHERIT */, 0);
-  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
-    if (fd_kind[fd] == CRT_FD_KIND_NONE) {
-      fd_table[fd] = (HANDLE)(uintptr_t)socket_handle;
-      fd_kind[fd] = CRT_FD_KIND_SOCKET;
-      fd_flags[fd] = 0;
-      fd_nonblock[fd] = 0;
-      fd_socket_seqpacket[fd] = 0;
-      fd_seq_peer_pid[fd] = 0;
-      fd_pipe_write_only[fd] = 0;
-      fd_termios_shadow_valid[fd] = 0;
-      return fd;
-    }
-  }
-  return -1;
+  return alloc_fd_slot((HANDLE)(uintptr_t)socket_handle, CRT_FD_KIND_SOCKET, 0, 0);
 }
 
 /* See CRT_FD_KIND_URANDOM's own comment: no real HANDLE/SOCKET backs
@@ -3580,40 +3587,12 @@ static int alloc_socket_fd(SOCKET socket_handle) {
  * existing "is this slot live" bookkeeping (fd_table[fd] != 0) keeps
  * working unchanged for it. */
 static int alloc_urandom_fd(void) {
-  int fd;
-
-  init_fd_table();
-  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
-    if (fd_kind[fd] == CRT_FD_KIND_NONE) {
-      fd_table[fd] = (HANDLE)(uintptr_t)1;
-      fd_kind[fd] = CRT_FD_KIND_URANDOM;
-      fd_flags[fd] = 0;
-      fd_nonblock[fd] = 0;
-      fd_pipe_write_only[fd] = 0;
-      fd_termios_shadow_valid[fd] = 0;
-      return fd;
-    }
-  }
-  return -1;
+  return alloc_fd_slot((HANDLE)(uintptr_t)1, CRT_FD_KIND_URANDOM, 0, 0);
 }
 
 /* See CRT_FD_KIND_ZERO's own comment. */
 static int alloc_zero_fd(void) {
-  int fd;
-
-  init_fd_table();
-  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
-    if (fd_kind[fd] == CRT_FD_KIND_NONE) {
-      fd_table[fd] = (HANDLE)(uintptr_t)1;
-      fd_kind[fd] = CRT_FD_KIND_ZERO;
-      fd_flags[fd] = 0;
-      fd_nonblock[fd] = 0;
-      fd_pipe_write_only[fd] = 0;
-      fd_termios_shadow_valid[fd] = 0;
-      return fd;
-    }
-  }
-  return -1;
+  return alloc_fd_slot((HANDLE)(uintptr_t)1, CRT_FD_KIND_ZERO, 0, 0);
 }
 
 /* See CRT_FD_KIND_EVENTFD's own comment: unlike alloc_urandom_fd()/
@@ -3628,26 +3607,15 @@ static int alloc_eventfd_fd(unsigned long long initval, int semaphore) {
   int fd;
   HANDLE event_handle;
 
-  init_fd_table();
   event_handle = CreateEventA(0, 1 /* manual reset */, initval != 0 ? 1 : 0, 0);
   if (event_handle == 0) {
     return -1;
   }
-  for (fd = 3; fd < CRT_FD_TABLE_SIZE; ++fd) {
-    if (fd_kind[fd] == CRT_FD_KIND_NONE) {
-      fd_table[fd] = event_handle;
-      fd_kind[fd] = CRT_FD_KIND_EVENTFD;
-      fd_flags[fd] = 0;
-      fd_nonblock[fd] = 0;
-      fd_pipe_write_only[fd] = 0;
-      fd_termios_shadow_valid[fd] = 0;
-      fd_eventfd_counter[fd] = initval;
-      fd_eventfd_semaphore[fd] = (unsigned char)(semaphore != 0);
-      return fd;
-    }
+  fd = alloc_fd_slot(event_handle, CRT_FD_KIND_EVENTFD, initval, semaphore);
+  if (fd < 0) {
+    CloseHandle(event_handle);
   }
-  CloseHandle(event_handle);
-  return -1;
+  return fd;
 }
 
 /* Real eventfd2(2) semantics, backing both libc/src/eventfd.c's portable
@@ -4404,10 +4372,9 @@ static void crt_socket_graceful_if_last(SOCKET s) {
 }
 
 static void rlock_forget_handle(HANDLE handle);
-static long close_fd_slot(int fd) {
+static long close_fd_slot_locked(int fd) {
   HANDLE handle;
 
-  init_fd_table();
   crt_debug_spawn_trace("close_fd", (unsigned long long)(unsigned int)fd);
   if (fd >= 0 && fd < CRT_FD_TABLE_SIZE && fd_kind[fd] == CRT_FD_KIND_SOCKET) {
     SOCKET socket_handle = (SOCKET)(uintptr_t)fd_table[fd];
@@ -4496,6 +4463,16 @@ static long close_fd_slot(int fd) {
     return fail_last_error();
   }
   return 0;
+}
+
+static long close_fd_slot(int fd) {
+  long result;
+
+  init_fd_table();
+  crt_spin_lock(&fd_slots_lock);
+  result = close_fd_slot_locked(fd);
+  crt_spin_unlock(&fd_slots_lock);
+  return result;
 }
 
 long __crt_sys_close(int fd) {
@@ -4922,11 +4899,10 @@ long __crt_sys_dup(int oldfd) {
   return fd;
 }
 
-long __crt_sys_dup2(int oldfd, int newfd) {
+static long dup2_locked(int oldfd, int newfd) {
   HANDLE handle = get_fd_handle(oldfd);
   HANDLE duplicate = 0;
 
-  init_fd_table();
   if (handle == INVALID_HANDLE_VALUE && !fd_is_virtual_device(oldfd)) {
     return -EBADF;
   }
@@ -4938,7 +4914,7 @@ long __crt_sys_dup2(int oldfd, int newfd) {
   }
   if (fd_is_virtual_device(oldfd)) {
     if (fd_kind[newfd] != CRT_FD_KIND_NONE) {
-      (void)close_fd_slot(newfd);
+      (void)close_fd_slot_locked(newfd);
     }
     copy_virtual_device_fd(oldfd, newfd);
     return newfd;
@@ -4947,12 +4923,22 @@ long __crt_sys_dup2(int oldfd, int newfd) {
     return fail_last_error();
   }
   if (fd_kind[newfd] != CRT_FD_KIND_NONE) {
-    (void)close_fd_slot(newfd);
+    (void)close_fd_slot_locked(newfd);
   }
   fd_table[newfd] = duplicate;
   fd_kind[newfd] = CRT_FD_KIND_FILE;
   fd_flags[newfd] = oldfd >= 0 && oldfd < CRT_FD_TABLE_SIZE ? fd_flags[oldfd] & ~FD_CLOEXEC : 0;
   return newfd;
+}
+
+long __crt_sys_dup2(int oldfd, int newfd) {
+  long result;
+
+  init_fd_table();
+  crt_spin_lock(&fd_slots_lock);
+  result = dup2_locked(oldfd, newfd);
+  crt_spin_unlock(&fd_slots_lock);
+  return result;
 }
 
 long __crt_sys_pipe(int pipefd[2]) {
@@ -4980,10 +4966,7 @@ long __crt_sys_pipe(int pipefd[2]) {
   }
   write_fd = alloc_fd(write_handle);
   if (write_fd < 0) {
-    fd_table[read_fd] = 0;
-    fd_kind[read_fd] = CRT_FD_KIND_NONE;
-    fd_flags[read_fd] = 0;
-    CloseHandle(read_handle);
+    (void)close_fd_slot(read_fd);
     CloseHandle(write_handle);
     return -EMFILE;
   }
@@ -8095,6 +8078,8 @@ long __crt_sys_fork(void) {
 
   crt_debug_handle_count("fork_entry_handles");
   memset(old_inherit_flags, 0, sizeof(old_inherit_flags));
+  init_fd_table();
+  crt_spin_lock(&fd_slots_lock);
   fd_set_inherit_for_fork(inherit_touched, old_inherit_flags);
   result = __crt_windows_memcopy_fork(&child_pid, &child_process);
   if (result == 0) {
@@ -8106,6 +8091,8 @@ long __crt_sys_fork(void) {
   }
   crt_debug_handle_count("fork_after_memcopy_handles");
   fd_restore_inherit_after_fork(inherit_touched, old_inherit_flags);
+  /* The child resumes here with a copy of the lock held by this thread. */
+  crt_spin_unlock(&fd_slots_lock);
 
   if (result <= 0) {
     return result;
@@ -8137,6 +8124,8 @@ long __crt_sys_fork(void) {
   memset(&info, 0, sizeof(info));
   info.Length = sizeof(info);
   memset(old_inherit_flags, 0, sizeof(old_inherit_flags));
+  init_fd_table();
+  crt_spin_lock(&fd_slots_lock);
   fd_set_inherit_for_fork(inherit_touched, old_inherit_flags);
   status = ntdll.RtlCloneUserProcess(
       CRT_RTL_CLONE_PROCESS_FLAGS_INHERIT_HANDLES,
@@ -8145,6 +8134,7 @@ long __crt_sys_fork(void) {
       0,
       &info);
   fd_restore_inherit_after_fork(inherit_touched, old_inherit_flags);
+  crt_spin_unlock(&fd_slots_lock);
   if (status == CRT_STATUS_PROCESS_CLONED) {
     windows_unregistered_clone = 1;
     return 0;
