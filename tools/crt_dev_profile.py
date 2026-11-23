@@ -10,7 +10,9 @@ SIDECAR = "share/crt/contracts/development.json"
 # UTF-8 active-code-page manifest (docs/design/windows_narrow_strings.md).
 # archive-xz-1: liblzma (static and shared, xz format with CRC64/SHA-256 checks and concatenated streams) beside zlib, so
 # a consumer can unpack the tar.xz SDK archives with only SDK-provided code.
-CAPABILITIES = ["crt-platform-queries-1", "json-sha2-1", "crt-narrow-encoding-1", "archive-xz-1"]
+# public-header-persona-1: no consumer compile option is needed for the bundled C libraries (`consumer_compile_options` is empty on
+# every target); on Windows the headers whose meaning depends on the host platform macros are CRT-owned shims (see PERSONA_HEADERS).
+CAPABILITIES = ["crt-platform-queries-1", "json-sha2-1", "crt-narrow-encoding-1", "archive-xz-1", "public-header-persona-1"]
 PORTS = {"zlib", "mbedtls", "curl", "cjson", "xz"}
 HEADER_PORTS = {"nlohmann-json": "include/nlohmann/json.hpp"}
 STATIC = {"zlib": ("lib/libz.a",), "curl": ("lib/libcurl.a",),
@@ -21,9 +23,74 @@ SHARED = {"zlib": ("libz",), "curl": ("libcurl",),
 
 
 def consumer_options(target_os):
-    # Match libcrtmedia's existing POSIX curl-header lane; no host winsock
-    # headers are part of this Bionic-compatible SDK's public include path.
-    return ["-U_WIN32", "-U_WIN32_WCE", "-U__WIN32__", "-UWIN32", "-U__MINGW32__"] if target_os == "windows" else []
+    """Compile options every consumer must pass for the bundled libraries: none.
+
+    Earlier Windows profiles returned `-U_WIN32 ...` here. That undefined the platform macros for the whole translation unit, so
+    libc++'s `std::filesystem::path` was parsed with `char` while the packaged libc++ is built with `_WIN32` (`wchar_t`): the
+    consumer linked and then returned wrong paths. The persona is now scoped to the headers that need it (PERSONA_HEADERS).
+    """
+    return []
+
+
+# The C ports are built with the POSIX/Bionic persona (their recipes pass -U_WIN32 ...): sockets are `int`, no winsock, POSIX
+# snprintf. libc++ is built with _WIN32 defined. A consumer therefore keeps _WIN32, and the headers of the C ports whose declarations
+# change with it are CRT-owned shims that drop the Windows platform macros only while the upstream header is parsed. Only headers whose
+# differences affect linking or types are shimmed (measured by preprocessing each public header both ways): curl.h needs winsock2.h and
+# SOCKET otherwise, mbedtls/platform.h otherwise refers to mbedtls_snprintf macros the POSIX-built library does not define. zlib.h, lzma.h
+# and cJSON.h differ only by an unused wide-character declaration and by calling-convention/dllexport attributes that are ignored on the
+# supported x86_64 and aarch64 targets, so they are left unmodified.
+PERSONA_MACROS = ("_WIN32", "_WIN32_WCE", "__WIN32__", "WIN32", "__MINGW32__")
+PERSONA_HEADERS = {"windows": ("include/curl/curl.h", "include/mbedtls/platform.h")}
+SHIM_MARKER = "CRT public-header persona shim 1"
+
+
+def upstream_name(header):
+    path = Path(header)
+    return path.with_name(path.stem + "_crt_upstream" + path.suffix).as_posix()
+
+
+def shim_text(header):
+    guard = "CRT_PERSONA_SHIM_" + re.sub(r"[^A-Z0-9]", "_", header.upper())
+    push = "".join('#pragma push_macro("%s")\n' % name for name in PERSONA_MACROS)
+    undef = "".join("#undef %s\n" % name for name in PERSONA_MACROS)
+    pop = "".join('#pragma pop_macro("%s")\n' % name for name in reversed(PERSONA_MACROS))
+    return (
+        "/* %s: %s\n"
+        "   The library behind this header is built with the POSIX/Bionic persona, so the upstream header is parsed without the\n"
+        "   Windows platform macros. The consumer keeps them: libc++ (std::filesystem::path, separators) is built for _WIN32.\n"
+        "   The upstream header is %s, byte for byte. */\n"
+        "#ifndef %s\n#define %s\n"
+        "#ifdef __cplusplus\n"
+        "#include <version> /* libc++ fixes its platform persona here, while _WIN32 is still defined, before the window below */\n"
+        "#endif\n%s%s#include \"%s\"\n%s#endif\n"
+    ) % (SHIM_MARKER, header, Path(upstream_name(header)).name, guard, guard, push, undef, Path(upstream_name(header)).name, pop)
+
+
+def apply_persona_shims(sdk, target_os):
+    """Install the shims of one target; idempotent, and refuses a header that is neither upstream nor an exact shim."""
+    for header in PERSONA_HEADERS.get(target_os, ()):
+        path, upstream = sdk / header, sdk / upstream_name(header)
+        text = shim_text(header)
+        if upstream.exists():
+            if path.read_text(encoding="utf-8") != text:
+                raise ValueError("persona shim target is not the expected shim: " + header)
+            continue
+        if not path.is_file() or SHIM_MARKER in path.read_text(encoding="utf-8", errors="replace"):
+            raise ValueError("persona shim input is not an upstream header: " + header)
+        path.rename(upstream)
+        path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def persona_records(sdk, target_os):
+    """What the profile records about the shims of this SDK; raises when an installed shim is not exactly the expected text."""
+    records = []
+    for header in PERSONA_HEADERS.get(target_os, ()):
+        path, upstream = sdk / header, sdk / upstream_name(header)
+        if not path.is_file() or not upstream.is_file() or path.read_text(encoding="utf-8") != shim_text(header):
+            raise ValueError("persona shim missing or modified: " + header)
+        records.append({"header": header, "upstream": upstream_name(header), "upstream_sha256": digest(upstream),
+                        "persona": "posix", "macros": list(PERSONA_MACROS)})
+    return records
 
 
 def digest(path):
@@ -75,8 +142,14 @@ def check(sdk, manifest):
         problems.append("Development SDK must require consumer-supplied explicit CA trust")
     if profile.get("capabilities") != CAPABILITIES:
         problems.append("Development SDK missing platform-query/JSON/SHA-2/xz capabilities")
-    if profile.get("consumer_compile_options") != consumer_options(manifest.get("target", {}).get("os")):
-        problems.append("Development SDK missing the SDK-owned portable networking compile options")
+    target_os = manifest.get("target", {}).get("os")
+    if profile.get("consumer_compile_options") != consumer_options(target_os):
+        problems.append("Development SDK consumer compile options must be empty (the platform persona is scoped to shim headers)")
+    try:
+        if profile.get("public_header_personas") != persona_records(sdk, target_os):
+            problems.append("Development SDK public-header persona record does not match the installed shim headers")
+    except (OSError, ValueError) as error:
+        problems.append("Development SDK public-header persona shims invalid: %s" % error)
     observed = runtime_digests(sdk)
     if not observed or profile.get("runtime_sha256") != observed:
         problems.append("Development SDK inherited runtime digest mismatch")

@@ -87,6 +87,8 @@ def main(argv=None):
              "--target-os", manifest["target"]["os"], "--target-arch", manifest["target"]["arch"],
              "--source-root", sources, "--work-root", temp / "port-build-curl",
              "--install-prefix", staged, "--port", "mbedtls", "--test"], env=env, cwd=ROOT)
+    # Before the dependency records: the shims and the relocated upstream headers belong to the curl and mbedtls header sets.
+    profile.apply_persona_shims(staged, manifest["target"]["os"])
     dependencies = media.network_dependency_records(staged, ROOT, sources)
     for name, notice, headers, links, patterns in (
             ("cjson", "LICENSE", ["include/cJSON.h"], ["lib/libcjson.a"],
@@ -119,6 +121,7 @@ def main(argv=None):
             "base_manifest_sha256": profile.digest(base / "manifest.json"),
             "runtime_sha256": inherited, "tls_trust": {"mode": "explicit-ca-file", "bundled": False}}
     data["consumer_compile_options"] = profile.consumer_options(manifest["target"]["os"])
+    data["public_header_personas"] = profile.persona_records(staged, manifest["target"]["os"])
     sidecar = staged / profile.SIDECAR
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     sidecar.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

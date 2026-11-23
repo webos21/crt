@@ -320,9 +320,19 @@ requires regenerating older candidates; CLI/Studio adoption remains separate.
 
 The shared networking build and dependency-record implementation is the same
 one used by `04-gfx-media`. No graphics/media/UI/Web dependency is installed.
-Windows consumers use the existing media port's POSIX/Bionic curl-header
-persona, exposed through `consumer_compile_options`, rather than leaking host
-Winsock headers. Windows zlib's `.so` spelling is intentionally preserved:
+Windows consumers see the bundled C libraries in the POSIX/Bionic persona they
+are built with, rather than host Winsock headers, and `consumer_compile_options`
+is empty on every target (capability `public-header-persona-1`). The persona is
+scoped to the headers whose declarations change with the Windows platform macros
+(`curl/curl.h`, `mbedtls/platform.h`): CRT-owned shim headers drop `_WIN32` and
+its aliases only while the upstream header, kept byte for byte beside it as
+`*_crt_upstream.h`, is parsed, and libc++ is made to decide its own persona
+first. The consumer keeps `_WIN32`, as libc++ (`std::filesystem::path` is
+`wchar_t`) is built for it; the former global `-U_WIN32 ...` option made the
+consumer's `path` a `char` string against a `wchar_t` library, which linked and
+returned wrong paths. The profile records each shim and the digest of its
+upstream header (`public_header_personas`) and `crt_dev_profile.check` verifies
+them. Windows zlib's `.so` spelling is intentionally preserved:
 the shared-runtime check reads PE's DLL characteristic instead of mistaking
 an import archive for a DLL. The profile ships dependency notices, the Apache
 choice for Mbed TLS and `share/crt/development-sbom.spdx.json`; it has no FFmpeg
