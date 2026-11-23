@@ -61,28 +61,23 @@ when a prefix such as `P1` or `V1` appears under multiple headings.
 
 ### Focused CRT/PAL follow-ups: revalidate before fixing
 
-Moved ahead of the SDK publication and CLI work on 2026-11-23: these follow-ups are handled before the next Dev SDK release (including signing and finalization) and before the next CLI
-increment. Each still needs its own current reproduction or regression evidence; none is claimed fixed by an earlier large-consumer pass.
+Prioritize current Dev SDK correctness evidence before publishing a new Dev
+SDK or building a new CLI on it. Apply Media/UI combination gates to the
+affected packages under the SDK change-impact policy.
 
 Found by the CLI's Windows replay (reproducers and numbers in the CLI's
 [Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29)):
 
-Replay basis:
-[Windows/x64 bootstrap findings](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#findings-fixed-in-this-pass)
-for PAL-01 and PAL-03,
-[narrow-string implementation](docs/design/windows_narrow_strings.md#implementation-status-2026-10-31)
-for PAL-02 and the linked UI/package evidence for PAL-04. Each follow-up needs its own
-current repro or regression evidence.
-
-- [ ] **PAL-01** Make `fread`/`fwrite` copy blocks instead of looping `fgetc`/`fputc` (`libc/src/stdio.c`; about 70 MB/s against
-  5 GB/s for `read()` on Windows), with a throughput regression test.
-- [ ] **PAL-02** Replay the [implemented UTF-8 narrow-string model](docs/design/windows_narrow_strings.md)
-  on Windows/x64 and CRT host tools in Unicode directories; Windows/arm64 passes
-  at its recorded snapshot. Retain the pre-1903 and foreign-host DLL limits.
-- [ ] **PAL-03** Decide whether `posix_spawn` should detect non-CRT children itself instead of requiring `CRT_SPAWN_NATIVE_WINDOWS`.
-
-These older reports need bounded checks against identified current artifacts;
-neither later large-consumer passes nor a stale build tree settles them.
+- [ ] Replay the Windows descriptor ownership fix on native x64 with the
+  four-thread regression and affected inheritance checks. ARM64 and x64
+  emulation results are in [acceptance](docs/acceptance/release_qualification.md#windows-descriptor-ownership-and-stdio-block-transfers-2026-11-23).
+- [ ] **PAL-02** Repeat Unicode SDK installation, CLI build/run and host tools
+  on native Windows/x64. ARM64 and x64 emulation pass
+  [the measured replay](docs/acceptance/release_qualification.md#windows-unicode-and-native-child-selection-pal-02-and-pal-03-2026-11-23).
+  Keep the Windows 10 1903 and foreign-host DLL limits.
+- [ ] **PAL-01** Run native Linux and macOS stdio regressions for the block
+  transfers. ARM64 Release measurements and the focused legacy CLI relay replay
+  are in [acceptance](docs/acceptance/release_qualification.md#windows-descriptor-ownership-and-stdio-block-transfers-2026-11-23).
 
 - [ ] **PAL-04** Revalidate meaningful partial-option combinations of ordinary Linux
   `crt-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
@@ -90,7 +85,7 @@ neither later large-consumer passes nor a stale build tree settles them.
   dependency copying/declaration and packaged example rebuilds, not the
   already-accepted isolated chain
   ([distribution contract](docs/guides/distribution.md),
-  [original UI evidence](docs/acceptance/crtui_acceptance.md)).
+  [fixture and native replay rows](docs/acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23)).
 
 
 <a name="crt-developer-experience-sdk---cli---studio"></a>

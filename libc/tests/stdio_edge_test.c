@@ -183,11 +183,46 @@ static int test_buffering_edges(void) {
   return 0;
 }
 
+static int test_block_transfers_across_stream_boundaries(void) {
+  char buffer[4];
+  char output[12] = {0};
+  FILE* stream = fopen("stdio_edge_blocks.tmp", "w+");
+  FILE* observer;
+  int failed;
+
+  if (stream == 0) return fail("block open");
+  if (setvbuf(stream, buffer, _IOLBF, sizeof(buffer)) != 0 ||
+      fwrite("abc\ndE", 2, 3, stream) != 3) {
+    fclose(stream);
+    return fail("line-buffered block write");
+  }
+  observer = fopen("stdio_edge_blocks.tmp", "r");
+  if (observer == 0) {
+    fclose(stream);
+    return fail("block observer");
+  }
+  failed = fread(output, 1, sizeof(output), observer) != 4 ||
+           memcmp(output, "abc\n", 4) != 0 || !feof(observer) || ferror(observer);
+  fclose(observer);
+  if (failed || fseek(stream, 0, SEEK_SET) != 0 || fgetc(stream) != 'a' ||
+      fgetc(stream) != 'b' || ungetc('B', stream) != 'B' || ungetc('A', stream) != 'A' ||
+      fread(output, 4, 2, stream) != 1 || memcmp(output, "ABc\ndE", 6) != 0 ||
+      !feof(stream) || ferror(stream)) {
+    fclose(stream);
+    remove("stdio_edge_blocks.tmp");
+    return fail("block read across pushback, refill and partial EOF");
+  }
+  fclose(stream);
+  remove("stdio_edge_blocks.tmp");
+  return 0;
+}
+
 int main(void) {
   if (test_regular_pushback_position() != 0 ||
       test_memory_pushback_position() != 0 ||
       test_eof_error_clear() != 0 ||
-      test_buffering_edges() != 0) {
+      test_buffering_edges() != 0 ||
+      test_block_transfers_across_stream_boundaries() != 0) {
     return 1;
   }
   puts("stdio_edge_test: ok");

@@ -33,6 +33,24 @@ Both backends share the same fd-table snapshot/bootstrap mechanism
 `execve()` on Windows to hand a spawned child's fd table across the
 process boundary.
 
+### Native child selection (PAL-03)
+
+Keep `CRT_SPAWN_NATIVE_WINDOWS` as an explicit launcher hint. CRT startup can
+consume the descriptor snapshot, signal state and argument spill. A known
+foreign Windows tool receives the normal Win32 command line, environment and
+standard handles instead. Overlong native command lines return `E2BIG`.
+The launcher can put the hint in its environment or pass it in `envp`. The
+PAL consumes it for that launch and removes it from the child's environment.
+`crt-native-tool` and the Windows compiler wrappers set it at their declared
+foreign tool boundary.
+
+The PE machine, subsystem and UTF-8 manifest describe the executable and its
+Windows settings. They do not advertise support for the CRT bootstrap protocol.
+A statically linked CRT image can also share its system imports with a foreign
+executable. Automatic selection would require a reliable, versioned capability
+advertisement that covers supported older images. The current contract needs
+no image classifier.
+
 ## Windows Memory-Copy `fork()`
 
 `__crt_windows_memcopy_fork()` (`libc/src/arch/windows/{aarch64,x86_64}/

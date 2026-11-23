@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <paths.h>
 #include <pthread.h>
 #include <spawn.h>
@@ -2027,6 +2028,18 @@ static size_t fread_unlocked_impl(void* ptr, size_t size, size_t nmemb, FILE* st
 
   total = size * nmemb;
   while (done < total) {
+    if (stream->_ur == 0 && !is_memory_stream(stream) &&
+        stream_last_op(stream) == CRT_STDIO_READ && stream->_r > 0 && stream->_p != 0) {
+      size_t chunk = (size_t)stream->_r;
+      if (chunk > total - done) chunk = total - done;
+      clear_stream_eof(stream);
+      memcpy(out + done, stream->_p, chunk);
+      stream->_p += chunk;
+      stream->_r -= (int)chunk;
+      sync_bionic_buffer_fields(stream);
+      done += chunk;
+      continue;
+    }
     int ch = fgetc_unlocked_impl(stream);
     if (ch == EOF) {
       break;
@@ -2059,7 +2072,37 @@ static size_t fwrite_unlocked_impl(const void* ptr, size_t size, size_t nmemb, F
   }
 
   total = size * nmemb;
+  if (stream_buffering_mode(stream) == _IONBF && stream->_write == __swrite) {
+    if (__swsetup(stream) != 0) return 0;
+    while (done < total) {
+      int chunk = total - done > INT_MAX ? INT_MAX : (int)(total - done);
+      int written = stream->_write(stream->_cookie, (const char*)in + done, chunk);
+      if (written <= 0) {
+        set_stream_error(stream);
+        break;
+      }
+      done += (size_t)written;
+    }
+    return done / size;
+  }
   while (done < total) {
+    int mode = stream_buffering_mode(stream);
+    if (!is_memory_stream(stream) && stream_last_op(stream) == CRT_STDIO_WRITE &&
+        mode != _IONBF && stream->_p != 0 && stream->_bf._base != 0 && stream->_w > 0) {
+      size_t chunk = (size_t)stream->_w;
+      if (chunk > total - done) chunk = total - done;
+      if (mode == _IOLBF) {
+        const unsigned char* newline = memchr(in + done, '\n', chunk);
+        if (newline) chunk = (size_t)(newline - (in + done));
+      }
+      if (chunk != 0) {
+        memcpy(stream->_p, in + done, chunk);
+        stream->_p += chunk;
+        stream->_w -= (int)chunk;
+        done += chunk;
+        continue;
+      }
+    }
     if (fputc_unlocked_impl(in[done], stream) == EOF) {
       break;
     }

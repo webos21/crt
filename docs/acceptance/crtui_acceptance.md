@@ -184,6 +184,40 @@ change was needed.
   statically and is unaffected. Recorded in `TODO.md` as a follow-up, not fixed
   here.
 
+### Linux partial-option media packaging follow-up (PAL-04, 2026-11-23)
+
+Source review at `0686ca5` confirms the path behind the earlier curl-only
+failure. With curl enabled, Linux `libcrtmedia.so` links the shared curl
+library. The ordinary stage-04 target supplies the dependency-copy arguments
+only when Skia, FFmpeg and curl are all enabled. Stage 05 inherits the assembled
+04 tree. A cross-linked ELF fixture with a real `DT_NEEDED` entry reproduces
+`lib/libcrtmedia.so -> undeclared libcurl.so.4` in the binary audit when that
+library is missing. The audit accepts the fixture after its matching SONAME
+file is added. The retained fixture in `out/pal-followup/pal04-elf/` exercises
+the audit only. The packaging Python suite ran 31 tests, with six host-specific
+skips.
+
+Native follow-up uses fresh Linux build directories with `CRTMEDIA_ENABLE_CURL=ON`
+and these option sets. A clean option-off tree and the existing fully enabled
+path are controls if the eventual change affects their inputs.
+
+| Skia | FFmpeg | LVGL | Ordinary target |
+| --- | --- | --- | --- |
+| OFF | OFF | OFF | `crt-media-dist` |
+| OFF | OFF | ON | `crt-ui-dist` |
+| OFF | ON | ON | `crt-ui-dist` |
+| ON | OFF | ON | `crt-ui-dist` |
+
+Configure each row with `cmake --preset linux-host-ninja-debug -B <fresh>`,
+setting `CRTGFX_ENABLE_SKIA`, `CRTMEDIA_ENABLE_FFMPEG` and `CRTUI_ENABLE_LVGL`
+to the row values. Build the indicated target and retain both the first error
+and the installed manifest. Verify stage 04 and, where applicable, stage 05.
+Check the transitive shared-object closure, dependency records, applicable
+license and relink payloads, and rebuild each shipped example from a relocated
+package via its `crt-toolchain.cmake`. The native runs remain open. This gate
+applies to the affected Media/UI combinations. Dev SDK qualification follows
+its own inputs and affected checks.
+
 ### 1. LVGL import and first pixels (Windows/x64 first)
 
 LVGL software draw buffer -> a CRT display adapter -> the existing
