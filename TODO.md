@@ -59,6 +59,45 @@ when a prefix such as `P1` or `V1` appears under multiple headings.
 
 ## In Progress
 
+### Focused CRT/PAL follow-ups: revalidate before fixing
+
+Moved ahead of the SDK publication and CLI work on 2026-11-23: these follow-ups are handled before the next Dev SDK release (including signing and finalization) and before the next CLI
+increment. Each still needs its own current reproduction or regression evidence; none is claimed fixed by an earlier large-consumer pass.
+
+Found by the CLI's Windows replay (reproducers and numbers in the CLI's
+[Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29)):
+
+Replay basis:
+[Windows/x64 bootstrap findings](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#findings-fixed-in-this-pass)
+for PAL-01 and PAL-03,
+[narrow-string implementation](docs/design/windows_narrow_strings.md#implementation-status-2026-10-31)
+for PAL-02 and the linked UI/package evidence for PAL-04. Each follow-up needs its own
+current repro or regression evidence.
+
+- [ ] **PAL-01** Make `fread`/`fwrite` copy blocks instead of looping `fgetc`/`fputc` (`libc/src/stdio.c`; about 70 MB/s against
+  5 GB/s for `read()` on Windows), with a throughput regression test.
+- [ ] **PAL-02** Replay the [implemented UTF-8 narrow-string model](docs/design/windows_narrow_strings.md)
+  on Windows/x64 and CRT host tools in Unicode directories; Windows/arm64 passes
+  at its recorded snapshot. Retain the pre-1903 and foreign-host DLL limits.
+- [ ] **PAL-03** Decide whether `posix_spawn` should detect non-CRT children itself instead of requiring `CRT_SPAWN_NATIVE_WINDOWS`.
+
+These older reports need bounded checks against identified current artifacts;
+neither later large-consumer passes nor a stale build tree settles them.
+
+- [ ] **PAL-04** Revalidate meaningful partial-option combinations of ordinary Linux
+  `crt-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
+  dependency publication already exists; close only reproduced gaps in shared
+  dependency copying/declaration and packaged example rebuilds, not the
+  already-accepted isolated chain
+  ([distribution contract](docs/guides/distribution.md),
+  [original UI evidence](docs/acceptance/crtui_acceptance.md)).
+- [ ] **PAL-06** libc++'s Windows `std::filesystem` truncates characters above U+FFFF: its path narrow/wide conversions (`__char_to_wide`, `__wide_to_char`) and the OS-boundary helpers
+  (`crt_win32_wide.h` `narrow`/`widen`, used by 15 recipe patches) treat the CRT's 4-byte `wchar_t` as one UTF-16 unit per element while the headers (`u8path`, `wstring`) produce UTF-32. Reproduced on
+  Windows/arm64 (the process ACP is 65001): `create_directory(u8path("\U0001F600"))` creates a directory whose name ends in U+F600 instead of the pair D83D DE00, `path(L"\U0001F600").string()` returns the
+  UTF-8 of U+F600, and `path("\xF0\x9F\x98\x80")` (a `char*` with a 4-byte character) throws `runtime_error: locale not supported`; characters up to U+FFFF (Hangul, Latin-1) are exact. Decide one canonical `path`
+  representation (UTF-32 matches the headers), make both conversions combine and split surrogate pairs with the right buffer sizes at every call site, and add a filesystem test (create, exists, iterate, rename, remove)
+  with a supplementary-plane name on every OS. Stream opens are not affected ([design note](docs/design/cxx_runtime.md#windows-stdfilesystempath-and-stream-opens)).
+
 <a name="crt-developer-experience-sdk---cli---studio"></a>
 
 ### CRT developer experience: SDK -> CLI -> VSCode
@@ -289,42 +328,6 @@ and requires a native replay for each added pair.
 The following sections are independent follow-ups, not prerequisites for the
 current SDK/CLI/editor workflow or a reopening of accepted SDK stages;
 long-term extensions stay conditional on a real consumer.
-
-### Focused CRT/PAL follow-ups: revalidate before fixing
-
-Found by the CLI's Windows replay (reproducers and numbers in the CLI's
-[Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29)):
-
-Replay basis:
-[Windows/x64 bootstrap findings](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#findings-fixed-in-this-pass)
-for PAL-01 and PAL-03,
-[narrow-string implementation](docs/design/windows_narrow_strings.md#implementation-status-2026-10-31)
-for PAL-02 and the linked UI/package evidence for PAL-04. Each follow-up needs its own
-current repro or regression evidence.
-
-- [ ] **PAL-01** Make `fread`/`fwrite` copy blocks instead of looping `fgetc`/`fputc` (`libc/src/stdio.c`; about 70 MB/s against
-  5 GB/s for `read()` on Windows), with a throughput regression test.
-- [ ] **PAL-02** Replay the [implemented UTF-8 narrow-string model](docs/design/windows_narrow_strings.md)
-  on Windows/x64 and CRT host tools in Unicode directories; Windows/arm64 passes
-  at its recorded snapshot. Retain the pre-1903 and foreign-host DLL limits.
-- [ ] **PAL-03** Decide whether `posix_spawn` should detect non-CRT children itself instead of requiring `CRT_SPAWN_NATIVE_WINDOWS`.
-
-These older reports need bounded checks against identified current artifacts;
-neither later large-consumer passes nor a stale build tree settles them.
-
-- [ ] **PAL-04** Revalidate meaningful partial-option combinations of ordinary Linux
-  `crt-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
-  dependency publication already exists; close only reproduced gaps in shared
-  dependency copying/declaration and packaged example rebuilds, not the
-  already-accepted isolated chain
-  ([distribution contract](docs/guides/distribution.md),
-  [original UI evidence](docs/acceptance/crtui_acceptance.md)).
-- [ ] **PAL-06** libc++'s Windows `std::filesystem` truncates characters above U+FFFF: its path narrow/wide conversions (`__char_to_wide`, `__wide_to_char`) and the OS-boundary helpers
-  (`crt_win32_wide.h` `narrow`/`widen`, used by 15 recipe patches) treat the CRT's 4-byte `wchar_t` as one UTF-16 unit per element while the headers (`u8path`, `wstring`) produce UTF-32. Reproduced on
-  Windows/arm64 (the process ACP is 65001): `create_directory(u8path("\U0001F600"))` creates a directory whose name ends in U+F600 instead of the pair D83D DE00, `path(L"\U0001F600").string()` returns the
-  UTF-8 of U+F600, and `path("\xF0\x9F\x98\x80")` (a `char*` with a 4-byte character) throws `runtime_error: locale not supported`; characters up to U+FFFF (Hangul, Latin-1) are exact. Decide one canonical `path`
-  representation (UTF-32 matches the headers), make both conversions combine and split surrogate pairs with the right buffer sizes at every call site, and add a filesystem test (create, exists, iterate, rename, remove)
-  with a supplementary-plane name on every OS. Stream opens are not affected ([design note](docs/design/cxx_runtime.md#windows-stdfilesystempath-and-stream-opens)).
 
 ### Windows process signals and Toybox `timeout`
 
