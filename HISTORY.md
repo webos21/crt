@@ -10,6 +10,15 @@ substantive update.
 
 ## 2026-11-23
 
+### Open `std::fstream` streams with a `std::filesystem::path` on Windows (PAL-05)
+
+The path constructors and `open()` of `ifstream`, `ofstream`, `fstream` and `filebuf` did not compile on Windows, where `path::value_type` is the CRT's 4-byte `wchar_t`, while the same source builds on Linux/macOS. libc++'s
+`_LIBCPP_HAS_OPEN_WITH_WCHAR` is back on and the MSVC-CRT `_wfopen()` call inside `<fstream>` is replaced by a private inline UTF-32 to UTF-8 conversion and the ordinary narrow `open()` (recipe patch on `include/fstream`; the former `__config` exclusion
+is removed, the `__cxx03` one stays). No libc ABI, libc++ export or consumer option is added; mode validation and failure states are the narrow open's, and a lone surrogate or a value above U+10FFFF is refused. The shared Dev SDK
+consumer checks read, write and append through the constructors and `open()`, space, Hangul and supplementary-plane names, failure states and the preservation of an existing file, in a static and a shared runtime
+([evidence](docs/acceptance/release_qualification.md#stdfstream-path-open-on-windows-pal-05-2026-11-23), [design](docs/design/cxx_runtime.md#windows-stdfilesystempath-and-stream-opens)). The work also exposed a separate, older defect: libc++'s Windows
+filesystem layer truncates characters above U+FFFF (`create_directory(u8path("😀"))` creates a directory ending in U+F600); that is not fixed here and is tracked as PAL-06.
+
 ### Close the Windows C++ public compile options item (P1-01)
 
 The Windows/arm64 replay of the corrected Dev profile closes the item. The CLI's `replay_cpp17_consumer_windows.py` consumes the `sdk (windows-aarch64)` CI artifact of `770ed07b` (hosted `sdk-integration` run 45099082349, content

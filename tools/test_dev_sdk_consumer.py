@@ -154,8 +154,9 @@ def main():
                                        ("missing-ca", None, "reject"), ("malformed-ca", "malformed.pem", "reject")):
                 command = [str(program), f"https://127.0.0.1:{server.server_port}/payload",
                            target_path(pki / ca, windows) if ca else "-", expected]
+                # cwd is the fresh work directory: the program creates and removes scratch files (std::fstream path checks) there
                 completed = subprocess.run(command, env=run_env, capture_output=True, text=True,
-                                           timeout=30, creationflags=flags)
+                                           timeout=30, creationflags=flags, cwd=work)
                 marker = "development-sdk: HTTPS+inflate ok" if expected == "ok" else "development-sdk: rejected"
                 if completed.returncode or marker not in completed.stdout:
                     raise ValueError(f"{mode}/{name}: exit {completed.returncode}; {completed.stdout} {completed.stderr}")
