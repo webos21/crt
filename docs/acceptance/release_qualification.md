@@ -1176,3 +1176,16 @@ The corrected producer (CRT `3c8c712`; hosted [`sdk-integration` run 45099082349
 The external C++17 replay passes 22/22 and the published `v0.0.1-preview.20261118.windows.arm64.1` fails it (5/16) with the same CLI. Measurements, identities and limits are owned by the CLI's
 [acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsarm64-external-c17-persona-consumer-replay-2026-11-23) and
 [compatibility entry](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#windowsarm64-c17-persona-consumer-combination-2026-11-23). Not covered: a release, signature or pin adoption of an SDK carrying the correction.
+
+### `std::fstream` path open on Windows (PAL-05, 2026-11-23)
+
+The fix (recipe patch on libc++'s `include/fstream`, PR 20) is exercised by the shared Dev SDK consumer, which now includes `fstream_path_checks`: read, write and append through the path constructors and `open()` for `ofstream`, `ifstream`,
+`fstream` and `filebuf`; space, Hangul and supplementary-plane (U+1F600) names; failure states (missing file or directory, a directory, an invalid mode, a second `open()`); preservation of an existing file; a lone surrogate refused on a wide-`path` target.
+Hosted [`sdk-integration` run 45115496512](https://github.com/webos21/crt/actions/runs/45115496512) at `421aed6` passes all six jobs; on each of the five hosts (Linux x86_64 and aarch64, macOS arm64, Windows x64 and arm64)
+the in-build consumer (static and shared runtime, real HTTPS server) and the external consumer of the extracted archive with the producer checkout hidden both pass, so the same test source runs on Linux/macOS, where `path::value_type` is `char`, and on Windows.
+Locally on Windows/arm64 (physical), the same code applied to the headers of the public SDK `v0.0.1-ci.45099082349` passes the repository's `test_dev_sdk_consumer.py` (static and shared), the unpatched SDK fails to compile it (the control), and the
+on-disk name of a file opened through `ofstream(u8path("disk-😀.txt"))` is the correct UTF-16 pair D83D DE00.
+
+Not covered: a published SDK carrying the fix (the CI artifact is unsigned and unpromoted); the CLI's own C++17 replay, which still opens files through `path::string()` and should be moved to the direct path open on a promoted SDK; directory and filesystem
+operations on names above U+FFFF, which are a separate defect (TODO PAL-06) and are deliberately not used by the test (those names are created and removed through stdio). The `windows-x64` leg of the pull request's `CI` once failed one in-tree libc
+timing check (`bionic_surface_test_runs`: user CPU time advanced), a test this change does not touch; rerunning only that job passed, so it is recorded as a pre-existing timing flake, not a result of this change.
