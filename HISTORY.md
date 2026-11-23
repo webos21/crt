@@ -8,6 +8,15 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-24
+
+### Close the native Linux stdio gate (PAL-01)
+
+The Linux replay of the Windows PAL follow-ups had been recorded only in crt-vscode's history. Rebuilt on current `main` `21a5509` (runtime unchanged since
+`312fec9`): Release core 172/172, and the 23 stdio, descriptor, process and socket cases pass 20 repetitions. PAL-01 closes on Linux, macOS and Windows; PAL-04's
+wording now names merged #24. The focused CRT/PAL queue has no open item
+([evidence](docs/acceptance/release_qualification.md#native-linuxx86_64-stdio-replay-pal-01-2026-11-24)).
+
 ## 2026-11-23
 
 ### Close the Linux partial-option packaging gaps (PAL-04)

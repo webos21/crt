@@ -68,13 +68,13 @@ affected packages under the SDK change-impact policy.
 Found by the CLI's Windows replay (reproducers and numbers in the CLI's
 [Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29)):
 
-- [ ] **PAL-01** Run native Linux stdio regressions for the block transfers.
+- [x] **PAL-01** Block transfers for buffered I/O pass the native stdio regressions on Linux/x86_64
+  ([revalidated on `21a5509`](docs/acceptance/release_qualification.md#native-linuxx86_64-stdio-replay-pal-01-2026-11-24)),
   [macOS/arm64](docs/acceptance/release_qualification.md#macosarm64-pal-follow-up-replay-2026-11-23)
-  and [Windows/x64](docs/acceptance/release_qualification.md#native-windowsx64-pal-replay-2026-11-23)
-  native replays pass; the ARM64 legacy CLI relay retains its own acceptance.
+  and [Windows/x64](docs/acceptance/release_qualification.md#native-windowsx64-pal-replay-2026-11-23);
+  the ARM64 legacy CLI relay retains its own acceptance.
 
-- [x] **PAL-04** Linux partial-option packaging closed at `312fec9` plus the
-  uncommitted fix: ordinary `crt-media-dist`/`crt-ui-dist` support Skia, FFmpeg and
+- [x] **PAL-04** Linux partial-option packaging closed by [#24](https://github.com/webos21/crt/pull/24) (`21a5509`): ordinary `crt-media-dist`/`crt-ui-dist` support Skia, FFmpeg and
   curl all OFF or all ON and refuse other combinations early; `verify_dist`
   rejects Skia/FFmpeg payload without its dependencies
   ([distribution](docs/guides/distribution.md),

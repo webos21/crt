@@ -1512,3 +1512,17 @@ and CLI `76a0f1a` closes the macOS stdio gate separately; see the
 stdio and PAL-04's Linux combinations remain in this focused work queue.
 The original Mac/ARM64 records' statements that x64 was pending describe
 their execution time; this section supplies the subsequent physical x64 result.
+
+### Native Linux/x86_64 stdio replay (PAL-01, 2026-11-24)
+
+Closes PAL-01's last gate. The unpublished Linux evidence recorded in crt-vscode's history for CRT `312fec9` (fresh Release core 172/172; the 23 `stdio*`,
+`fd_*`, `fork*`, `spawn*`, `eventfd`, `socket*`, `memfd` and `timerfd` cases 20/20; `stdio_edge_test` passing against both the previous and the block-transfer
+object; five-run buffered/unbuffered medians) is revalidated against current `main` `21a5509`, which differs from `312fec9` only in the PAL-04 packaging change
+and documentation (`git diff 312fec9 21a5509 -- libc libm` is empty).
+
+Host: Ubuntu 26.04.1, kernel 7.0.0-44, x86_64, Clang/LLD 21.1.8. A new `out/pal01-linux-20261124` tree (Ninja, Release, imported libc++ off) builds in 56 s and
+passes **172/172** CTest cases; the 23 focused cases pass 20 consecutive repetitions. No runtime, SDK payload, pin or option is changed.
+
+Not re-measured: the stdio throughput medians, which remain the earlier five-run Linux record; Windows slot-table behaviour (native Windows evidence), which
+Linux does not execute.
+
