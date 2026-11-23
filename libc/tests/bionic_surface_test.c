@@ -72,27 +72,46 @@ static void test_gettid(void) {
 #endif
 }
 
+/* CPU-time clocks are quantized: on Windows user/kernel time (GetProcessTimes, which getrusage() and the CPU-time clock_gettime() clocks use) advances in
+ * scheduler ticks of about 15.6 ms. A fixed amount of work is a function of the CPU's speed, so a fast runner can finish it inside one tick and read zero CPU
+ * time (measured: with a loop of about 10 ms 28% of fresh processes end with zero, at 13 ms 5%, at 16 ms under 1%), which made this test fail now and then on
+ * the hosted windows-x64 runner. Spinning for a bounded amount of WALL time instead holds on any CPU, and still fails if the clock really never moves. */
+static volatile unsigned long cpu_sink;
+#define CPU_CLOCK_BUDGET_MS 3000LL
+
+static long long wall_ms(void) {
+  struct timespec now;
+
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (long long)now.tv_sec * 1000LL + now.tv_nsec / 1000000L;
+}
+
+/* Burns user CPU in short slices until `probe()` returns nonzero or the wall-clock budget is spent. */
+static void burn_cpu_until(int (*probe)(void)) {
+  long long deadline = wall_ms() + CPU_CLOCK_BUDGET_MS;
+  unsigned long i;
+
+  while (!probe() && wall_ms() < deadline) {
+    for (i = 0; i < 200000UL; ++i) {
+      cpu_sink += i;
+    }
+  }
+}
+
 #if defined(__APPLE__) || defined(_WIN32) || defined(__MINGW32__) || defined(CRT_TARGET_OS_WINDOWS)
 #include <sys/resource.h>
 
+static int rusage_user_time_moved(void) {
+  struct rusage now;
+
+  return getrusage(RUSAGE_SELF, &now) == 0 && (now.ru_utime.tv_sec > 0 || now.ru_utime.tv_usec > 0);
+}
+
 static void test_getrusage(void) {
   struct rusage usage;
-  volatile unsigned long sink = 0;
-  unsigned long i;
-
-  /* Spin until the process's user CPU clock moves (it ticks every ~15.6 ms on Windows, so a fixed
-   * amount of work can finish inside one tick on a fast runner), for at most ~100M iterations. */
-  int round;
 
   memset(&usage, 0, sizeof(usage));
-  for (round = 0; round < 40; ++round) {
-    for (i = 0; i < 2500000UL; ++i) {
-      sink += i;
-    }
-    if (getrusage(RUSAGE_SELF, &usage) == 0 && (usage.ru_utime.tv_sec > 0 || usage.ru_utime.tv_usec > 0)) {
-      break;
-    }
-  }
+  burn_cpu_until(rusage_user_time_moved);
   CHECK(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage(RUSAGE_SELF)");
   CHECK(usage.ru_maxrss > 512 && usage.ru_maxrss < 64L * 1024 * 1024, "ru_maxrss is a plausible number of KiB");
   CHECK(usage.ru_utime.tv_sec > 0 || usage.ru_utime.tv_usec > 0, "user CPU time advanced");
@@ -189,19 +208,22 @@ static void test_sched(void) {
   CHECK(SCHED_BATCH == 3 && SCHED_IDLE == 5, "Bionic scheduling policy numbers");
 }
 
+static int cpu_clocks_moved(void) {
+  struct timespec process_cpu, thread_cpu;
+
+  return clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &process_cpu) == 0 && clock_gettime(CLOCK_THREAD_CPUTIME_ID, &thread_cpu) == 0 &&
+         (process_cpu.tv_sec > 0 || process_cpu.tv_nsec > 0) && (thread_cpu.tv_sec > 0 || thread_cpu.tv_nsec > 0);
+}
+
 static void test_clocks(void) {
   struct timespec t;
   struct timespec process_cpu, thread_cpu;
-  volatile unsigned long sink = 0;
-  unsigned long i;
 
   CHECK(clock_gettime(CLOCK_MONOTONIC_COARSE, &t) == 0, "CLOCK_MONOTONIC_COARSE");
   CHECK(clock_gettime(CLOCK_MONOTONIC_RAW, &t) == 0, "CLOCK_MONOTONIC_RAW");
   CHECK(clock_gettime(CLOCK_REALTIME_COARSE, &t) == 0 && t.tv_sec > 1700000000L, "CLOCK_REALTIME_COARSE");
   CHECK(clock_gettime(CLOCK_BOOTTIME, &t) == 0 && t.tv_sec >= 0, "CLOCK_BOOTTIME");
-  for (i = 0; i < 20000000UL; ++i) {
-    sink += i;
-  }
+  burn_cpu_until(cpu_clocks_moved);
   CHECK(clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &process_cpu) == 0, "CLOCK_PROCESS_CPUTIME_ID");
   CHECK(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &thread_cpu) == 0, "CLOCK_THREAD_CPUTIME_ID");
   CHECK(process_cpu.tv_sec > 0 || process_cpu.tv_nsec > 0, "process CPU time advanced");
