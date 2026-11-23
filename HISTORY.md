@@ -10,6 +10,16 @@ substantive update.
 
 ## 2026-11-23
 
+### Stop the intermittent `bionic_surface_test` CPU-time failure by spinning on wall time (root cause)
+
+`bionic_surface_test_runs` failed now and then on the hosted windows-x64 runner with `user CPU time advanced` (twice on 2026-11-23, in the PR 20 and PR 21 CI runs). Its history: on 2026-10-11 (`c9425d0`) a fixed 30M-iteration loop was seen
+failing once and replaced by "up to 40 rounds of 2.5M iterations until the clock moves", whose message says to bound the wait instead of assuming a duration, but the bound was still a *count* of work, so it still depends on the CPU's speed. The
+cause is the same: Windows CPU time (`GetProcessTimes`, behind `getrusage` and the `CLOCK_*_CPUTIME_ID` clocks) advances in scheduler ticks of about 15.6 ms, and a fast core can finish a fixed amount of work inside one tick. Measured on Windows/arm64
+with the same loop shortened, 300 fresh processes each: a loop of about 10 ms ends with zero CPU time in 83, about 13 ms in 15, about 16 ms in 1, about 18 ms in 0. The `getrusage` check and its sibling `CLOCK_PROCESS_CPUTIME_ID`/`CLOCK_THREAD_CPUTIME_ID`
+check (a fixed 20M iterations, the same defect) now burn CPU until the clock moves or 3 s of *wall* time pass, so they hold on any CPU and still fail when the clock never moves; 0 failures in 400 runs, idle and with 8 busy processes on 4 cores. The tick
+resolution is documented where Windows `getrusage` reads it. Not reproduced here: the failure itself on the hosted runner (the shortened loop reproduces the mechanism, not the runner's exact loop length). No earlier written plan to measure time instead of counting was found in the
+repositories, issues, pull requests or recorded sessions; `c9425d0` is the only trace of that intent.
+
 ### Open `std::fstream` streams with a `std::filesystem::path` on Windows (PAL-05)
 
 The path constructors and `open()` of `ifstream`, `ofstream`, `fstream` and `filebuf` did not compile on Windows, where `path::value_type` is the CRT's 4-byte `wchar_t`, while the same source builds on Linux/macOS. libc++'s
