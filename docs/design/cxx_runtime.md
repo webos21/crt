@@ -263,6 +263,25 @@ canonical Windows runtime DLL/import-library inputs, not only C archives.
 Cause, native host limits and exact regression evidence are owned by the
 [iostream diagnostic](../bringup/crt_pal_residual_triage.md#windows-iostream-priority-initialization-fix-2026-10-22).
 
+### Windows `std::filesystem::path` and stream opens
+
+On Windows `std::filesystem::path::value_type` is `wchar_t`, which this CRT builds as a 4-byte `int` (`-fwchar-type=int`), and the narrow file-name
+encoding of a CRT executable is UTF-8. `std::ifstream`, `std::ofstream`, `std::fstream` and `std::filebuf` therefore need a wide open to accept a
+`path` (`open(path)` and the path constructors) the way they do on Linux/macOS, where `value_type` is `char`. Upstream libc++ implements it with the
+MSVC CRT's `_wfopen()`, which this project's independent libc does not have and must not gain as public ABI. The recipe keeps upstream's
+`_LIBCPP_HAS_OPEN_WITH_WCHAR` and replaces only that call inside `<fstream>`: the wide path is converted to UTF-8 by a private, inline
+`__crt_wide_path_to_utf8` (UTF-32 here, UTF-16 if `wchar_t` were 2 bytes; a lone or reversed surrogate or a value above U+10FFFF is refused) and
+the ordinary narrow `open(const char*)` runs, so mode validation, failure states and `fopen` semantics are the narrow open's. Nothing is exported from
+libc++ or added to the CRT libc, and no consumer option is involved. The `__cxx03` headers keep the feature off (C++03 has no `filesystem::path`).
+The shared Dev SDK consumer (`libstdc++/tests/development_sdk_consumer.cc`) checks it on every OS in a static and a shared runtime: read, write and
+append through the constructors and `open()`, space, Hangul and supplementary-plane names, failure states and the preservation of an existing file.
+
+**Known limit (TODO PAL-06).** libc++'s own Windows filesystem operations and its `path` narrow/wide conversions (`__char_to_wide`,
+`__wide_to_char`, `crt_win32_wide.h`) still treat the 4-byte `wchar_t` as one UTF-16 unit per element: a character above U+FFFF is truncated to 16 bits
+(`create_directory(u8path("\U0001F600"))` creates a directory whose name ends in U+F600), `path::string()` of such a path is wrong, and
+`path(const char*)` with a 4-byte UTF-8 character throws. Stream opens do not depend on those layers, so a file named with such a character is opened
+correctly (its on-disk name is the UTF-16 pair); a directory operation on it is not.
+
 ## Exceptions, RTTI, And Unwind
 
 The bootstrap `cxx` library still defaults to `-fno-exceptions` and
@@ -508,7 +527,7 @@ is narrower:
 
 1. Add further focused standard-library behavior coverage where host
    adaptation is subtle. Windows `<filesystem>` UTF-32-`wchar_t`-to-UTF-16
-   path handling, the item that used to head this list, is done -- see
+   path handling, the item that used to head this list, is done for characters up to U+FFFF (see the limit above) -- see
    [`archived HISTORY.md`](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md)'s 2026-08-31 entry for the full investigation (a real
    client/library ABI mismatch caused by an existing `<print>` patch's
    translation-unit-global `#undef`, plus several other real bugs found

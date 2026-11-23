@@ -1,10 +1,14 @@
 #include <curl/curl.h>
 #include <zlib.h>
 #include <lzma.h>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
+#include <system_error>
 #include <nlohmann/json.hpp>
 #define CJSON_HIDE_SYMBOLS
 #include <cJSON.h>
@@ -64,8 +68,113 @@ static bool platform_persona() {
          sizeof(curl_socket_t) == sizeof(int) && std::strcmp(text, "7-ok") == 0;
 }
 
+// std::fstream family opened with a std::filesystem::path. On Windows path::value_type is the packaged libc++'s wchar_t (4 bytes
+// in this CRT) and the wide open has to reach the CRT's UTF-8 narrow file-name boundary; on Linux/macOS it is char. The same checks run
+// on every OS: read, write and append through the path constructors and open(); a space, a Hangul and a supplementary-plane name;
+// failure states and the preservation of an existing file. File names with a supplementary-plane character are created and removed
+// through stdio, not std::filesystem: libc++'s own Windows directory operations are a separate item (TODO PAL-06).
+static bool fstream_path_checks(std::string& why) {
+  namespace fs = std::filesystem;
+  auto fail = [&](const char* what) { why = what; return false; };
+  auto slurp = [](const fs::path& p, std::string& out) {
+    std::ifstream in(p, std::ios::binary);
+    if (!in) return false;
+    out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return true;
+  };
+  auto slurp_stdio = [](const std::string& u8, std::string& out) {
+    FILE* file = std::fopen(u8.c_str(), "rb");
+    if (!file) return false;
+    char buffer[64];
+    size_t count = std::fread(buffer, 1, sizeof buffer, file);
+    std::fclose(file);
+    out.assign(buffer, count);
+    return true;
+  };
+  // "crt fstream 한글" (a space and Hangul syllables, UTF-8 spelled out, not source encoding)
+  const fs::path dir = fs::u8path("crt fstream \xED\x95\x9C\xEA\xB8\x80");
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  if (!fs::create_directory(dir)) return fail("create_directory with a space and a Hangul name");
+  const fs::path names[] = {dir / "plain.txt", dir / "with space.txt", dir / fs::u8path("\xED\x95\x9C\xEA\xB8\x80.txt"),
+                            dir / fs::u8path("a \xED\x95\x9C b.txt")};
+  for (const fs::path& file : names) {
+    std::string got;
+    { std::ofstream out(file, std::ios::binary); if (!out) return fail("ofstream(path) write"); out << "one"; }
+    if (!slurp(file, got) || got != "one") return fail("ifstream(path) read back after ofstream(path)");
+    { std::ofstream out(file, std::ios::binary | std::ios::app); if (!out) return fail("ofstream(path, app)"); out << "+two"; }
+    if (!slurp(file, got) || got != "one+two") return fail("append through ofstream(path, app)");
+    { std::fstream io(file, std::ios::in | std::ios::out | std::ios::binary); if (!io) return fail("fstream(path, in|out)");
+      io.seekp(0, std::ios::end); io << "+3"; }
+    if (!slurp(file, got) || got != "one+two+3") return fail("fstream(path, in|out) must keep the existing content");
+    std::ofstream late; late.open(file, std::ios::binary | std::ios::trunc);
+    if (!late.is_open()) return fail("ofstream::open(path, trunc)");
+    late << "new"; late.close();
+    std::ifstream again; again.open(file, std::ios::binary);
+    if (!again.is_open()) return fail("ifstream::open(path)");
+    again.close();
+    if (!slurp(file, got) || got != "new") return fail("open(path, trunc) then read");
+    std::filebuf raw;
+    if (!raw.open(file, std::ios::in | std::ios::binary)) return fail("filebuf::open(path)");
+    if (raw.sgetc() != 'n') return fail("filebuf read");
+    raw.close();
+    if (fs::file_size(file) != 3) return fail("file_size through the same path");
+  }
+  int seen = 0;
+  for (const fs::directory_entry& entry : fs::directory_iterator(dir)) { (void)entry; ++seen; }
+  if (seen != 4) return fail("directory_iterator sees every file");
+
+  // a supplementary-plane name (U+1F600) and a mixed one, opened through a path built from UTF-8: the stream open must reach the same
+  // file stdio reaches with the UTF-8 name
+  const std::string emoji = "crt-fstream-\xF0\x9F\x98\x80.txt", mixed = "crt a \xED\x95\x9C\xF0\x9F\x98\x80 b.txt";
+  for (const std::string& u8 : {emoji, mixed}) {
+    std::remove(u8.c_str());
+    std::string got;
+    { std::ofstream out(fs::u8path(u8), std::ios::binary); if (!out) return fail("ofstream(path) with a supplementary-plane name"); out << "wide"; }
+    if (!slurp_stdio(u8, got) || got != "wide") return fail("stdio must read what ofstream(path) wrote under a supplementary-plane name");
+    { std::ofstream out(fs::u8path(u8), std::ios::binary | std::ios::app); out << "+app"; }
+    if (!slurp(fs::u8path(u8), got) || got != "wide+app") return fail("ifstream(path) with a supplementary-plane name");
+    if (std::remove(u8.c_str()) != 0) return fail("remove the supplementary-plane file through stdio");
+    std::ifstream gone(fs::u8path(u8));
+    if (gone.is_open()) return fail("a removed supplementary-plane file must not open");
+  }
+
+  // failure states, and an existing file stays as it was
+  const fs::path keep = dir / "keep.txt";
+  { std::ofstream out(keep, std::ios::binary); out << "keep"; }
+  std::ifstream missing(dir / "no such file.txt");
+  if (missing.is_open() || !missing.fail()) return fail("ifstream on a missing path must fail");
+  std::ofstream nodir(dir / "no such dir" / "x.txt");
+  if (nodir.is_open() || !nodir.fail()) return fail("ofstream into a missing directory must fail");
+  std::ofstream onto_dir(dir);
+  if (onto_dir.is_open() || !onto_dir.fail()) return fail("ofstream onto a directory must fail");
+  std::ofstream bad_mode(keep, std::ios::trunc | std::ios::app);   // out|trunc|app has no fopen mode: refused, and the file is not truncated
+  if (bad_mode.is_open()) return fail("an invalid open mode must be refused");
+  std::string got;
+  if (!slurp(keep, got) || got != "keep") return fail("a failed open must preserve the existing file");
+  std::ofstream already(keep, std::ios::binary | std::ios::app);
+  already.open(keep, std::ios::binary);
+  if (!already.fail()) return fail("open() on an open stream must set failbit");
+  already.clear(); already.close();
+  if (!slurp(keep, got) || got != "keep") return fail("the refused second open must preserve the file");
+  // wide paths only exist where path::value_type is wide: a lone surrogate is not a valid file name and must not create one
+  if (sizeof(fs::path::value_type) > 1) {
+    std::wstring bad = L"lone-"; bad.push_back(static_cast<wchar_t>(0xD800)); bad += L".txt";
+    std::ofstream lone(dir / fs::path(bad));
+    if (lone.is_open()) return fail("a lone surrogate in a wide path must be refused");
+  }
+  fs::remove_all(dir, ec);
+  if (fs::exists(dir)) return fail("cleanup");
+  return true;
+}
+
 static bool utilities(const char* program) {
   if (!platform_persona()) return false;
+  std::string fstream_why;
+  if (!fstream_path_checks(fstream_why)) {
+    std::cerr << "development-sdk: fstream path: " << fstream_why << '\n';
+    return false;
+  }
   nlohmann::json value = {{"integer", 18446744073709551615ULL}, {"text", "space \uD55C\uAE00"}};
   if (nlohmann::json::parse(value.dump()) != value) return false;
   cJSON* parsed = cJSON_Parse("{\"value\":42}");
