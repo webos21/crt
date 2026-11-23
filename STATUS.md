@@ -5,11 +5,13 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-The SDK, CLI and host-tools snapshot was reviewed on **2026-11-20** against
-CRT `278c5d9`, CLI `e362a51` and the `crt-vscode` scaffold `b547406`.
+The SDK, CLI and host-tools snapshot was reviewed on **2026-11-23** against
+CRT `2443922`, CLI `183178d` and `crt-vscode` `119e894`.
 This review uses the work queues, completed work and recorded acceptance results.
 Each result retains its original source revision, artifact identities and host
-scope. Other subsystem entries retain their earlier acceptance scope.
+scope; it is not a new native replay or artifact adoption. The published-release
+inventory below retains its recorded November 20 scope. Other subsystem entries
+retain their earlier acceptance scope.
 
 ## Current Baseline
 
@@ -371,6 +373,18 @@ remain separate platform gates. The historical Linux pure C shared SDK-provider
 control resolved host libz. The current C static/shared SDK policy is replayed natively on Linux, Windows and macOS from unpromoted candidates ([Tranche 6.4](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23)).
 The published Windows SDKs keep the older behavior until a corrected SDK is promoted.
 
+**Windows C++ public compile policy (P1-01) is verified.** CRT `3c8c712`
+removes the global consumer `-U_WIN32 ...` options and confines the POSIX/Bionic
+persona to CRT-owned curl and mbedTLS header shims, preserving the packaged
+libc++'s Windows filesystem types. Corrected SDK candidates from CRT `770ed07b`
+pass the CLI's external C++17 static/shared-runtime replay on physical Windows
+x64 and arm64 machines. These are unpromoted candidates, not updated public SDKs
+or consumer pins. The completed item lives in
+[HISTORY](HISTORY.md#close-the-windows-c-public-compile-options-item-p1-01);
+the CLI owns the exact
+[exercised SDK-CLI combinations](https://github.com/webos21/crt-cli/blob/183178d/docs/compatibility.md#windowsarm64-c17-persona-consumer-combination-2026-11-23).
+The separate path-taking stream-constructor limitation remains below.
+
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
 record accepts only the recorded native/cross-packaging scope. Failed
@@ -465,6 +479,12 @@ statuses, and exceptions are maintained in:
 
 - On the Windows Dev SDK baseline, an independent two-thread file-I/O test reproduced read failures and wrong bytes. The port-store
   replay uses independent publisher processes. [Reproducer and exact SDK scope](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/ci_acceptance.md#windowsarm64-hosted-integration-expansion-2026-11-20).
+- Windows path-taking stream constructors such as `std::ofstream(path)` do not
+  compile against the packaged libc++: `path::value_type` is CRT's 4-byte
+  `wchar_t`, but `<fstream>` has no matching wide-open path. Consumers currently
+  use `path::string()`; this is separate from the completed C++ public compile
+  policy replay. The API/policy decision remains
+  [PAL-05](TODO.md#focused-crtpal-follow-ups-revalidate-before-fixing).
 - The built-in Linux/Windows DNS resolver supplies synchronous UDP A-record
   lookup; AAAA queries, TCP fallback, search domains and caching remain open.
   IPv6 literals and sockets already exist; macOS uses the system resolver.
@@ -583,18 +603,17 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-The current producer focus is Dev SDK correctness and release signing.
+The active producer focus is signature-gated SDK publication, coordinated with
+the CLI. Verified runtime corrections still need artifact promotion and pin
+adoption; their completed native replay gates are not reopened.
 
 - **Promote a corrected Windows SDK** so consumers can adopt it. The pure C
   shared provider policy (Tranche 6.4) is verified on every host from
-  unpromoted candidates; the newest published Windows/x64 SDK is still
-  `20261110` and fails six of the 36 C provider cases. Pin adoption is tracked
-  by `crt-cli`.
+  unpromoted candidates, and the Windows C++ public compile policy is verified
+  on both Windows architectures. The recorded published Windows SDKs predate
+  these corrections. Promotion, signing and CLI pin adoption remain separate
+  from the completed replays.
   [Replay records](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23).
-- **Windows C++ P1-01** covers the Dev profile's curl compile options and
-  `<filesystem>`. The CLI already scopes the options by source. A corrected
-  producer SDK still needs external C++17 replay on Windows x64 and ARM64.
-  [Windows compile options](TODO.md#p1---windows-c-public-compile-options-d5).
 - **SDK signing P1-01 and P1-02** coordinate draft verification and
   signature-checked finalization with `crt-cli`. The recorded releases use
   offline signatures attached after publication.
