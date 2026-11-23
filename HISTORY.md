@@ -10,6 +10,13 @@ substantive update.
 
 ## 2026-11-23
 
+### Complete the physical Windows/x64 replay of the pure C shared provider (Tranche 6.4 / P0-01)
+
+Built a clean Release candidate of CRT `770ed07b` (`v0.0.1-rehearsal.11`; CTest 169/169, in-build C provider check 4/4) and replayed it on this physical Windows 11 x64 machine with CLI `c297a65`: the SDK alone builds the CLI (self-build cold 21/0, warm 0/21; native 1028, archive 214, SDK-store 113, recipe 147, store-lock 9)
+and the C static/shared driver passes 36/36 with the loaded `libc.dll` equal to the installed SDK's. The published `20261110` SDK again fails the same six of 36. This closes the last verification slice of P0-01 (Linux x64/aarch64, Windows x64 hosted and physical, Windows arm64 and macOS arm64 are all recorded), so the item is removed from TODO.
+**Still open and not part of this item:** promoting a Windows SDK that carries the correction (the newest published Windows/x64 SDK is `20261110`) and consumer pin adoption, tracked by crt-cli CI-01 and P1-01; Windows C++ `<filesystem>`. No product, published SDK, pin or STATUS change.
+[Inputs, results and limits](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23).
+
 ### Replay the pure C shared provider on macOS/arm64 (Tranche 6.4)
 
 Synchronize CRT `3c8c712`, CLI `01d2532` and crt-vscode `8c13564`. Independently verify and consume the macOS SDK artifact of

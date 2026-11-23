@@ -2886,3 +2886,22 @@ That is not a skipped Mac provider gate; the Mac CI asset bytes are independentl
 No runtime or upstream source modification, local SDK patch, release/signing/pin adoption, extension-host execution, GPU/Web rebuild,
 Windows rerun or current Windows persona/`<filesystem>` qualification. The five-host publication/promotion decision stays open under P0;
 this closes the macOS native replay slice, not all of Tranche 6.4.
+
+## Windows/x64 physical-machine pure C shared provider replay (2026-11-23)
+
+The physical-machine counterpart of the [hosted Windows/x64 replay](#windowsx64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22), closing its "not a physical x64 machine" limit for Tranche 6.4.
+Host: Windows 11 Pro 10.0.26100 x64 (physical), LLVM 22.1.8, Windows SDK `10.0.28000.0`. **The SDK is a locally built, unpromoted candidate, not a release or a downloaded CI artifact:** nothing is signed, published or pinned.
+
+**Candidate.** CRT `770ed07b` (includes the Windows persona fix of #19) in a clean detached worktree, `VERSION` `v0.0.1-rehearsal.11`, preset `windows-host-ninja-debug` with `-DCMAKE_BUILD_TYPE=Release`, imported libc++ on, Skia/FFmpeg/curl/LVGL off, `crt-dev-release`.
+Manifest SHA-256 `92f844b3649aae7b59628f33bc59a4f450b50394fa49239b3f417a75e09d57b5`, installed content `eb41ca930c9e7ed2dd8e972fa48a3c520380b9c95d2560db7d1fc1956162aeec`, `bin\libc.dll` `f660266d37d48466ec23f51d13eed9e1e1ec01d41f395c739e016df7d8a5c17a`,
+archive `cc7d6553...21ff`. Build CTest 169/169; the in-build installed-SDK C provider check passes 4/4.
+
+**CLI replay.** CLI `c297a65` consumed that SDK alone (`replay_cli_contract_windows.py`, restricted token, empty `PATH`, job-object accounting, 736 recorded processes; every step of the replay log passes): the SDK built the CLI, which self-built cold 21 executed / 0 reused and warm 0 / 21;
+executable `2543b1daaa6c471e2a9364d7625cb207e433235cd3b8841085c6297d9150e877` (46,048,256 bytes). Native 1028, archive 214, SDK-store 113, recipe 147 and store-lock 9 checks pass (the five input-gated `port-*` suites are not counted as passes). The SDK inventory was unchanged.
+`replay_c_shared_windows.py` passes **36/36** (static control without a `libc.dll` import; shared runtime importing `libc.dll` with the process loading exactly the installed SDK's `bin\libc.dll` and failing to start without it; shared runtime + project DLL with one libc and one `errno`; a static executable depending on a shared library refused before output);
+result SHA-256 `a695516627fdc3016453f0dc89b74c2772b1038715312a61f29e1f12fa74d5d7`.
+
+**Published SDK, as a baseline.** The same driver and CLI against `v0.0.1-preview.20261110.windows.1` (manifest `b0fca4c8...6976`, content `5bb55372...c7ef`) pass 30/36. The six failures are the shared-runtime executable's missing `libc.dll` import, loaded-image and start-failure cases and the project-DLL
+executable's missing import, loaded-image and `run` cases: the same six as on the hosted x64 and arm64 replays (result SHA-256 `e8bcd60253457a262462be1870ad49e84febc1b72f879dca3c10f603e2248293`). The published SDK is left as it is.
+
+**Not covered.** Release, signing and consumer pin adoption of any Windows SDK carrying the correction (the newest published Windows/x64 SDK is still `20261110`); Windows C++ `<filesystem>` and the curl compile options (separate item); a Windows zlib or same-name provider case. Evidence is in `C:\Users\Lee\s13\`, outside the repositories.

@@ -87,39 +87,6 @@ and CLI adoption ledger: build a candidate, hand off immutable public SDK inputs
 outside producer trees, validate consumers, then promote and adopt exact pins.
 A public release is not required for that loop.
 
-#### P0 - Pure C shared provider policy (Tranche 6.4 / D5)
-
-Consumer handoff:
-[crt-cli correctness handoff P1-01](https://github.com/webos21/crt-cli/blob/main/TODO.md#p1---producer-correctness-handoff-and-first-user-workflow-d5)
-replays the exact SDK candidate and records its adoption.
-
-- [ ] **P0-01** **6.4** Establish the intended C static/shared startup, link and SDK-library
-  runtime-search policy. The retained [first-build provider](docs/acceptance/sdk_split_acceptance.md#linux-installed-sdk-first-build-consumer-slice-2026-11-06)
-  emits static C inputs for `executable-shared.link_c`; the later [CLI control](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#linux-d3-common-change-replay-and-macos-handoff-2026-11-09)
-  maps host libz. Reproduce against identified current SDK inputs before fixing;
-  support the mode correctly or reject it explicitly.
-- [x] Linux/x86_64 correction and clean Dev SDK candidate replay
-  ([evidence](docs/acceptance/sdk_split_acceptance.md#clean-linuxx86_64-c-shared-sdk-candidate-2026-11-21)).
-- [x] Native Linux/aarch64 producer policy replay
-  ([hosted evidence](docs/acceptance/sdk_split_acceptance.md#hosted-linux-producer-replay)).
-- [x] Windows/x64 wrapper correction (`crt-cc` honors the runtime linkage) verified on a local, unpromoted
-  candidate; the clean CI candidate and consumer evidence are recorded below
-  ([HISTORY](HISTORY.md), 2026-11-22).
-- [x] Windows/arm64: the clean CI-built SDK of `5325cea` with CLI `44fbf24` (native 1,041 checks; static, shared and shared + project DLL 36/36 with the loaded `libc.dll` equal to the installed SDK's; the
-  published `20261118` SDK fails six of the same cases) ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22)).
-- [x] Windows/x64 (hosted `windows-2022`, not a physical machine): the x64 CI artifact of the same build with CLI `6f7f8b9`: native replay passed, 36/36, the published `20261110` SDK fails the same six cases
-  ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22)).
-- [x] macOS/arm64: replay CLI `01d2532` with the same clean CI build's SDK: C provider **76/76**, native **984**,
-  actual zlib source-port/provider **20/20** gates and Mach-O binding audits; the existing public Mac SDK also passes
-  the C provider matrix ([evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-pure-c-shared-provider-replay-2026-11-23)).
-- [ ] Promote qualified SDK artifacts before consumer pin adoption. Windows/x64 evidence remains hosted;
-  a physical Windows/x64 replay is separate if the owner requires it.
-- Acceptance: verify the static control and each supported shared mode with link
-  maps, ELF `DT_NEEDED` / Mach-O load commands / PE imports and loaded images. If C shared is unsupported, verify
-  explicit rejection before linking and no output artifact. Reject host libz
-  fallback as qualification. Replay with the new SDK/contract identity and
-  retain the old pin and diagnostic evidence.
-
 #### P1 - Windows C++ public compile options (D5)
 
 Reproduction baseline:
