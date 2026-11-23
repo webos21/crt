@@ -1415,3 +1415,100 @@ This is CI-artifact and local
 execution evidence, not a signed release, pin adoption or editor acceptance.
 Native Linux stdio execution, physical Windows/x64 follow-ups and Linux
 partial-option Media/UI packaging remain separate gates. STATUS is unchanged.
+
+### Native Windows/x64 PAL replay (2026-11-23)
+
+Physical Windows/x86_64, build 26100, LLVM 22.1.8, Windows SDK
+`10.0.28000.0`, Python 3.11.9. Reviewed CRT `52881f086c44ae22ea257e3d22839ff3b71e1ce7`,
+CLI `6704aa8b82f22590700ca85d73f526c79eea6fd9` and extension
+`119e894b520ca079c02faed61088741bbfd19cbe`. This closes the physical x64
+follow-ups of the preceding ARM64/emulated-x64 records, with the newer
+post-descriptor/stdio SDK. It does not replace their original identities.
+
+**SDK input.** The successful [SDK Integration run 45159161995](https://github.com/webos21/crt/actions/runs/45159161995)
+at CRT `52881f08` supplies the x64 Dev SDK. `ci_sdk_release.py verify` checks
+the original release assets before extraction: manifest SHA-256
+`b7eeda14c3b857564ebfc2042ed33fdd9fa0f9e23a6270ae8402c99b297f2be0`, archive
+`7d170eaf66176a9961a59bdc25e811b69dc4e782a7052f8ac6ffcc8333172edd`
+(73,153,429 bytes), installed content
+`408024fb52a6904c53c0082a093e8765cfe3968eca506b481f616c2c2293cab9`.
+The CI artifact is unsigned and unpromoted; no consumer pins change.
+
+**Descriptor correctness and spawn.** A fresh Release C core build
+(`CRT_USE_IMPORTED_LIBCXX=OFF`, optional Skia/FFmpeg/curl/LVGL disabled) passes
+20 focused CTest cases; `fork_heap_snapshot_test_runs` retains its existing
+skip. The 21-case selection includes all five `stdio*` suites, descriptor
+concurrency/snapshot/adopt-handle, fork/signal/runtime reset, owned spawn
+groups, UTF-8 narrow arguments/environment, long argv/status/kill, eventfd,
+socket network and socketpair. The committed four-thread descriptor test
+against the PAL-06 SDK from run `45142915867` fails all three runs (35, 34,
+59 I/O or cleanup failures, exit 5). The fresh fixed executable passes five
+consecutive runs: 400,000 open/read/close cycles, exact expected bytes, no
+failures. These are independent descriptor lifetimes, not concurrent close
+and use of the same descriptor. The explicit native-child hint policy
+(PAL-03) is unchanged and both owned-group launcher modes pass.
+
+**PAL-01 measurement.** `benchmark/stdio_throughput.c`, compiled `-O3`, uses
+the baseline SDK's static libc and then the same SDK with only the fresh
+Release `stdio.c.obj` supplied before the archive. Three interleaved samples
+give these medians; units are MiB/s, using the benchmark's 64 KiB buffer and
+temporary file:
+
+| Operation | PAL-06 baseline | Block-transfer object |
+| --- | ---: | ---: |
+| Buffered `fwrite` | 163.3 | 273.2 |
+| Buffered `fread` | 178.9 | 386.3 |
+| Unbuffered descriptor `fwrite` | 0.3 | 2337.5 |
+
+Baseline `libc.a` SHA-256 is
+`7696582d55af2a1e3d19ea62448ff473d099923458aff10ca52a8df690d9e459`;
+replacement object is
+`f9d6731c7218cde94b44bf56205eb8aa76b49a829d68cf6de2af4e89f7881ec3`.
+This is a local file microbenchmark, not application throughput. The ARM64
+legacy-CLI stdio relay result above is retained; that private CLI variant
+and the full public D1 workflow are not rerun here.
+
+**PAL-02, PAL-05 and PAL-06 consumers.** `test_dev_sdk_external.py` passes
+against the extracted SDK from a fresh private workspace with the producer
+checkout/build and original SDK inaccessible to the restricted token. The
+visibility probe checks descendant denial, static/shared HTTPS and inflate
+pass with trust negatives, and the relocated SDK inventory remains unchanged
+(2,738 entries). Its shared consumer includes direct `fstream(path)` and the
+Unicode filesystem checks (U+1F600/U+20000 names). The CLI's separate C++17
+replay passes 22/22 in each of `u 한글 é` and `u 한글 😀`, and its C
+static/shared/DLL provider replay passes 36/36. Host-tools replay passes 18/18
+from a relocated Hangul/emoji root. The public CLI's shell creates
+`한글 é 😀.txt` with its exact host-visible name and bytes, and runs awk and
+GNU make with empty inherited PATH. [CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#native-windowsx64-unicode-and-provider-replay-2026-11-23)
+owns those CLI/bundle identities, commands and isolation limits.
+
+**Reproduction and evidence.** The fresh core is
+`out/pal-native-x64-20261123/core`; the local evidence root
+`out/pal-native-x64-20261123/` retains `core-tests.xml`,
+`measurement-commands.json`, `measurement-result.json`, both release
+verification receipts, `sdk-external/result.json`, `unicode-bmp/result.json`,
+`unicode-supplementary/result.json`, `c-shared/result.json` and
+`shell-unicode-result.json`. Benchmark/replay orchestration and raw command
+logs are there; private input/store/job roots are under `C:\Users\Lee\s16`.
+Use the committed descriptor test and benchmark with the pinned baseline
+and candidate objects above. SDK isolation is reproducible with
+`python tools/test_dev_sdk_external.py --sdk-root <extracted-dev> --output <fresh-evidence> --work-root <fresh-private-root>`;
+set the explicit Windows SDK library path and native LLVM tools as required
+by the SDK. No runtime code or shared format changes in this replay.
+
+The fresh C core uses `cmake --preset windows-host-ninja-debug -B <fresh-build>
+-DCMAKE_BUILD_TYPE=Release -DCRT_USE_IMPORTED_LIBCXX=OFF -DCRTGFX_ENABLE_SKIA=OFF
+-DCRTMEDIA_ENABLE_FFMPEG=OFF -DCRTMEDIA_ENABLE_CURL=OFF -DCRTUI_ENABLE_LVGL=OFF`.
+Build the named test targets above, then select their `_test_runs` CTest names
+with `--output-on-failure --output-junit <fresh-evidence>/core-tests.xml`.
+
+The extension's typecheck and compilation cover its scaffold only; no editor,
+clangd or debugger acceptance is inferred. PAL-04's ordinary Linux Media/UI
+partial-option combinations remain a separate Linux gate. The Windows 10
+1903 minimum, foreign-host UTF-8 manifest requirement and symlink-creation
+privilege limits are unchanged. The macOS evidence merged at `cb3e0145`
+and CLI `76a0f1a` closes the macOS stdio gate separately; see the
+[Mac replay](#macosarm64-pal-follow-up-replay-2026-11-23). Only native Linux
+stdio and PAL-04's Linux combinations remain in this focused work queue.
+The original Mac/ARM64 records' statements that x64 was pending describe
+their execution time; this section supplies the subsequent physical x64 result.

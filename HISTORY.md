@@ -10,6 +10,22 @@ substantive update.
 
 ## 2026-11-23
 
+### Replay the Windows ARM64 PAL changes on physical Windows/x64
+
+After synchronizing CRT `52881f08`, CLI `6704aa8` and extension `119e894`,
+the native x64 replay closes the remaining descriptor and PAL-02 host gates.
+The descriptor regression fails three times on the PAL-06 CI SDK and passes
+five times on the fix (400,000 cycles). A fresh Release core passes 20 tests
+with one existing fork-heap skip; the restricted-token relocated SDK consumer,
+Unicode CLI C++ consumers, C provider and host-tools checks pass. Release
+stdio measurements also improve on the same baseline SDK.
+[Acceptance](docs/acceptance/release_qualification.md#native-windowsx64-pal-replay-2026-11-23)
+owns exact inputs, measurements, commands and limits. Previous ARM64/macOS
+records keep their original host and artifact scope. No product, format,
+release or pin change. Merged the macOS evidence at `cb3e0145` and the CLI's
+`76a0f1a` without changing the tested runtime inputs; PAL-01 now retains only
+native Linux, and PAL-04 retains its Linux packaging gate.
+
 ### Replay the Windows PAL follow-up work on macOS/arm64
 
 Synchronize CRT `52881f0`, CLI `6704aa8` and crt-vscode `119e894`. A fresh

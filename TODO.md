@@ -68,17 +68,10 @@ affected packages under the SDK change-impact policy.
 Found by the CLI's Windows replay (reproducers and numbers in the CLI's
 [Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29)):
 
-- [ ] Replay the Windows descriptor ownership fix on native x64 with the
-  four-thread regression and affected inheritance checks. ARM64 and x64
-  emulation results are in [acceptance](docs/acceptance/release_qualification.md#windows-descriptor-ownership-and-stdio-block-transfers-2026-11-23).
-- [ ] **PAL-02** Repeat Unicode SDK installation, CLI build/run and host tools
-  on native Windows/x64. ARM64 and x64 emulation pass
-  [the measured replay](docs/acceptance/release_qualification.md#windows-unicode-and-native-child-selection-pal-02-and-pal-03-2026-11-23).
-  Keep the Windows 10 1903 and foreign-host DLL limits.
 - [ ] **PAL-01** Run native Linux stdio regressions for the block transfers.
-  [macOS/arm64 replay](docs/acceptance/release_qualification.md#macosarm64-pal-follow-up-replay-2026-11-23)
-  passes; Windows ARM64 measurements and the legacy CLI relay replay remain in
-  [acceptance](docs/acceptance/release_qualification.md#windows-descriptor-ownership-and-stdio-block-transfers-2026-11-23).
+  [macOS/arm64](docs/acceptance/release_qualification.md#macosarm64-pal-follow-up-replay-2026-11-23)
+  and [Windows/x64](docs/acceptance/release_qualification.md#native-windowsx64-pal-replay-2026-11-23)
+  native replays pass; the ARM64 legacy CLI relay retains its own acceptance.
 
 - [ ] **PAL-04** Revalidate meaningful partial-option combinations of ordinary Linux
   `crt-media-dist`/`crt-ui-dist` with curl enabled. Full Skia+FFmpeg+curl
