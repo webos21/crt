@@ -56,6 +56,7 @@ def main():
     parser.add_argument('--linker', type=Path, required=True)
     parser.add_argument('--ar', type=Path, required=True)
     parser.add_argument('--previous-cli', type=Path, help='an earlier committed crt-cli executable for the bootstrap loop')
+    parser.add_argument('--allow-dirty-sdk', action='store_true', help='explicit opt-in for an uncommitted local SDK candidate')
     args = parser.parse_args()
     if sys.platform != 'darwin':
         parser.error('this acceptance driver requires native macOS Seatbelt')
@@ -212,8 +213,13 @@ int main(int argc, char** argv) {
           inputs=objects, output=seed, libraries=libraries), '--ld-path=' + str(tools['linker'])], boxed=True)
     configure = ['configure', '--project', source, '--sdk-root', sdk, '--sdk-contract', provider,
                  '--contract-sha256', digest(provider), '--cc', tools['clang'], '--cxx', tools['clangxx'],
-                 '--linker', tools['linker'], '--ar', tools['ar'], '--allow-dirty-sdk', 'true']
+                 '--linker', tools['linker'], '--ar', tools['ar']]
+    if args.allow_dirty_sdk:
+        configure += ['--allow-dirty-sdk', 'true']
     run('configure', [seed, *configure, '--json'], boxed=True)
+    selection = json.loads((evidence / 'configure.stdout').read_text())['data']['selection']
+    if selection.get('allow_dirty_sdk') is not args.allow_dirty_sdk:
+        raise ValueError('SDK dirty opt-in differs from the requested replay policy')
     run('build', [seed, 'build', '--project', source, '--json'], boxed=True)
     # The incremental cache would let the self-build reuse the seed's objects; drop them so it recompiles from source.
     for stale in (source / 'out/native').iterdir():
@@ -250,7 +256,7 @@ int main(int argc, char** argv) {
         (loop_source / '.sdk.json').write_text(json.dumps({
             'format': 0, 'sdk_root': str(sdk), 'sdk_contract': str(provider), 'contract_sha256': digest(provider),
             'cc': str(tools['clang']), 'cxx': str(tools['clangxx']), 'linker': str(tools['linker']), 'ar': str(tools['ar']),
-            'allow_dirty_sdk': True, 'seed': str(prev), 'origin': 'replay_cli_contract_macos.py'}, indent=2) + '\n')
+            'allow_dirty_sdk': args.allow_dirty_sdk, 'seed': str(prev), 'origin': 'replay_cli_contract_macos.py'}, indent=2) + '\n')
         run('loop-configure-stage1', [stage1, 'configure', '--project', loop_source, '--json'], boxed=True)
         run('loop-build-stage1', [stage1, 'build', '--project', loop_source, '--json'], boxed=True)
         stage2 = loop_source / 'out/native/crt-cli'
@@ -277,6 +283,7 @@ int main(int argc, char** argv) {
         raise ValueError('SDK inputs were modified')
     doctor = json.loads((evidence / 'bare-doctor.stdout').read_text())
     save('result.json', {'passed': True, 'work': str(work), 'sdk_inventory_unchanged': True,
+                         'allow_dirty_sdk': args.allow_dirty_sdk,
                          'sdk_sha256': inventory_digest(before), 'provider_sha256': digest(provider),
                          'source_sha256': inventory_digest(input_inventory), 'binary_sha256': digest(program),
                          'binary_size': program.stat().st_size, 'imports': image['dependencies'],

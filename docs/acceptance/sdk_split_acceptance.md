@@ -2817,3 +2817,72 @@ while its DLL does, so it does not run. That published SDK is left as it is.
 **A workflow finding.** The first run failed in the contract replay's visibility probe because the hosted workspace's inherited read grants were not removed; the retry applies the same preparation as `sdk-integration.yml`, with the probe's denial check unchanged.
 
 **Not covered.** A physical Windows/x64 machine; macOS; a release, signing or pin adoption of any Windows SDK carrying the correction; Windows C++ `<filesystem>` and the curl compile options (the separate P1-01 item); a Windows zlib or same-name provider case. The hosted receipts expire 14 days after the run.
+
+## macOS/arm64 pure C shared provider replay (2026-11-23)
+
+Native macOS consumer qualification of **P0-01 / Tranche 6.4**, not a release or pin promotion. All three clean main branches were
+synchronized with `git pull --ff-only`: CRT `3c8c712`, CLI `01d25328137b6382612d1900884453faecefc625`, crt-vscode `8c13564`.
+This uses the macOS artifact from the **same clean SDK build** as the Windows records above, not an overlay on a published SDK.
+The [CLI acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#macosarm64-pure-c-shared-sdk-replay-2026-11-23)
+owns the detailed consumer matrix, baseline comparison and exercised CLI combination. No editor workflow was run.
+
+### Immutable SDK inputs
+
+Artifact `sdk-macos-aarch64-5325cea0dc0428bc79ac8a40c852a514265bf726`, ID **14746818377**, from
+[SDK integration 45002729132](https://github.com/webos21/crt/actions/runs/45002729132), producer
+`5325cea0dc0428bc79ac8a40c852a514265bf726`, CI label `v0.0.1-ci.45002729132`.
+The 15,405,858-byte GitHub artifact contains the six release assets under `crt/crt/out/sdk-ci/release/dev` plus CI receipts under `_temp`.
+The first independent-verifier invocation incorrectly used the enclosing artifact directory and was refused for unexpected directories
+and a missing manifest. The corrected invocation verifies the exact six-asset directory without relaxing the asset-set check.
+
+- Release manifest: **1,658 bytes**, SHA-256 `3ed66f8eb02ef1a2ab6674d7808a74ca632a819d045e2e3a3f3e1369932610c8`.
+- SDK archive: **6,129,868 bytes**, SHA-256 `4da417a0b501a25dd7f8a60282ea15e7a524591a644f7e8c99b63ed3e8b7408e`.
+- Installed content: `8c5c68594c5845c1f343e8fa452bf0dd4800eb857d3dd20643bb45726ac981b6`.
+- Portable contract: `456c37bcdef1de93a07517321a98e80cc982c16f3f44f84a9bb5defacfa389ee`.
+
+`ci_sdk_release.py verify --os macos --arch aarch64 --version v0.0.1-ci.45002729132 --commit 5325cea...` reports **OK** and keeps
+the extracted SDK outside the producer checkout. Verification result SHA-256
+`39474e26fd6359cdbbae76e4a88cd0f333bcc5797982083ad18271d7d94584d4`. This CI artifact has no release signature; digest/inventory
+verification is not described as publisher authentication. Producer/compile dirty flags are false. The later Windows persona fix at
+CRT `3c8c712` is not inside this artifact and its separate P1 acceptance is not claimed here.
+
+### Native results
+
+Host: macOS **27.2.1** (`26B131`), arm64, Xcode **27.2** (`27B52`), Apple Clang 21. `replay_cli_contract_macos.py` now defaults to clean
+SDK selection; `--allow-dirty-sdk` is an explicit opt-in only for local dirty experiments. This run uses no opt-in and checks the selected
+flag. The CLI product is unchanged from `01d2532`; replay-only tooling and `libc/tests/sdk_c_provider_images_test.c` are working-tree additions.
+The C fixture uses public `crt/dl.h` image enumeration, not Darwin headers or invented ELF data; it is an identified test input, not an
+input of the CLI product build. `crt_dl_iterate_images` is a CRT PAL extension, not attributed to Bionic.
+
+The SDK-only CLI rebuild uses 21 cold commands / zero reused and zero warm commands / 21 reused. Native **984**, archive **221**,
+SDK store **114**, recipe **147** and store-lock **9** checks pass. Five port suites in that generic test invocation lack their inputs and
+explicitly report skipped, not five additional passes. Bare help/version/doctor, source/SDK hiding and unchanged SDK inventories pass.
+Contract replay result SHA-256 `5d8135597ce7bb94d0e0e4a2deeb2d3237bf424f059b9567640f93c58ee3aa2b`.
+
+The CLI-owned C replay passes **76/76 gates** against the CI SDK, covering static/shared SDK libraries, a project dylib, explicit provider
+precedence, constructor/allocator/errno agreement, real mapped images and early mixed-runtime refusals. The unchanged published Mac SDK
+also passes **76/76**: Windows's failed public baseline does not apply to Mac. Actual pristine zlib **1.3.1** static/shared C/C++ port/provider
+replay passes **20/20 gates**, recipe **147** and project **81** checks, with no skips in those two requested suites. SDK and port controls
+map their own libz, not Apple's. Binding/mixed-allocator audits pass on **8 + 7** images. The linked CLI record owns the complete matrix,
+binary identities, Seatbelt boundaries, direct provider observations and public baseline authentication scope.
+
+### Evidence and limits
+
+Retained local root: `out/p0-c-shared-macos-20261123/` (ignored). `ci-input/`, `sdk-verification-correct-root.json`, `contract-replay/`,
+`c-provider-r3/`, `published-baseline-final/`, `port-project-replay/`, `provider-observations.json`, `binding-audit.json` and
+`port-binding-audit.json` retain inputs, full commands, output, maps and audit results. The final consumer workspaces are outside the
+producer trees under `/private/tmp`; the contract workspace is recorded in its input receipt.
+
+The CLI record identifies the exact consumer result, driver, fixture and audit digests rather than duplicating that ledger here.
+
+Two retained harness failures are not counted as acceptance: `c-provider-r1` assumed an uncanonicalized `libz.dylib` argv instead of
+the CLI's resolved `libz.1.3.1.dylib`; `c-provider-r2` and the first public-baseline run passed a content hash to `sdk verify`, whose
+implemented argument is the installed directory name. The final fresh runs use the corrected calls; no product failure was suppressed.
+Focused parser/link-receipt/provider-alias fixtures (5) and existing Seatbelt fixtures (6) pass, no skips.
+The four existing port-replay parser fixtures also pass. Producer collector/exporter/binding-auditor/asset-verifier regression modules
+run **41** tests: **40 pass**, one optional real-byte test is skipped because it requires the old Linux/x86_64 `20261110.4` asset set.
+That is not a skipped Mac provider gate; the Mac CI asset bytes are independently verified above.
+
+No runtime or upstream source modification, local SDK patch, release/signing/pin adoption, extension-host execution, GPU/Web rebuild,
+Windows rerun or current Windows persona/`<filesystem>` qualification. The five-host publication/promotion decision stays open under P0;
+this closes the macOS native replay slice, not all of Tranche 6.4.

@@ -59,6 +59,13 @@ change. A red scheduled or path-triggered run is a regression or a changed exter
 Not proven here: Full SDK content, GPU/window/media behaviour, publisher authenticity
 (the signature is made offline by the owner after publication; see [publisher signing](../security/publisher_signing.md)).
 
+For a source-hidden macOS CLI self-build replay, `tools/replay_cli_contract_macos.py`
+defaults to clean SDK selection and records `allow_dirty_sdk: false`. Supply
+`--allow-dirty-sdk` only for an explicitly identified local dirty experiment;
+do not use it for CI/release qualification. The distinct pure C static/shared
+provider matrix and exact consumer inputs are in the
+[macOS Tranche 6.4 record](../acceptance/sdk_split_acceptance.md#macosarm64-pure-c-shared-provider-replay-2026-11-23).
+
 ## Pin rules (enforced by `tools/test_sdk_workflows.py`)
 
 - Every `uses:` is a full 40-hex commit with its version in a trailing `# vX.Y.Z` comment; never a moving tag.

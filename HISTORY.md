@@ -8,6 +8,23 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-23
+
+### Replay the pure C shared provider on macOS/arm64 (Tranche 6.4)
+
+Synchronize CRT `3c8c712`, CLI `01d2532` and crt-vscode `8c13564`. Independently verify and consume the macOS SDK artifact of
+CRT `5325cea` / SDK integration `45002729132`, the build already used by the Windows consumers. The SDK-only CLI self-build is
+cold 21/0 and warm 0/21, with clean selection (the macOS replay no longer silently opts into dirty SDKs). Native 984, archive 221,
+SDK-store 114, recipe 147 and store-lock 9 pass; the five input-gated suites' skips are not counted as passes.
+
+A new public-PAL C image fixture and CLI-owned macOS replay pass 76/76: static/shared SDK zlib, a project dylib, same-install-name
+provider precedence, actual libc/libz images, constructors and allocator/errno sharing, missing-runtime denial and three early mixed-runtime
+refusals. The original public Mac SDK passes the same 76/76, unlike the failing Windows baseline. Actual upstream zlib static/shared
+port/provider replay passes 20/20 gates (recipe 147, project 81). Binding/mixed-allocator audits pass on eight C/CLI/SDK images and seven
+source-port consumer/images. Preserve the harness setup failures; no product runtime, upstream, published SDK, lock or pin changes.
+Promotion and consumer pin adoption remain open; STATUS is unchanged.
+[Inputs, exact results, reproduction and limits](docs/acceptance/sdk_split_acceptance.md#macosarm64-pure-c-shared-provider-replay-2026-11-23).
+
 ## 2026-11-22
 
 ### Record the Windows/x64 consumer replay of the CI SDK on a hosted runner (Tranche 6.4)

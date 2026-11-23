@@ -103,16 +103,19 @@ replays the exact SDK candidate and records its adoption.
 - [x] Native Linux/aarch64 producer policy replay
   ([hosted evidence](docs/acceptance/sdk_split_acceptance.md#hosted-linux-producer-replay)).
 - [x] Windows/x64 wrapper correction (`crt-cc` honors the runtime linkage) verified on a local, unpromoted
-  candidate; a clean Windows candidate and its CLI replay remain open
+  candidate; the clean CI candidate and consumer evidence are recorded below
   ([HISTORY](HISTORY.md), 2026-11-22).
 - [x] Windows/arm64: the clean CI-built SDK of `5325cea` with CLI `44fbf24` (native 1,041 checks; static, shared and shared + project DLL 36/36 with the loaded `libc.dll` equal to the installed SDK's; the
   published `20261118` SDK fails six of the same cases) ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsarm64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22)).
 - [x] Windows/x64 (hosted `windows-2022`, not a physical machine): the x64 CI artifact of the same build with CLI `6f7f8b9`: native replay passed, 36/36, the published `20261110` SDK fails the same six cases
   ([evidence](docs/acceptance/sdk_split_acceptance.md#windowsx64-consumer-replay-of-the-ci-sdk-for-the-pure-c-shared-provider-2026-11-22)).
-- [ ] Replay the updated CLI on macOS, and on a physical Windows/x64 machine if hosted evidence is not enough.
-  Promote qualified SDK artifacts before consumer pin adoption.
+- [x] macOS/arm64: replay CLI `01d2532` with the same clean CI build's SDK: C provider **76/76**, native **984**,
+  actual zlib source-port/provider **20/20** gates and Mach-O binding audits; the existing public Mac SDK also passes
+  the C provider matrix ([evidence](docs/acceptance/sdk_split_acceptance.md#macosarm64-pure-c-shared-provider-replay-2026-11-23)).
+- [ ] Promote qualified SDK artifacts before consumer pin adoption. Windows/x64 evidence remains hosted;
+  a physical Windows/x64 replay is separate if the owner requires it.
 - Acceptance: verify the static control and each supported shared mode with link
-  maps, ELF `DT_NEEDED` and loaded images. If C shared is unsupported, verify
+  maps, ELF `DT_NEEDED` / Mach-O load commands / PE imports and loaded images. If C shared is unsupported, verify
   explicit rejection before linking and no output artifact. Reject host libz
   fallback as qualification. Replay with the new SDK/contract identity and
   retain the old pin and diagnostic evidence.
