@@ -10,6 +10,11 @@ substantive update.
 
 ## 2026-11-23
 
+### Replay the corrected Windows C++ persona with an external C++17 consumer on Windows/x64 (P1-01)
+
+The CLI's new `replay_cpp17_consumer_windows.py` consumes the locally built `770ed07b` candidate on this physical x64 machine and passes 22/22 (no consumer option, both CRT shims, `std::filesystem`, libcurl and mbedtls for a static and a shared runtime); the published `20261110`
+SDK fails (5/16). Findings kept: `std::ofstream(path)` does not compile against the packaged libc++, and there is no shared libcurl. Windows/arm64 is not yet run, so P1-01 stays open. No product, pin or STATUS change. [Record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-external-c17-persona-consumer-replay-on-a-physical-machine-2026-11-23).
+
 ### Complete the physical Windows/x64 replay of the pure C shared provider (Tranche 6.4 / P0-01)
 
 Built a clean Release candidate of CRT `770ed07b` (`v0.0.1-rehearsal.11`; CTest 169/169, in-build C provider check 4/4) and replayed it on this physical Windows 11 x64 machine with CLI `c297a65`: the SDK alone builds the CLI (self-build cold 21/0, warm 0/21; native 1028, archive 214, SDK-store 113, recipe 147, store-lock 9)

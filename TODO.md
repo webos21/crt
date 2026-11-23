@@ -105,7 +105,12 @@ revised SDK is pending. Consumer handoff:
   - [x] Reproduced on Windows/arm64 against the public SDK `v0.0.1-preview.20261118.windows.arm64.1`: with the profile's `-U_WIN32 ...` the consumer links and
     `std::filesystem` returns wrong paths; without them `curl.h` needs `winsock2.h`. Fix: empty `consumer_compile_options`, CRT-owned persona shims for
     `curl/curl.h` and `mbedtls/platform.h` ([contract](docs/design/sdk_development_contract.md)); local Windows/arm64 proof against the real public libraries.
-  - [ ] Hosted `sdk-integration` of the corrected producer on all hosts, then the CLI contract replay against that SDK; record in release qualification.
+  - [x] Hosted `sdk-integration` of the corrected producer passes all six jobs ([run 45099082349](https://github.com/webos21/crt/actions/runs/45099082349), `770ed07b`).
+  - [x] Windows/x64 physical: the CLI's external C++17 replay of the corrected candidate passes 22/22 and the published `20261110` SDK fails
+    ([record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-external-c17-persona-consumer-replay-on-a-physical-machine-2026-11-23)).
+  - [ ] Windows/arm64: the same replay on an ARM64 machine against the `sdk (windows-aarch64)` artifact of that run; record in release qualification.
+  - [ ] `std::ofstream(std::filesystem::path)` does not compile against the packaged libc++ in the corrected SDK (`path::value_type` is `wchar_t`, `<fstream>` has no wide open): decide whether
+    to make the libc++ persona provide it or to document `path::string()`; do not hide it in a consumer option.
 - Acceptance: filesystem path types and link/run behavior agree with packaged
   libc++, with curl headers usable in the same consumer. Replay affected CLI
   consumers with the new SDK; do not hide producer flags in CLI or the extension.
