@@ -10,6 +10,16 @@ substantive update.
 
 ## 2026-11-23
 
+### Convert characters above U+FFFF at the libc++ Windows filesystem boundary (PAL-06)
+
+libc++'s Windows `std::filesystem` truncated every character above U+FFFF to 16 bits. A `path` on this target holds UTF-32 (the 4-byte `wchar_t` the headers produce for `u8path()` and `wstring`) while every Win32 call is UTF-16, and the
+recipe's `crt_win32_wide.h` narrowed and widened one element for one unit: `create_directory(u8path(U+1F600))` made a directory whose name ended in U+F600, `path::string()` of it was wrong, and `path(const char*)` with a 4-byte UTF-8 character threw.
+`narrow()` now splits such an element into a surrogate pair and `widen()` combines pairs, both return their counts, the 13 `narrow()` scratch buffers are sized for the worst case (`narrow_capacity()` = `2 * len + 1`) and the 6 `widen()` call sites
+(`GetTempPathW`, `getcwd`, `realpath`, symlink readlink, directory iteration, `path` conversion) use the returned count. `__char_to_wide` returns the element count in both calls of the header's "measure, then convert" idiom; returning the raw UTF-16 unit count would have
+resized the string and left trailing NULs. Unpaired surrogate elements pass through unchanged (NTFS allows such names). The shared Dev SDK consumer runs `filesystem_unicode_checks` (create, list, rename, copy, `canonical`, `absolute`, `current_path`, `space`,
+`permissions`, remove, with U+1F600 and U+20000 names, and stdio reaching the same names) on every OS, and `tools/test_libcxx_wide_patches.py` guards the buffer sizing and the use of the returned counts
+([evidence](docs/acceptance/release_qualification.md#libc-windows-filesystem-names-above-uffff-pal-06-2026-11-23), [design](docs/design/cxx_runtime.md#windows-stdfilesystempath-and-stream-opens)).
+
 ### Stop the intermittent `bionic_surface_test` CPU-time failure by spinning on wall time (root cause)
 
 `bionic_surface_test_runs` failed now and then on the hosted windows-x64 runner with `user CPU time advanced` (twice on 2026-11-23, in the PR 20 and PR 21 CI runs). Its history: on 2026-10-11 (`c9425d0`) a fixed 30M-iteration loop was seen

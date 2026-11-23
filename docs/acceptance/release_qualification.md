@@ -1193,3 +1193,20 @@ The fix on `main` (`111c351`) is consumed by the CLI on Windows/arm64: the `sdk-
 Not covered: a published SDK carrying the fix (the CI artifacts are unsigned and unpromoted); the CLI replay on a physical Windows/x64 machine (the hosted `windows-x86_64` job passes the shared consumer test); directory and filesystem
 operations on names above U+FFFF, which are a separate defect (TODO PAL-06) and are deliberately not used by the test (those names are created and removed through stdio). The `windows-x64` leg of the pull request's `CI` once failed one in-tree libc
 timing check (`bionic_surface_test_runs`: user CPU time advanced), a test this change does not touch; rerunning only that job passed, so it is recorded as a pre-existing timing flake, not a result of this change.
+
+### libc++ Windows filesystem names above U+FFFF (PAL-06, 2026-11-23)
+
+The fix (PR 21, merged as `a149bfe`; recipe patches for `crt_win32_wide.h`, `path.cpp`, `posix_compat.h`, `directory_iterator.cpp` and `operations.cpp`) is exercised by the shared Dev SDK consumer's new `filesystem_unicode_checks`. Hosted
+[`sdk-integration` run 45138735507](https://github.com/webos21/crt/actions/runs/45138735507) at the pull request head `121f095` passes all six jobs; on each of the five hosts (Linux x86_64 and aarch64, macOS arm64, Windows x64 and arm64) the in-build consumer (static and shared runtime,
+real HTTPS server) and the external consumer of the extracted archive with the producer checkout hidden pass, so the same source runs on Linux/macOS, where `path::value_type` is `char`, and on Windows. The pull request's `CI` passes on all five legs after the `windows-x64` leg was rerun
+for the unrelated timing flake described below.
+
+Locally on Windows/arm64 (physical), libc++ was built from the committed recipe (8 min 45 s). The new test passes and the same test fails on the pre-fix libc++ at its first representation check; `path(const char*)` with U+1F600 no longer throws and gives the single element `1F600`
+with the UTF-8 bytes `F09F9880`; the on-disk name of a directory made by `create_directory(u8path(U+1F600))` is the UTF-16 pair `D83D DE00` (it ended in `F600` before); the PAL-05 `fstream_path_checks` and the libc++ smoke tests (static and shared) still pass; the host unit test of
+`narrow`/`widen` passes 11 cases (boundaries, round trip over sampled scalar values, values above U+10FFFF, unpaired surrogates). One later change to that recipe text, assigning the final `widen()` result to `count` in `__char_to_wide`, has the same meaning and was not rebuilt locally; the hosted run
+builds the committed text. The merge commit's own `sdk-integration` run on `main` is `45142915867`.
+
+By design and documented in `cxx_runtime.md`: a `std::wstring` that stores a UTF-16 pair as two elements is not a valid UTF-32 path (`string()`/`u8string()` throw, as before the fix); unpaired surrogate elements are passed to the OS unchanged; a value above U+10FFFF becomes U+FFFD.
+Not covered: a published SDK carrying the fix (the CI artifacts are unsigned and unpromoted), a physical Windows/x64 machine (the hosted `windows-x86_64` job covers x64), and symlink creation, which needs a privilege the runners may not grant (`create_symlink` is not in the consumer test).
+
+The `windows-x64` leg of the pull request's `CI` failed once on `bionic_surface_test_runs` (`user CPU time advanced`), a test this change does not touch. Its root cause is the 15.6 ms Windows CPU-time tick and a fixed amount of spinning; it is fixed separately (PR 22, `0871ca6`) and recorded in HISTORY.

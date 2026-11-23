@@ -91,12 +91,7 @@ neither later large-consumer passes nor a stale build tree settles them.
   already-accepted isolated chain
   ([distribution contract](docs/guides/distribution.md),
   [original UI evidence](docs/acceptance/crtui_acceptance.md)).
-- [ ] **PAL-06** libc++'s Windows `std::filesystem` truncates characters above U+FFFF: its path narrow/wide conversions (`__char_to_wide`, `__wide_to_char`) and the OS-boundary helpers
-  (`crt_win32_wide.h` `narrow`/`widen`, used by 15 recipe patches) treat the CRT's 4-byte `wchar_t` as one UTF-16 unit per element while the headers (`u8path`, `wstring`) produce UTF-32. Reproduced on
-  Windows/arm64 (the process ACP is 65001): `create_directory(u8path("\U0001F600"))` creates a directory whose name ends in U+F600 instead of the pair D83D DE00, `path(L"\U0001F600").string()` returns the
-  UTF-8 of U+F600, and `path("\xF0\x9F\x98\x80")` (a `char*` with a 4-byte character) throws `runtime_error: locale not supported`; characters up to U+FFFF (Hangul, Latin-1) are exact. Decide one canonical `path`
-  representation (UTF-32 matches the headers), make both conversions combine and split surrogate pairs with the right buffer sizes at every call site, and add a filesystem test (create, exists, iterate, rename, remove)
-  with a supplementary-plane name on every OS. Stream opens are not affected ([design note](docs/design/cxx_runtime.md#windows-stdfilesystempath-and-stream-opens)).
+
 
 <a name="crt-developer-experience-sdk---cli---studio"></a>
 
