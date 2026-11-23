@@ -368,8 +368,8 @@ The newer Linux/x86_64 SDK and Windows/arm64 SDK have independent [workflow rele
 Linux/aarch64's [public replay](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10) covers glibc 2.43.
 Use the [installation guide](docs/guides/dev_sdk_preview.md) for external toolchain requirements and explicit SDK selection. The detached signature covers the archive. Authenticode, Developer ID and notarization
 remain separate platform gates. The historical Linux pure C shared SDK-provider
-control resolved host libz. Current SDK policy and replay remain open under
-[Tranche 6.4](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23).
+control resolved host libz. The current C static/shared SDK policy is replayed natively on Linux, Windows and macOS from unpromoted candidates ([Tranche 6.4](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23)).
+The published Windows SDKs keep the older behavior until a corrected SDK is promoted.
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -585,11 +585,12 @@ statuses, and exceptions are maintained in:
 
 The current producer focus is Dev SDK correctness and release signing.
 
-- **P0-01 / Tranche 6.4** covers the Linux pure C shared provider and runtime
-  search policy. Qualify the intended provider with link and loaded-image
-  evidence, or verify explicit rejection of the unsupported mode. Replay the
-  exact candidate with the CLI before adoption.
-  [C shared work](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23).
+- **Promote a corrected Windows SDK** so consumers can adopt it. The pure C
+  shared provider policy (Tranche 6.4) is verified on every host from
+  unpromoted candidates; the newest published Windows/x64 SDK is still
+  `20261110` and fails six of the 36 C provider cases. Pin adoption is tracked
+  by `crt-cli`.
+  [Replay records](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23).
 - **Windows C++ P1-01** covers the Dev profile's curl compile options and
   `<filesystem>`. The CLI already scopes the options by source. A corrected
   producer SDK still needs external C++17 replay on Windows x64 and ARM64.
