@@ -49,6 +49,9 @@ policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Done
 
+<!-- Preserve the old link from dated snapshots; completed details live in HISTORY. -->
+<a name="p1---windows-c-public-compile-options-d5"></a>
+
 See [`HISTORY.md`](HISTORY.md) for the full, dated, reverse-chronological
 record of completed work. This section stays empty in `TODO.md` itself. Finished
 top-level work moves to `HISTORY.md`; terse checked prerequisite gates may remain
@@ -86,34 +89,6 @@ Use the [producer review procedure](docs/design/sdk_development_contract.md#8-cr
 and CLI adoption ledger: build a candidate, hand off immutable public SDK inputs
 outside producer trees, validate consumers, then promote and adopt exact pins.
 A public release is not required for that loop.
-
-#### P1 - Windows C++ public compile options (D5)
-
-Reproduction baseline:
-[Windows/x64 bootstrap findings](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#findings-fixed-in-this-pass)
-and
-[implemented Windows CLI behavior](https://github.com/webos21/crt-cli/blob/main/docs/reference/bootstrap_contract.md#windows-host-behaviour-2026-10-29)
-. The CLI already scopes the curl flags by source. External C++17 acceptance for the
-revised SDK is pending. Consumer handoff:
-[crt-cli correctness handoff P1-01](https://github.com/webos21/crt-cli/blob/main/TODO.md#p1---producer-correctness-handoff-and-first-user-workflow-d5)
-.
-
-- [ ] **P1-01** Reproduce the Dev profile's `consumer_compile_options`/`<filesystem>`
-  interaction using an external C++17 consumer on Windows x64 and ARM64.
-  [Current options](tools/crt_dev_profile.py) undefine `_WIN32` for curl headers;
-  scope them per library or correct the header/platform-macro contract in CRT.
-  - [x] Reproduced on Windows/arm64 against the public SDK `v0.0.1-preview.20261118.windows.arm64.1`: with the profile's `-U_WIN32 ...` the consumer links and
-    `std::filesystem` returns wrong paths; without them `curl.h` needs `winsock2.h`. Fix: empty `consumer_compile_options`, CRT-owned persona shims for
-    `curl/curl.h` and `mbedtls/platform.h` ([contract](docs/design/sdk_development_contract.md)); local Windows/arm64 proof against the real public libraries.
-  - [x] Hosted `sdk-integration` of the corrected producer passes all six jobs ([run 45099082349](https://github.com/webos21/crt/actions/runs/45099082349), `770ed07b`).
-  - [x] Windows/x64 physical: the CLI's external C++17 replay of the corrected candidate passes 22/22 and the published `20261110` SDK fails
-    ([record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-external-c17-persona-consumer-replay-on-a-physical-machine-2026-11-23)).
-  - [ ] Windows/arm64: the same replay on an ARM64 machine against the `sdk (windows-aarch64)` artifact of that run; record in release qualification.
-  - [ ] `std::ofstream(std::filesystem::path)` does not compile against the packaged libc++ in the corrected SDK (`path::value_type` is `wchar_t`, `<fstream>` has no wide open): decide whether
-    to make the libc++ persona provide it or to document `path::string()`; do not hide it in a consumer option.
-- Acceptance: filesystem path types and link/run behavior agree with packaged
-  libc++, with curl headers usable in the same consumer. Replay affected CLI
-  consumers with the new SDK; do not hide producer flags in CLI or the extension.
 
 #### P1 - Sign before publishing SDKs (D6)
 
@@ -347,6 +322,11 @@ neither later large-consumer passes nor a stale build tree settles them.
   already-accepted isolated chain
   ([distribution contract](docs/guides/distribution.md),
   [original UI evidence](docs/acceptance/crtui_acceptance.md)).
+- [ ] **PAL-05** `std::ofstream(const std::filesystem::path&)` and the other path-taking stream constructors do not compile against the packaged libc++ on Windows: `path::value_type` is
+  `wchar_t` (4 bytes in CRT) and `<fstream>` has no wide open, while the same source builds on Linux, where `value_type` is `char`. Found by the CLI's external C++17 replay
+  ([x64](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsx64-external-c17-persona-consumer-replay-on-a-physical-machine-2026-11-23),
+  [arm64](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsarm64-external-c17-persona-consumer-replay-2026-11-23)); the consumers open files through `path::string()`.
+  Decide whether the Windows libc++ persona should provide the open (a CRT wide-open PAL function) or whether CRT documents `path::string()`; do not hide it in a consumer compile option.
 
 ### Windows process signals and Toybox `timeout`
 

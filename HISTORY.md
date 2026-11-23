@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-23
 
+### Close the Windows C++ public compile options item (P1-01)
+
+The Windows/arm64 replay of the corrected Dev profile closes the item. The CLI's `replay_cpp17_consumer_windows.py` consumes the `sdk (windows-aarch64)` CI artifact of `770ed07b` (hosted `sdk-integration` run 45099082349, content
+`b592e3cc...d617`) on this physical arm64 machine with CLI `6e484cc` self-built by that SDK, and passes 22/22; the published `20261118` Windows/arm64 SDK fails the same driver (5/16) as the baseline. With the
+Windows/x64 result above both Windows architectures are exercised, and the exact SDK-CLI pair is in the CLI's [compatibility record](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#windowsarm64-c17-persona-consumer-combination-2026-11-23)
+([acceptance](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsarm64-external-c17-persona-consumer-replay-2026-11-23)). **Still open and not part of this item:** promotion of an SDK that carries the
+correction and consumer pin adoption (crt-cli CI-01), and the `std::ofstream(path)` finding, which moved to Planned as PAL-05. No producer code changed in this step; the CI-built artifact is unsigned and unpromoted.
+
 ### Replay the corrected Windows C++ persona with an external C++17 consumer on Windows/x64 (P1-01)
 
 The CLI's new `replay_cpp17_consumer_windows.py` consumes the locally built `770ed07b` candidate on this physical x64 machine and passes 22/22 (no consumer option, both CRT shims, `std::filesystem`, libcurl and mbedtls for a static and a shared runtime); the published `20261110`

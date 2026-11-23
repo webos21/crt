@@ -1168,3 +1168,11 @@ The `CI` checks on the pull-request head (the five-host build matrix) were green
 
 Not covered: a `sdk-release.yml` dry run of `windows-arm64` through the normal gate (the smoke is no longer excused for it), which is S7 step 6 and builds a new SDK; the
 hosted smoke exercises a CI-built SDK, not the published `20261118` one (that pairing was exercised locally and recorded in the pin record).
+
+### Windows C++ persona correction consumed on Windows/arm64 (P1-01, 2026-11-23)
+
+The corrected producer (CRT `3c8c712`; hosted [`sdk-integration` run 45099082349](https://github.com/webos21/crt/actions/runs/45099082349) at `770ed07b` passes all six jobs) was consumed by the CLI on a physical Windows/arm64 machine from the
+`sdk (windows-aarch64)` artifact: manifest `84c90909b5341e7a9eaf150e30a2a745ee4ff15642b9c28822f8de606310675a`, content `b592e3cc13545c0bb3a86f4c5f7222d62b551a5e2a4c634f61a87caa70b4d617`, empty `consumer_compile_options` and the two CRT-owned shims.
+The external C++17 replay passes 22/22 and the published `v0.0.1-preview.20261118.windows.arm64.1` fails it (5/16) with the same CLI. Measurements, identities and limits are owned by the CLI's
+[acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/sdk_install_acceptance.md#windowsarm64-external-c17-persona-consumer-replay-2026-11-23) and
+[compatibility entry](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#windowsarm64-c17-persona-consumer-combination-2026-11-23). Not covered: a release, signature or pin adoption of an SDK carrying the correction.
