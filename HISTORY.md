@@ -10,6 +10,11 @@ substantive update.
 
 ## 2026-11-24
 
+### Consume the Windows/arm64 closure packages with the shared CRT (PAL-04)
+
+The minimum, FFmpeg-less and Skia-less stage-05 packages (and the full one as a control), relocated to a `SDK space 한글` path, build all their shipped examples with both `static` and `shared` CRT/C++ linkage (32 builds, no CRT change) and run them with only the package `bin` on `PATH`: every example exits 0 with its own check in both modes. The PE import tables show the shared builds importing `libc.dll` (`gfx-skia` also `libc++.dll`) and the static ones importing neither, with no import outside the package and System32.
+A "no `bin` on `PATH`" negative control was wrong (the static UI example also needs the SDK DLLs) and a first module sample was empty; both are recorded as non-evidence. Loaded-module lists match the package byte for byte but cannot tell the modes apart, since the SDK's own DLLs import `libc.dll`. [Evidence](docs/acceptance/crtui_acceptance.md#windowsarm64-packaging-and-closure-replay-2026-11-24).
+
 ### Replay the Media/UI packaging and the closure packages on Windows/arm64 (PAL-04)
 
 On the physical Windows/arm64 host the PAL-04 packaging matrix passes at CRT `1ae70fa`: the minimum and the full controls, the FFmpeg-less package (Skia, FreeType and the private Win32 consumer headers) and the Skia-less package (FFmpeg, curl, Mbed TLS and zlib) each verify at stage 04 and 05,
