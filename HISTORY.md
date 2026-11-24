@@ -10,6 +10,12 @@ substantive update.
 
 ## 2026-11-24
 
+### Replay the Skia-less and FFmpeg-less closure packages on macOS (PAL-04)
+
+On macOS/arm64 the Windows closure packaging works unchanged: the retained Release trees re-package a Skia-less (FFmpeg, curl, Mbed TLS, zlib) and an FFmpeg-less (FreeType, Skia) package that pass `verify_dist` at stages 04 and 05, rebuild
+every shipped example from a relocated `SDK space 한글` copy (default and shared CRT linkage, binding audits clean), run the UI 30-frame check and verify as extracted archives. The all-ON and all-OFF controls keep their dependency records. macOS now passes
+`CRT_MEDIA_DIST_PARTIAL=ON` like Windows; Linux still refuses both shapes. The first build script omitted `-S` and was rerun; negative verifier controls fail and recover as expected. [Evidence](docs/acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24).
+
 ### Package complete Skia-only and FFmpeg-only closures on Windows/x64 (PAL-04)
 
 `crt-media-dist`/`crt-ui-dist` on Windows/x64 now accept Skia ON/FFmpeg OFF (FreeType and Skia) and Skia OFF/FFmpeg+curl ON (FFmpeg, curl, Mbed TLS, zlib) and package exactly that closure; FFmpeg without curl is refused before building, and Linux and macOS

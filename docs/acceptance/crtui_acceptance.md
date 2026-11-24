@@ -475,6 +475,40 @@ Tests: the option matrix with and without `partial`, the verifier (the Skia clos
 Not covered: Windows/arm64, Linux and macOS (they still refuse both shapes), shared-runtime linkage of the new packages, GPU presentation or media playback beyond compile/link and the 30-frame software UI check, a published release or signature, and CI.
 No runtime, ABI, dependency pin or release asset changed.
 
+#### macOS/arm64 Skia-less and FFmpeg-less closure packages (2026-11-24)
+
+Replay of the Windows/x64 [closure packages](#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24) on macOS/arm64. CRT `85a2b6d` plus the change below; macOS 27.2.1 (`26B131`), Xcode 27.2 (`27B52`), Apple clang 21.0.0;
+Release, `CRT_USE_IMPORTED_LIBCXX=ON`, curl ON, LVGL ON. The retained trees of the [macOS replay](#macosarm64-packaging-replay-2026-11-24) are reconfigured and re-packaged (their compiled Skia, FFmpeg and runtime
+outputs are reused, not a cold build). Evidence: `out/pal04-macos-20261124/` (`closure-*`, `ffmpeg-less-package/`, `r1-closure-*` for the failed first attempt).
+
+**Change.** `CMakeLists.txt` passes `CRT_MEDIA_DIST_PARTIAL=ON` for `macos` as well as `windows`, so the option rule accepts the two complete single closures; `tools/test_media_dist_options.py` pins that. The packaging itself (`--media-components`,
+per-closure copy and records, the FreeType requirement in `verify_dist`) is the shared code the Windows replay added; nothing in it needed a macOS change. Linux still refuses both shapes.
+
+| Skia | FFmpeg | curl | macOS/arm64 result |
+| --- | --- | --- | --- |
+| OFF | OFF | any | nothing optional (control, unchanged records) |
+| ON | ON | ON | both closures (control) |
+| OFF | ON | ON | **Skia-less:** FFmpeg, curl, Mbed TLS and zlib; no `libskia.a`, `libfreetype.a` or `gfx-skia` |
+| ON | OFF | any | **FFmpeg-less:** FreeType and Skia; no FFmpeg libraries or `media-player` |
+| OFF/ON | ON | OFF | refused before building (rule unchanged) |
+
+**Results.** `verify_dist` passes at stage 04 and 05 for all four packages (the macOS binding audit is part of it). Each stage-05 package is copied with symlinks preserved to `SDK space 한글/05-ui`, verifies again there, and its own toolchain
+rebuilds every shipped example: Skia-less `gfx-simple`, `gfx-gpu`, `ui-basic`, `media-player`; FFmpeg-less `gfx-simple`, `gfx-gpu`, `ui-basic`, `gfx-skia`; controls as before. `ui-basic` runs
+`crtui_window_demo: presented=30 pixel_check=pass input_check=pass` with only the SDK `bin` on `PATH` for all four. The stage-05 `.tar.xz` of each extracts into a new directory and verifies
+(Skia-less 10,845,480 bytes `19bc716f5e84...`, FFmpeg-less 13,022,096 bytes `a82d4a5506ae...`, full 18,737,228 bytes `a4e9cc15557f...`, off 5,425,060 bytes `3d971b404ad4...`).
+Beyond the Windows record, every package's examples were also rebuilt with `CRT_RUNTIME_LINKAGE` and `CRT_CXX_RUNTIME_LINKAGE` both `shared`: all consumer binding audits report no problem and the UI runs the same 30 frames (`closure-archive-shared-results.json`).
+
+Package contents (`manifest.json`): Skia-less records `ffmpeg`, `curl`, `mbedtls`, `zlib` and no `skia`/`freetype`; FFmpeg-less records `freetype`, `skia` and no `ffmpeg`/`curl`/`mbedtls`/`zlib`.
+
+**Controls.** The re-packaged all-ON and all-OFF packages keep the earlier candidates' dependency records and license files byte for byte; the only difference is the build identity in `share/licenses/SOURCE-OFFER.md` (source commit `cc86383` to `85a2b6d`).
+**Negative controls** on disposable relocated copies: removing `lib/libfreetype.a` or `lib/libskia.a` from the FFmpeg-less package or `lib/libavcodec.a` from the Skia-less package makes `verify_dist` fail ("distribution is missing"), and restoring the file makes it pass again; dropping the
+`curl` record from the Skia-less package fails with `package ships FFmpeg-backed payload ... without its dependency record(s): curl`. Unit tests (`test_media_dist_options`, `test_verify_dist`, `test_create_dist`, `test_sdk_workflows`, `test_dev_sdk`) pass 105 tests with 3 host skips.
+
+**Attempts kept.** The first run of the build script (`r1-*`) omitted the source directory from `cmake -B`, so every configure failed and the builds ran with each tree's previous options; its FFmpeg-less row was really the full package and is not counted. The second run rebuilt the FFmpeg-less package
+in the tree that the full control then overwrote, so that package was regenerated once more and copied to `ffmpeg-less-package/` before the tree was restored to all-ON.
+
+Not covered: Linux and Windows/arm64; GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a published release or signature; CI (the change touches only CMake option selection). No runtime, ABI, dependency pin or release asset changed.
+
 #### Native Windows replay handoff
 
 Use a fresh Windows Release tree per row of the Skia/FFmpeg matrix above,

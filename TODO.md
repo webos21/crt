@@ -83,7 +83,7 @@ Found by the CLI's Windows replay (reproducers and numbers in the CLI's
   ([replay](docs/acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)).
   Complete Skia-less and FFmpeg-less closure packages are published on Windows/x64
   ([record](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24));
-  Linux and macOS keep refusing both shapes until their own replay.
+  macOS/arm64 packages them too ([record](docs/acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)); Linux keeps refusing both shapes until its own replay.
 
 - [ ] **PAL-04 host replay follow-up:** Windows/x64 and macOS/arm64 now refuse the reproduced partial combinations before building
   ([Windows](docs/acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24), [macOS](docs/acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24));

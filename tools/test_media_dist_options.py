@@ -65,7 +65,7 @@ class MediaDistOptionMatrixTests(unittest.TestCase):
         self.assertRegex(text, r'set\(CRT_MEDIA_DIST_OPTION_PROBLEM ""\)\s+set\(CRT_MEDIA_DIST_PARTIAL OFF\)')
         self.assertNotRegex(text, r'if\(CRT_TARGET_OS STREQUAL "[a-z]+"[^)]*\)\s+include\(cmake/crt_media_dist_options\.cmake\)')
         # Only the replayed host publishes a single complete closure; Linux and macOS keep refusing it.
-        self.assertRegex(text, r'if\(CRT_TARGET_OS STREQUAL "windows"\)\s+set\(CRT_MEDIA_DIST_PARTIAL ON\)')
+        self.assertRegex(text, r'if\(CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "macos"\)\s+set\(CRT_MEDIA_DIST_PARTIAL ON\)')
         self.assertIn("--media-components", text)
         self.assertRegex(text, r"if\(CRT_MEDIA_DIST_OPTION_PROBLEM\)\s+add_custom_target\(crt-media-dist")
         # The supported path keeps the unchanged ordinary command, including the full-path dependency copy.

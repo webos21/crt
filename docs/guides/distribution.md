@@ -312,7 +312,8 @@ Use the isolated stage chain for a packaged option-ON SDK. Evidence and limits:
 The early CMake refusal applies to every host: Linux, Windows/x64 ([Windows replay](../acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24))
 and macOS ([early refusal](../acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24)); the shared verifier applies on every host as well. The
 [macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)
-reproduced late rejection of both partial shapes, which is why macOS now refuses them early; it is not support for partial packages.
+reproduced late rejection of both partial shapes, which is why macOS now refuses incomplete packages early. Windows/x64 and macOS/arm64 also package a complete
+Skia-less or FFmpeg-less closure (`CRT_MEDIA_DIST_PARTIAL`; [macOS record](../acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)); Linux still refuses both.
 Windows/x64 additionally packages one complete closure: Skia ON with FFmpeg OFF (the FreeType and Skia closure) or Skia OFF with FFmpeg and curl ON
 (the FFmpeg, curl, Mbed TLS and zlib closure); FFmpeg without curl is refused. Linux and macOS keep refusing both shapes until their own replay
 ([record](../acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)).

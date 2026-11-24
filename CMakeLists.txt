@@ -1889,13 +1889,12 @@ if(Python3_Interpreter_FOUND)
   # PAL-04: the ordinary package publishes the Skia/FFmpeg/curl closure only as a whole (see
   # cmake/crt_media_dist_options.cmake). Refuse a partial combination up front, the way crt-ui-dist
   # refuses CRTUI_ENABLE_LVGL=OFF below; crt-ui-dist depends on this target, so it is refused too.
-  # Every host refuses incomplete packages before building: Linux and Windows/x64 were replayed first, and macOS
-  # reproduced the same late verifier rejection of both partial shapes (docs/acceptance/crtui_acceptance.md).
+  # Every host refuses incomplete packages before building (docs/acceptance/crtui_acceptance.md).
   # A single complete closure (Skia-less or FFmpeg-less) is packaged only where its packaging has been replayed:
-  # Windows/x64. Linux and macOS keep refusing it until their own replay.
+  # Windows/x64 and macOS/arm64. Linux keeps refusing it until its own replay.
   set(CRT_MEDIA_DIST_OPTION_PROBLEM "")
   set(CRT_MEDIA_DIST_PARTIAL OFF)
-  if(CRT_TARGET_OS STREQUAL "windows")
+  if(CRT_TARGET_OS STREQUAL "windows" OR CRT_TARGET_OS STREQUAL "macos")
     set(CRT_MEDIA_DIST_PARTIAL ON)
   endif()
   include(cmake/crt_media_dist_options.cmake)
