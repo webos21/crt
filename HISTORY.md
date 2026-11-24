@@ -10,6 +10,31 @@ substantive update.
 
 ## 2026-11-24
 
+### Replay ordinary Media/UI packaging on macOS (PAL-04)
+
+At CRT `cc86383`, build fresh Release minimum and partial-option trees on
+macOS/arm64, reusing raw source caches only. The minimum package (Skia and
+FFmpeg OFF, curl ON, LVGL ON) passes stage-04/05 verification. Both partial
+shapes build but fail the current shared verifier: Skia-only omits `libskia.a`
+and the Skia record; FFmpeg-only omits the ffmpeg/curl/mbedtls/zlib records.
+Preserve those rejected outputs and first errors rather than calling them
+successful packages. Early CMake refusal remains Linux-only; deciding whether
+to extend it to macOS stays in TODO.
+
+Reconfigure the saved Skia tree freshly with all options ON: both packages
+verify. Minimum/full package binding audits pass for 102/110 Mach-O images.
+Space/Hangul relocated SDKs rebuild three/five examples with explicit shared
+CRT linkage; all eight consumer binding audits pass, and both UI consumers run
+30 frames with pixel/input checks passing. Both stage-05 archives also verify
+after extraction into new directories. The earlier full SDK at `a79a06b`
+is retained only as a separate older-artifact control. Removing the Skia
+record/archive from its disposable copy demonstrates the new verifier refusal;
+the restored copy verifies. Packaging unit tests: 61 run, one Linux-only skip.
+[Acceptance](docs/acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)
+owns inputs, logs, commands and limits. Windows is assigned to a separate
+physical host; no Actions, release, runtime/ABI or consumer pin change. The
+focused section is not retired while this host follow-up remains open.
+
 ### Close the native Linux stdio gate (PAL-01)
 
 The Linux replay of the Windows PAL follow-ups had been recorded only in crt-vscode's history. Rebuilt on current `main` `21a5509` (runtime unchanged since

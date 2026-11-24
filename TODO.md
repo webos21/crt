@@ -79,8 +79,14 @@ Found by the CLI's Windows replay (reproducers and numbers in the CLI's
   rejects Skia/FFmpeg payload without its dependencies
   ([distribution](docs/guides/distribution.md),
   [evidence and limits](docs/acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23)).
-  Not replayed on macOS/Windows. Optional follow-up if a partial package is
-  wanted: publish a Skia-less or FFmpeg-less dependency closure.
+  macOS reproduces both late partial-package rejections
+  ([replay](docs/acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)).
+  Optional follow-up if a partial package is wanted: publish a Skia-less or
+  FFmpeg-less dependency closure.
+
+- [ ] **PAL-04 host replay follow-up:** decide macOS early refusal for the
+  reproduced partial combinations; Windows packaging replay remains assigned
+  to a separate physical host ([handoff](docs/acceptance/crtui_acceptance.md#native-windows-replay-handoff)).
 
 
 <a name="crt-developer-experience-sdk---cli---studio"></a>

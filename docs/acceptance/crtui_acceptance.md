@@ -280,6 +280,120 @@ neither refused nor verified; `media-stream` exists only in the isolated stage;
 the `cf` build time was not analyzed for cache effects; packages were not run
 against a display beyond the `ui-basic` 30-frame check.
 
+#### macOS/arm64 packaging replay (2026-11-24)
+
+Inputs: CRT `cc8638348636b2a8a2b3903e3a1b145fec760970`, macOS 27.2.1
+(`26B131`), Xcode 27.2 (`27B52`), Apple Clang 21. Release trees and retained
+logs are under `out/pal04-macos-20261124/`. This is the ordinary cumulative
+package path, not isolated-stage or release qualification. Native Windows
+replay is assigned to a separate physical host; no Windows Actions run was
+requested or dispatched.
+
+Use the macOS preset with a new `-B` directory for each partial option row:
+
+```sh
+cmake --preset macos-host-ninja-debug -B out/pal04-macos-20261124/<row> \
+  -DCMAKE_BUILD_TYPE=Release -DCRT_USE_IMPORTED_LIBCXX=ON \
+  -DCRTGFX_ENABLE_SKIA=<ON-or-OFF> -DCRTMEDIA_ENABLE_FFMPEG=<ON-or-OFF> \
+  -DCRTMEDIA_ENABLE_CURL=ON -DCRTUI_ENABLE_LVGL=ON
+cmake --build out/pal04-macos-20261124/<row> --target crt-ui-dist -j6
+```
+
+The new trees reuse verified raw download/clone caches, not previously built
+runtime or Skia objects. `tools.test_media_dist_options`, `test_verify_dist`,
+`test_create_dist` and `test_sdk_workflows` run 61 tests: 60 pass, one
+Linux-only test skips (`packaging-unit.log`).
+
+- **Minimum control (`off`, Skia OFF/FFmpeg OFF/curl ON):** the fresh build
+  completes `crt-ui-dist`, including verified stage 04 and 05 packages.
+  Curl has no effect without FFmpeg. The stage-05 dependency records are
+  `crt-libc`, `mksh`, `toybox`, `onetrue-awk`, `llvm-runtimes` and `lvgl`;
+  no optional Skia/FFmpeg payload is advertised. The macOS binding audit
+  passes for 102 images (9 dylibs and 93 executables).
+- **Relocated minimum control:** copy stage 05 with symlinks preserved to
+  `relocated off 한글/05-ui`. Its own toolchain rebuilds `gfx-simple`,
+  `gfx-gpu` and `ui-basic`. The UI executable runs 30 frames with
+  `presented=30 pixel_check=pass input_check=pass`; the relocated package
+  also passes `verify_dist`. An additional rebuild with both
+  `CRT_RUNTIME_LINKAGE=shared` and `CRT_CXX_RUNTIME_LINKAGE=shared` passes
+  all three consumer binding audits and repeats the UI 30-frame check.
+  Retain `off-shared-examples.json`, `off-shared-consumer-bindings.json`
+  and `off-shared-ui-run.json` separately from the default-linkage runs.
+- **Skia-only (`skia-only`, initially Skia ON/FFmpeg OFF/curl ON):** the
+  native build reaches stage-04 publication, but the shared verifier rejects
+  it: `package ships Skia payload ... without its Skia dependency:
+  lib/libskia.a and the skia dependency record are required`. Preserve
+  `skia-only-build.log`, `skia-only-configure-before-full.txt` and
+  `skia-only-rejected-package/` as the failed inputs/output. This is an
+  actual package-build failure, not just a synthetic verifier fixture.
+- **FFmpeg-only (`ffmpeg-only`, Skia OFF/FFmpeg ON/curl ON):** the fresh
+  native build also reaches stage-04 publication, then fails verification:
+  `package ships FFmpeg-backed payload ... without its dependency record(s):
+  ffmpeg, curl, mbedtls, zlib`. Retain `ffmpeg-only-build.log` and the
+  rejected `ffmpeg-only/dist/04-gfx-media/`; stage 05 is not accepted.
+- **Current-source full control:** after preserving the Skia-only failure,
+  use `cmake --fresh` on that tree with all three options ON, retaining
+  `full-configure.log` and `full-build.log`. This deliberately reuses its
+  current-source runtime/Skia outputs; it is not a second cold build.
+  Both stage 04 and 05 build and verify. The full dependency set adds
+  `freetype`, `ffmpeg`, `skia`, `curl`, `mbedtls` and `zlib` to the minimum
+  package, including the FFmpeg relink kit at `share/crt/relink/libcrtmedia`
+  and its license/source offer. The package binding audit passes for
+  110 images (15 dylibs and 95 executables), retaining the auditor's
+  existing pure-math note for `crtgfx_skia_gpu_window_demo` rather than
+  silently treating it as a new all-symbol binding guarantee.
+- **Relocated current full control:** `relocated current full 한글/05-ui`
+  verifies and rebuilds all five shipped examples with shared CRT linkage
+  explicitly enabled as above. All five external-consumer binding audits
+  pass; `ui-basic` runs 30 frames with both pixel/input checks passing.
+  Evidence: `current-full-shared-{examples,consumer-bindings,ui-run}.json`.
+- **Archive controls:** extract each minimum/current-full stage-05 `.tar.xz`
+  into a new directory and run `verify_dist.py --stage 05-ui` again; both
+  pass (`archive-verify.json` and `*-extracted-verify.log`).
+- **Existing full-package control:** the previously built stage 04/05 SDK
+  at source commit `a79a06b585a7da2322c6acadb3da963c9208d128` passes the
+  current verifier and macOS binding audit. Its relocated stage 05 rebuilds
+  `gfx-simple`, `gfx-gpu`, `gfx-skia`, `ui-basic` and `media-player`; UI
+  runs the same 30-frame check. This is an older-artifact control, not a
+  current-source rebuild claim.
+- **Negative verifier control:** remove both the Skia manifest record and
+  `lib/libskia.a` from a disposable relocated full SDK. The new closure
+  check rejects it with the same dependency diagnostic. Removing only the
+  archive is already caught by the older inventory check. Restore the
+  original manifest bytes and archive; the restored SDK verifies again.
+
+At this baseline, early CMake refusal is still **Linux-only**. macOS builds
+both unsupported partial shapes before rejecting their packages. Do not report
+this as successful partial-package support or promote either rejected SDK.
+The relocation checks rebuild examples from packaged inputs but do not hide
+the producer/source tree; GPU and media examples are compile/link checks,
+not additional GPU presentation or media-playback evidence. No runtime,
+ABI, dependency pin or release asset was changed; documentation was being
+recorded during the full-control build. This replay does not apply a macOS
+packaging policy change.
+
+#### Native Windows replay handoff
+
+Use a fresh Windows Release tree per row of the Skia/FFmpeg matrix above,
+with `windows-host-ninja-debug`, imported libc++ ON, curl ON and LVGL ON.
+Run `crt-ui-dist` (which includes stage 04) and retain the first failure,
+the resolved options and any published manifest. On the two supported
+controls, also run `crt-media-dist` and verify both packages:
+
+```powershell
+python tools/verify_dist.py --dist <build>/dist/04-gfx-media --stage 04-gfx-media
+python tools/verify_dist.py --dist <build>/dist/05-ui --stage 05-ui
+```
+
+Rebuild every shipped example through a relocated SDK's toolchain, retaining
+the Windows import-library/DLL load result and the UI 30-frame check. Check
+dependency records, notices and the full package's relink/source payload.
+Partial combinations must either be deliberately refused before expensive
+prerequisites, or provide a complete, verifiable closure; a late verifier
+failure is a finding, not a passing package. Linux early refusal is not
+evidence of Windows behavior. Keep this host gate open until native results
+are supplied.
+
 ### 1. LVGL import and first pixels (Windows/x64 first)
 
 LVGL software draw buffer -> a CRT display adapter -> the existing
