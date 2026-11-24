@@ -3,7 +3,7 @@
 Documents are grouped by purpose. Start with [project meaning](design/project_meanings.md),
 [stack choices](design/project_stacks.md), and the [runtime roadmap](design/runtime_roadmap.md).
 Current work is in [TODO](../TODO.md); completed work is in
-[October history](../HISTORY.md) and the [monthly archive](history/README.md).
+[current-month history](../HISTORY.md) and the [monthly archive](history/README.md).
 
 ## Acceptance contracts and measured evidence
 

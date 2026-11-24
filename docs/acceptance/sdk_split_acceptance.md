@@ -1,7 +1,7 @@
 # Full / Development SDK split acceptance
 
 This record owns the S2-S5 producer/consumer gates of the Full / Development SDK split (complete
-2026-10-27; the TODO tranche was closed and summarized in [HISTORY](../../HISTORY.md)). Content and
+2026-10-27; see the [October completion record](../history/HISTORY-2026-10.md#development-and-full-sdk-split)). Content and
 identity policy belong to the [SDK contract](../design/sdk_development_contract.md#full-sdk-and-development-sdk-adopted-direction-2026-10-22);
 commands belong to the [distribution guide](../guides/distribution.md#development-sdk-producer-and-external-validation).
 Original B4/B5 results remain in [build-system acceptance](build_system_acceptance.md#development-sdk-windows-replay).
@@ -15,7 +15,7 @@ evidence have been reviewed across five native pairs:
 
 | Pair | Producer and consumer evidence |
 | --- | --- |
-| Linux/x86_64 | [Latest clean SDK/CLI review](../../HISTORY.md#revalidate-the-latest-cli-on-linuxx86_64-with-a-fresh-clean-dev-sdk), linking the original consumer acceptance |
+| Linux/x86_64 | [October clean SDK/CLI review](../history/HISTORY-2026-10.md#revalidate-the-latest-cli-on-linuxx86_64-with-a-fresh-clean-dev-sdk), linking the original consumer acceptance |
 | Linux/aarch64 | [Native SDK/CLI replay](#linuxaarch64-latest-source-cli-replay-2026-11-02) |
 | macOS/arm64 | [Native SDK/CLI replay](#macosarm64-latest-source-cli-replay-2026-11-01) |
 | Windows/x64 | [Clean SDK replay including the spawn-environment fix](#windowsx64-latest-source-cli-replay-2026-11-02) |

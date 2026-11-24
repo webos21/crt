@@ -1,23 +1,25 @@
 # Monthly history archive
 
-`HISTORY.md` at the repository root retains October 2026's detailed completed
-work. Earlier months are summarized here, preserving decisions, root causes,
-validation evidence, and limitations rather than every debugging step.
+The root [HISTORY](../../HISTORY.md) retains the current month's detailed
+completed work. Closed months are summarized here, preserving decisions, root
+causes, validation evidence, and limitations rather than every debugging step.
 
 | Month | Source and scope |
 | --- | --- |
 | [July 2026](HISTORY-2026-07.md) | Git-log backfill: 117 commits, July 27–31. The original work log has no July entries. |
 | [August 2026](HISTORY-2026-08.md) | Original work log, August 2–31: shell/PAL/porting, imported C++, graphics foundations. |
 | [September 2026](HISTORY-2026-09.md) | Original work log, September 1–30: isolated SDKs, graphics/media, and UI Tranches 0–3. |
-| [October 2026](../../HISTORY.md) | Detailed active-month record. |
+| [October 2026](HISTORY-2026-10.md) | Original work log, October 1–31: UI, WebKit, SDK build and release qualification, native CLI and PAL. |
 
 ## Exact source and recovery
 
-The immutable pre-archive source is commit
+The immutable August/September pre-archive source is commit
 `4e5eead68048723c37e46c22d80bca43915ac093`:
 
 - [Original August record, lines 12620–23242](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md#L12620-L23242).
 - [Original September record, lines 1108–12619](https://github.com/webos21/crt/blob/4e5eead68048723c37e46c22d80bca43915ac093/HISTORY.md#L1108-L12619).
+- [Original October record, lines 1262–5966](https://github.com/webos21/crt/blob/88b172cf153a8b786fc98a8e17872ebce8b0efa2/HISTORY.md#L1262-L5966),
+  from pre-archive commit `88b172cf153a8b786fc98a8e17872ebce8b0efa2`.
 
 From a checkout containing that commit, recover the complete source without
 changing the working tree:
@@ -31,13 +33,15 @@ Select a month (the source is reverse chronological):
 ```sh
 sed -n '/^## 2026-08/,$p' /tmp/crt-history-before-archive.md
 sed -n '/^## 2026-09/,/^## 2026-08/{ /^## 2026-08/q; p; }' /tmp/crt-history-before-archive.md
+git show 88b172cf153a8b786fc98a8e17872ebce8b0efa2:HISTORY.md |
+  sed -n '/^## 2026-10-31$/,$p'
 ```
 
 Read the complete dated entry, including later corrections, before reusing a
 root-cause claim. For actual reproduction, inspect the implementation revision
 named by that entry and its recipes/presets, then build in a separate checkout
-with the recorded host/device/toolchain prerequisites. The archive snapshot is
-a source citation, not a claim that October code reproduces every earlier bug.
+with the recorded host/device/toolchain prerequisites. An archive snapshot is
+a source citation, not a claim that its code reproduces every earlier bug.
 Source archives without Git can use the immutable links above. Historical
 commands and paths in that original file intentionally retain their old names.
 

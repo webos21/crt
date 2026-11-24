@@ -5,8 +5,8 @@ does not repeat the implementation diary in [`HISTORY.md`](HISTORY.md), the
 open work queue in [`TODO.md`](TODO.md), or the per-port matrix in
 [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 
-The SDK, CLI and host-tools snapshot was reviewed on **2026-11-23** against
-CRT `2443922`, CLI `183178d` and `crt-vscode` `119e894`.
+The SDK, CLI and host-tools snapshot was reviewed on **2026-11-24** against
+CRT `88b172c`, CLI `af849da` and `crt-vscode` `e418379`.
 This review uses the work queues, completed work and recorded acceptance results.
 Each result retains its original source revision, artifact identities and host
 scope; it is not a new native replay or artifact adoption. The published-release
@@ -297,6 +297,15 @@ identities and limitations belong to
 This is the packaging/consumer snapshot, not a general support or all-devices
 matrix. A completed historical replay does not certify every new build.
 
+Ordinary Media/UI packaging and relocated shared-runtime consumption are
+verified for the minimum, full, Skia-only and FFmpeg-only layouts on
+macOS/arm64 and both Windows architectures. The Windows/arm64 Skia build uses
+the pinned x64 `gn.exe` as a host tool under emulation; the SDK and consumers
+are native ARM64. Linux retains the verified minimum/full layouts and the
+early refusal of single-closure configurations. These local packages are
+not published Dev or Full releases.
+[Packaging policy and evidence](docs/guides/distribution.md#mediaui-package-options).
+
 | Host/architecture | Lower stages and relink | `06-web` evidence and limits |
 | --- | --- | --- |
 | Linux/x86_64 | Regenerated SDKs; isolated stage/relink evidence | Native isolated SDK, installed/relocated consumers; later `04 -> 05 -> 06` chain and scoped installed-device gates |
@@ -383,7 +392,8 @@ or consumer pins. The completed item lives in
 [HISTORY](HISTORY.md#close-the-windows-c-public-compile-options-item-p1-01);
 the CLI owns the exact
 [exercised SDK-CLI combinations](https://github.com/webos21/crt-cli/blob/183178d/docs/compatibility.md#windowsarm64-c17-persona-consumer-combination-2026-11-23).
-The separate path-taking stream-constructor limitation remains below.
+The separate path-taking stream-constructor defect was also fixed and
+replayed; see the candidate-versus-release distinction below.
 
 **Release state.** The old `v0.4.0-preview.1` GitHub binary release was withdrawn;
 its source tag remains. The owner's `web_public_release.approved: true`
@@ -477,14 +487,13 @@ statuses, and exceptions are maintained in:
 
 ### CRT/PAL
 
-- On the Windows Dev SDK baseline, an independent two-thread file-I/O test reproduced read failures and wrong bytes. The port-store
-  replay uses independent publisher processes. [Reproducer and exact SDK scope](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/ci_acceptance.md#windowsarm64-hosted-integration-expansion-2026-11-20).
-- Windows path-taking stream constructors such as `std::ofstream(path)` do not
-  compile against the packaged libc++: `path::value_type` is CRT's 4-byte
-  `wchar_t`, but `<fstream>` has no matching wide-open path. Consumers currently
-  use `path::string()`; this is separate from the completed C++ public compile
-  policy replay. The API/policy decision remains
-  [PAL-05](TODO.md#focused-crtpal-follow-ups-revalidate-before-fixing).
+- Earlier Windows SDKs retain their recorded descriptor-concurrency and
+  libc++ path limitations. Current candidates fix descriptor ownership,
+  direct `fstream(path)` opens and supplementary-plane filesystem names.
+  Physical ARM64 and x64 evidence is recorded in the
+  [PAL acceptance](docs/acceptance/release_qualification.md#windows-descriptor-ownership-and-stdio-block-transfers-2026-11-23)
+  and [x64 replay](docs/acceptance/release_qualification.md#native-windowsx64-pal-replay-2026-11-23).
+  These results do not update any published SDK or CLI pin.
 - The built-in Linux/Windows DNS resolver supplies synchronous UDP A-record
   lookup; AAAA queries, TCP fallback, search domains and caching remain open.
   IPv6 literals and sockets already exist; macOS uses the system resolver.
@@ -594,12 +603,10 @@ statuses, and exceptions are maintained in:
 - Input evidence is scripted through the real event queue; interactive keyboard,
   mouse and trackpad behavior on real devices is not automated on any host.
 - The release tool supports `05-ui` and `06-web`; that does not imply an uploaded
-  binary release. The in-tree package ships `crtui/skia*.h` even when
-  Skia/FFmpeg are off but builds the companion libraries only when they are on.
-- `crt-ui-dist` requires LVGL and its packaged sample. The native host presets
-  enable the complete LVGL/Skia/FFmpeg/curl path; explicitly minimal or disabled
-  configurations do not supply that package contract. Partial-option curl
-  combinations remain a bounded [follow-up](TODO.md#focused-crtpal-follow-ups-revalidate-before-fixing).
+  binary release. Ordinary `crt-ui-dist` requires LVGL and its packaged sample
+  even when Skia and FFmpeg are both disabled. Skia companion payload is
+  packaged only with its complete dependency set; see the distribution scope
+  above for the verified configurations.
 
 ## Next Priorities
 

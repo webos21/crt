@@ -6,7 +6,7 @@ This record covers the in-tree build entry points, not renewed acceptance of
 the isolated SDK chain. [The target catalog](../guides/build_targets.json)
 owns user-facing target names; [distribution](../guides/distribution.md) owns
 SDK construction and isolation. B0-B5 are complete; the
-[completion history](../../HISTORY.md#complete-build-system-consolidation-b5)
+[completion history](../history/HISTORY-2026-10.md#complete-build-system-consolidation-b5)
 links this evidence. Existing Full SDK and Development SDK
 production remain separate from release publication approval.
 Build-system consolidation closes after native entry-point replay and final

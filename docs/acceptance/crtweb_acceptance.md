@@ -1356,7 +1356,7 @@ Apple framework in libcurl. Both parts were needed, because CRT's macOS socket l
   rebuild).
 
 *IPv6 and the Tranche 3A replay on Windows/x64 (2026-10-12).* The same finding held on Windows (the PAL passed Bionic
-numbers to Winsock) and is fixed there (`HISTORY.md`, `docs/porting/bionic_libc_gaps.md`): `AF_INET6`, `sockaddr_in6`,
+numbers to Winsock) and is fixed there ([October history](../history/HISTORY-2026-10.md), `docs/porting/bionic_libc_gaps.md`): `AF_INET6`, `sockaddr_in6`,
 the `SOL_SOCKET`/`IPPROTO_IPV6` option tables, `getaddrinfo()` IPv6 results and RFC 6761 `localhost`. Evidence:
 `socket_ipv6_test` in full on Windows (literals, passive/loopback, `localhost` both families, TCP and UDP over `::1`,
 `IPV6_V6ONLY`, a dual-stack listener taking an IPv4 client as `::ffff:127.0.0.1`, `SO_KEEPALIVE`/`SO_LINGER`/buffers,
@@ -1368,7 +1368,7 @@ named shared mapping in place of descriptor passing is the obvious shape) is sti
 
 *Windows AF_UNIX for the 3A transport (2026-10-12).* The transport decision for Windows is made in CRT libc, not in
 `libcrtweb`: Winsock's AF_UNIX stream sockets plus a CRT-owned SOCK_SEQPACKET (framing) and SCM_RIGHTS (handle and
-socket duplication into the peer process), see `HISTORY.md` and `docs/porting/bionic_libc_gaps.md`. The frozen wire v1
+socket duplication into the peer process), see [October history](../history/HISTORY-2026-10.md) and `docs/porting/bionic_libc_gaps.md`. The frozen wire v1
 is unchanged: `crtweb_wire_transport_test` runs `crtweb_wire_send/recv` over it between two Windows processes
 (CONFIG, a BUFFER_ADD carrying a memfd that the consumer maps and reads, FRAME, TITLE, FRAME_ACK, BUFFER_RELEASE, and a
 size-mismatch EPROTO). Gate C, the `SurfaceClient` consumer test (`crtweb_web_surface_test`), now runs on Windows/x64 too
@@ -1389,7 +1389,7 @@ the product port's own process model (B4) replaces them. What the replay found, 
 
 1. *No `SOCK_SEQPACKET` on Darwin.* `socketpair(AF_UNIX, SOCK_SEQPACKET)` and the listener model both failed with
    `EPROTONOSUPPORT`; this was the open "macOS transport decision". It is made in CRT libc, as for Windows
-   (`HISTORY.md`, `docs/porting/bionic_libc_gaps.md`): a `SOCK_STREAM` socket carrying a 4-byte length per record,
+   ([October history](../history/HISTORY-2026-10.md), `docs/porting/bionic_libc_gaps.md`): a `SOCK_STREAM` socket carrying a 4-byte length per record,
    with `SCM_RIGHTS` sent in the same `sendmsg()` as the length so Darwin delivers the descriptors with the first byte
    of the record. `socket()`, `socketpair()` and `accept()` mark a descriptor framed (an in-process table, copied by
    `dup`, dropped by `close`, inherited by `fork`, and handed across `exec` in `CRT_SEQPACKET_FDS`, see the review
@@ -1454,7 +1454,7 @@ server over IPv4 and over `::1`. `tools/check_web_dependencies.py` resolves all 
 the prefix (SQLite3 is the `sqlite-amalgamation` port). **B3** `build_webkit_crt_port.py --run-tests` builds WTF,
 bmalloc, JavaScriptCore, PAL, WebCore and the bundled Skia (about 7,900 steps) and the graph test prints text width
 86.70 and 216 dark text pixels, the Linux and macOS numbers; the import audit lists only CRT DLLs, port DLLs and
-KERNEL32, and no GLib symbol. The findings are in `HISTORY.md` (2026-10-12): COFF reports undefined symbols that an ELF
+KERNEL32, and no GLib symbol. The findings are in the [original October 12 record](https://github.com/webos21/crt/blob/88b172cf153a8b786fc98a8e17872ebce8b0efa2/HISTORY.md#L4380-L4672): COFF reports undefined symbols that an ELF
 `--gc-sections` link drops (`__dso_handle`, `__cxa_thread_atexit`, `CurlSSLHandle::platformInitialize()`,
 `SkStrikeRef`), the 8,191-character `.cmd` limit and the 32,767-character spawn limit, native-program redirection, and
 the OpenSSL LLP64 target. *Open on Windows:* the multi-process milestones B4-B7, shared OpenSSL/libcurl, the CA bundle,
@@ -1858,7 +1858,8 @@ new-PID/load/frame/pixel conditions remain unchanged, while whole-pool ownership
 is exercised by runtime and host shutdown. The driver always rebuilds the
 in-tree WebView test before running it, so a stale executable cannot satisfy the
 gate. Exact results are in `C:\crtw\b3w\acceptance-b3.json`; detailed defects and
-the Windows AF_UNIX spawn-snapshot regression are recorded in `HISTORY.md`.
+the Windows AF_UNIX spawn-snapshot regression are recorded in the
+[original October 13 record](https://github.com/webos21/crt/blob/88b172cf153a8b786fc98a8e17872ebce8b0efa2/HISTORY.md#L4144-L4379).
 
 The same WebKit and `PlatformCRT` on the CRT PAL (not a WPE-for-Windows
 effort). Focus on process spawning, IPC handles, shared memory, executable
@@ -2676,7 +2677,8 @@ Evidence: `C:/crtw/b3w/acceptance-b3.json`, `out/web-windows-current-final.log`,
 `physical-camera-run/stress.log` under that work root. Reproduce with the
 Windows driver command above, adding both explicit device options after an
 FFmpeg-enabled `05-ui` refresh. Core/allocator, source-closure and software
-regressions are recorded in `HISTORY.md` and allocator acceptance.
+regressions are recorded in the [October history](../history/HISTORY-2026-10.md)
+and allocator acceptance.
 The final artifact refresh verifies `01-c` through `05-ui`, includes the new
 private header in the 04 source archive and passes the five base-media tests
 (`out/web-windows-current-artifacts-final.log`, `out/web-windows-current-media-final.log`).
@@ -5268,7 +5270,7 @@ repository) to reach the later steps. (2) The media-player step requires `hardwa
 `CRTMEDIA_PLAYER_DEMO_SOFTWARE_ONLY=1` was set so the step expects `hardware_decode=no`. (3) The GPU CTest cases above. This is the same class of
 limit as the Linux/aarch64 guest without a VA driver.
 
-**Defects found** (details in `HISTORY.md`, 2026-10-22): `gpu_win32.c` depended on a host `<string.h>` (`0116844`); `crtgfx_skia_shared`
+**Defects found** ([original October 22 record](https://github.com/webos21/crt/blob/88b172cf153a8b786fc98a8e17872ebce8b0efa2/HISTORY.md#L2154-L2546)): `gpu_win32.c` depended on a host `<string.h>` (`0116844`); `crtgfx_skia_shared`
 linked libc++ both statically and as a DLL in isolated stages (`8ffd984`); `crtmedia_http_lifecycle_test` audited handles before cancelled
 transfers settled (`f0217d7`, about 30% flaky on this VM). Build-host inputs not in the repository: the Windows/x64 `gn.exe` of Skia's pinned GN
 revision (the arm64 package is not published), `CRT_WINDOWS_SDK_LIBPATH` in 8.3 form and `CRT_CC/CXX/AR/RANLIB`.

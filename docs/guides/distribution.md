@@ -299,7 +299,9 @@ a release requirement. Build speed alone is handled by its warm dependency
 cache and explicit job controls, not by adding the heavyweight path to the
 default workflow.
 
-Media/UI package option combinations (PAL-04): the ordinary `crt-media-dist` and `crt-ui-dist` publish each optional
+### Media/UI Package Options
+
+The ordinary `crt-media-dist` and `crt-ui-dist` publish each optional
 dependency closure only whole: the Skia closure is FreeType and Skia, the FFmpeg closure is FFmpeg with curl, Mbed TLS and zlib.
 `CRTGFX_ENABLE_SKIA`, `CRTMEDIA_ENABLE_FFMPEG` and `CRTMEDIA_ENABLE_CURL` all OFF (curl has no effect without FFmpeg) or all three ON
 is supported on every host. Windows (x64 and arm64) and macOS/arm64 additionally package one complete closure (`CRT_MEDIA_DIST_PARTIAL`): Skia ON with
@@ -309,7 +311,7 @@ build. `verify_dist.py` also rejects, on every host, a package that ships Skia o
 libraries. Use the isolated stage chain for a packaged option-ON SDK. Evidence and limits:
 [Linux](../acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23),
 [Windows/x64](../acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24) and its
-[closure packages](../acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24),
+[shared-runtime closure replay](../acceptance/crtui_acceptance.md#windowsx64-shared-runtime-closure-replay-2026-11-24),
 [macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24) (late rejection of both partial shapes, which is why
 macOS now refuses incomplete packages early: [early refusal](../acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24)) and the
 [macOS closure packages](../acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24) and the

@@ -2,7 +2,7 @@
 
 This record owns the identified artifacts and positive local collection evidence
 for the release qualification and assembly rehearsal, completed **2026-10-28**
-within the per-host local scope below; completion is recorded in [HISTORY](../../HISTORY.md).
+within the per-host local scope below; see the [October completion record](../history/HISTORY-2026-10.md#web-distribution-and-release-qualification-october-1828).
 The [build-system scope](build_system_acceptance.md#release-qualification-scope-split-2026-10-23)
 defines the gate; the completed [SDK split](sdk_split_acceptance.md) does not
 qualify old candidates for release. CLI adoption remains consumer-owned.

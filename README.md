@@ -529,6 +529,10 @@ target builds the stages before it. Public command prefixes are `c`, `cxx`,
 trees need a preset reconfigure after the
 [target-name migration](docs/guides/distribution.md#cmake-stage-command-names).
 
+For ordinary `crt-media-dist` and `crt-ui-dist`, see the
+[package option matrix](docs/guides/distribution.md#mediaui-package-options)
+before mixing Skia, FFmpeg and curl. `crt-ui-dist` requires LVGL.
+
 ```sh
 cmake --build --preset <preset> --target crt-c-build
 cmake --build --preset <preset> --target crt-c-test
@@ -934,7 +938,7 @@ Start here:
 - [Runtime roadmap](docs/design/runtime_roadmap.md)
 - [Current status](STATUS.md)
 - [Current work queue](TODO.md)
-- [History](HISTORY.md)
+- [Current-month history](HISTORY.md) and [monthly archive](docs/history/README.md)
 - [FAQ](docs/guides/faq.md)
 - [Project meaning](docs/design/project_meanings.md)
 
@@ -964,8 +968,9 @@ Build/distribution:
 
 CRT is a developer-preview project, not a promise of universal platform or
 device support. The owning [acceptance documents](docs/README.md#acceptance-contracts-and-measured-evidence)
-record measured scope and limitations; [TODO](TODO.md) owns active/planned work
-and [HISTORY](HISTORY.md) owns completed changes. [STATUS](STATUS.md) is a dated
+record measured scope and limitations. [TODO](TODO.md) tracks active and planned
+work. [HISTORY](HISTORY.md) and the [monthly archive](docs/history/README.md)
+record completed work. [STATUS](STATUS.md) is a dated
 snapshot and is updated separately, not automatically by this README.
 
 ---

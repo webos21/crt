@@ -1,7 +1,8 @@
 # TODO: CRT Runtime Work Queue
 
 This file tracks the active CRT runtime work queue and its ordered follow-up.
-Completed work moves to `HISTORY.md` in reverse chronological order. Detailed
+Completed work moves to `HISTORY.md` in reverse chronological order, then to the
+[monthly archive](docs/history/README.md). Detailed
 policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Notice
@@ -379,7 +380,7 @@ change.
   ([fetch implementation](tools/fetch_ports.py),
   [FreeType recipe](porting/recipes/freetype.json)).
 - [ ] **PAL-EXT-06** Package the Skia-less and FFmpeg-less closures on Linux as well: Linux still refuses both single-closure shapes, which Windows/x64, Windows/arm64 and macOS/arm64 package
-  ([Windows/x64](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24),
+  ([Windows/x64](docs/acceptance/crtui_acceptance.md#windowsx64-shared-runtime-closure-replay-2026-11-24),
   [Windows/arm64](docs/acceptance/crtui_acceptance.md#windowsarm64-packaging-and-closure-replay-2026-11-24),
   [macOS](docs/acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)). Do it only for a consumer that wants such a package; it needs its own native Linux replay.
 
