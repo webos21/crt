@@ -4,12 +4,10 @@
 A build-host driver, never a runtime dependency. Stdlib only. Commands:
 
   plan     validate the request (host, date, serial, commit on main, CI success) and print the names and runner for the jobs.
-  publish  the only step with write permission: re-verify the packaged bytes, stage a draft release, download it back and compare
-           every byte, then (unless --draft-only) turn it into a non-latest prerelease. It never rebuilds and never overwrites.
+  stage    re-verify the packaged bytes, create and download a draft, and record its exact identity. It never publishes.
 
-The assets are exactly the files `crt-dev-release` produced (verified by tools/ci_sdk_release.py, which shares no code with the
-producer). Publisher authentication is *not* part of publication: the owner signs the archive offline afterwards and attaches `.sig`
-(docs/security/publisher_signing.md), then the consumer pin is promoted.
+The assets are exactly the files `crt-dev-release` produced. A separate
+approval-gated workflow checks the offline signatures before publication.
 """
 import argparse
 import datetime
@@ -22,6 +20,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_sdk_release  # noqa: E402
+import release_signing  # noqa: E402
 
 BASE_VERSION = '0.0.1'
 # host key -> OS, architecture, hosted runner, and the dotted host label carried by the tag (a prerelease identifier allows no `_`).
@@ -212,7 +211,7 @@ def command_plan(args):
             handle.writelines('%s=%s\n' % item for item in outputs.items())
 
 
-def command_publish(args):
+def command_stage(args):
     commit = require_commit(args.commit)
     info = names(args.host, args.date, args.serial)
     release = Path(args.release_dir).resolve()
@@ -235,33 +234,14 @@ def command_publish(args):
     notes = work.parent / (work.name + '-notes.md')
     notes.parent.mkdir(parents=True, exist_ok=True)
     notes.write_text(rendered, encoding='utf-8')
-    gh('release', 'create', info['tag'], '--repo', args.repo, '--draft', '--prerelease', '--latest=false', '--target', commit,
-       '--title', info['title'], '--notes-file', notes, *files)
-    log('draft %s created' % info['tag'])
-    work.mkdir(parents=True, exist_ok=False)
-    gh('release', 'download', info['tag'], '--repo', args.repo, '--dir', work)
-    expected = {entry.name: entry.read_bytes() for entry in files}
-    got = {entry.name: entry.read_bytes() for entry in work.iterdir()}
-    if sorted(got) != sorted(expected) or any(got[name] != expected[name] for name in expected):
-        raise ReleaseError('the draft assets differ from the verified files')
-    view = json.loads(gh('release', 'view', info['tag'], '--repo', args.repo, '--json', 'isDraft,isPrerelease,targetCommitish,assets').stdout)
-    if not view['isDraft'] or not view['isPrerelease'] or view['targetCommitish'] != commit or len(view['assets']) != len(files):
-        raise ReleaseError('the staged draft does not match the request: ' + json.dumps(view)[:300])
-    log('draft verified byte for byte (%d assets)' % len(files))
-    if args.draft_only:
-        log('draft-only: stopping before publication; delete the draft by hand')
-        return
-    gh('release', 'edit', info['tag'], '--repo', args.repo, '--draft=false', '--prerelease', '--latest=false')
-    final = json.loads(gh('release', 'view', info['tag'], '--repo', args.repo, '--json', 'isDraft,isPrerelease,tagName,url').stdout)
-    if final['isDraft'] or not final['isPrerelease']:
-        raise ReleaseError('the published release is not a non-draft prerelease: %s' % final)
-    log('published %s' % final['url'])
+    release_signing.stage(args.repo, info['tag'], commit, info['title'], notes, files,
+                          work, Path(args.receipt), args.dry_run)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('plan', 'publish'):
+    for name in ('plan', 'stage'):
         p = sub.add_parser(name)
         p.add_argument('--host', required=True, choices=sorted(HOSTS))
         p.add_argument('--commit', required=True)
@@ -274,11 +254,12 @@ def main(argv=None):
         else:
             p.add_argument('--release-dir', required=True)
             p.add_argument('--work', required=True)
-            p.add_argument('--draft-only', action='store_true')
+            p.add_argument('--receipt', required=True)
+            p.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
     try:
-        {'plan': command_plan, 'publish': command_publish}[args.command](args)
-    except ReleaseError as error:
+        {'plan': command_plan, 'stage': command_stage}[args.command](args)
+    except (ReleaseError, release_signing.SigningError, OSError, ValueError, KeyError, TypeError) as error:
         log('RELEASE FAIL: %s' % error)
         return 1
     return 0

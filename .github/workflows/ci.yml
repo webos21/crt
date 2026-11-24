@@ -315,6 +315,13 @@ jobs:
       - name: Preflight the C and C++ stage configurations without building dependencies
         run: cmake --build --preset ${{ matrix.preset }} --target crt-c-config crt-cxx-config
 
+      - name: Check the protected draft and offline signing gate
+        if: matrix.name == 'linux-amd64'
+        run: |
+          python -m unittest discover -s tools -p test_ci_sdk_publish.py
+          python -m unittest discover -s tools -p test_release_signing.py
+          python -m unittest tools.test_sdk_workflows
+
       # One native host exercises the reduced SDK and actual source-hidden
       # consumer. The other hosts keep their bounded offline profile fixtures.
       - name: Development SDK producer and S5 acceptance (Linux amd64)

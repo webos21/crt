@@ -11,16 +11,18 @@ State in two or three sentences what changed relative to the previous Preview an
 
 ## Downloads and trusted pins
 
-Obtain the manifest pin independently from this reviewed repository or the owner's signed announcement before accepting the
-payload hashes below. Publisher authentication is **not** part of this publication: the owner signs the archive offline afterwards and
-attaches `<archive>.sig`; until that file exists the release is unauthenticated.
+Obtain the manifest pin independently from this reviewed repository or the
+owner's signed announcement. Before publication, the owner signs every
+payload file offline and the separate finalizer verifies the detached
+`<asset>.sig` files against the staged bytes.
+[Verify with the independently pinned publisher key](https://github.com/webos21/crt/blob/main/docs/security/publisher_signing.md).
 
 - Manifest SHA-256: **{{MANIFEST_SHA256}}** ({{MANIFEST_BYTES}} bytes).
 - Installed SDK content: `{{CONTENT_SHA256}}`.
 
 {{ASSET_TABLE}}
 
-The other files are the release manifest and the sums file for this target.
+The manifest and checksum file for this target also have detached signatures.
 
 ## Qualification and migration
 

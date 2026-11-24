@@ -1,0 +1,56 @@
+name: Finalize signed release
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage_run_id:
+        description: Successful non-rehearsal staging workflow run ID
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Identify the eligible draft and check the approval environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          STAGE_RUN_ID: ${{ inputs.stage_run_id }}
+        run: |
+          set -euo pipefail
+          python3 tools/release_signing.py --repo "$REPO" plan --stage-run-id "$STAGE_RUN_ID" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  finalize:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify offline signatures and publish the exact draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          STAGE_RUN_ID: ${{ inputs.stage_run_id }}
+        run: |
+          set -euo pipefail
+          python3 tools/release_signing.py --repo "$REPO" finalize --stage-run-id "$STAGE_RUN_ID" \
+            --key docs/security/crt-release-publisher.pub | tee -a "$GITHUB_STEP_SUMMARY"

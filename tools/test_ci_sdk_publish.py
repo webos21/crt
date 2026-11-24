@@ -1,4 +1,5 @@
-"""Tests of tools/ci_sdk_publish.py: naming, notes rendering, the approval-gate check, and the draft -> compare -> publish flow against a fake `gh`."""
+"""SDK release naming, approval prerequisites, and draft staging against a fake gh."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ from test_ci_sdk_release import Fixture
 COMMIT = 'b' * 40
 FAKE_GH = textwrap.dedent('''\
     #!/usr/bin/env python3
-    import json, os, shutil, sys
+    import hashlib, json, os, shutil, sys
     from pathlib import Path
     state = Path(os.environ['FAKE_GH_STATE'])
     argv = sys.argv[1:]
@@ -27,7 +28,7 @@ FAKE_GH = textwrap.dedent('''\
         if not (folder / 'meta.json').exists():
             sys.exit(1)
         meta = json.loads((folder / 'meta.json').read_text())
-        print(json.dumps({'isDraft': meta['draft'], 'isPrerelease': meta['prerelease'], 'targetCommitish': meta['target'], 'tagName': tag,
+        print(json.dumps({'databaseId': 30, 'isDraft': meta['draft'], 'isPrerelease': meta['prerelease'], 'targetCommitish': meta['target'], 'tagName': tag,
                           'url': 'https://example.invalid/' + tag, 'assets': [{'name': n} for n in meta['assets']]}))
     elif argv[:2] == ['release', 'create']:
         tag, folder = argv[2], state / 'releases' / argv[2]
@@ -42,7 +43,8 @@ FAKE_GH = textwrap.dedent('''\
             shutil.copy(f, folder / Path(f).name)
             names.append(Path(f).name)
         shutil.copy(notes, folder / 'NOTES.md')
-        (folder / 'meta.json').write_text(json.dumps({'draft': '--draft' in argv, 'prerelease': '--prerelease' in argv, 'target': argv[i + 1], 'assets': names}))
+        (folder / 'meta.json').write_text(json.dumps({'draft': '--draft' in argv, 'prerelease': '--prerelease' in argv,
+            'target': argv[i + 1], 'title': argv[argv.index('--title') + 1], 'assets': names}))
         if os.environ.get('FAKE_GH_CORRUPT'):
             (folder / names[0]).write_bytes(b'corrupted in transit')
     elif argv[:2] == ['release', 'download']:
@@ -52,11 +54,24 @@ FAKE_GH = textwrap.dedent('''\
         for f in folder.iterdir():
             if f.name not in ('meta.json', 'NOTES.md'):
                 shutil.copy(f, out / f.name)
-    elif argv[:2] == ['release', 'edit']:
-        meta_path = state / 'releases' / argv[2] / 'meta.json'
-        meta = json.loads(meta_path.read_text())
-        meta['draft'] = '--draft=false' not in argv
-        meta_path.write_text(json.dumps(meta))
+    elif argv[0] == 'api':
+        endpoint = argv[-1]
+        if endpoint.endswith('/environments/release'):
+            print(json.dumps({'protection_rules': [{'type': 'required_reviewers', 'reviewers': [{}]}]}))
+        elif '/git/matching-refs/' in endpoint:
+            print('[]')
+        else:
+            folder, = (state / 'releases').iterdir()
+            meta = json.loads((folder / 'meta.json').read_text())
+            if endpoint.endswith('/releases/30'):
+                print(json.dumps({'id': 30, 'tag_name': folder.name, 'draft': meta['draft'], 'prerelease': meta['prerelease'],
+                    'target_commitish': meta['target'], 'name': meta['title'], 'body': (folder / 'NOTES.md').read_text()}))
+            elif endpoint.endswith('/releases/30/assets?per_page=100'):
+                print(json.dumps([[{'id': i, 'name': name, 'size': (folder / name).stat().st_size, 'state': 'uploaded',
+                    'digest': 'sha256:' + hashlib.sha256((folder / name).read_bytes()).hexdigest()}
+                    for i, name in enumerate(meta['assets'], 1)]]))
+            else:
+                sys.exit(2)
     else:
         sys.exit(2)
 ''')
@@ -221,33 +236,35 @@ class PublishFlowTest(unittest.TestCase):
         gh = bin_dir / 'gh'
         gh.write_text(FAKE_GH)
         gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
-        self.env = {'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'], 'FAKE_GH_STATE': str(self.state)}
+        self.env = {'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'], 'FAKE_GH_STATE': str(self.state),
+                    'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}
         for key, value in self.env.items():
             self.addCleanup(os.environ.__setitem__, key, os.environ[key]) if key in os.environ else self.addCleanup(os.environ.pop, key, None)
             os.environ[key] = value
         self.notes = root / 'notes.md'
         self.notes.write_text((Path(__file__).resolve().parent.parent / 'docs/releases/sdk_release_notes_template.md').read_text(encoding='utf-8'), encoding='utf-8')
         self.counter = 0
+        self.receipt = root / 'release-stage.json'
 
     def args(self, **extra):
         self.counter += 1
         values = dict(host='linux-x64', commit=COMMIT, date='20261118', serial='1', repo='o/r', release_dir=str(self.release), notes_file='docs/releases/x.md',
-                      work=str(Path(self.tmp.name) / ('work%d' % self.counter)), draft_only=False)
+                      work=str(Path(self.tmp.name) / ('work%d' % self.counter)), dry_run=False, receipt=self.receipt)
         values.update(extra)
         return type('Args', (), values)()
 
-    def run_publish(self, **extra):
+    def run_stage(self, **extra):
         # the notes path rule is checked on the repository-relative name; the fake runs from a temp file, so patch only the lookup
         original = publish.require_notes_path
         publish.require_notes_path = lambda path: self.notes
         self.addCleanup(setattr, publish, 'require_notes_path', original)
-        return publish.command_publish(self.args(**extra))
+        return publish.command_stage(self.args(**extra))
 
     def meta(self):
         return json.loads((self.state / 'releases' / self.info['tag'] / 'meta.json').read_text())
 
-    def test_draft_only_stages_and_compares_but_leaves_a_draft(self):
-        self.run_publish(draft_only=True)
+    def test_dry_run_stages_a_draft_without_a_receipt(self):
+        self.run_stage(dry_run=True)
         meta = self.meta()
         self.assertTrue(meta['draft'])
         self.assertTrue(meta['prerelease'])
@@ -256,37 +273,45 @@ class PublishFlowTest(unittest.TestCase):
         notes = (self.state / 'releases' / self.info['tag'] / 'NOTES.md').read_text()
         self.assertNotIn('{{', notes)
         self.assertIn(self.info['tag'], notes)
+        self.assertFalse(self.receipt.exists())
 
-    def test_a_full_run_ends_as_a_non_draft_prerelease_that_is_not_latest(self):
-        self.run_publish()
-        self.assertFalse(self.meta()['draft'])
+    def test_real_staging_leaves_a_draft_and_pins_its_entire_inventory(self):
+        self.run_stage()
+        self.assertTrue(self.meta()['draft'])
         self.assertTrue(self.meta()['prerelease'])
+        receipt = json.loads(self.receipt.read_text())
+        self.assertEqual(set(receipt['draft']['assets']), set(self.meta()['assets']))
+        self.assertEqual(receipt['run_id'], 123)
+        self.assertEqual(receipt['draft']['assets'][self.fixture.names['sums']]['sha256'],
+                         hashlib.sha256((self.release / self.fixture.names['sums']).read_bytes()).hexdigest())
         calls = (self.state / 'calls.log').read_text()
         self.assertIn('--latest=false', calls)
         self.assertEqual(calls.count('release create'), 1)
+        self.assertNotIn('release edit', calls)
 
     def test_an_existing_release_is_never_overwritten(self):
-        self.run_publish(draft_only=True)
+        self.run_stage(dry_run=True)
         with self.assertRaises(publish.ReleaseError):
-            self.run_publish(draft_only=True)
+            self.run_stage(dry_run=True)
 
     def test_corrupted_bytes_are_refused_before_anything_is_uploaded(self):
         archive = self.release / self.fixture.names['archive']
         archive.write_bytes(archive.read_bytes() + b'x')
         with self.assertRaises(publish.ReleaseError):
-            self.run_publish()
+            self.run_stage()
         self.assertFalse((self.state / 'releases' / self.info['tag']).exists())
 
     def test_a_commit_that_differs_from_the_manifest_is_refused(self):
         with self.assertRaises(publish.ReleaseError):
-            self.run_publish(commit='c' * 40)
+            self.run_stage(commit='c' * 40)
 
     def test_a_draft_that_differs_from_the_verified_files_is_never_published(self):
         os.environ['FAKE_GH_CORRUPT'] = '1'
         self.addCleanup(os.environ.pop, 'FAKE_GH_CORRUPT', None)
-        with self.assertRaises(publish.ReleaseError):
-            self.run_publish()
+        with self.assertRaises(publish.release_signing.SigningError):
+            self.run_stage()
         self.assertTrue(self.meta()['draft'])
+        self.assertFalse(self.receipt.exists())
 
 
 if __name__ == '__main__':
