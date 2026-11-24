@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-24
 
+### Replay the Media/UI packaging and the closure packages on Windows/arm64 (PAL-04)
+
+On the physical Windows/arm64 host the PAL-04 packaging matrix passes at CRT `1ae70fa`: the minimum and the full controls, the FFmpeg-less package (Skia, FreeType and the private Win32 consumer headers) and the Skia-less package (FFmpeg, curl, Mbed TLS and zlib) each verify at stage 04 and 05,
+rebuild every shipped example from a relocated `SDK space 한글` copy, run the UI 30-frame check, and extract and verify from their stage-05 `.zip`; FFmpeg ON with curl OFF is refused in under 0.4 s. At `2fc6eaf` (before the closure packaging) both partial shapes were refused before building and the full control
+carried the private Skia headers, with a negative verifier control. The first full build failed after 52 minutes because the pinned Skia GN revision has no `windows-arm64` package (HTTP 404 in `fetch-gn`); the documented x64 `gn.exe` of that revision, supplied with `-DCRTGFX_SKIA_GN` and run under emulation, resumed it in 13 minutes.
+That input, the failed attempt and a result-file gap (the script's SHA-256 lines, recomputed from the preserved archives) are recorded, not hidden. With this the Windows/arm64 gap of the focused CRT/PAL queue is closed and the section leaves In Progress; the Linux closure packaging is a conditional Planned item
+([evidence](docs/acceptance/crtui_acceptance.md#windowsarm64-packaging-and-closure-replay-2026-11-24)).
+
 ### Replay the Skia-less and FFmpeg-less closure packages on macOS (PAL-04)
 
 On macOS/arm64 the Windows closure packaging works unchanged: the retained Release trees re-package a Skia-less (FFmpeg, curl, Mbed TLS, zlib) and an FFmpeg-less (FreeType, Skia) package that pass `verify_dist` at stages 04 and 05, rebuild

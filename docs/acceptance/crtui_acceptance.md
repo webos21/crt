@@ -509,6 +509,41 @@ in the tree that the full control then overwrote, so that package was regenerate
 
 Not covered: Linux and Windows/arm64; GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a published release or signature; CI (the change touches only CMake option selection). No runtime, ABI, dependency pin or release asset changed.
 
+#### Windows/arm64 packaging and closure replay (2026-11-24)
+
+Windows 11 Pro 10.0.26300 arm64 (physical), LLVM 22.1.8 (`woa64`), Windows SDK `10.0.28000.0` `um/arm64`, Python 3.14 arm64. Every row is a Release tree (`windows-host-ninja-debug`, imported libc++ ON, curl ON, LVGL ON, `-DCMAKE_BUILD_TYPE=Release`)
+configured fresh or, from the second phase on, **reconfigured and re-packaged from the compiled trees** as the macOS closure replay did. It is the ordinary cumulative package path run by hand, not isolated-stage or release qualification, and no Actions run was requested.
+Skia is the pinned `13ffba25...`. Retained logs, per-row results and the preserved archives are under `out/pal04-windows-arm64-20261124/` (ignored; `closure-rows-result.json`, `packages/<row>/`, `*-verify-*.log`, `gn-amd64/gn-fetch.json`).
+
+**Phase 1, CRT `2fc6eaf` (the refusal policy of that time).** Fresh trees for Skia ON / FFmpeg OFF and Skia OFF / FFmpeg ON refused `crt-media-dist` and `crt-ui-dist` in 0.29-0.36 s, one command (the refusal script) and no prerequisite build, with the option diagnostic naming the
+supported combinations. The minimum control (Skia and FFmpeg OFF) built `crt-ui-dist` in 28 min 18 s and `crt-media-dist` in 21 s; `verify_dist` passed at stage 04 and 05 (records `crt-libc`, `mksh`, `toybox`, `onetrue-awk`, `llvm-runtimes`, plus `lvgl` at 05). Copied to `SDK space 한글`
+the package rebuilt `gfx-simple`, `gfx-gpu` and `ui-basic`, and `ui-basic` printed `crtui_window_demo: presented=30 pixel_check=pass input_check=pass` with only the SDK `bin` and System32 on `PATH`; the stage-05 `.zip` (64,397,970 bytes) extracted into a new directory, verified and ran the same check.
+The full control (Skia, FFmpeg, curl ON) first **failed after 52 min 10 s at `crtgfx-skia-build`**: Skia's `bin/fetch-gn` got `HTTP Error 404` because the pinned GN revision has no `windows-arm64` package (the documented
+[build-host input](crtweb_acceptance.md): the x64 `gn.exe`). That attempt is kept (`full-crt-ui-dist.log`). The x64 `gn.exe` of the same pinned revision `b2afae12...` (`https://chrome-infra-packages.appspot.com/dl/gn/gn/windows-amd64/+/git_revision:b2afae122eeb6ce09c52d63f67dc53fc517dbdc8`; zip 1,120,394 bytes SHA-256 `7249f55d6f22b55affa68aaf19d2f597c39946299216e12d78eac6cc1469f8a1`, `gn.exe` 2,371,072 bytes SHA-256 `cf28c1ea5c5c6c2ec1c2e4e12b360f276595ceea8de6a35368dfd1f9b39b527d`, PE machine `0x8664`) runs under x64 emulation (`2175 (b2afae122eeb)`)
+and was supplied with `-DCRTGFX_SKIA_GN`; the same tree resumed and built in 13 min 26 s (media 31 s). The full package passed `verify_dist` at stage 04 and 05 (records add `freetype`, `ffmpeg`, `skia`, `curl`, `mbedtls`, `zlib` and `mingw-w64-headers`; `include/crt-win32-shim`, `include/crt-mingw-w64-headers` and `libskia.a` present),
+and the relocated copy rebuilt all five shipped examples, including `gfx-skia` (the one whose private headers the x64 replay found missing) and `media-player`, and ran the 30-frame check (archive 100,406,500 bytes, extracted package verified and ran it).
+Negative control: in the extracted copy, renaming `include/crt-win32-shim` makes `verify_dist` exit 1 with `Windows Skia consumer headers missing: include/crt-win32-shim/mingw_w64_compat.h`; restoring it exits 0.
+
+**Phase 2, CRT `1ae70fa` (complete closure packages on Windows and macOS).** `59ab344` and `1ae70fa` replaced the refusal of the two single-closure shapes by packaging them (see the [Windows/x64 record](#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)), so Phase 1's refusals are history, not evidence for the current policy.
+The four rows below were re-packaged at `1ae70fa`; each passes `verify_dist` at stage 04 and 05, the record and file expectations, the relocated rebuild of every shipped example with the 30-frame check, and the extracted `.zip` verified and run.
+
+| Row (Skia / FFmpeg / curl) | `crt-ui-dist` / `crt-media-dist` | Dependency records at stage 05 (besides `crt-libc`, `mksh`, `toybox`, `onetrue-awk`, `llvm-runtimes`, `lvgl`) | Examples rebuilt | Stage-05 `.zip` |
+| --- | ---: | --- | --- | --- |
+| OFF / OFF / ON (control) | 246 s / 16 s | none | `gfx-simple`, `gfx-gpu`, `ui-basic` | 64,397,983 bytes `ccd6a4e8baab...` |
+| ON / ON / ON (control) | 280 s / 21 s | `freetype`, `skia`, `ffmpeg`, `curl`, `mbedtls`, `zlib`, `mingw-w64-headers` | those plus `gfx-skia`, `media-player` | 100,406,517 bytes `74f96c998a7e...` |
+| ON / OFF / ON (**FFmpeg-less**) | 219 s / 16 s | `freetype`, `skia`, `mingw-w64-headers`; no `ffmpeg`, `curl`, `mbedtls`, `zlib` | `gfx-simple`, `gfx-gpu`, `ui-basic`, `gfx-skia` | 90,276,169 bytes `fed59dd55d5b...` |
+| OFF / ON / ON (**Skia-less**) | 206 s / 13 s | `ffmpeg`, `curl`, `mbedtls`, `zlib`; no `skia`, `freetype`, `mingw-w64-headers` | `gfx-simple`, `gfx-gpu`, `ui-basic`, `media-player` | 74,528,710 bytes `30d126e00bbc...` |
+
+Manifest SHA-256 (stage 04 / 05): off `68942ca6fe4c...` / `21d04e9c6dd3...`; full `dc39d6d23d49...` / `0c092dd30cf1...`; FFmpeg-less `f51c1c11d06e...` / `370c8398d92e...`; Skia-less `759066926309...` / `1fa56fee3b68...`. The FFmpeg-less package has `libskia.a`, `libfreetype.a` and the Win32 consumer headers and no
+FFmpeg or curl archives or `media-player`; the Skia-less package has the FFmpeg, curl, Mbed TLS and zlib archives and no Skia, FreeType or `gfx-skia`. The only combination still refused is FFmpeg ON with curl OFF: with Skia OFF and with Skia ON both dist targets exit 1 in 0.28-0.36 s with one command and the
+diagnostic `FFmpeg media needs curl, Mbed TLS and zlib in its dependency closure`. Unit tests at `1ae70fa`: `test_media_dist_options` 4, `test_verify_dist` 25, `test_create_dist` 15 (6 host skips), `test_dev_sdk` and `test_sdk_workflows` 22 pass.
+
+**Findings and attempts, kept.** (1) The Skia `gn` input above is a host input, not a CRT defect; it is the same input the documents already list for x64, but the arm64 package for it is not published, so an arm64 builder must supply the x64 `gn.exe` or fail with the 404. (2) The Phase 2 script's SHA-256 lines failed with
+`Get-FileHash` not found inside the hidden PowerShell and left those fields out of its result file; the identities above were recomputed from the preserved archives and nothing else depended on them.
+
+Not covered: Linux (it still refuses both single-closure shapes until its own replay); shared-runtime linkage of the new packages (the macOS replay covers it); GPU presentation or media playback beyond compile/link and the 30-frame software UI check; the late verifier failure of the partial shapes before the closure
+change was not rebuilt on arm64 (the x64 and macOS records keep it); a published release or signature; CI. No runtime, ABI, dependency pin or release asset changed.
+
 #### Native Windows replay handoff
 
 Use a fresh Windows Release tree per row of the Skia/FFmpeg matrix above,
@@ -529,7 +564,8 @@ Partial combinations must either be deliberately refused before expensive
 prerequisites, or provide a complete, verifiable closure; a late verifier
 failure is a finding, not a passing package. Linux early refusal is not
 evidence of Windows behavior. This gate is closed on Windows/x64 by the
-[replay above](#windowsx64-packaging-replay-2026-11-24); Windows/arm64 is not covered.
+[replay above](#windowsx64-packaging-replay-2026-11-24) and on Windows/arm64 by the
+[arm64 replay](#windowsarm64-packaging-and-closure-replay-2026-11-24).
 
 ### 1. LVGL import and first pixels (Windows/x64 first)
 

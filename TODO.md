@@ -49,6 +49,9 @@ policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Done
 
+<!-- Preserve the old link from dated snapshots; completed details live in HISTORY. -->
+<a name="focused-crtpal-follow-ups-revalidate-before-fixing"></a>
+
 See [`HISTORY.md`](HISTORY.md) for the full, dated, reverse-chronological
 record of completed work. This section stays empty in `TODO.md` itself. Finished
 top-level work moves to `HISTORY.md`; terse checked prerequisite gates may remain
@@ -58,37 +61,6 @@ Task IDs are scoped to their topic heading. Refer to the repository and topic
 when a prefix such as `P1` or `V1` appears under multiple headings.
 
 ## In Progress
-
-### Focused CRT/PAL follow-ups: revalidate before fixing
-
-Prioritize current Dev SDK correctness evidence before publishing a new Dev
-SDK or building a new CLI on it. Apply Media/UI combination gates to the
-affected packages under the SDK change-impact policy.
-
-Found by the CLI's Windows replay (reproducers and numbers in the CLI's
-[Windows record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/bootstrap_acceptance.md#native-json-builder-on-windowsx64-2026-10-29)):
-
-- [x] **PAL-01** Block transfers for buffered I/O pass the native stdio regressions on Linux/x86_64
-  ([revalidated on `21a5509`](docs/acceptance/release_qualification.md#native-linuxx86_64-stdio-replay-pal-01-2026-11-24)),
-  [macOS/arm64](docs/acceptance/release_qualification.md#macosarm64-pal-follow-up-replay-2026-11-23)
-  and [Windows/x64](docs/acceptance/release_qualification.md#native-windowsx64-pal-replay-2026-11-23);
-  the ARM64 legacy CLI relay retains its own acceptance.
-
-- [x] **PAL-04** Linux partial-option packaging closed by [#24](https://github.com/webos21/crt/pull/24) (`21a5509`): ordinary `crt-media-dist`/`crt-ui-dist` support Skia, FFmpeg and
-  curl all OFF or all ON and refuse other combinations early; `verify_dist`
-  rejects Skia/FFmpeg payload without its dependencies
-  ([distribution](docs/guides/distribution.md),
-  [evidence and limits](docs/acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23)).
-  macOS reproduces both late partial-package rejections
-  ([replay](docs/acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)).
-  Complete Skia-less and FFmpeg-less closure packages are published on Windows/x64
-  ([record](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24));
-  macOS/arm64 packages them too ([record](docs/acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)); Linux keeps refusing both shapes until its own replay.
-
-- [ ] **PAL-04 host replay follow-up:** Windows/x64 and macOS/arm64 now refuse the reproduced partial combinations before building
-  ([Windows](docs/acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24), [macOS](docs/acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24));
-  the full Windows package carries the private Skia consumer headers. Windows/arm64 is not covered.
-
 
 <a name="crt-developer-experience-sdk---cli---studio"></a>
 
@@ -380,7 +352,7 @@ evidence.
 
 These remain visible for future consumers, not automatic CLI prerequisites.
 
-The links on PAL-EXT-01 through PAL-EXT-05 are existing investigations, evidence or
+The links on PAL-EXT-01 through PAL-EXT-06 are existing investigations, evidence or
 design triggers. Define a targeted regression and a real consumer before qualifying a
 change.
 
@@ -406,6 +378,10 @@ change.
   validation; these are not missing work
   ([fetch implementation](tools/fetch_ports.py),
   [FreeType recipe](porting/recipes/freetype.json)).
+- [ ] **PAL-EXT-06** Package the Skia-less and FFmpeg-less closures on Linux as well: Linux still refuses both single-closure shapes, which Windows/x64, Windows/arm64 and macOS/arm64 package
+  ([Windows/x64](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24),
+  [Windows/arm64](docs/acceptance/crtui_acceptance.md#windowsarm64-packaging-and-closure-replay-2026-11-24),
+  [macOS](docs/acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)). Do it only for a consumer that wants such a package; it needs its own native Linux replay. Also open on the other hosts: shared-runtime linkage of the new packages on Windows.
 
 ### Upper runtime roadmap: long-term extensions
 
