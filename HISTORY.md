@@ -12,6 +12,19 @@ substantive update.
 
 ## 2026-11-24
 
+### Implement separate offline-signature finalization for SDK and CLI previews
+
+Split the release path into protected draft staging and a separate approved
+finalizer. A non-rehearsal stage run records release ID, tag/commit and exact
+asset IDs and digests; rehearsal drafts get no receipt. The finalizer reuses
+that receipt and the pinned RSA-PSS publisher key, requires a detached
+signature for every payload, and checks the downloaded bytes before and
+after the publication call. The archive-signature consumer format is unchanged.
+The artifact-only host-tools workflow stays unchanged; its manual publication
+uses the same offline policy. Local tests use fake GitHub state and temporary
+keys; no hosted rehearsal, production signature or publication was performed.
+[Owner procedure](docs/security/publisher_signing.md#signing-procedure-owner).
+
 ### Consume the Windows/arm64 closure packages with the shared CRT (PAL-04)
 
 The minimum, FFmpeg-less and Skia-less stage-05 packages (and the full one as a control), relocated to a `SDK space 한글` path, build all their shipped examples with both `static` and `shared` CRT/C++ linkage (32 builds, no CRT change) and run them with only the package `bin` on `PATH`: every example exits 0 with its own check in both modes. The PE import tables show the shared builds importing `libc.dll` (`gfx-skia` also `libc++.dll`) and the static ones importing neither, with no import outside the package and System32.

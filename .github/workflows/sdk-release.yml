@@ -8,15 +8,12 @@ name: SDK release
 #            (no write permission);
 #   verify   on a separate fresh runner: independent re-verification of the downloaded bytes and the consumer smoke by the
 #            pinned, signature-checked published CLI Preview installing that archive (no write permission). A host that has no
-#            published CLI yet (tools/ci_sdk_publish.py: `bootstrap`, today windows-arm64) cannot run that smoke: it is recorded as
+#            published CLI yet (tools/ci_sdk_publish.py: `bootstrap`) cannot run that smoke: it is recorded as
 #            NOT RUN, the reviewed notes must say so, and the source-hidden native consumer of the extracted archive stands in;
 #            the exception ends the moment the host has a pin (docs/guides/sdk_ci.md, "First-host bootstrap");
-#   publish  waits for approval on the `release` environment, re-verifies the bytes, stages a draft, downloads it back and
-#            compares every byte, and only then publishes a non-latest prerelease. It is the only job with `contents: write`
-#            and never rebuilds.
-# `dry_run: true` (the default) stops at the verified draft after the same approval; delete that draft by hand.
-# Publisher authentication is not done here: the owner signs the archive offline and attaches `.sig` afterwards
-# (docs/security/publisher_signing.md); consumers pin only after that. Design and procedure: docs/guides/sdk_ci.md.
+#   stage    waits for approval on the `release` environment, re-verifies the bytes, and creates a verified draft only.
+#            Non-rehearsal runs issue a receipt for the separate signature-checked finalization workflow.
+# `dry_run: true` (the default) creates a rehearsal draft without a receipt; delete it by hand.
 
 on:
   workflow_dispatch:
@@ -44,7 +41,7 @@ on:
         type: string
         required: true
       dry_run:
-        description: Stop at the verified draft instead of publishing
+        description: Rehearsal only; do not issue a receipt for finalization
         type: boolean
         default: true
 
@@ -58,6 +55,7 @@ concurrency:
 jobs:
   plan:
     name: plan (${{ inputs.host }})
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -87,7 +85,11 @@ jobs:
           python-version: '3.12'
 
       - name: Tests of the release driver and the workflow rules
-        run: python -m unittest discover -s tools -p "test_ci_sdk_publish.py" && python -m unittest tools.test_sdk_workflows
+        run: |
+          python -m unittest discover -s tools -p test_ci_sdk_publish.py
+          python -m unittest discover -s tools -p test_release_signing.py
+          python -m unittest tools.test_sdk_workflows
+          python tools/ci_sdk_publish.py stage --help
 
       - name: Validate the request
         id: plan
@@ -294,14 +296,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  publish:
-    name: publish (${{ inputs.host }})
+  stage:
+    name: stage draft (${{ inputs.host }})
     needs: [plan, verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Required reviewers are configured on this environment; `plan` refused the run unless they exist, and this job does not
     # start until a reviewer approves.
     environment: release
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -322,7 +327,7 @@ jobs:
           name: sdk-release-${{ needs.plan.outputs.tag }}
           path: ${{ runner.temp }}/release-files
 
-      - name: Stage, compare and publish
+      - name: Stage and verify a draft, never publish
         env:
           GH_TOKEN: ${{ github.token }}
           HOST: ${{ inputs.host }}
@@ -335,6 +340,16 @@ jobs:
         run: |
           set -euo pipefail
           args=(--host "$HOST" --commit "$COMMIT" --date "$DATE" --serial "$SERIAL" --repo "$REPO"
-                --release-dir "$RUNNER_TEMP/release-files" --notes-file "$NOTES" --work "$RUNNER_TEMP/draft-check")
-          if [ "$DRY_RUN" = true ]; then args+=(--draft-only); fi
-          python tools/ci_sdk_publish.py publish "${args[@]}"
+                --release-dir "$RUNNER_TEMP/release-files" --notes-file "$NOTES" --work "$RUNNER_TEMP/draft-check"
+                --receipt "$RUNNER_TEMP/release-stage.json")
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          python tools/ci_sdk_publish.py stage "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain the eligible stage receipt
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-stage-receipt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-stage.json
+          if-no-files-found: error
+          retention-days: 14

@@ -2,7 +2,8 @@
 
 Owner: CRT. Status: **the public key and fingerprint are published, and selected release archives have detached publisher signatures.**
 Publisher authentication applies only to the exact archive bytes whose signature was verified with the pinned key; it does not extend to
-unsigned release records, checksums, source assets or other releases. Keep digest pins alongside signature verification
+unsigned release records, checksums, source assets or other releases. New gated releases sign each of these assets individually;
+existing releases retain their original per-file coverage. Keep digest pins alongside signature verification
 ([Preview trust policy](../design/dev_preview_trust.md)). Dated signing records below and the owning acceptance documents identify the signed assets.
 
 ## The publisher key
@@ -83,12 +84,54 @@ This does not change fingerprint independence, sign the release metadata or prov
 
 Signing is a deliberate, manual, offline step. CI never holds the private key.
 
-1. Produce the release candidate in the workflow, download its artifacts and compare them with the candidate recorded in acceptance.
-2. On the offline machine, check each asset's SHA-256 against the release record; sign each asset; verify each signature with the **public**
-   key and the command above.
-3. Upload the `.sig` files to the same release (new files only; accepted assets are never replaced) and record the signer's key fingerprint,
-   the date and the assets signed in the acceptance record.
-4. From a fresh workspace, download the public release and verify with `crt-cli fetch --publisher-key` or the `openssl` command.
+For new Dev SDK and CLI Previews, stage on `main` with `dry_run: false` and
+approve the `release` environment. Staging never publishes, even with
+`dry_run: false`. Rehearsals (`dry_run: true`) do not issue a finalization
+receipt and cannot be finalized; delete the rehearsal draft or use a new tag.
+
+1. Obtain the stage run ID and its immutable Actions receipt. Download the
+   draft payload and compare its exact names, sizes and SHA-256 values with the
+   receipt from that successful run. Actions build artifacts are not releases;
+   this gate does not make them private.
+2. On the offline machine, sign **every** payload file, including
+   `SHA256SUMS-*`. For an SDK that means the archive, toolchain contract, two
+   stage-source archives, manifest and checksums; for the CLI it means the
+   archive and checksums. Use the format above and verify with the public key.
+   Archive signatures keep their existing names and consumer contract.
+3. Upload each `<asset>.sig` to the same draft. Do not replace payload bytes,
+   edit the draft or attach the internal staging receipt. Dispatch
+   `finalize-release.yml` on `main` with the **stage workflow run ID** and
+   approve the separate `release` deployment after checking the plan summary.
+   The finalizer uses only the receipt from the successful workflow's current
+   attempt (14-day retention), re-downloads the draft, checks the exact
+   payload and signature set using the pinned SPKI fingerprint, and makes
+   that draft a non-latest prerelease. It downloads and checks the assets again
+   after publication. It does not rebuild, overwrite, or republish.
+4. Verify the public files independently in a fresh workspace before changing
+   any consumer pins. Record the run IDs, signer fingerprint, digests and
+   verification result in acceptance. Check every file whose authenticity is
+   required; verifying only the archive does not authenticate other files.
+
+**Setup and recovery.** Configure required reviewers and a main-only deployment
+branch policy on the `release` environment in both repositories. Do not edit
+the draft or tag while finalization is running. GitHub's
+[release update API](https://docs.github.com/en/rest/releases/releases#update-a-release)
+does not atomically compare an asset inventory and publish: the finalizer
+rechecks the release, asset IDs and tag immediately before publication and
+again afterwards. Limit release editors accordingly. If staging failed or
+its receipt expired, stage a fresh candidate under an unused tag (or first
+remove a confirmed unpublished draft under owner control). If finalization
+was interrupted, check the release's state before retrying; an already-public
+release is never edited by a retry. A post-publication audit failure is not
+proof the release stayed private: stop pin promotion and investigate.
+
+**Independent host tools** remain artifact-only in `host-tools.yml`. For
+new manual Host Tools Previews, stage a draft from the verified archive,
+release record and checksum file. Apply the same sign-each-file rule;
+download the signed draft, verify its exact inventory, hashes and signatures
+against the original verified files, then have the owner approve and publish
+manually. Verify the public downloads again. This path has no Actions
+finalization receipt; do not dispatch the SDK finalizer for it.
 
 ## Roadmap
 

@@ -100,14 +100,14 @@ and
 cover the existing flow. Validate the new finalization path jointly with
 [crt-cli signing P1-01](https://github.com/webos21/crt-cli/blob/main/TODO.md#p1---sign-before-publishing).
 
-- [ ] **P1-01** Coordinate [sdk-release.yml](.github/workflows/sdk-release.yml) with the
-  CLI release workflow: verify/stage a draft, attach the owner's offline `.sig`,
-  verify the pinned publisher key and exact asset set, then authorize public
-  prerelease finalization. Review the manual host-tools release path under the
-  same policy; its artifact-only CI does not publish releases.
-- [ ] **P1-02** Agree approval placement, dry-run finalization policy and signature
-  coverage of checksum/metadata assets before implementation; key distribution,
-  rotation/revocation and OS code signing remain separate trust decisions.
+- [ ] **P1-01** Qualify the hosted staged-SDK and CLI finalization path:
+  confirm main-only required reviewers, exercise non-finalizable rehearsals,
+  signature/inventory refusal and retry, and verify public bytes on the first
+  owner-approved release. The manual host-tools path shares the signing policy,
+  not the automated finalizer.
+- [x] **P1-02** Implement approvals at both staging and finalization, no
+  finalization receipt for rehearsals, and signatures for all payload files
+  including checksums and metadata. [Procedure and trust boundary](docs/security/publisher_signing.md#signing-procedure-owner).
 - Acceptance: absent/wrong signatures, changed assets or failed approval leave
   the release non-public; valid finalization verifies the downloadable bytes.
 

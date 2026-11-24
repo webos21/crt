@@ -74,7 +74,7 @@ class WorkflowRulesTest(unittest.TestCase):
 
 
 class ReleaseWorkflowRulesTest(unittest.TestCase):
-    """sdk-release.yml is the only workflow that may publish: read-only by default, one write job behind an approval environment."""
+    """The SDK staging workflow may create a protected draft, never publish it."""
     TEXT = (ROOT / '.github/workflows/sdk-release.yml').read_text(encoding='utf-8')
 
     def jobs(self):
@@ -88,12 +88,12 @@ class ReleaseWorkflowRulesTest(unittest.TestCase):
             self.assertNotIn(trigger, on)
         self.assertRegex(on, r'(?s)dry_run:.*?default: true')
 
-    def test_write_permission_exists_only_in_the_publish_job_behind_the_release_environment(self):
+    def test_write_permission_exists_only_in_the_stage_job_behind_the_release_environment(self):
         self.assertRegex(self.TEXT, r'(?m)^permissions:\n  contents: read\n')
         jobs = self.jobs()
-        self.assertEqual(sorted(jobs), ['package', 'plan', 'publish', 'verify'])
+        self.assertEqual(sorted(jobs), ['package', 'plan', 'stage', 'verify'])
         for name, body in jobs.items():
-            if name == 'publish':
+            if name == 'stage':
                 self.assertRegex(body, r'(?m)^    environment: release$')
                 self.assertRegex(body, r'(?m)^      contents: write$')
                 self.assertEqual(len(re.findall(r'write', re.sub(r'#.*', '', body))), 1)
@@ -102,11 +102,14 @@ class ReleaseWorkflowRulesTest(unittest.TestCase):
                 self.assertNotIn('environment:', body)
         self.assertEqual(re.sub(r'(?m)#.*', '', self.TEXT).count('contents: write'), 1)
 
-    def test_publish_needs_the_verified_bytes_and_never_builds(self):
-        publish = self.jobs()['publish']
-        self.assertRegex(publish, r'needs: \[plan, verify\]')
-        for forbidden in ('cmake', 'crt-dev-release', 'apt-get'):
-            self.assertNotIn(forbidden, publish)
+    def test_stage_needs_the_verified_bytes_and_never_builds_or_publishes(self):
+        stage = self.jobs()['stage']
+        self.assertRegex(stage, r'needs: \[plan, verify\]')
+        self.assertIn('ci_sdk_publish.py stage', stage)
+        self.assertIn('!inputs.dry_run', stage)
+        self.assertIn("if: github.ref == 'refs/heads/main'", self.jobs()['plan'])
+        for forbidden in ('cmake', 'crt-dev-release', 'apt-get', 'release_signing.py --repo', '--draft=false'):
+            self.assertNotIn(forbidden, stage)
 
     def test_inputs_reach_scripts_only_through_the_environment(self):
         for name, body in self.jobs().items():
