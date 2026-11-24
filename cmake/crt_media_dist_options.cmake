@@ -10,7 +10,7 @@
 #   Skia OFF, FFmpeg OFF (curl irrelevant: the HTTP transport is compiled only with FFmpeg)
 #   Skia ON,  FFmpeg ON,  curl ON
 #
-# CMakeLists.txt applies it to Linux and Windows targets. Use as a module:
+# CMakeLists.txt applies it to every target OS (Linux, Windows and macOS). Use as a module:
 # crt_media_dist_option_problem(<out-var> <skia> <ffmpeg> <curl>) sets the variable
 # to an empty string for a supported combination, else to the reason. Run directly (`cmake
 # -DCRTGFX_ENABLE_SKIA=.. -DCRTMEDIA_ENABLE_FFMPEG=.. -DCRTMEDIA_ENABLE_CURL=.. -P <this file>`) it

@@ -299,7 +299,7 @@ a release requirement. Build speed alone is handled by its warm dependency
 cache and explicit job controls, not by adding the heavyweight path to the
 default workflow.
 
-Linux media/UI package option combinations (PAL-04): the ordinary
+Media/UI package option combinations (PAL-04): the ordinary
 `crt-media-dist` and `crt-ui-dist` publish the Skia, FFmpeg and curl dependency
 closure only as a unit. They support `CRTGFX_ENABLE_SKIA`,
 `CRTMEDIA_ENABLE_FFMPEG` and `CRTMEDIA_ENABLE_CURL` all OFF (curl has no effect
@@ -309,10 +309,10 @@ tree still build. `verify_dist.py` also rejects a package that ships Skia or
 FFmpeg-backed payload without its dependency records and `lib/libskia.a`.
 Use the isolated stage chain for a packaged option-ON SDK. Evidence and limits:
 [acceptance](../acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23).
-The early CMake refusal applies to Linux and Windows/x64 ([Windows replay](../acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24));
-the shared verifier applies on every host. The [macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)
-reproduces late rejection of both partial shapes, rather than support for
-partial packages; the macOS early-refusal decision is still open.
+The early CMake refusal applies to every host: Linux, Windows/x64 ([Windows replay](../acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24))
+and macOS ([early refusal](../acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24)); the shared verifier applies on every host as well. The
+[macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)
+reproduced late rejection of both partial shapes, which is why macOS now refuses them early; it is not support for partial packages.
 
 Outputs are placed under:
 

@@ -362,7 +362,7 @@ Linux-only test skips (`packaging-unit.log`).
   archive is already caught by the older inventory check. Restore the
   original manifest bytes and archive; the restored SDK verifies again.
 
-At this baseline, early CMake refusal is still **Linux-only**. macOS builds
+At this baseline, early CMake refusal is still **Linux-only** (the later [macOS early refusal](#macosarm64-early-refusal-2026-11-24) closes that for macOS). macOS builds
 both unsupported partial shapes before rejecting their packages. Do not report
 this as successful partial-package support or promote either rejected SDK.
 The relocation checks rebuild examples from packaged inputs but do not hide
@@ -406,6 +406,37 @@ packaging command line. Re-packaged `off` and `full` pass `verify_dist` at stage
 
 Not covered: Windows/arm64; a published release asset or signature; GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a partial package with a complete dependency closure (a Skia-less or FFmpeg-less closure
 remains the optional follow-up). No runtime, ABI, dependency pin or release asset changed. The macOS early-refusal decision stays open.
+
+#### macOS/arm64 early refusal (2026-11-24)
+
+**Decision: refuse the partial Skia/FFmpeg/curl combinations before building on macOS too.** Rationale: the [macOS replay](#macosarm64-packaging-replay-2026-11-24) reproduced
+the same late failure as Windows/x64 for both partial shapes (Skia ON/FFmpeg OFF and Skia OFF/FFmpeg ON each build to stage-04 publication and are then rejected by the shared
+verifier), so a macOS user pays a long build before learning that the combination was never packageable. The verifier stays the second line of defense on every host. This is
+not support for partial packages; a partial package with a complete dependency closure remains the optional follow-up.
+
+**Change.** `CMakeLists.txt` now applies `cmake/crt_media_dist_options.cmake` to every target OS (the Linux/Windows OS guard is gone), so `crt-media-dist` and `crt-ui-dist`
+(which depends on it) become the single refusal command on macOS for any combination other than Skia, FFmpeg and curl all OFF (curl has no effect without FFmpeg) or all ON. Other
+targets of the same tree still build. `tools/test_media_dist_options.py` now asserts the unguarded application (and that no OS guard returns). No runtime, public header,
+ABI, dependency pin or release asset changes.
+
+**Native check** (CRT `ffa8251` plus the change; macOS 27.2.1 `26B131`, Xcode 27.2 `27B52`, Apple clang 21.0.0; Release, `CRT_USE_IMPORTED_LIBCXX=ON`, `CRTMEDIA_ENABLE_CURL=ON`,
+`CRTUI_ENABLE_LVGL=ON`; fresh trees under `out/pal04-macos-early-20261124/`, configure plus build invocations only):
+
+| Row (Skia / FFmpeg) | `cmake --build --target crt-media-dist` and `crt-ui-dist` | Evidence |
+| --- | --- | --- |
+| ON / OFF | both exit 1 in 0 s, **0** compile steps, the full option diagnostic (names the three options, the supported combinations and the isolated-stage alternative) | `skia-only-*.log`; `ninja -t commands`: one command, the refusal script |
+| OFF / ON | the same | `ffmpeg-only-*.log` |
+| OFF / OFF | not refused: `ninja -t commands` lists 903 (`crt-media-dist`) and 1881 (`crt-ui-dist`) commands, including `create_dist.py` and `crt_stage_cache.py`, and no refusal script | `off-*.commands` |
+| ON / ON | not refused: 930 and 1912 commands, the same packaging and cache commands, no refusal script | `full-*.commands` |
+
+The two supported rows were deliberately **not rebuilt**: the minimum and full macOS packages, their relocated rebuilds and the UI 30-frame runs are the unchanged results of the
+[macOS replay](#macosarm64-packaging-replay-2026-11-24), and nothing they depend on changed (the command lines are the ordinary ones). Unit tests: `test_media_dist_options`,
+`test_verify_dist`, `test_create_dist` and `test_sdk_workflows` pass 62 tests with one Linux-only skip.
+
+A first attempt of this check invoked the configure loop from `zsh`, whose unquoted `$row` is not word-split, so the rows were configured with the preset's defaults and real
+builds started; the trees were removed and the check was redone with explicit variables. Nothing from that attempt is recorded as a result.
+
+Not covered: Windows/arm64; building the supported rows again; a published asset or signature; a partial package with a complete closure.
 
 #### Native Windows replay handoff
 

@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-24
 
+### Refuse partial Media/UI package options early on macOS (PAL-04)
+
+The macOS replay had reproduced the same late verifier rejection of both partial Skia/FFmpeg shapes as Windows, so the decision is to refuse them before building there too.
+`crt_media_dist_option_problem` now applies to every target OS instead of Linux and Windows only. On macOS/arm64 fresh Release trees refuse Skia ON/FFmpeg OFF and Skia
+OFF/FFmpeg ON for `crt-media-dist` and `crt-ui-dist` in 0 s with the option diagnostic and no compile step; the supported all-OFF and all-ON rows keep the ordinary 900+ command
+packaging paths and are not rebuilt. The option-matrix test now pins the unguarded application. No runtime, ABI, pin or asset change. A first check run configured the rows with
+default options because of a `zsh` word-splitting slip and was discarded. [Evidence](docs/acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24).
+
 ### Replay ordinary Media/UI packaging on Windows/x64 (PAL-04)
 
 On the physical Windows/x64 host, fresh Release trees confirm the late failure of both partial shapes (Skia OFF/FFmpeg ON ships FFmpeg payload without its dependencies; Skia ON/FFmpeg OFF ships Skia payload without `libskia.a`) and that the
