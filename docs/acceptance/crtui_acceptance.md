@@ -475,6 +475,9 @@ Tests: the option matrix with and without `partial`, the verifier (the Skia clos
 Not covered: Windows/arm64 (replayed later: [Windows/arm64 record](#windowsarm64-packaging-and-closure-replay-2026-11-24)), Linux and macOS (they still refused both shapes then), shared-runtime linkage of the new packages, GPU presentation or media playback beyond compile/link and the 30-frame software UI check, a published release or signature, and CI.
 No runtime, ABI, dependency pin or release asset changed.
 
+The [subsequent Windows/x64 replay](#windowsx64-shared-runtime-closure-replay-2026-11-24)
+covers shared linkage and executes the graphics and media examples.
+
 #### macOS/arm64 Skia-less and FFmpeg-less closure packages (2026-11-24)
 
 Replay of the Windows/x64 [closure packages](#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24) on macOS/arm64. CRT `85a2b6d` plus the change below; macOS 27.2.1 (`26B131`), Xcode 27.2 (`27B52`), Apple clang 21.0.0;
@@ -548,8 +551,62 @@ Loaded modules of a live process (sampled with 250 ms polling): `libc.dll`, `lib
 Records: `shared-rows-result.json`, `shared-recheck-*.json`, `shared-cxx-result.json`, per-example `shared-<row>-<example>-<linkage>-build.log`.
 Attempts and a withdrawn control, kept: (1) "no package `bin` on `PATH`: a static build should still run, a shared one should not" was wrong and is **not evidence**: the static `ui-basic` also fails with `STATUS_DLL_NOT_FOUND` (0xC0000135) because it imports the SDK's `libcrtgfx.dll`/`libcrtui.dll`. (2) The first live-module sample (3 s, a million-frame run) returned an empty list for a cause not found; the polling method replaced it. (3) The software UI check does not exercise GPU or media beyond what the examples print.
 
-Not covered: Linux (it still refuses both single-closure shapes until its own replay); shared-runtime linkage of the new packages on Windows/x64 (arm64 covered above; macOS has its own record); GPU presentation or media playback beyond compile/link and the 30-frame software UI check; the late verifier failure of the partial shapes before the closure
+Not covered: Linux (it still refuses both single-closure shapes until its own replay); shared-runtime linkage of the new packages is recorded for Windows/arm64 above, [Windows/x64](#windowsx64-shared-runtime-closure-replay-2026-11-24) and macOS (not Linux); GPU presentation or media playback beyond compile/link and the 30-frame software UI check; the late verifier failure of the partial shapes before the closure
 change was not rebuilt on arm64 (the x64 and macOS records keep it); a published release or signature; CI. No runtime, ABI, dependency pin or release asset changed.
+
+#### Windows/x64 shared-runtime closure replay (2026-11-24)
+
+Physical Windows 11 x64, build 26100, LLVM 22.1.8, CMake 3.29.2, Ninja
+1.13.2, Python 3.11.9, Windows SDK `10.0.28000.0` `um/x64`. Synchronized
+CRT `027b88100cb71ce0aaa04d6095a81001a469c2a8`, CLI
+`af849da`, and extension `e418379`. The latest packaging implementation is
+from `1ae70fa`. This replay covers the shared CRT linkage left open by the
+earlier Windows/x64 closure record.
+
+Reconfigure `out/p4w-off`, `out/p4w-g3`, `out/p4w-g4`, and `out/p4w-full`
+using `cmake --fresh --preset windows-host-ninja-debug -B <tree>`, Release,
+imported libc++ ON, curl ON and LVGL ON. Retain their existing runtime and
+dependency build trees. Run `cmake --build <tree> --target crt-ui-dist
+--parallel 8` and verify stages `04-gfx-media` and `05-ui`. The stage-05
+manifests identify `027b8810`. Both manifests in each row declare the expected
+optional dependency set and all its provenance and notices. FFmpeg rows carry
+the relink kit. Skia rows carry the Windows private consumer headers. SHA-256
+comparison with the retained ZIPs matches all 426 bundled `.exe` and `.dll`
+entries across the four rows.
+
+Extract each `05-ui.zip` into a fresh directory under `out/p4-x64 shared 한글/`.
+Run `verify_dist.py --stage 05-ui` on each extracted SDK. Build every shipped
+example through its SDK `crt-toolchain.cmake` with `CRT_RUNTIME_LINKAGE`,
+`CRT_CXX_RUNTIME_LINKAGE` and `CRT_CXX_STL_LINKAGE` set to `shared`. The PE
+import table of each application names `libc.dll`. Both `gfx-skia` applications
+also import `libc++.dll`. Launch the executables with the extracted SDK's `bin`
+as the entire `PATH`.
+
+| Skia / FFmpeg / curl | Optional closure | Shared examples built and run | Stage-05 ZIP SHA-256 |
+| --- | --- | ---: | --- |
+| OFF / OFF / ON | None | 3 | `e9798ba58477b30d181586efff2d24e1e5202b3bd5ef9f1ec733d9c39892b744` |
+| OFF / ON / ON | FFmpeg, curl, Mbed TLS, zlib | 4 | `ab0757fbcfa60e4970b1ab9f0cec0d25444fa0618b0c0b5d6b41e844c7a12955` |
+| ON / OFF / ON | FreeType, Skia, private Windows headers | 4 | `ce97dbff454f8e7f87cc82e34fe29b9c785e6eba8fff04d824c8a285eefdbf0a` |
+| ON / ON / ON | Both closures | 5 | `65a9a1bbc630d1a607ba5edca050f0567f4d6e9781b7b4414e40b0e1207b477d` |
+
+All four `ui-basic` runs report `presented=30 pixel_check=pass input_check=pass`.
+The shipped graphics and media examples each present eight frames. The GPU
+example creates a real swapchain, and the media example plays the ZIP's local
+`test_video.mp4`. The earlier link and software UI evidence is retained under
+its original artifact identities.
+
+In fresh Release trees with FFmpeg ON and curl OFF, both values of Skia fail
+both distribution targets in 0.23–0.25 seconds. The diagnostic names the curl,
+Mbed TLS and zlib closure, and only the refusal script runs after the glob
+check. The five packaging/SDK Python suites run 105 tests with 99 passing and
+six host skips. The associated code change's hosted [CRT CI run 45345724799](https://github.com/webos21/crt/actions/runs/45345724799)
+also passes its `windows-x64` job. The ordinary Media/UI matrix is covered by
+the physical host runs above.
+
+Retained evidence is under `out/pal04-current-x64-20261124/` in
+`producer-commands.json`, `*-consumer-{commands,result}.json`,
+`packaging-unit.log` and `audit-result.json`. It includes the previous ZIPs
+under `previous-zips/`. The four new ZIPs are local Development artifacts.
 
 #### Native Windows replay handoff
 

@@ -381,7 +381,7 @@ change.
 - [ ] **PAL-EXT-06** Package the Skia-less and FFmpeg-less closures on Linux as well: Linux still refuses both single-closure shapes, which Windows/x64, Windows/arm64 and macOS/arm64 package
   ([Windows/x64](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24),
   [Windows/arm64](docs/acceptance/crtui_acceptance.md#windowsarm64-packaging-and-closure-replay-2026-11-24),
-  [macOS](docs/acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)). Do it only for a consumer that wants such a package; it needs its own native Linux replay. Also open: shared-runtime linkage of the new packages on Windows/x64 (Windows/arm64 and macOS are recorded).
+  [macOS](docs/acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)). Do it only for a consumer that wants such a package; it needs its own native Linux replay.
 
 ### Upper runtime roadmap: long-term extensions
 
