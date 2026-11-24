@@ -299,24 +299,20 @@ a release requirement. Build speed alone is handled by its warm dependency
 cache and explicit job controls, not by adding the heavyweight path to the
 default workflow.
 
-Media/UI package option combinations (PAL-04): the ordinary
-`crt-media-dist` and `crt-ui-dist` publish the Skia, FFmpeg and curl dependency
-closure only as a unit. They support `CRTGFX_ENABLE_SKIA`,
-`CRTMEDIA_ENABLE_FFMPEG` and `CRTMEDIA_ENABLE_CURL` all OFF (curl has no effect
-without FFmpeg), or all three ON. Any other combination is refused before the
-stage builds, with a diagnostic naming the options; the other targets of that
-tree still build. `verify_dist.py` also rejects a package that ships Skia or
-FFmpeg-backed payload without its dependency records and `lib/libskia.a`.
-Use the isolated stage chain for a packaged option-ON SDK. Evidence and limits:
-[acceptance](../acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23).
-The early CMake refusal applies to every host: Linux, Windows/x64 ([Windows replay](../acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24))
-and macOS ([early refusal](../acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24)); the shared verifier applies on every host as well. The
-[macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)
-reproduced late rejection of both partial shapes, which is why macOS now refuses incomplete packages early. Windows/x64 and macOS/arm64 also package a complete
-Skia-less or FFmpeg-less closure (`CRT_MEDIA_DIST_PARTIAL`; [macOS record](../acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)); Linux still refuses both.
-Windows/x64 additionally packages one complete closure: Skia ON with FFmpeg OFF (the FreeType and Skia closure) or Skia OFF with FFmpeg and curl ON
-(the FFmpeg, curl, Mbed TLS and zlib closure); FFmpeg without curl is refused. Linux and macOS keep refusing both shapes until their own replay
-([record](../acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24)).
+Media/UI package option combinations (PAL-04): the ordinary `crt-media-dist` and `crt-ui-dist` publish each optional
+dependency closure only whole: the Skia closure is FreeType and Skia, the FFmpeg closure is FFmpeg with curl, Mbed TLS and zlib.
+`CRTGFX_ENABLE_SKIA`, `CRTMEDIA_ENABLE_FFMPEG` and `CRTMEDIA_ENABLE_CURL` all OFF (curl has no effect without FFmpeg) or all three ON
+is supported on every host. Windows/x64 and macOS/arm64 additionally package one complete closure (`CRT_MEDIA_DIST_PARTIAL`): Skia ON with
+FFmpeg OFF, or Skia OFF with FFmpeg and curl ON. FFmpeg without curl is refused everywhere, and Linux refuses both single-closure shapes until
+its own replay. A refused combination fails before the stage builds, with a diagnostic naming the options; the other targets of that tree still
+build. `verify_dist.py` also rejects, on every host, a package that ships Skia or FFmpeg-backed payload without its dependency records and
+libraries. Use the isolated stage chain for a packaged option-ON SDK. Evidence and limits:
+[Linux](../acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23),
+[Windows/x64](../acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24) and its
+[closure packages](../acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24),
+[macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24) (late rejection of both partial shapes, which is why
+macOS now refuses incomplete packages early: [early refusal](../acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24)) and the
+[macOS closure packages](../acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24).
 
 Outputs are placed under:
 
