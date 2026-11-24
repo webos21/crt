@@ -304,7 +304,7 @@ def validate_external_prerequisites(manifest: dict) -> dict[str, dict]:
     return by_id
 
 
-def validate_optional_payload_closure(dist: Path, redistributed: dict) -> None:
+def validate_optional_payload_closure(dist: Path, redistributed: dict, target_os: str = "") -> None:
     """A package that ships Skia or FFmpeg payload must also ship what it needs (PAL-04).
 
     The ordinary option-OFF package ships neither and is untouched. A package with the Skia bridge/example or the
@@ -326,6 +326,15 @@ def validate_optional_payload_closure(dist: Path, redistributed: dict) -> None:
                 "package ships Skia payload (" + ", ".join(skia_payload[:3]) + ") without its Skia dependency: "
                 "lib/libskia.a and the skia dependency record are required; build with Skia, FFmpeg and curl all "
                 "enabled or all disabled (docs/guides/distribution.md)")
+        if target_os == "windows":
+            missing_headers = [relative for relative in (
+                "include/crt-win32-shim/mingw_w64_compat.h",
+                "include/crt-mingw-w64-headers/_mingw.h",
+                "include/crt-mingw-w64-headers/windows.h",
+                "include/crt-mingw-w64-headers/d3d12.h")
+                if not (dist / relative).is_file()]
+            if missing_headers:
+                raise SystemExit("Windows Skia consumer headers missing: " + ", ".join(missing_headers))
     ffmpeg_payload = [relative for relative in ("examples/media-player",) if (dist / relative).exists()]
     ffmpeg_payload += [path.relative_to(dist).as_posix() for path in present("examples/bin", ("crtmedia_player_demo*",))]
     if ffmpeg_payload:
@@ -713,7 +722,7 @@ def main() -> None:
             require_any(dist / "lib", ("*crtmedia*dll*", "libcrtmedia.so*",
                                         "libcrtmedia.dylib"), "shared crtmedia")
     if args.stage >= "04-gfx-media":
-        validate_optional_payload_closure(dist, redistributed)
+        validate_optional_payload_closure(dist, redistributed, manifest["target"]["os"])
     if args.stage >= "05-ui":
         validate_ui_stage(dist, manifest, redistributed, suffix)
     if args.stage == "06-web":

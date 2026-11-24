@@ -372,6 +372,41 @@ ABI, dependency pin or release asset was changed; documentation was being
 recorded during the full-control build. This replay does not apply a macOS
 packaging policy change.
 
+#### Windows/x64 packaging replay (2026-11-24)
+
+Inputs: CRT `cc8638348636b2a8a2b3903e3a1b145fec760970` plus the working-tree change recorded below, Windows 11 Pro 10.0.26100 x64 (physical),
+LLVM 22.1.8, CLI `1ab78e1` and crt-vscode `e418379` as the synchronized neighbors (they are not inputs of this packaging path). Release trees and retained logs are
+under `out/p4w-*` and `out/pal04-windows-x64-20261124/` (`inputs.json`, `setup-notes.md`). This is the ordinary cumulative package path, not isolated-stage or release
+qualification; no Windows Actions run was requested. Every row used a new Release tree (`windows-host-ninja-debug`, imported libc++ ON, curl ON, LVGL ON, `-DCMAKE_BUILD_TYPE=Release`).
+The Skia source checkout is the pinned `13ffba25...` with only the two controlled build patches (`.gn`, `gn/toolchain/BUILD.gn`, hashes in `inputs.json`).
+
+- **Setup failure, kept.** The pre-existing `out/windows-host-ninja-debug/external/llvm-runtimes` source cache failed the integrity check (`libcxxabi/src/cxa_exception_storage.cpp`). It was preserved and a pristine
+  cache `out/p4w-deps/llvm` was used. A first combined unit run also errored in the workflow Git query on Windows (`missing config value GIT_CONFIG_VALUE_0`: the environment-clearing mocks delete an injected empty value);
+  with `GIT_CONFIG_COUNT=0` only in the test process, the unchanged suites pass. Neither is a PAL-04 result, and no Git configuration was changed.
+- **Baseline before any change: both partial shapes build, then fail late.** Skia OFF / FFmpeg ON / curl ON (`g3`) builds through stage 04 and stops in the verifier: `package ships FFmpeg-backed payload (examples/media-player,
+  examples/bin/crtmedia_player_demo.exe) without its dependency record(s): ffmpeg, curl, mbedtls, zlib` (the manifest lists only `crt-libc`, `mksh`, `toybox`, `onetrue-awk`, `llvm-runtimes`; `libavformat.a`, `libavcodec.a`, `libcurl.a`,
+  `libmbedtls.a`, `libz.a` are absent). Skia ON / FFmpeg OFF / curl ON (`g4`) ships the Skia header and example but no `libskia.a` and no dependency record. Evidence: `g3-payload-gap.json`, `g4-payload-gap.json`, `g3-crt-ui-dist.log`, `g4-crt-ui-dist.log`.
+- **Minimum control (`off`, Skia OFF / FFmpeg OFF / curl ON)** passes stage 04 and 05 verification. Dependency records are `crt-libc`, `mksh`, `toybox`, `onetrue-awk`, `llvm-runtimes` and `lvgl`. The cached LVGL source/header set (1,364 compiled files) equals a freshly
+  fetched pinned copy (`lvgl-source-audit.json`).
+- **Full control (Skia, FFmpeg and curl ON)** passes stage 04 and 05 and adds `freetype`, `ffmpeg`, `skia`, `curl`, `mbedtls` and `zlib`.
+- **A real gap the replay found in the full package.** Verified and relocated to `SDK space 한글`, the full package's `gfx-skia` example failed to configure: `Could not find CRT_WIN32_SHIM_DIR using ... mingw_w64_compat.h`
+  (`full-baseline-consumer-commands.json`). The isolated 04 stage already ships those private headers; the ordinary cumulative package did not. The verifier had passed this package, so the gap was a verifier hole as well.
+
+**Change (code).** (1) `CMakeLists.txt` applies `cmake/crt_media_dist_options.cmake` to Windows as well as Linux, so the two partial shapes are refused when the dist targets are configured, before any prerequisite builds.
+(2) For a Windows Skia package, `libcrtgfx/CMakeLists.txt` installs the private `include/crt-win32-shim` and `include/crt-mingw-w64-headers` trees with the mingw-w64 licenses and fetch provenance, and `tools/create_dist.py` records them as the
+`mingw-w64-headers` private-SDK-headers dependency. (3) `tools/verify_dist.py` (`validate_optional_payload_closure(..., target_os)`) rejects a Windows Skia package that lacks these headers
+(`Windows Skia consumer headers missing: ...`). Tests: `tools.test_media_dist_options`, `test_verify_dist` (new Windows header-closure test, including each header missing in turn, and no effect on Linux/macOS), `test_create_dist` and
+`test_sdk_workflows` pass 62 tests with 6 host skips (`unit-final.log`). The macOS early-refusal decision is unchanged.
+
+**After the change.** Fresh trees for the two partial shapes (`ng3`, `ng4`) refuse `crt-media-dist` and `crt-ui-dist` in 0.17-0.19 s with the option diagnostic and run no SDK prerequisite build (`rule-result.json`). The supported controls keep an identical
+packaging command line. Re-packaged `off` and `full` pass `verify_dist` at stage 04 and 05, relocated to `SDK space 한글` they rebuild every shipped example (`off`: `gfx-simple`, `gfx-gpu`, `ui-basic`; `full`: those plus `gfx-skia` and `media-player`), and
+`ui-basic` runs `crtui_window_demo: presented=30 pixel_check=pass input_check=pass` with only the SDK `bin` on `PATH`. The `.zip` of stage 05, extracted into a new directory, verifies and runs the same 30-frame check
+(`off`: 66,259,514 bytes, SHA-256 `60fc6c4728381c64f9e3ff80cb20fcaa2e9ec6f228a88eba271e3dd6eb8c451d`; `full`: 102,609,332 bytes, `acdd415d50fc8f970e2b4e2db5e83fe7cefff8910618281fd0fdf8b2955048d6`; manifests
+`02a3cc10...7383` and `b17447b2...0972`). Negative verifier control: the changed verifier rejects the retained pre-change full package (`full-before-fix.zip`) with `Windows Skia consumer headers missing: ...` (`full-baseline-verifier-negative.log`).
+
+Not covered: Windows/arm64; a published release asset or signature; GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a partial package with a complete dependency closure (a Skia-less or FFmpeg-less closure
+remains the optional follow-up). No runtime, ABI, dependency pin or release asset changed. The macOS early-refusal decision stays open.
+
 #### Native Windows replay handoff
 
 Use a fresh Windows Release tree per row of the Skia/FFmpeg matrix above,
@@ -391,8 +426,8 @@ dependency records, notices and the full package's relink/source payload.
 Partial combinations must either be deliberately refused before expensive
 prerequisites, or provide a complete, verifiable closure; a late verifier
 failure is a finding, not a passing package. Linux early refusal is not
-evidence of Windows behavior. Keep this host gate open until native results
-are supplied.
+evidence of Windows behavior. This gate is closed on Windows/x64 by the
+[replay above](#windowsx64-packaging-replay-2026-11-24); Windows/arm64 is not covered.
 
 ### 1. LVGL import and first pixels (Windows/x64 first)
 

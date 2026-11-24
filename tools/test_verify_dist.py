@@ -278,6 +278,27 @@ class OptionalPayloadClosureTests(unittest.TestCase):
             self.check(("ffmpeg",))
         self.check(("ffmpeg", "curl", "mbedtls", "zlib"))
 
+    def test_windows_skia_requires_private_consumer_headers(self) -> None:
+        self.write("examples/gfx-skia/main.cc")
+        self.write("lib/libskia.a")
+        headers = ("include/crt-win32-shim/mingw_w64_compat.h",
+                   "include/crt-mingw-w64-headers/_mingw.h",
+                   "include/crt-mingw-w64-headers/windows.h",
+                   "include/crt-mingw-w64-headers/d3d12.h")
+        for target_os in ("linux", "macos"):
+            validate_optional_payload_closure(self.dist, {"skia": {}}, target_os)
+        with self.assertRaisesRegex(SystemExit, "Windows Skia consumer headers missing"):
+            validate_optional_payload_closure(self.dist, {"skia": {}}, "windows")
+        for relative in headers:
+            self.write(relative)
+        validate_optional_payload_closure(self.dist, {"skia": {}}, "windows")
+        for relative in headers:
+            with self.subTest(missing=relative):
+                (self.dist / relative).unlink()
+                with self.assertRaisesRegex(SystemExit, "Windows Skia consumer headers missing"):
+                    validate_optional_payload_closure(self.dist, {"skia": {}}, "windows")
+                self.write(relative)
+
 
 class ExternalPrerequisiteTests(unittest.TestCase):
     def test_shared_cxx_loader_is_declared_from_02_and_inherited_once(self):

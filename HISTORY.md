@@ -10,6 +10,14 @@ substantive update.
 
 ## 2026-11-24
 
+### Replay ordinary Media/UI packaging on Windows/x64 (PAL-04)
+
+On the physical Windows/x64 host, fresh Release trees confirm the late failure of both partial shapes (Skia OFF/FFmpeg ON ships FFmpeg payload without its dependencies; Skia ON/FFmpeg OFF ships Skia payload without `libskia.a`) and that the
+Skia-less and full controls verify at stages 04 and 05. The replay also found that the verified, relocated full package could not configure its `gfx-skia` example (the private Win32 shim and mingw-w64 headers were not packaged and the verifier did not require them).
+The Linux early option refusal now covers Windows, the Windows Skia package installs and records those headers, and `verify_dist` requires them. Both partial shapes are refused in under 0.2 s; the supported controls rebuild all shipped examples from a
+relocated `SDK space 한글` copy, run the UI 30-frame check and verify as extracted `.zip` archives; 62 tests pass (6 host skips). Windows/arm64, macOS early refusal and a complete partial-closure package remain open.
+[Evidence](docs/acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24).
+
 ### Replay ordinary Media/UI packaging on macOS (PAL-04)
 
 At CRT `cc86383`, build fresh Release minimum and partial-option trees on

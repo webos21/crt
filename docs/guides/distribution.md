@@ -309,10 +309,10 @@ tree still build. `verify_dist.py` also rejects a package that ships Skia or
 FFmpeg-backed payload without its dependency records and `lib/libskia.a`.
 Use the isolated stage chain for a packaged option-ON SDK. Evidence and limits:
 [acceptance](../acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23).
-The early CMake refusal is currently Linux-only; the shared verifier applies
-on every host. The [macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)
+The early CMake refusal applies to Linux and Windows/x64 ([Windows replay](../acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24));
+the shared verifier applies on every host. The [macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)
 reproduces late rejection of both partial shapes, rather than support for
-partial packages. Native Windows packaging replay remains pending.
+partial packages; the macOS early-refusal decision is still open.
 
 Outputs are placed under:
 

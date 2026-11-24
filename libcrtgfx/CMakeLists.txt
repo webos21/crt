@@ -1221,6 +1221,20 @@ if(CRTGFX_ENABLE_SKIA)
   # be redone on every future Skia version bump -- so the nested
   # include/include/ path here is intentional, not a mistake.
   install(DIRECTORY "${CRTGFX_SKIA_ROOT}/include" DESTINATION include COMPONENT crt-gfx)
+  if(CRT_TARGET_OS STREQUAL "windows")
+    # Match the isolated 04 stage's private headers for standalone Skia consumers.
+    # These prefixed directories are outside the public Bionic include surface.
+    install(DIRECTORY "${CRTGFX_WIN32_SHIM_ROOT}/"
+      DESTINATION include/crt-win32-shim COMPONENT crt-gfx)
+    install(DIRECTORY "${CRT_MINGW_W64_HEADERS_INCLUDE_ROOT}/"
+      DESTINATION include/crt-mingw-w64-headers COMPONENT crt-gfx)
+    install(FILES "${CRT_MINGW_W64_HEADERS_DIR}/COPYING"
+                  "${CRT_MINGW_W64_HEADERS_DIR}/DISCLAIMER"
+                  "${CRT_MINGW_W64_HEADERS_DIR}/DISCLAIMER.PD"
+      DESTINATION share/licenses/mingw-w64-headers COMPONENT crt-gfx)
+    install(FILES "${CRT_MINGW_W64_HEADERS_DIR}/.crt-mingw-w64-headers-fetch.json"
+      DESTINATION share/crt/dependencies/mingw-w64-headers RENAME fetch.json COMPONENT crt-gfx)
+  endif()
 endif()
 
 # CRT_STARTUP_END_OBJECTS deliberately not listed here -- see

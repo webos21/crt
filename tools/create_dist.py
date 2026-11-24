@@ -743,6 +743,17 @@ def main() -> None:
             root, destination, args.media_dependency_prefix.resolve(),
             args.media_source_root.resolve(), args.skia_source.resolve(),
             args.skia_library.resolve(), redistributed_dependencies)
+    mingw_provenance = "share/crt/dependencies/mingw-w64-headers/fetch.json"
+    if args.target_os == "windows" and (destination / mingw_provenance).is_file():
+        redistributed_dependencies = [item for item in redistributed_dependencies
+                                      if item["name"] != "mingw-w64-headers"]
+        redistributed_dependencies.append({
+            "name": "mingw-w64-headers", "kind": "private-sdk-headers",
+            "headers": ["include/crt-mingw-w64-headers"],
+            "link_artifacts": [], "runtime_artifacts": [],
+            "notices": ["share/licenses/mingw-w64-headers/" + name
+                        for name in ("COPYING", "DISCLAIMER", "DISCLAIMER.PD")],
+            "provenance": mingw_provenance})
     xkbcommon = copy_xkbcommon(
         args.xkbcommon_install.resolve() if args.xkbcommon_install else None,
         args.xkbcommon_source.resolve() if args.xkbcommon_source else None,

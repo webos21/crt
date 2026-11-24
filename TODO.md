@@ -84,9 +84,9 @@ Found by the CLI's Windows replay (reproducers and numbers in the CLI's
   Optional follow-up if a partial package is wanted: publish a Skia-less or
   FFmpeg-less dependency closure.
 
-- [ ] **PAL-04 host replay follow-up:** decide macOS early refusal for the
-  reproduced partial combinations; Windows packaging replay remains assigned
-  to a separate physical host ([handoff](docs/acceptance/crtui_acceptance.md#native-windows-replay-handoff)).
+- [ ] **PAL-04 host replay follow-up:** decide macOS early refusal for the reproduced partial combinations.
+  Windows/x64 is replayed: both partial shapes are refused before building and the full package now carries the private Skia consumer headers
+  ([record](docs/acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24)); Windows/arm64 is not covered.
 
 
 <a name="crt-developer-experience-sdk---cli---studio"></a>

@@ -4,13 +4,13 @@
 # The package publishes the Skia, FFmpeg and curl closure (link/runtime artifacts, notices,
 # provenance, relink kit and source offer) only as one unit, and only when the in-tree build
 # produced all of it. Anything in between would install libraries that need files the package
-# does not carry (libcrtgfx_skia without libskia.a; a libcrtmedia.so whose DT_NEEDED libcurl is
-# not copied), so it is rejected before the expensive build instead of after it.
+# does not carry (Skia companions without libskia.a; FFmpeg-backed media without its dependency
+# records and link artifacts), so it is rejected before the expensive build instead of after it.
 #
 #   Skia OFF, FFmpeg OFF (curl irrelevant: the HTTP transport is compiled only with FFmpeg)
 #   Skia ON,  FFmpeg ON,  curl ON
 #
-# CMakeLists.txt applies it to Linux targets only. Use as a module:
+# CMakeLists.txt applies it to Linux and Windows targets. Use as a module:
 # crt_media_dist_option_problem(<out-var> <skia> <ffmpeg> <curl>) sets the variable
 # to an empty string for a supported combination, else to the reason. Run directly (`cmake
 # -DCRTGFX_ENABLE_SKIA=.. -DCRTMEDIA_ENABLE_FFMPEG=.. -DCRTMEDIA_ENABLE_CURL=.. -P <this file>`) it
@@ -27,7 +27,7 @@ function(crt_media_dist_option_problem out skia ffmpeg curl)
       "(CRTGFX_ENABLE_SKIA=${skia}, CRTMEDIA_ENABLE_FFMPEG=${ffmpeg}, CRTMEDIA_ENABLE_CURL=${curl}): "
       "the ordinary SDK publishes the Skia, FFmpeg and curl dependency closure only together, so a "
       "partial combination would install libraries whose dependencies the package does not carry "
-      "(Skia companions without libskia.a, or a libcrtmedia.so that needs an undeclared libcurl). "
+      "(Skia companions without libskia.a, or FFmpeg-backed media without dependency records/link artifacts). "
       "Supported combinations: Skia, FFmpeg and curl all OFF (curl has no effect without FFmpeg), or "
       "Skia, FFmpeg and curl all ON. Reconfigure with one of them, or use the isolated 04-gfx-media "
       "stage chain. Other targets still build. Only these dist targets are refused.")
