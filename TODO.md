@@ -81,12 +81,13 @@ Found by the CLI's Windows replay (reproducers and numbers in the CLI's
   [evidence and limits](docs/acceptance/crtui_acceptance.md#linux-partial-option-media-packaging-follow-up-pal-04-2026-11-23)).
   macOS reproduces both late partial-package rejections
   ([replay](docs/acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24)).
-  Optional follow-up if a partial package is wanted: publish a Skia-less or
-  FFmpeg-less dependency closure.
+  Complete Skia-less and FFmpeg-less closure packages are published on Windows/x64
+  ([record](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24));
+  Linux and macOS keep refusing both shapes until their own replay.
 
-- [ ] **PAL-04 host replay follow-up:** decide macOS early refusal for the reproduced partial combinations.
-  Windows/x64 is replayed: both partial shapes are refused before building and the full package now carries the private Skia consumer headers
-  ([record](docs/acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24)); Windows/arm64 is not covered.
+- [ ] **PAL-04 host replay follow-up:** Windows/x64 and macOS/arm64 now refuse the reproduced partial combinations before building
+  ([Windows](docs/acceptance/crtui_acceptance.md#windowsx64-packaging-replay-2026-11-24), [macOS](docs/acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24));
+  the full Windows package carries the private Skia consumer headers. Windows/arm64 is not covered.
 
 
 <a name="crt-developer-experience-sdk---cli---studio"></a>

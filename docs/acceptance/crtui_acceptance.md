@@ -362,7 +362,7 @@ Linux-only test skips (`packaging-unit.log`).
   archive is already caught by the older inventory check. Restore the
   original manifest bytes and archive; the restored SDK verifies again.
 
-At this baseline, early CMake refusal is still **Linux-only**. macOS builds
+At this baseline, early CMake refusal is still **Linux-only** (the later [macOS early refusal](#macosarm64-early-refusal-2026-11-24) closes that for macOS). macOS builds
 both unsupported partial shapes before rejecting their packages. Do not report
 this as successful partial-package support or promote either rejected SDK.
 The relocation checks rebuild examples from packaged inputs but do not hide
@@ -406,6 +406,74 @@ packaging command line. Re-packaged `off` and `full` pass `verify_dist` at stage
 
 Not covered: Windows/arm64; a published release asset or signature; GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a partial package with a complete dependency closure (a Skia-less or FFmpeg-less closure
 remains the optional follow-up). No runtime, ABI, dependency pin or release asset changed. The macOS early-refusal decision stays open.
+
+#### macOS/arm64 early refusal (2026-11-24)
+
+**Decision: refuse the partial Skia/FFmpeg/curl combinations before building on macOS too.** Rationale: the [macOS replay](#macosarm64-packaging-replay-2026-11-24) reproduced
+the same late failure as Windows/x64 for both partial shapes (Skia ON/FFmpeg OFF and Skia OFF/FFmpeg ON each build to stage-04 publication and are then rejected by the shared
+verifier), so a macOS user pays a long build before learning that the combination was never packageable. The verifier stays the second line of defense on every host. This is
+not support for partial packages; a partial package with a complete dependency closure remains the optional follow-up.
+
+**Change.** `CMakeLists.txt` now applies `cmake/crt_media_dist_options.cmake` to every target OS (the Linux/Windows OS guard is gone), so `crt-media-dist` and `crt-ui-dist`
+(which depends on it) become the single refusal command on macOS for any combination other than Skia, FFmpeg and curl all OFF (curl has no effect without FFmpeg) or all ON. Other
+targets of the same tree still build. `tools/test_media_dist_options.py` now asserts the unguarded application (and that no OS guard returns). No runtime, public header,
+ABI, dependency pin or release asset changes.
+
+**Native check** (CRT `ffa8251` plus the change; macOS 27.2.1 `26B131`, Xcode 27.2 `27B52`, Apple clang 21.0.0; Release, `CRT_USE_IMPORTED_LIBCXX=ON`, `CRTMEDIA_ENABLE_CURL=ON`,
+`CRTUI_ENABLE_LVGL=ON`; fresh trees under `out/pal04-macos-early-20261124/`, configure plus build invocations only):
+
+| Row (Skia / FFmpeg) | `cmake --build --target crt-media-dist` and `crt-ui-dist` | Evidence |
+| --- | --- | --- |
+| ON / OFF | both exit 1 in 0 s, **0** compile steps, the full option diagnostic (names the three options, the supported combinations and the isolated-stage alternative) | `skia-only-*.log`; `ninja -t commands`: one command, the refusal script |
+| OFF / ON | the same | `ffmpeg-only-*.log` |
+| OFF / OFF | not refused: `ninja -t commands` lists 903 (`crt-media-dist`) and 1881 (`crt-ui-dist`) commands, including `create_dist.py` and `crt_stage_cache.py`, and no refusal script | `off-*.commands` |
+| ON / ON | not refused: 930 and 1912 commands, the same packaging and cache commands, no refusal script | `full-*.commands` |
+
+The two supported rows were deliberately **not rebuilt**: the minimum and full macOS packages, their relocated rebuilds and the UI 30-frame runs are the unchanged results of the
+[macOS replay](#macosarm64-packaging-replay-2026-11-24), and nothing they depend on changed (the command lines are the ordinary ones). Unit tests: `test_media_dist_options`,
+`test_verify_dist`, `test_create_dist` and `test_sdk_workflows` pass 62 tests with one Linux-only skip.
+
+A first attempt of this check invoked the configure loop from `zsh`, whose unquoted `$row` is not word-split, so the rows were configured with the preset's defaults and real
+builds started; the trees were removed and the check was redone with explicit variables. Nothing from that attempt is recorded as a result.
+
+Not covered: Windows/arm64; building the supported rows again; a published asset or signature; a partial package with a complete closure.
+
+#### Windows/x64 Skia-less and FFmpeg-less closure packages (2026-11-24)
+
+The optional follow-up of PAL-04 (a partial package with a complete dependency closure) on the physical Windows/x64 host, with the same toolchain, Skia pin and
+controlled patches as the [packaging replay](#windowsx64-packaging-replay-2026-11-24). Evidence: `out/pal04-windows-x64-20261124/` (`g3-*`, `g4-*`, `closure-rule*.json`, `rejected-partial-before-closure/`).
+
+**Closures.** *Skia* is FreeType and Skia (`libfreetype.a`, `libskia.a`, the skcms headers, the Skia/FreeType records and, on Windows, the private consumer headers). *FFmpeg* is FFmpeg with curl, Mbed TLS and
+zlib. The Skia companions (`libcrtgfx_skia`, `libcrtui_skia`, `libcrtui_skia_media`) belong to the Skia closure: `crtui_skia_media` is built whenever Skia is on, because `crtmedia` has a backend-less core, so an
+FFmpeg-less package ships it.
+
+| Skia | FFmpeg | curl | Windows/x64 result |
+| --- | --- | --- | --- |
+| OFF | OFF | any | nothing optional (unchanged) |
+| ON | ON | ON | both closures (unchanged) |
+| OFF | ON | ON | **Skia-less:** the FFmpeg closure only |
+| ON | OFF | any | **FFmpeg-less:** the Skia closure only (curl has no effect without FFmpeg) |
+| OFF/ON | ON | OFF | refused before building: `FFmpeg media needs curl, Mbed TLS and zlib in its dependency closure` |
+
+**Change.** `cmake/crt_media_dist_options.cmake` takes a fifth `partial` argument; `CMakeLists.txt` passes it ON only for `windows` and passes `--media-components skia,ffmpeg` (any subset) to `tools/create_dist.py`, which copies exactly those files
+(`copy_media_development_dependencies`) and records exactly those dependencies (`add_redistributed_dependencies(..., components)`; the FreeType and Mbed TLS license choices are written only for a shipped dependency). The isolated stage and the full
+package default to both closures. `tools/verify_dist.py` now also requires the FreeType record and `lib/libfreetype.a` with any Skia payload. Linux and macOS keep refusing the two partial shapes until they have their own replay.
+Tests: the option matrix with and without `partial`, the verifier (the Skia closure with FreeType, one complete closure without the other, the media companion), the per-closure copy and the per-closure records pass 105 tests with 6 host skips.
+
+**Results (fresh evidence on the retained Release trees).** The rejected baseline packages (`g3`, `g4`: late verifier failure) are preserved. After the change, `crt-ui-dist` packages both rows (Skia-less 207 s, FFmpeg-less 230 s) and `verify_dist` passes at stage 04 and 05 and on the copy relocated to `SDK space 한글`:
+
+- **Skia-less (`g3`):** records `ffmpeg`, `curl`, `mbedtls`, `zlib` and no `skia`/`freetype`; the FFmpeg, curl, Mbed TLS and zlib archives are present and `libskia.a`, `libfreetype.a` and `examples/gfx-skia` are absent. The relocated SDK rebuilds `gfx-simple`, `gfx-gpu`, `ui-basic` and `media-player`
+  and `ui-basic` runs `presented=30 pixel_check=pass input_check=pass` with only the SDK `bin` on `PATH`. The stage-05 `.zip` (76,219,342 bytes, SHA-256 `7a444548f629c8167e615cf6338d365e7a2ba8296376fc4ef99c7031f8edf7a3`) extracts, verifies and runs the same 30-frame check.
+- **FFmpeg-less (`g4`):** records `freetype`, `skia` and `mingw-w64-headers` and no `ffmpeg`/`curl`/`mbedtls`/`zlib`; `libskia.a`, `libfreetype.a` and the skcms headers are present and the FFmpeg/curl archives and `examples/media-player` are absent. The relocated SDK rebuilds `gfx-simple`, `gfx-gpu`,
+  `ui-basic` and `gfx-skia` (including its private headers) and the 30-frame check passes. Its `.zip` (92,649,517 bytes, SHA-256 `0703ee695db1e0466beff12cda916eb91ec6e990629d1bbd7bae50778c62b950`) extracts, verifies and runs it.
+- **Refusal.** Fresh trees for FFmpeg ON / curl OFF with Skia OFF and ON refuse `crt-media-dist` and `crt-ui-dist` in 0.19-0.20 s with no SDK prerequisite build (`closure-rule-result.json`).
+- **Controls.** The all-OFF and all-ON rows keep their packages: the only packaging-command difference is the added `--media-components skia,ffmpeg` on the all-ON row, and their dependency records equal the earlier candidates. Their manifest hashes change only through the recorded build
+  identity (`created_utc`, `source_commit`). The re-packaged controls were relocated, rebuilt and archive-checked again (`off-final-*`, `full-final-*`).
+
+**Attempt kept.** The first FFmpeg-less package failed in `verify_dist` because a check this change had added wrongly required the FFmpeg records with `libcrtui_skia_media`; the library does not need FFmpeg, so the check was removed and its test now pins the correct rule (`g4-crt-ui-dist-2.log`).
+
+Not covered: Windows/arm64, Linux and macOS (they still refuse both shapes), shared-runtime linkage of the new packages, GPU presentation or media playback beyond compile/link and the 30-frame software UI check, a published release or signature, and CI.
+No runtime, ABI, dependency pin or release asset changed.
 
 #### Native Windows replay handoff
 

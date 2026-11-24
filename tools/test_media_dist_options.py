@@ -2,7 +2,7 @@
 """PAL-04: the ordinary crt-media-dist/crt-ui-dist option matrix (cmake/crt_media_dist_options.cmake).
 
 Runs the module's script mode with `cmake -P`, so the exact predicate the build uses is the one tested, and checks that
-CMakeLists.txt actually applies it to the Linux and Windows dist targets."""
+CMakeLists.txt actually applies it to the dist targets of every host."""
 
 import itertools
 import re
@@ -59,12 +59,14 @@ class MediaDistOptionMatrixTests(unittest.TestCase):
                 self.assertIn("all OFF", message)
                 self.assertIn("all ON", message)
 
-    def test_linux_and_windows_dist_targets_apply_the_rule_and_keep_the_ordinary_command(self) -> None:
+    def test_every_target_os_applies_the_rule_and_keeps_the_ordinary_command(self) -> None:
         text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-        # Only the replayed host publishes a single complete closure; Linux keeps refusing it.
+        # No OS guard on the rule: Linux, Windows and macOS all refuse an unsupported combination before building.
+        self.assertRegex(text, r'set\(CRT_MEDIA_DIST_OPTION_PROBLEM ""\)\s+set\(CRT_MEDIA_DIST_PARTIAL OFF\)')
+        self.assertNotRegex(text, r'if\(CRT_TARGET_OS STREQUAL "[a-z]+"[^)]*\)\s+include\(cmake/crt_media_dist_options\.cmake\)')
+        # Only the replayed host publishes a single complete closure; Linux and macOS keep refusing it.
         self.assertRegex(text, r'if\(CRT_TARGET_OS STREQUAL "windows"\)\s+set\(CRT_MEDIA_DIST_PARTIAL ON\)')
         self.assertIn("--media-components", text)
-        self.assertRegex(text, r'if\(CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "windows"\)\s+include\(cmake/crt_media_dist_options\.cmake\)')
         self.assertRegex(text, r"if\(CRT_MEDIA_DIST_OPTION_PROBLEM\)\s+add_custom_target\(crt-media-dist")
         # The supported path keeps the unchanged ordinary command, including the full-path dependency copy.
         self.assertRegex(text, r"else\(\)\s+crt_add_cached_stage_target\(crt-media-dist NAME gfx-media-dist")

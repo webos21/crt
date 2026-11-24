@@ -10,6 +10,21 @@ substantive update.
 
 ## 2026-11-24
 
+### Package complete Skia-only and FFmpeg-only closures on Windows/x64 (PAL-04)
+
+`crt-media-dist`/`crt-ui-dist` on Windows/x64 now accept Skia ON/FFmpeg OFF (FreeType and Skia) and Skia OFF/FFmpeg+curl ON (FFmpeg, curl, Mbed TLS, zlib) and package exactly that closure; FFmpeg without curl is refused before building, and Linux and macOS
+keep refusing both shapes. `create_dist.py` and `add_redistributed_dependencies` take the closures as components, `verify_dist` also requires FreeType with Skia, and 105 tests pass. On the existing Release trees both packages verify at stages 04 and 05, relocate to `SDK space 한글`,
+rebuild their examples (media-player or gfx-skia), run the UI 30-frame check and verify as extracted `.zip` archives; the all-OFF and all-ON controls keep their dependency records. A first FFmpeg-less attempt failed on an over-strict check of mine
+(the Skia media companion does not need FFmpeg) and is kept. Merged with the macOS early-refusal commit (`2fc6eafe`). Windows/arm64, Linux/macOS replay, shared-runtime linkage and CI remain open. [Evidence](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24).
+
+### Refuse partial Media/UI package options early on macOS (PAL-04)
+
+The macOS replay had reproduced the same late verifier rejection of both partial Skia/FFmpeg shapes as Windows, so the decision is to refuse them before building there too.
+`crt_media_dist_option_problem` now applies to every target OS instead of Linux and Windows only. On macOS/arm64 fresh Release trees refuse Skia ON/FFmpeg OFF and Skia
+OFF/FFmpeg ON for `crt-media-dist` and `crt-ui-dist` in 0 s with the option diagnostic and no compile step; the supported all-OFF and all-ON rows keep the ordinary 900+ command
+packaging paths and are not rebuilt. The option-matrix test now pins the unguarded application. No runtime, ABI, pin or asset change. A first check run configured the rows with
+default options because of a `zsh` word-splitting slip and was discarded. [Evidence](docs/acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24).
+
 ### Replay ordinary Media/UI packaging on Windows/x64 (PAL-04)
 
 On the physical Windows/x64 host, fresh Release trees confirm the late failure of both partial shapes (Skia OFF/FFmpeg ON ships FFmpeg payload without its dependencies; Skia ON/FFmpeg OFF ships Skia payload without `libskia.a`) and that the

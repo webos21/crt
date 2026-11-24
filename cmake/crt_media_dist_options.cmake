@@ -17,7 +17,8 @@
 # Anything else (FFmpeg without curl) would install libraries whose dependencies the package does not carry, so
 # it is rejected before the expensive build instead of after it. The two partial closures are accepted only
 # where `partial` is true: CMakeLists.txt passes it for the hosts whose packaging has been replayed
-# (Windows/x64); Linux and macOS keep refusing them until their own replay.
+# (Windows/x64); Linux and macOS keep refusing them until their own replay. The rule itself applies to every
+# target OS (Linux, Windows and macOS).
 #
 # Use as a module: crt_media_dist_option_problem(<out-var> <skia> <ffmpeg> <curl> <partial>) sets the variable
 # to an empty string for a supported combination, else to the reason. Run directly (`cmake
