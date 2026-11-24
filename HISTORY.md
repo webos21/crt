@@ -29,7 +29,7 @@ every shipped example from a relocated `SDK space 한글` copy (default and shar
 `crt-media-dist`/`crt-ui-dist` on Windows/x64 now accept Skia ON/FFmpeg OFF (FreeType and Skia) and Skia OFF/FFmpeg+curl ON (FFmpeg, curl, Mbed TLS, zlib) and package exactly that closure; FFmpeg without curl is refused before building, and Linux and macOS
 keep refusing both shapes. `create_dist.py` and `add_redistributed_dependencies` take the closures as components, `verify_dist` also requires FreeType with Skia, and 105 tests pass. On the existing Release trees both packages verify at stages 04 and 05, relocate to `SDK space 한글`,
 rebuild their examples (media-player or gfx-skia), run the UI 30-frame check and verify as extracted `.zip` archives; the all-OFF and all-ON controls keep their dependency records. A first FFmpeg-less attempt failed on an over-strict check of mine
-(the Skia media companion does not need FFmpeg) and is kept. Merged with the macOS early-refusal commit (`2fc6eafe`). Windows/arm64, Linux/macOS replay, shared-runtime linkage and CI remain open. [Evidence](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24).
+(the Skia media companion does not need FFmpeg) and is kept. Merged with the macOS early-refusal commit (`2fc6eafe`). Windows/arm64 (replayed later, see the 2026-11-24 Windows/arm64 entry above), Linux/macOS replay, shared-runtime linkage and CI remain open. [Evidence](docs/acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24).
 
 ### Refuse partial Media/UI package options early on macOS (PAL-04)
 

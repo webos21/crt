@@ -404,7 +404,7 @@ packaging command line. Re-packaged `off` and `full` pass `verify_dist` at stage
 (`off`: 66,259,514 bytes, SHA-256 `60fc6c4728381c64f9e3ff80cb20fcaa2e9ec6f228a88eba271e3dd6eb8c451d`; `full`: 102,609,332 bytes, `acdd415d50fc8f970e2b4e2db5e83fe7cefff8910618281fd0fdf8b2955048d6`; manifests
 `02a3cc10...7383` and `b17447b2...0972`). Negative verifier control: the changed verifier rejects the retained pre-change full package (`full-before-fix.zip`) with `Windows Skia consumer headers missing: ...` (`full-baseline-verifier-negative.log`).
 
-Not covered: Windows/arm64; a published release asset or signature; GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a partial package with a complete dependency closure (a Skia-less or FFmpeg-less closure
+Not covered: Windows/arm64 (replayed later: [Windows/arm64 record](#windowsarm64-packaging-and-closure-replay-2026-11-24)); a published release asset or signature; GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a partial package with a complete dependency closure (a Skia-less or FFmpeg-less closure
 remains the optional follow-up). No runtime, ABI, dependency pin or release asset changed. The macOS early-refusal decision stays open.
 
 #### macOS/arm64 early refusal (2026-11-24)
@@ -436,7 +436,7 @@ The two supported rows were deliberately **not rebuilt**: the minimum and full m
 A first attempt of this check invoked the configure loop from `zsh`, whose unquoted `$row` is not word-split, so the rows were configured with the preset's defaults and real
 builds started; the trees were removed and the check was redone with explicit variables. Nothing from that attempt is recorded as a result.
 
-Not covered: Windows/arm64; building the supported rows again; a published asset or signature; a partial package with a complete closure.
+Not covered: Windows/arm64 (replayed later: [Windows/arm64 record](#windowsarm64-packaging-and-closure-replay-2026-11-24)); building the supported rows again; a published asset or signature; a partial package with a complete closure.
 
 #### Windows/x64 Skia-less and FFmpeg-less closure packages (2026-11-24)
 
@@ -472,7 +472,7 @@ Tests: the option matrix with and without `partial`, the verifier (the Skia clos
 
 **Attempt kept.** The first FFmpeg-less package failed in `verify_dist` because a check this change had added wrongly required the FFmpeg records with `libcrtui_skia_media`; the library does not need FFmpeg, so the check was removed and its test now pins the correct rule (`g4-crt-ui-dist-2.log`).
 
-Not covered: Windows/arm64, Linux and macOS (they still refuse both shapes), shared-runtime linkage of the new packages, GPU presentation or media playback beyond compile/link and the 30-frame software UI check, a published release or signature, and CI.
+Not covered: Windows/arm64 (replayed later: [Windows/arm64 record](#windowsarm64-packaging-and-closure-replay-2026-11-24)), Linux and macOS (they still refused both shapes then), shared-runtime linkage of the new packages, GPU presentation or media playback beyond compile/link and the 30-frame software UI check, a published release or signature, and CI.
 No runtime, ABI, dependency pin or release asset changed.
 
 #### macOS/arm64 Skia-less and FFmpeg-less closure packages (2026-11-24)
@@ -507,11 +507,11 @@ Package contents (`manifest.json`): Skia-less records `ffmpeg`, `curl`, `mbedtls
 **Attempts kept.** The first run of the build script (`r1-*`) omitted the source directory from `cmake -B`, so every configure failed and the builds ran with each tree's previous options; its FFmpeg-less row was really the full package and is not counted. The second run rebuilt the FFmpeg-less package
 in the tree that the full control then overwrote, so that package was regenerated once more and copied to `ffmpeg-less-package/` before the tree was restored to all-ON.
 
-Not covered: Linux and Windows/arm64; GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a published release or signature; CI (the change touches only CMake option selection). No runtime, ABI, dependency pin or release asset changed.
+Not covered: Linux and Windows/arm64 (the latter replayed later: [Windows/arm64 record](#windowsarm64-packaging-and-closure-replay-2026-11-24)); GPU presentation or media playback beyond compile/link and the 30-frame software UI check; a published release or signature; CI (the change touches only CMake option selection). No runtime, ABI, dependency pin or release asset changed.
 
 #### Windows/arm64 packaging and closure replay (2026-11-24)
 
-Windows 11 Pro 10.0.26300 arm64 (physical), LLVM 22.1.8 (`woa64`), Windows SDK `10.0.28000.0` `um/arm64`, Python 3.14 arm64. Every row is a Release tree (`windows-host-ninja-debug`, imported libc++ ON, curl ON, LVGL ON, `-DCMAKE_BUILD_TYPE=Release`)
+Windows 11 Pro 10.0.26300 arm64 (physical), LLVM 22.1.8 (`woa64`), Windows SDK `10.0.28000.0` `um/arm64`; the CMake-driven builds ran Python 3.14 arm64, the direct `verify_dist`, unit-test and archive-extraction calls Python 3.11.9 arm64. Every row is a Release tree (`windows-host-ninja-debug`, imported libc++ ON, curl ON, LVGL ON, `-DCMAKE_BUILD_TYPE=Release`)
 configured fresh or, from the second phase on, **reconfigured and re-packaged from the compiled trees** as the macOS closure replay did. It is the ordinary cumulative package path run by hand, not isolated-stage or release qualification, and no Actions run was requested.
 Skia is the pinned `13ffba25...`. Retained logs, per-row results and the preserved archives are under `out/pal04-windows-arm64-20261124/` (ignored; `closure-rows-result.json`, `packages/<row>/`, `*-verify-*.log`, `gn-amd64/gn-fetch.json`).
 

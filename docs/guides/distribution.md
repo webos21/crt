@@ -302,7 +302,7 @@ default workflow.
 Media/UI package option combinations (PAL-04): the ordinary `crt-media-dist` and `crt-ui-dist` publish each optional
 dependency closure only whole: the Skia closure is FreeType and Skia, the FFmpeg closure is FFmpeg with curl, Mbed TLS and zlib.
 `CRTGFX_ENABLE_SKIA`, `CRTMEDIA_ENABLE_FFMPEG` and `CRTMEDIA_ENABLE_CURL` all OFF (curl has no effect without FFmpeg) or all three ON
-is supported on every host. Windows/x64 and macOS/arm64 additionally package one complete closure (`CRT_MEDIA_DIST_PARTIAL`): Skia ON with
+is supported on every host. Windows (x64 and arm64) and macOS/arm64 additionally package one complete closure (`CRT_MEDIA_DIST_PARTIAL`): Skia ON with
 FFmpeg OFF, or Skia OFF with FFmpeg and curl ON. FFmpeg without curl is refused everywhere, and Linux refuses both single-closure shapes until
 its own replay. A refused combination fails before the stage builds, with a diagnostic naming the options; the other targets of that tree still
 build. `verify_dist.py` also rejects, on every host, a package that ships Skia or FFmpeg-backed payload without its dependency records and
@@ -312,7 +312,8 @@ libraries. Use the isolated stage chain for a packaged option-ON SDK. Evidence a
 [closure packages](../acceptance/crtui_acceptance.md#windowsx64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24),
 [macOS replay](../acceptance/crtui_acceptance.md#macosarm64-packaging-replay-2026-11-24) (late rejection of both partial shapes, which is why
 macOS now refuses incomplete packages early: [early refusal](../acceptance/crtui_acceptance.md#macosarm64-early-refusal-2026-11-24)) and the
-[macOS closure packages](../acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24).
+[macOS closure packages](../acceptance/crtui_acceptance.md#macosarm64-skia-less-and-ffmpeg-less-closure-packages-2026-11-24) and the
+[Windows/arm64 replay](../acceptance/crtui_acceptance.md#windowsarm64-packaging-and-closure-replay-2026-11-24) (its Skia build needs the x64 `gn.exe` host input).
 
 Outputs are placed under:
 
