@@ -586,20 +586,29 @@ set(CMAKE_INSTALL_RPATH "${CRT_DISTRIBUTION_ROOT}/lib")
     (destination / "VERSION").write_text(release_version + "\n", encoding="utf-8")
 
 
+SKIA_CLOSURE_FILES = ("include/freetype2", "lib/libfreetype.a")
+FFMPEG_CLOSURE_FILES = ("include/libavformat", "include/libavcodec",
+                        "include/libswresample", "include/libavutil", "include/curl",
+                        "include/mbedtls", "include/psa", "include/zlib.h", "include/zconf.h",
+                        "lib/libavformat.a", "lib/libavcodec.a",
+                        "lib/libswresample.a", "lib/libavutil.a", "lib/libcurl.a",
+                        "lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a", "lib/libz.a")
+
+
 def copy_media_development_dependencies(root: Path, destination: Path, prefix: Path,
-                                      sources: Path, skia_source: Path, skia_library: Path,
-                                      dependencies: list) -> list:
+                                      sources: Path, skia_source: Path | None, skia_library: Path | None,
+                                      dependencies: list,
+                                      components: tuple[str, ...] = ("skia", "ffmpeg")) -> list:
     """Option-ON in-tree SDKs must also be usable as an isolated predecessor.
 
     Never copy a whole build prefix (which can contain host generators or a
     conflicting OpenSSL curl). Copy only the existing media/Skia contract.
+    `components` selects the closures to publish (PAL-04): "skia" is FreeType and Skia, "ffmpeg" is FFmpeg with
+    curl, Mbed TLS and zlib. A partial package carries exactly one closure; the default is both.
     """
-    for relative in ("include/freetype2", "include/libavformat", "include/libavcodec",
-                     "include/libswresample", "include/libavutil", "include/curl",
-                     "include/mbedtls", "include/psa", "include/zlib.h", "include/zconf.h",
-                     "lib/libfreetype.a", "lib/libavformat.a", "lib/libavcodec.a",
-                     "lib/libswresample.a", "lib/libavutil.a", "lib/libcurl.a",
-                     "lib/libmbedtls.a", "lib/libmbedx509.a", "lib/libmbedcrypto.a", "lib/libz.a"):
+    skia = "skia" in components
+    ffmpeg = "ffmpeg" in components
+    for relative in (SKIA_CLOSURE_FILES if skia else ()) + (FFMPEG_CLOSURE_FILES if ffmpeg else ()):
         source = prefix / relative
         if not source.exists():
             raise SystemExit(f"option-ON predecessor dependency missing: {source}")
@@ -609,8 +618,9 @@ def copy_media_development_dependencies(root: Path, destination: Path, prefix: P
             shutil.copytree(source, target, dirs_exist_ok=True)
         else:
             shutil.copy2(source, target)
-    shutil.copy2(skia_library, destination / "lib/libskia.a")
-    shutil.copytree(skia_source / "modules/skcms", destination / "include/modules/skcms", dirs_exist_ok=True)
+    if skia:
+        shutil.copy2(skia_library, destination / "lib/libskia.a")
+        shutil.copytree(skia_source / "modules/skcms", destination / "include/modules/skcms", dirs_exist_ok=True)
     # Shared networking artifacts and import libraries are part of the SDK
     # on every OS. Windows zlib intentionally uses a PE DLL with a .so name;
     # Mbed TLS installs its DLLs in lib/, curl installs its DLL in bin/.
@@ -618,7 +628,7 @@ def copy_media_development_dependencies(root: Path, destination: Path, prefix: P
         ("lib", ("libcurl.so*", "libmbed*.so*", "libz.so*", "libcurl*.dylib", "libmbed*.dylib", "libz*.dylib",
                  "libcurl*.dll*", "libmbed*.dll*", "libz*.dll*")),
         ("bin", ("libcurl*.dll", "libmbed*.dll", "libz*.dll")),
-    ):
+    ) if ffmpeg else ():
         for pattern in patterns:
             for source in (prefix / directory).glob(pattern):
                 if source.is_file():
@@ -642,7 +652,7 @@ def copy_media_development_dependencies(root: Path, destination: Path, prefix: P
     if sys.platform == "darwin":
         portable_macho_dependency_paths(destination, (prefix,))
     manifest = {"redistributed_dependencies": dependencies}
-    add_redistributed_dependencies(root, destination, sources, skia_source, manifest)
+    add_redistributed_dependencies(root, destination, sources, skia_source, manifest, components)
     return manifest["redistributed_dependencies"]
 
 
@@ -680,6 +690,8 @@ def main() -> None:
     parser.add_argument("--media-source-root", type=Path)
     parser.add_argument("--skia-source", type=Path)
     parser.add_argument("--skia-library", type=Path)
+    parser.add_argument("--media-components", default="skia,ffmpeg",
+                        help="comma-separated dependency closures an in-tree media package publishes (skia, ffmpeg)")
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--stage", required=True)
     parser.add_argument("--target-os", required=True)
@@ -737,12 +749,19 @@ def main() -> None:
             "notices": ["share/licenses/lvgl/LICENCE.txt"],
             "provenance": "share/crt/dependencies/lvgl/recipe.json"})
     if args.media_dependency_prefix:
-        if not all((args.media_source_root, args.skia_source, args.skia_library)):
-            raise SystemExit("full media SDK needs --media-source-root, --skia-source, --skia-library")
+        media_components = tuple(name for name in args.media_components.split(",") if name)
+        if not media_components or set(media_components) - {"skia", "ffmpeg"}:
+            raise SystemExit("--media-components takes skia and/or ffmpeg")
+        if not args.media_source_root:
+            raise SystemExit("a media SDK needs --media-source-root")
+        if "skia" in media_components and not all((args.skia_source, args.skia_library)):
+            raise SystemExit("a Skia media SDK needs --skia-source and --skia-library")
         redistributed_dependencies = copy_media_development_dependencies(
             root, destination, args.media_dependency_prefix.resolve(),
-            args.media_source_root.resolve(), args.skia_source.resolve(),
-            args.skia_library.resolve(), redistributed_dependencies)
+            args.media_source_root.resolve(),
+            args.skia_source.resolve() if args.skia_source else None,
+            args.skia_library.resolve() if args.skia_library else None,
+            redistributed_dependencies, media_components)
     mingw_provenance = "share/crt/dependencies/mingw-w64-headers/fetch.json"
     if args.target_os == "windows" and (destination / mingw_provenance).is_file():
         redistributed_dependencies = [item for item in redistributed_dependencies

@@ -3,6 +3,7 @@
 
 import copy
 import sys
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -266,9 +267,40 @@ class OptionalPayloadClosureTests(unittest.TestCase):
                 (self.dist / relative).unlink()
 
     def test_skia_payload_with_library_and_record_passes(self) -> None:
+        for relative in ("lib/libcrtgfx_skia.a", "lib/libskia.a", "lib/libfreetype.a", "examples/gfx-skia/main.cc"):
+            self.write(relative)
+        self.check(("skia", "freetype"))
+
+    def test_skia_closure_includes_freetype(self) -> None:
         for relative in ("lib/libcrtgfx_skia.a", "lib/libskia.a", "examples/gfx-skia/main.cc"):
             self.write(relative)
-        self.check(("skia",))
+        with self.assertRaisesRegex(SystemExit, "missing records: freetype.*missing files: lib/libfreetype.a"):
+            self.check(("skia",))
+        self.write("lib/libfreetype.a")
+        with self.assertRaisesRegex(SystemExit, "missing records: freetype"):
+            self.check(("skia",))
+
+    def test_one_complete_closure_passes_without_the_other(self) -> None:
+        # Skia-less: FFmpeg with its network closure and no Skia payload at all.
+        self.write("examples/media-player/main.c")
+        self.write("lib/libcrtmedia.a")
+        self.check(("ffmpeg", "curl", "mbedtls", "zlib"))
+        # FFmpeg-less: the Skia closure and no FFmpeg payload.
+        shutil.rmtree(self.dist / "examples/media-player")
+        for relative in ("lib/libcrtgfx_skia.a", "lib/libcrtui_skia.a", "lib/libskia.a", "lib/libfreetype.a",
+                         "examples/gfx-skia/main.cc"):
+            self.write(relative)
+        self.check(("skia", "freetype"))
+
+    def test_the_skia_media_companion_is_part_of_the_skia_closure(self) -> None:
+        # libcrtui_skia_media is built whenever Skia is on (crtmedia has a backend-less core), so an FFmpeg-less
+        # package ships it; it needs the Skia closure and nothing else.
+        for relative in ("lib/libcrtui_skia_media.a", "lib/libskia.a", "lib/libfreetype.a"):
+            self.write(relative)
+        self.check(("skia", "freetype"))
+        (self.dist / "lib/libskia.a").unlink()
+        with self.assertRaisesRegex(SystemExit, "Skia payload"):
+            self.check(("skia", "freetype"))
 
     def test_ffmpeg_sample_requires_the_network_closure(self) -> None:
         self.write("examples/media-player/main.c")
@@ -281,22 +313,23 @@ class OptionalPayloadClosureTests(unittest.TestCase):
     def test_windows_skia_requires_private_consumer_headers(self) -> None:
         self.write("examples/gfx-skia/main.cc")
         self.write("lib/libskia.a")
+        self.write("lib/libfreetype.a")
         headers = ("include/crt-win32-shim/mingw_w64_compat.h",
                    "include/crt-mingw-w64-headers/_mingw.h",
                    "include/crt-mingw-w64-headers/windows.h",
                    "include/crt-mingw-w64-headers/d3d12.h")
         for target_os in ("linux", "macos"):
-            validate_optional_payload_closure(self.dist, {"skia": {}}, target_os)
+            validate_optional_payload_closure(self.dist, {"skia": {}, "freetype": {}}, target_os)
         with self.assertRaisesRegex(SystemExit, "Windows Skia consumer headers missing"):
-            validate_optional_payload_closure(self.dist, {"skia": {}}, "windows")
+            validate_optional_payload_closure(self.dist, {"skia": {}, "freetype": {}}, "windows")
         for relative in headers:
             self.write(relative)
-        validate_optional_payload_closure(self.dist, {"skia": {}}, "windows")
+        validate_optional_payload_closure(self.dist, {"skia": {}, "freetype": {}}, "windows")
         for relative in headers:
             with self.subTest(missing=relative):
                 (self.dist / relative).unlink()
                 with self.assertRaisesRegex(SystemExit, "Windows Skia consumer headers missing"):
-                    validate_optional_payload_closure(self.dist, {"skia": {}}, "windows")
+                    validate_optional_payload_closure(self.dist, {"skia": {}, "freetype": {}}, "windows")
                 self.write(relative)
 
 

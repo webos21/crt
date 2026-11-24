@@ -573,6 +573,62 @@ class DevelopmentProfile(unittest.TestCase):
         for relative in ("lib/libz.so.1.3.1", "lib/libmbedtls.dll", "lib/libmbedtls.dll.a", "bin/libcurl-4.dll"):
             self.assertEqual("fixture", (destination / relative).read_text())
 
+    def test_a_partial_media_package_copies_exactly_one_closure(self):
+        """PAL-04: Skia-less ships FFmpeg with curl/mbedtls/zlib; FFmpeg-less ships FreeType and Skia, nothing else."""
+        import create_dist
+        from unittest.mock import patch
+        prefix = self.root / "ports"
+        skia = self.root / "skia"
+        for relative in ("include/freetype2", "include/libavformat", "include/libavcodec", "include/libswresample",
+                         "include/libavutil", "include/curl", "include/mbedtls", "include/psa"):
+            path = prefix / relative
+            path.mkdir(parents=True)
+            (path / "fixture.h").write_text("fixture")
+        for relative in ("include/zlib.h", "include/zconf.h", "lib/libfreetype.a", "lib/libavformat.a", "lib/libavcodec.a",
+                         "lib/libswresample.a", "lib/libavutil.a", "lib/libcurl.a", "lib/libmbedtls.a",
+                         "lib/libmbedx509.a", "lib/libmbedcrypto.a", "lib/libz.a", "bin/libcurl-4.dll"):
+            path = prefix / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("fixture")
+        (skia / "modules/skcms").mkdir(parents=True)
+        (skia / "modules/skcms/fixture.h").write_text("fixture")
+        (skia / "libskia.a").write_text("fixture")
+        skia_files = {"lib/libfreetype.a", "include/freetype2/fixture.h", "lib/libskia.a",
+                      "include/modules/skcms/fixture.h"}
+        ffmpeg_files = {"lib/libavformat.a", "lib/libavutil.a", "include/libavcodec/fixture.h", "lib/libcurl.a",
+                        "lib/libmbedtls.a", "lib/libz.a", "include/zlib.h", "bin/libcurl-4.dll"}
+        for components, present, absent in ((("skia",), skia_files, ffmpeg_files), (("ffmpeg",), ffmpeg_files, skia_files)):
+            destination = self.root / ("04-" + components[0])
+            destination.mkdir()
+            with patch("build_stage_04_gfx_media.add_redistributed_dependencies") as record:
+                create_dist.copy_media_development_dependencies(
+                    self.root, destination, prefix, self.root,
+                    skia if "skia" in components else None, skia / "libskia.a" if "skia" in components else None,
+                    [], components)
+            self.assertEqual(components, record.call_args.args[-1])
+            for relative in present:
+                self.assertTrue((destination / relative).exists(), (components, relative))
+            for relative in absent:
+                self.assertFalse((destination / relative).exists(), (components, relative))
+
+    def test_dependency_records_follow_the_selected_closure(self):
+        import build_stage_04_gfx_media as media
+        from unittest.mock import patch
+        sources = self.root / "sources"
+        for name in ("freetype-1", "ffmpeg-1", "curl-1", "mbedtls-1", "zlib-1"):
+            (sources / name).mkdir(parents=True)
+        expected = {("skia",): ["freetype", "skia"], ("ffmpeg",): ["ffmpeg", "curl", "mbedtls", "zlib"],
+                    ("skia", "ffmpeg"): ["freetype", "ffmpeg", "skia", "curl", "mbedtls", "zlib"]}
+        for components, names in expected.items():
+            manifest = {"redistributed_dependencies": [{"name": "crt-libc"}]}
+            fake = lambda staged, name, *rest: {"name": name, "notices": []}
+            with patch.object(media, "copy_dependency_record", side_effect=fake),                  patch.object(media, "network_dependency_records",
+                              return_value=[{"name": n, "notices": []} for n in ("curl", "mbedtls", "zlib")]),                  patch.object(media, "first_existing", return_value=self.root),                  patch.object(media, "existing_relative_files", return_value=[]),                  patch.object(media, "record_license_choices"):
+                media.add_redistributed_dependencies(self.root, self.root, sources, self.root, manifest, components)
+            self.assertEqual(["crt-libc"] + names, [item["name"] for item in manifest["redistributed_dependencies"]])
+        with self.assertRaisesRegex(SystemExit, "FFmpeg source"):
+            media.add_redistributed_dependencies(self.root, self.root, self.root / "none", self.root, {}, ("ffmpeg",))
+
 
 if __name__ == "__main__":
     unittest.main()

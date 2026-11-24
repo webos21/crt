@@ -621,19 +621,24 @@ MBEDTLS_CHOICE = """CRT redistributes Mbed TLS under the Apache License 2.0, one
 """
 
 
-def record_license_choices(staged: Path, freetype_source: Path, dependencies: list[dict]) -> None:
-    """Make the dual-license choices visible in the SDK: FreeType's FTL text and credit line, the Mbed TLS choice."""
+def record_license_choices(staged: Path, freetype_source: Path | None, dependencies: list[dict]) -> None:
+    """Make the dual-license choices visible in the SDK: FreeType's FTL text and credit line, the Mbed TLS choice.
+
+    Each choice is recorded only for a dependency the package actually ships (a Skia-less or FFmpeg-less package
+    carries one of the two closures)."""
     by_name = {item["name"]: item for item in dependencies}
-    year = re.search(r"1996-(\d{4})", (freetype_source / "src" / "base" / "ftobjs.c").read_text(encoding="utf-8", errors="replace"))
-    if year is None:
-        raise SystemExit("cannot read the FreeType copyright year from src/base/ftobjs.c")
-    directory = Path("share") / "licenses" / "freetype"
-    shutil.copy2(freetype_source / "docs" / "FTL.TXT", staged / directory / "FTL.TXT")
-    (staged / directory / "CRT-LICENSE-CHOICE.txt").write_text(FREETYPE_CHOICE.format(year=year.group(1)), encoding="utf-8", newline="\n")
-    by_name["freetype"]["notices"] += [(directory / "FTL.TXT").as_posix(), (directory / "CRT-LICENSE-CHOICE.txt").as_posix()]
-    directory = Path("share") / "licenses" / "mbedtls"
-    (staged / directory / "CRT-LICENSE-CHOICE.txt").write_text(MBEDTLS_CHOICE, encoding="utf-8", newline="\n")
-    by_name["mbedtls"]["notices"].append((directory / "CRT-LICENSE-CHOICE.txt").as_posix())
+    if "freetype" in by_name:
+        year = re.search(r"1996-(\d{4})", (freetype_source / "src" / "base" / "ftobjs.c").read_text(encoding="utf-8", errors="replace"))
+        if year is None:
+            raise SystemExit("cannot read the FreeType copyright year from src/base/ftobjs.c")
+        directory = Path("share") / "licenses" / "freetype"
+        shutil.copy2(freetype_source / "docs" / "FTL.TXT", staged / directory / "FTL.TXT")
+        (staged / directory / "CRT-LICENSE-CHOICE.txt").write_text(FREETYPE_CHOICE.format(year=year.group(1)), encoding="utf-8", newline="\n")
+        by_name["freetype"]["notices"] += [(directory / "FTL.TXT").as_posix(), (directory / "CRT-LICENSE-CHOICE.txt").as_posix()]
+    if "mbedtls" in by_name:
+        directory = Path("share") / "licenses" / "mbedtls"
+        (staged / directory / "CRT-LICENSE-CHOICE.txt").write_text(MBEDTLS_CHOICE, encoding="utf-8", newline="\n")
+        by_name["mbedtls"]["notices"].append((directory / "CRT-LICENSE-CHOICE.txt").as_posix())
 
 
 def existing_relative_files(root: Path, patterns: tuple[str, ...]) -> list[str]:
@@ -879,26 +884,37 @@ def build_skia(asset: Path, source: Path, mingw_checkout: Path | None,
 
 def add_redistributed_dependencies(asset: Path, staged: Path,
                                    port_sources: Path, skia_source: Path,
-                                   manifest: dict) -> None:
+                                   manifest: dict,
+                                   components: tuple[str, ...] = ("skia", "ffmpeg")) -> None:
+    """Record the Skia and/or FFmpeg dependency closure.
+
+    Skia's closure is FreeType and Skia itself; FFmpeg's is FFmpeg with curl, Mbed TLS and zlib. The isolated stage
+    and the full in-tree package ship both; a partial in-tree package (PAL-04) ships exactly one closure."""
+    skia = "skia" in components
+    ffmpeg = "ffmpeg" in components
     freetype_source = next(port_sources.glob("freetype-*"), None)
     ffmpeg_source = next(port_sources.glob("ffmpeg-*"), None)
     curl_source = next(port_sources.glob("curl-*"), None)
     mbedtls_source = next(port_sources.glob("mbedtls-*"), None)
     zlib_source = next(port_sources.glob("zlib-*"), None)
-    if freetype_source is None or ffmpeg_source is None:
-        raise SystemExit("the port driver did not leave verified FreeType/FFmpeg sources")
-    if curl_source is None or mbedtls_source is None or zlib_source is None:
+    if skia and freetype_source is None:
+        raise SystemExit("the port driver did not leave a verified FreeType source")
+    if ffmpeg and ffmpeg_source is None:
+        raise SystemExit("the port driver did not leave a verified FFmpeg source")
+    if ffmpeg and (curl_source is None or mbedtls_source is None or zlib_source is None):
         raise SystemExit("the port driver did not leave verified curl/mbedtls/zlib sources")
 
-    dependencies = [
-        copy_dependency_record(
+    dependencies = []
+    if skia:
+        dependencies.append(copy_dependency_record(
             staged, "freetype", asset / "porting" / "recipes" / "freetype.json",
             first_existing(freetype_source, ("LICENSE.TXT", "LICENSE", "docs/LICENSE.TXT")),
             ["include/freetype2"], ["lib/libfreetype.a"],
             existing_relative_files(staged, (
                 "lib/libfreetype.so*", "lib/libfreetype*.dylib",
-                "bin/libfreetype*.dll", "lib/libfreetype*.dll.a"))),
-        copy_dependency_record(
+                "bin/libfreetype*.dll", "lib/libfreetype*.dll.a"))))
+    if ffmpeg:
+        dependencies.append(copy_dependency_record(
             staged, "ffmpeg", asset / "porting" / "recipes" / "ffmpeg.json",
             first_existing(ffmpeg_source, ("COPYING.LGPLv2.1", "COPYING.LGPLv3", "LICENSE.md")),
             ["include/libavformat", "include/libavcodec",
@@ -911,14 +927,15 @@ def add_redistributed_dependencies(asset: Path, staged: Path,
                 "lib/libavformat*.dylib", "lib/libavcodec*.dylib",
                 "lib/libswresample*.dylib", "lib/libavutil*.dylib",
                 "bin/avformat*.dll", "bin/avcodec*.dll",
-                "bin/swresample*.dll", "bin/avutil*.dll"))),
-        copy_dependency_record(
+                "bin/swresample*.dll", "bin/avutil*.dll"))))
+    if skia:
+        dependencies.append(copy_dependency_record(
             staged, "skia", asset / "libcrtgfx" / "third_party" / "skia" / "recipe.json",
             first_existing(skia_source, ("LICENSE",)),
             ["include/include", "include/modules/skcms"],
-            ["lib/libskia.a"], []),
-        *network_dependency_records(staged, asset, port_sources),
-    ]
+            ["lib/libskia.a"], []))
+    if ffmpeg:
+        dependencies.extend(network_dependency_records(staged, asset, port_sources))
     record_license_choices(staged, freetype_source, dependencies)
     retained = [item for item in manifest.get("redistributed_dependencies", [])
                 if item.get("name") not in {"freetype", "ffmpeg", "skia",

@@ -320,12 +320,15 @@ def validate_optional_payload_closure(dist: Path, redistributed: dict, target_os
     skia_payload += [path.relative_to(dist).as_posix() for path in
                      present("lib", ("*crtgfx_skia*", "*crtui_skia*")) + present("bin", ("*crtgfx_skia*",))]
     if skia_payload:
-        missing = [name for name in ("skia",) if name not in redistributed]
-        if missing or not (dist / "lib" / "libskia.a").is_file():
+        missing = [name for name in ("skia", "freetype") if name not in redistributed]
+        absent = [relative for relative in ("lib/libskia.a", "lib/libfreetype.a") if not (dist / relative).is_file()]
+        if missing or absent:
             raise SystemExit(
                 "package ships Skia payload (" + ", ".join(skia_payload[:3]) + ") without its Skia dependency: "
-                "lib/libskia.a and the skia dependency record are required; build with Skia, FFmpeg and curl all "
-                "enabled or all disabled (docs/guides/distribution.md)")
+                "the skia and freetype dependency records and lib/libskia.a, lib/libfreetype.a are required"
+                + (" (missing records: " + ", ".join(missing) + ")" if missing else "")
+                + (" (missing files: " + ", ".join(absent) + ")" if absent else "")
+                + "; configure a supported Skia/FFmpeg/curl combination (docs/guides/distribution.md)")
         if target_os == "windows":
             missing_headers = [relative for relative in (
                 "include/crt-win32-shim/mingw_w64_compat.h",
@@ -342,8 +345,8 @@ def validate_optional_payload_closure(dist: Path, redistributed: dict, target_os
         if missing:
             raise SystemExit(
                 "package ships FFmpeg-backed payload (" + ", ".join(ffmpeg_payload[:2]) + ") without its dependency "
-                "record(s): " + ", ".join(missing) + "; build with Skia, FFmpeg and curl all enabled or all "
-                "disabled (docs/guides/distribution.md)")
+                "record(s): " + ", ".join(missing) + "; configure a supported Skia/FFmpeg/curl combination "
+                "(docs/guides/distribution.md)")
 
 
 def validate_ui_stage(dist: Path, manifest: dict, redistributed: dict, suffix: str) -> None:

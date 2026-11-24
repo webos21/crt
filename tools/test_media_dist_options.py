@@ -14,14 +14,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = ROOT / "cmake" / "crt_media_dist_options.cmake"
 SUPPORTED = {("OFF", "OFF", "OFF"), ("OFF", "OFF", "ON"), ("ON", "ON", "ON")}
+# One complete closure, accepted only where the host's packaging has been replayed (Windows/x64): Skia-less is FFmpeg with
+# curl; FFmpeg-less is Skia with either curl value (curl has no effect without FFmpeg).
+PARTIAL_SUPPORTED = SUPPORTED | {("OFF", "ON", "ON"), ("ON", "OFF", "ON"), ("ON", "OFF", "OFF")}
 
 
 @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
 class MediaDistOptionMatrixTests(unittest.TestCase):
-    def run_matrix(self, skia: str, ffmpeg: str, curl: str) -> subprocess.CompletedProcess:
+    def run_matrix(self, skia: str, ffmpeg: str, curl: str, partial: str = "OFF") -> subprocess.CompletedProcess:
         return subprocess.run(
             ["cmake", f"-DCRTGFX_ENABLE_SKIA={skia}", f"-DCRTMEDIA_ENABLE_FFMPEG={ffmpeg}",
-             f"-DCRTMEDIA_ENABLE_CURL={curl}", "-P", str(MODULE)],
+             f"-DCRTMEDIA_ENABLE_CURL={curl}", f"-DCRT_MEDIA_DIST_PARTIAL={partial}", "-P", str(MODULE)],
             capture_output=True, text=True)
 
     def test_exactly_the_supported_rows_pass(self) -> None:
@@ -32,6 +35,17 @@ class MediaDistOptionMatrixTests(unittest.TestCase):
                     self.assertEqual(done.returncode, 0, done.stderr)
                 else:
                     self.assertNotEqual(done.returncode, 0)
+
+    def test_a_host_with_a_replayed_partial_closure_accepts_exactly_the_complete_rows(self) -> None:
+        for combination in itertools.product(("OFF", "ON"), repeat=3):
+            with self.subTest(skia_ffmpeg_curl=combination):
+                done = self.run_matrix(*combination, partial="ON")
+                if combination in PARTIAL_SUPPORTED:
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                else:
+                    self.assertNotEqual(done.returncode, 0)
+                    message = " ".join(done.stderr.split())
+                    self.assertIn("FFmpeg media needs curl", message)
 
     def test_the_two_reproduced_pal04_rows_get_a_readable_diagnostic(self) -> None:
         for combination in (("OFF", "ON", "ON"), ("ON", "OFF", "ON")):
@@ -47,6 +61,9 @@ class MediaDistOptionMatrixTests(unittest.TestCase):
 
     def test_linux_and_windows_dist_targets_apply_the_rule_and_keep_the_ordinary_command(self) -> None:
         text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        # Only the replayed host publishes a single complete closure; Linux keeps refusing it.
+        self.assertRegex(text, r'if\(CRT_TARGET_OS STREQUAL "windows"\)\s+set\(CRT_MEDIA_DIST_PARTIAL ON\)')
+        self.assertIn("--media-components", text)
         self.assertRegex(text, r'if\(CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "windows"\)\s+include\(cmake/crt_media_dist_options\.cmake\)')
         self.assertRegex(text, r"if\(CRT_MEDIA_DIST_OPTION_PROBLEM\)\s+add_custom_target\(crt-media-dist")
         # The supported path keeps the unchanged ordinary command, including the full-path dependency copy.

@@ -1864,23 +1864,43 @@ if(Python3_Interpreter_FOUND)
   endif()
   add_custom_target(crt-media-build DEPENDS ${CRT_GFX_MEDIA_BUILD_DEPENDS})
   add_custom_target(crt-media-test DEPENDS crt-internal-media-gfx-test crt-internal-media-runtime-test)
+  # The dependency closures the in-tree package publishes: Skia (FreeType and Skia) and/or FFmpeg (with curl,
+  # Mbed TLS and zlib). Both is the full package; one is a partial package (PAL-04, Windows/x64 replayed).
   set(CRT_FULL_MEDIA_DIST_ARGS)
-  if(CRTGFX_ENABLE_SKIA AND CRTMEDIA_ENABLE_FFMPEG AND CRTMEDIA_ENABLE_CURL)
-    list(GET CRTGFX_SKIA_LIBRARIES 0 CRT_STAGE_SKIA_LIBRARY)
+  set(CRT_MEDIA_DIST_COMPONENTS)
+  if(CRTGFX_ENABLE_SKIA)
+    list(APPEND CRT_MEDIA_DIST_COMPONENTS skia)
+  endif()
+  if(CRTMEDIA_ENABLE_FFMPEG AND CRTMEDIA_ENABLE_CURL)
+    list(APPEND CRT_MEDIA_DIST_COMPONENTS ffmpeg)
+  endif()
+  if(CRT_MEDIA_DIST_COMPONENTS)
     list(APPEND CRT_FULL_MEDIA_DIST_ARGS
       --media-dependency-prefix "${CRTMEDIA_FFMPEG_PORT_PREFIX}"
-      --media-source-root "${CMAKE_BINARY_DIR}/port-tests/src"
-      --skia-source "${CRTGFX_SKIA_ROOT}" --skia-library "${CRT_STAGE_SKIA_LIBRARY}")
+      --media-source-root "${CMAKE_BINARY_DIR}/port-tests/src")
+    if(CRTGFX_ENABLE_SKIA)
+      list(GET CRTGFX_SKIA_LIBRARIES 0 CRT_STAGE_SKIA_LIBRARY)
+      list(APPEND CRT_FULL_MEDIA_DIST_ARGS
+        --skia-source "${CRTGFX_SKIA_ROOT}" --skia-library "${CRT_STAGE_SKIA_LIBRARY}")
+    endif()
+    string(JOIN "," CRT_MEDIA_DIST_COMPONENT_LIST ${CRT_MEDIA_DIST_COMPONENTS})
+    list(APPEND CRT_FULL_MEDIA_DIST_ARGS --media-components "${CRT_MEDIA_DIST_COMPONENT_LIST}")
   endif()
   # PAL-04: the ordinary package publishes the Skia/FFmpeg/curl closure only as a whole (see
   # cmake/crt_media_dist_options.cmake). Refuse a partial combination up front, the way crt-ui-dist
   # refuses CRTUI_ENABLE_LVGL=OFF below; crt-ui-dist depends on this target, so it is refused too.
   # Linux and Windows refuse incomplete packages before building; the macOS early-refusal decision remains separate.
+  # A single complete closure (Skia-less or FFmpeg-less) is packaged only where its packaging has been replayed:
+  # Windows/x64. Linux keeps refusing it until its own replay.
   set(CRT_MEDIA_DIST_OPTION_PROBLEM "")
+  set(CRT_MEDIA_DIST_PARTIAL OFF)
+  if(CRT_TARGET_OS STREQUAL "windows")
+    set(CRT_MEDIA_DIST_PARTIAL ON)
+  endif()
   if(CRT_TARGET_OS STREQUAL "linux" OR CRT_TARGET_OS STREQUAL "windows")
     include(cmake/crt_media_dist_options.cmake)
     crt_media_dist_option_problem(CRT_MEDIA_DIST_OPTION_PROBLEM
-      "${CRTGFX_ENABLE_SKIA}" "${CRTMEDIA_ENABLE_FFMPEG}" "${CRTMEDIA_ENABLE_CURL}")
+      "${CRTGFX_ENABLE_SKIA}" "${CRTMEDIA_ENABLE_FFMPEG}" "${CRTMEDIA_ENABLE_CURL}" "${CRT_MEDIA_DIST_PARTIAL}")
   endif()
   if(CRT_MEDIA_DIST_OPTION_PROBLEM)
     add_custom_target(crt-media-dist
