@@ -10,6 +10,20 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-25
+
+### Close sign-before-publishing for the Dev SDK and CLI (D6)
+
+Both repositories restrict the `release` environment to `main` with required
+reviewers. A dry-run draft could not supply a finalization receipt in either
+repository. A real but unsigned draft likewise failed after approval, leaving
+it non-public. After the owner signed every file offline, the separately
+approved finalizers published the Linux/x86_64 SDK and CLI as non-latest
+prereleases. Fresh unauthenticated downloads matched the staged payloads and
+all eight signatures verified. No consumer pins changed; manual Host Tools
+publication is outside the automated gate.
+[Run IDs, digests and scope](docs/acceptance/release_qualification.md#sign-before-publishing-qualification-2026-11-25).
+
 ## 2026-11-24
 
 ### Implement separate offline-signature finalization for SDK and CLI previews

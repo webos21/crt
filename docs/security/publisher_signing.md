@@ -1,9 +1,13 @@
 # Publisher Signing Key and Roadmap
 
-Owner: CRT. Status: **the public key and fingerprint are published, and selected release archives have detached publisher signatures.**
-Publisher authentication applies only to the exact archive bytes whose signature was verified with the pinned key; it does not extend to
-unsigned release records, checksums, source assets or other releases. New gated releases sign each of these assets individually;
-existing releases retain their original per-file coverage. Keep digest pins alongside signature verification
+Owner: CRT. Status: **the public key and fingerprint are published.** The
+[November 25 Linux/x86_64 SDK and CLI Previews](../acceptance/release_qualification.md#sign-before-publishing-qualification-2026-11-25)
+were the first published after the new gate verified detached signatures for
+every payload file. Selected older release archives also carry signatures.
+Publisher authentication applies only to the exact bytes of each asset whose
+signature was verified with the pinned key. An archive signature does not
+authenticate the release record, checksums or source archives. Older releases
+retain their original per-file coverage. Keep digest pins alongside signature verification
 ([Preview trust policy](../design/dev_preview_trust.md)). Dated signing records below and the owning acceptance documents identify the signed assets.
 
 ## The publisher key

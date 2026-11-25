@@ -70,7 +70,7 @@ when a prefix such as `P1` or `V1` appears under multiple headings.
 The immediate path is SDK -> CLI -> `crt-vscode`/other editors; standalone
 [Studio](docs/design/crt_studio.md) remains a long-term consumer. In Progress
 is the selected focus, not a claim that every item is already being implemented.
-Prioritize current Dev SDK correctness, signed publication and the first editor
+Prioritize current Dev SDK correctness, qualified artifact promotion and the first editor
 workflow; D4 expansion, Full delivery and self-upgrade stay in Planned.
 
 Queue reviewed on 2026-11-20 against local CRT `278c5d9`, CLI `e362a51` and
@@ -90,26 +90,6 @@ Use the [producer review procedure](docs/design/sdk_development_contract.md#8-cr
 and CLI adoption ledger: build a candidate, hand off immutable public SDK inputs
 outside producer trees, validate consumers, then promote and adopt exact pins.
 A public release is not required for that loop.
-
-#### P1 - Sign before publishing SDKs (D6)
-
-Acceptance baseline:
-[hosted draft rehearsal](docs/acceptance/release_qualification.md#hosted-sdk-release-dry-run-s3-2026-11-17)
-and
-[publisher trust and signature scope](docs/security/publisher_signing.md#what-a-signature-does-and-does-not-establish)
-cover the existing flow. Validate the new finalization path jointly with
-[crt-cli signing P1-01](https://github.com/webos21/crt-cli/blob/main/TODO.md#p1---sign-before-publishing).
-
-- [ ] **P1-01** Qualify the hosted staged-SDK and CLI finalization path:
-  confirm main-only required reviewers, exercise non-finalizable rehearsals,
-  signature/inventory refusal and retry, and verify public bytes on the first
-  owner-approved release. The manual host-tools path shares the signing policy,
-  not the automated finalizer.
-- [x] **P1-02** Implement approvals at both staging and finalization, no
-  finalization receipt for rehearsals, and signatures for all payload files
-  including checksums and metadata. [Procedure and trust boundary](docs/security/publisher_signing.md#signing-procedure-owner).
-- Acceptance: absent/wrong signatures, changed assets or failed approval leave
-  the release non-public; valid finalization verifies the downloadable bytes.
 
 ## Planned
 
