@@ -112,20 +112,6 @@ consumes the resulting CLI contract.
 - Acceptance: affected consumer flags, headers, SDK/target/lock identities and
   unsupported modes are checked against exact artifacts before adoption.
 
-### P1 - Native compatibility beyond hosted runners
-
-Existing bounds:
-[Linux/aarch64 SDK candidate](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-preview-candidate-2026-11-10)
-and
-[Linux/arm64 hosted replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#linuxarm64-leg-2026-11-11)
-. Replay with
-[crt-cli CI-02](https://github.com/webos21/crt-cli/blob/main/TODO.md#ci---monitoring-and-pin-promotion). Raspberry Pi acceptance remains pending.
-
-- [ ] **P1-01** Qualify explicit Linux distribution/glibc/loader/LLVM combinations,
-  including a real Raspberry Pi ARM64 device. Record OS and tool identities,
-  SDK/CLI pins, C/C++ build/run and actual runtime dependencies; Ubuntu 26.04 /
-  glibc 2.43 hosted ARM64 evidence does not qualify other systems.
-
 ### P1 - Public ABI baseline and runtime architecture hardening
 
 Capture exports/imports from exact published artifacts before narrowing the ABI;
