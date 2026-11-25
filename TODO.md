@@ -50,9 +50,6 @@ policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Done
 
-<!-- Preserve the old link from dated snapshots; completed details live in HISTORY. -->
-<a name="focused-crtpal-follow-ups-revalidate-before-fixing"></a>
-
 See [`HISTORY.md`](HISTORY.md) for the full, dated, reverse-chronological
 record of completed work. This section stays empty in `TODO.md` itself. Finished
 top-level work moves to `HISTORY.md`; terse checked prerequisite gates may remain
@@ -63,54 +60,25 @@ when a prefix such as `P1` or `V1` appears under multiple headings.
 
 ## In Progress
 
-<a name="crt-developer-experience-sdk---cli---studio"></a>
-
-### CRT developer experience: SDK -> CLI -> VSCode
-
-The immediate path is SDK -> CLI -> `crt-vscode`/other editors; standalone
-[Studio](docs/design/crt_studio.md) remains a long-term consumer. In Progress
-is the selected focus, not a claim that every item is already being implemented.
-Prioritize current Dev SDK correctness, qualified artifact promotion and the first editor
-workflow; D4 expansion, Full delivery and self-upgrade stay in Planned.
-
-Queue reviewed on 2026-11-20 against local CRT `278c5d9`, CLI `e362a51` and
-extension `b547406`. This is source/document review, not a new native replay or
-artifact adoption. Completed Tranches 1-4 and host qualification remain in
-[HISTORY](HISTORY.md), [SDK acceptance](docs/acceptance/sdk_split_acceptance.md)
-and [host-tools acceptance](docs/acceptance/host_tools_acceptance.md#host-qualification-closure-2026-11-20).
-Follow the [SDK contract](docs/design/sdk_development_contract.md) and existing
-D0-D7/tranche IDs; **3.3** remains deferred in Planned.
-
-CRT owns producer policy/artifacts; [CLI](https://github.com/webos21/crt-cli/blob/main/TODO.md)
-owns workflow/API implementation and [crt-vscode](https://github.com/webos21/crt-vscode/blob/main/TODO.md)
-owns editor integration. Preserve original reviewed planning baselines (CLI
-`5fcdc995d231fe2f9dbab4292000a81e0b4fce93`, Studio
-`27548e1c6d29b5a63d7eb6adce8aaf47b2f5d807`); they are not artifact locks.
-Use the [producer review procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review)
-and CLI adoption ledger: build a candidate, hand off immutable public SDK inputs
-outside producer trees, validate consumers, then promote and adopt exact pins.
-A public release is not required for that loop.
-
-## Planned
-
 ### P1 - SDK support for the first editor workflow
 
-Producer baseline:
-[installed portable provider](docs/design/sdk_development_contract.md#portable-toolchain-contract-crt-31-stage-2)
-and
-[source-hidden SDK replay](docs/acceptance/sdk_split_acceptance.md#linux-source-hidden-replay-2026-10-27)
-. Supply fixtures to
-[crt-cli P0-01 through P0-04](https://github.com/webos21/crt-cli/blob/main/TODO.md#p0---minimal-public-editor-api-d7-slice-coordinated-with-d5d6)
-if the existing provider needs changes.
-[crt-vscode V0-01 through V0-03](https://github.com/webos21/crt-vscode/blob/main/TODO.md#v0---crt-cli-contract-owned-by-crt-cli-requirements-only-here)
-consumes the resulting CLI contract.
+Start with an installed Linux/x86_64 Dev SDK and exercise the
+[portable provider](docs/design/sdk_development_contract.md#portable-toolchain-contract-crt-31-stage-2)
+using the [source-hidden replay](docs/acceptance/sdk_split_acceptance.md#linux-source-hidden-replay-2026-10-27)
+as a baseline. Review any provider or SDK change against the exact consumer
+failure using the [shared contract procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review).
 
-- [ ] **P1-01** Support CLI-owned compilation-database/project-state contracts with
-  installed SDK C/C++ compile-policy fixtures and external consumers. The CLI
-  generates `compile_commands.json` from its actual build plan; CRT supplies
-  public compiler policy, not a VS Code-specific flag reconstruction path.
+- [ ] **P1-01** Validate installed SDK C/C++ compile policy with fixtures and an
+  external consumer for
+  [crt-cli P0-01 through P0-04](https://github.com/webos21/crt-cli/blob/main/TODO.md#p0---minimal-public-editor-api-d7-slice-coordinated-with-d5d6).
+  CRT supplies public compiler policy. The CLI generates `compile_commands.json`
+  from its build plan and reports project state.
+  [crt-vscode V0](https://github.com/webos21/crt-vscode/blob/main/TODO.md#v0---crt-cli-contract-owned-by-crt-cli-requirements-only-here)
+  adopts the CLI contract for the editor.
 - Acceptance: affected consumer flags, headers, SDK/target/lock identities and
   unsupported modes are checked against exact artifacts before adoption.
+
+## Planned
 
 ### P1 - Public ABI baseline and runtime architecture hardening
 
