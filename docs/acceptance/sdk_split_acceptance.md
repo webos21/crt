@@ -2905,3 +2905,77 @@ result SHA-256 `a695516627fdc3016453f0dc89b74c2772b1038715312a61f29e1f12fa74d5d7
 executable's missing import, loaded-image and `run` cases: the same six as on the hosted x64 and arm64 replays (result SHA-256 `e8bcd60253457a262462be1870ad49e84febc1b72f879dca3c10f603e2248293`). The published SDK is left as it is.
 
 **Not covered.** Release, signing and consumer pin adoption of any Windows SDK carrying the correction (the newest published Windows/x64 SDK is still `20261110`); Windows C++ `<filesystem>` and the curl compile options (separate item); a Windows zlib or same-name provider case. Evidence is in `C:\Users\Lee\s13\`, outside the repositories.
+
+## Linux/x86_64 SDK compile policy for the first editor workflow (2026-11-25)
+
+CRT P1-01 qualifies the producer input for the first VS Code workflow.
+Reviewed source baselines are CRT `67626f8e`, CRT-CLI `6cabc72` and
+CRT VS Code `5f468d1`. The CLI's P0-01 through P0-04 own the compilation
+database, project-state, capability and result contracts. The extension's
+V0/V1 acceptance remains separate.
+
+Use the signed Linux/x86_64 Dev SDK `v0.0.1-preview.20261125.linux.x64.1`
+from CRT `c89ae1ac720b258e7ee0e52829f900636283cb67` and signed CLI
+`v0.1.0-preview.20261125.linux-x86_64.1` from
+`20ee7e6c7b4a645a795b3db32cab101afef5078c`. The
+[public asset record](release_qualification.md#sign-before-publishing-qualification-2026-11-25)
+and [CLI CI pin promotion](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md)
+own the release/pin context. Both archive signatures, the manifest and the
+asset digests were checked with the pinned publisher inputs before extraction
+or installation. Host Ubuntu 26.04.1, glibc 2.43, LLVM 21.1.8.
+
+| Exact input | SHA-256 |
+| --- | --- |
+| SDK archive | `e455d08c31d1bf5d3cb470c4b28f09fffa228545350dc04ed099e132da85744b` |
+| SDK manifest | `6adfa744c4739f25b5c7275316913081a644b3bfc6a185dc8ac2a8f774f2cbbe` |
+| Installed content | `d2edb36c64f8f7c6d67603763e07a83d0cb4c2858c99e7957e00dde2d54dc921` |
+| Portable contract | `54bb35e014c59af90c1e2b73c3f544ebc7815edc958e704e15bef097dbedd2d1` |
+| CLI archive | `942a45365cb3906754e5663a1c401ba223201cab9f025aa23d30e2b285a42289` |
+| Extracted CLI executable | `827d974bfcb399254efcd9325fcf7df99cebc69b9a6ada7f335f777fc5ad01d5` |
+
+Replay with [the native policy driver](../../tools/test_sdk_editor_policy.py)
+and its [public-header fixture](../../tools/fixtures/sdk_editor/). The
+archive, manifest and referenced contract must be colocated. Provide the
+verified native CLI executable and the four LLVM tools via `--llvm-bin`:
+
+```sh
+python3 tools/test_sdk_editor_policy.py \
+  --cli /absolute/path/to/crt-cli --cli-sha256 <executable-sha256> \
+  --archive /absolute/path/to/crt-v0.0.1-preview.20261125.linux.x64.1-linux-x86_64-dev.tar.xz \
+  --manifest /absolute/path/to/release-manifest-dev-linux-x86_64.json \
+  --manifest-sha256 <manifest-sha256> --contract-sha256 <contract-sha256> \
+  --llvm-bin /usr/lib/llvm-21/bin --output /absolute/new-evidence-directory \
+  --hide-root /absolute/path/to/crt-cli-checkout
+```
+
+Bubblewrap denies networking, clears PATH and hides the CRT checkout and
+requested sibling roots. Visibility probes precede installation. The CLI uses
+an empty home with a separate installed SDK store; the store becomes read-only
+before configuring and compiling. The SDK, project and source paths include
+spaces or Hangul. Compiler and archive/link tools are explicit paths.
+
+| Check | Native result |
+| --- | --- |
+| C99 and C++17 policy argv | All eight matched the installed provider across static/shared executables and static/shared libraries |
+| Header ownership | Read-only Clang syntax/header traces used SDK C/`zlib.h` and SDK libc++ `<filesystem>`, project headers and LLVM resource headers |
+| Selection | Installed receipt, configure result, build result and project lock agree with the exact SDK/provider identity |
+| Build and run | Cold 12 executed, warm 0 executed / 12 reused. Both executables run. SDK inventory and project manifest/lock are preserved |
+| Unsupported or stale input | Static runtime for a shared library is rejected before output/binding. A stale provider digest in the lock is refused without rewriting that lock |
+
+The diagnostic traces use the driver selected in `.crt/local.json`.
+On this host the CLI canonicalizes the requested `clang++` symlink to
+`clang`; C++ source spelling and `-std=c++17` preserve its actual C++
+compile behavior. A consumer should use the recorded driver/argv rather
+than reconstructing a driver name or adding a guessed sysroot. The final
+receipt retains eight compile entries and their inherited working directory
+as test evidence. Production `compile_commands.json`, read-only project
+queries, clangd, and the Extension Development Host require the CLI and editor
+increments. No change to the SDK payload or contract format is needed for
+the exercised scope.
+
+Raw evidence is under `/home/syszone/GitLocal/crt-editor-p1-20261125.tnaYli`.
+`replay-state/result.json` and `replay-state-argv.json` record the passing
+commands. The first two attempts are retained. Their harness checks assumed
+the uncanonicalized C++ driver name and different wording for the stale
+contract rejection, respectively. The measured product calls behaved as
+recorded above.

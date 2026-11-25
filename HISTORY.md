@@ -12,6 +12,17 @@ substantive update.
 
 ## 2026-11-25
 
+### Validate the installed SDK compile policy for the first editor workflow (P1-01)
+
+The signed November 25 Linux/x86_64 Dev SDK and CLI Preview pass the
+source-hidden C/C++ fixture. The real CLI emits eight compile argv across
+four modes, all matching the portable SDK policy and resolving the expected
+installed headers. The two executables run and the warm build reuses every
+step. An unsupported runtime mode and a stale contract lock fail without
+changing project state. The CLI can build its editor APIs on these inputs
+with the existing SDK format.
+[Evidence and replay](docs/acceptance/sdk_split_acceptance.md#linuxx86_64-sdk-compile-policy-for-the-first-editor-workflow-2026-11-25).
+
 ### Qualify the retained ARM64 Dev SDK on a physical Raspberry Pi (P1-01)
 
 The signed November 10 SDK and November 16 CLI pass native C/C++ workflows
