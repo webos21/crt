@@ -12,6 +12,16 @@ substantive update.
 
 ## 2026-11-25
 
+### Qualify the retained ARM64 Dev SDK on a physical Raspberry Pi (P1-01)
+
+The signed November 10 SDK and November 16 CLI pass native C/C++ workflows
+on Raspberry Pi 3 B+, Debian 13.7, glibc 2.41 and LLVM 19.1.7. Fresh static
+and shared C++ exception probes pass; ELF and mapped-image audits confirm
+CRT libraries with only the declared OS loader. The CLI consumer owns the
+raw replay. The bounded compatibility task leaves TODO; untested Pi/OS,
+Full SDK and newer source combinations remain outside this qualification.
+[Producer handoff and exact bounds](docs/acceptance/release_qualification.md#raspberry-pi-arm64-native-compatibility-2026-11-25).
+
 ### Close sign-before-publishing for the Dev SDK and CLI (D6)
 
 Both repositories restrict the `release` environment to `main` with required

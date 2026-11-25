@@ -1575,3 +1575,53 @@ native macOS or Windows build, a two-new-artifact compatibility test, pin
 promotion, or OS code signing. Manual Host Tools publication follows the
 same offline key policy outside this automated finalizer.
 
+
+## Raspberry Pi ARM64 native compatibility (2026-11-25)
+
+This closes the bounded native-compatibility P1-01 handoff to CLI CI-02.
+It adds a physical-device result to the retained Ubuntu 26.04/glibc 2.43
+ARM64 hosted record; other distributions and devices need their own evidence.
+The consumer owns the [full replay record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#raspberry-pi-arm64-native-compatibility-ci-02-2026-11-25).
+CRT source baseline for this documentation handoff is `9460fc87`; no producer
+source, compiler policy, SDK payload or consumer lock was changed.
+
+| Boundary | Exercised identity |
+| --- | --- |
+| Device | Raspberry Pi 3 Model B Plus Rev 1.3, native aarch64, 64-bit Debian 13.7 (trixie), kernel `6.18.50+rpt-rpi-v8` |
+| Host libc/loader | glibc 2.41; `/lib/ld-linux-aarch64.so.1` resolves to `/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1`, SHA-256 `32f8643735b7bbc6375bdae3198376ef0e130be0006150fb1524f04c3528e07a` |
+| External tools | Debian Clang/LLD 19.1.7, `/usr/lib/llvm-19/bin`; explicit compiler/linker/ar paths and hashes in the consumer host receipt |
+| Public SDK | `v0.0.1-preview.20261110.linux.arm64.2`, producer `e6a94ab9e69b05497b3804328971d24d6071a53d`, archive SHA-256 `5c99dc59b747cb31cb623fa057264c3a4e7d5715f960203073dc1b34f664a1c4` |
+| SDK content/policy | `cd2ab657615c0fa52a1804f301a57dfa21b1067e3e5ed5a9f9a07d86ae050cc6` / `a3df2fbd6b4d14d316b691a1d2831d0692aaba133e3b168076ee0ec7cb6434d4` |
+| Public CLI | `v0.1.0-preview.20261116.linux-arm64.1`, archive SHA-256 `311bc451b0c20402f6298ba469e596326bef2c5ae526333ef861edff860e77aa`; executable `4b5109e99568fcf0f80d62f5e496748aec471d31dd8ea7ddc5e6235e339b3d3b` |
+
+Public CLI/SDK archives passed size/digest and publisher signature checks.
+The package verifier passed from a fresh private home in a path containing
+spaces and Hangul: acquisition, doctor/wrong-pin rejection, C/C++ creation,
+cold build (3 commands each), test/run and warm reuse (0 commands) with
+unchanged project locks. The CLI ELF has no `DT_NEEDED` entry and uses the
+declared OS loader. No SDK or source checkout was needed for its initial
+version/doctor commands.
+
+Independent C++17 probes exercised vector/iostream and exception throw/catch
+with both static and shared CRT linkage. Both passed build/test/run and warm
+reuse. Static maps contain only the executable and OS loader. Shared maps
+contain the selected SDK's libc, libm, libdl, libc++, libc++abi and libunwind,
+and the OS loader. No host glibc, libstdc++ or libgcc_s was mapped. ELF
+`DT_NEEDED`, interpreter and version audits agree with those observed maps.
+The corrected runtime receipt SHA-256 is
+`b0d7538a8b6f235da3e2dedbb9d4f0d0ffecd73d4f86886612d1f351d3c86417`.
+An initial extra probe edited an unused `main.cxx`; it is excluded from runtime
+qualification and retained separately. The corrected fresh projects assert
+the actual manifest source is compiled and require the runtime output marker.
+
+This qualifies the identified Dev SDK/CLI pair and LLVM 19 combination on this
+Pi. It does not qualify 32-bit Pi OS, older glibc releases, arbitrary ARM64
+systems, Full SDK/graphics/device suites, or current CRT main source. The
+older SDK's pure-C shared-provider boundary remains as previously recorded;
+C++ shared execution here does not adopt the later provider contract.
+
+Raw receipts, ELF audits and scripts are retained under the consumer's
+`out/ci-monitoring-review-20261125/pi-native/`; the consumer acceptance record
+owns reproduction commands and its archive identities. Existing x86_64 Ubuntu
+24.04/glibc 2.39 and ARM64 Ubuntu 26.04/glibc 2.43 records retain their original
+identities. This is native compatibility evidence, not a new release or pin.
