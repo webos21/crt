@@ -383,6 +383,25 @@ release needs the same OS SDK inputs as the export (Xcode, `CRT_WINDOWS_SDK_LIBP
 followed by [five-pair native release/consumer records](../acceptance/sdk_split_acceptance.md), including Windows/x64;
 each keeps its own producer/CLI snapshot and artifacts.
 
+#### SDK input to the editor workflow
+
+The selected format-1 provider's per-mode `compile_c` and `compile_cxx` argv,
+installed headers, and declared compiler resource directory supply compile
+policy for editor consumers. The CLI owns the actual command expansion,
+resolved working directory and per-source project arguments. Derive the
+compilation database from that build plan, including on warm builds. Keep link
+and archive commands out of the database. Linux may use the native driver
+default for the target and explicit SDK include roots rather than emitting
+a separate `--target` or `--sysroot` switch. Target identity comes from the
+verified SDK selection.
+
+The SDK content and portable contract digests, profile, target and producer
+commit are available through existing metadata. The CLI owns read-only project
+state and errors for missing or incompatible selections. The extension
+consumes the CLI contract. See the
+[installed Linux C/C++ fixture](../acceptance/sdk_split_acceptance.md#linuxx86_64-sdk-compile-policy-for-the-first-editor-workflow-2026-11-25)
+for the exact tested combination and the boundary of the producer evidence.
+
 #### Installation-time contract pin handoff (CRT 3.1)
 
 The existing pinned release manifest already supplies the archive identity,

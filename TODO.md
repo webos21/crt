@@ -50,6 +50,9 @@ policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Done
 
+<!-- Preserve the inbound editor-queue links from CRT-CLI and CRT VS Code. -->
+<a name="p1---sdk-support-for-the-first-editor-workflow"></a>
+
 See [`HISTORY.md`](HISTORY.md) for the full, dated, reverse-chronological
 record of completed work. This section stays empty in `TODO.md` itself. Finished
 top-level work moves to `HISTORY.md`; terse checked prerequisite gates may remain
@@ -60,23 +63,11 @@ when a prefix such as `P1` or `V1` appears under multiple headings.
 
 ## In Progress
 
-### P1 - SDK support for the first editor workflow
-
-Start with an installed Linux/x86_64 Dev SDK and exercise the
-[portable provider](docs/design/sdk_development_contract.md#portable-toolchain-contract-crt-31-stage-2)
-using the [source-hidden replay](docs/acceptance/sdk_split_acceptance.md#linux-source-hidden-replay-2026-10-27)
-as a baseline. Review any provider or SDK change against the exact consumer
-failure using the [shared contract procedure](docs/design/sdk_development_contract.md#8-cross-repository-contract-review).
-
-- [ ] **P1-01** Validate installed SDK C/C++ compile policy with fixtures and an
-  external consumer for
-  [crt-cli P0-01 through P0-04](https://github.com/webos21/crt-cli/blob/main/TODO.md#p0---minimal-public-editor-api-d7-slice-coordinated-with-d5d6).
-  CRT supplies public compiler policy. The CLI generates `compile_commands.json`
-  from its build plan and reports project state.
-  [crt-vscode V0](https://github.com/webos21/crt-vscode/blob/main/TODO.md#v0---crt-cli-contract-owned-by-crt-cli-requirements-only-here)
-  adopts the CLI contract for the editor.
-- Acceptance: affected consumer flags, headers, SDK/target/lock identities and
-  unsupported modes are checked against exact artifacts before adoption.
+The first editor workflow's CRT producer validation is complete
+([P1-01 evidence](docs/acceptance/sdk_split_acceptance.md#linuxx86_64-sdk-compile-policy-for-the-first-editor-workflow-2026-11-25)).
+[CRT-CLI P0](https://github.com/webos21/crt-cli/blob/main/TODO.md#p0---minimal-public-editor-api-d7-slice-coordinated-with-d5d6)
+owns the next implementation. Revisit CRT policy if an exact installed-SDK
+consumer exposes a gap.
 
 ## Planned
 
