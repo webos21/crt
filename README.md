@@ -242,7 +242,7 @@ external LLVM tools and any required vendor OS SDK.
 integration and is currently a development scaffold. CRT owns the SDK and
 compiler policy, and `crt-cli` owns the build and the planned editor API.
 The standalone CRT Studio remains a long-term project.
-[Current developer workflow](TODO.md#crt-developer-experience-sdk---cli---vscode) ·
+[Current developer workflow](TODO.md#p1---sdk-support-for-the-first-editor-workflow) ·
 [Verified distribution scope](STATUS.md#distribution-and-host-scope).
 
 See [docs/design/runtime_roadmap.md](docs/design/runtime_roadmap.md) for the dependency order and stage policy.
