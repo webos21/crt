@@ -1526,3 +1526,52 @@ passes **172/172** CTest cases; the 23 focused cases pass 20 consecutive repetit
 Not re-measured: the stdio throughput medians, which remain the earlier five-run Linux record; Windows slot-table behaviour (native Windows evidence), which
 Linux does not execute.
 
+### Sign-before-publishing qualification (2026-11-25)
+
+Closes the SDK and CLI D6 signing gate. Both GitHub `release` environments
+had required reviewers and a single allowed deployment branch, `main`.
+Staging and finalization each required a separate owner approval. No private
+signing key was given to CI. The hosted results on Linux/x86_64 were:
+
+| Check | CRT SDK | CLI | Result |
+| --- | --- | --- | --- |
+| Dry-run stage | [45416825954](https://github.com/webos21/crt/actions/runs/45416825954) | [45510380183](https://github.com/webos21/crt-cli/actions/runs/45510380183) | Verified draft, no finalization receipt |
+| Dry-run finalization | [45510263220](https://github.com/webos21/crt/actions/runs/45510263220) | [45512751143](https://github.com/webos21/crt-cli/actions/runs/45512751143) | `plan` refused the missing receipt; `finalize` skipped |
+| Real stage | [45514066954](https://github.com/webos21/crt/actions/runs/45514066954) | [45513708388](https://github.com/webos21/crt-cli/actions/runs/45513708388) | Independent package replay passed; attempt 1 retained the exact unsigned draft receipt |
+| Real draft, no signatures | [45518140100](https://github.com/webos21/crt/actions/runs/45518140100) | [45518151962](https://github.com/webos21/crt-cli/actions/runs/45518151962) | `plan` passed, approved `finalize` refused the signature inventory, drafts stayed non-public |
+| Same drafts, signed | [45521346212](https://github.com/webos21/crt/actions/runs/45521346212) | [45521362159](https://github.com/webos21/crt-cli/actions/runs/45521362159) | After offline signing and new approvals, both finalized as non-latest prereleases and passed the post-publication download check |
+
+The [SDK release](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261125.linux.x64.1)
+was published at `2026-11-25T00:53:00Z`, release ID `457496773`, at commit
+`c89ae1ac720b258e7ee0e52829f900636283cb67`. Installed SDK content SHA-256:
+`d2edb36c64f8f7c6d67603763e07a83d0cb4c2858c99e7957e00dde2d54dc921`.
+The native hosted SDK smoke used the signed November 16 CLI Preview. The C
+and C++ projects built, tested and ran; each executed three cold commands
+and reused all three on the warm build.
+
+| SDK payload | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `crt-v0.0.1-preview.20261125.linux.x64.1-linux-x86_64-dev.tar.xz` | 7702804 | `e455d08c31d1bf5d3cb470c4b28f09fffa228545350dc04ed099e132da85744b` |
+| `crt-v0.0.1-preview.20261125.linux.x64.1-linux-x86_64-dev-toolchain.json` | 403292 | `54bb35e014c59af90c1e2b73c3f544ebc7815edc958e704e15bef097dbedd2d1` |
+| `crt-v0.0.1-preview.20261125.linux.x64.1-linux-02-cxx-source.tar.xz` | 9117712 | `3496dd191b82251a7e48bd59adcc0038ce3af024a237f50b21e01fe6eb3bc141` |
+| `crt-v0.0.1-preview.20261125.linux.x64.1-linux-03-gfx-simple-source.tar.xz` | 841276 | `f901aa7d26856a6b36327bd6c5891a4f4e2673aecde95584292c732cc9910130` |
+| `release-manifest-dev-linux-x86_64.json` | 1753 | `6adfa744c4739f25b5c7275316913081a644b3bfc6a185dc8ac2a8f774f2cbbe` |
+| `SHA256SUMS-dev-linux-x86_64` | 541 | `4faa82a4417552499b8a335e2efba6bf7c134421505658f97903061284b22867` |
+
+Independent verification on macOS downloaded all public files into fresh
+directories using unauthenticated HTTPS. It compared payload names, byte
+counts and SHA-256 values to `release-stage-receipt-1`, confirmed that the
+release and Git tag still match the staged identity, checked the checksum
+files, and verified all six SDK and both CLI RSA-PSS signatures against the
+[pinned publisher key](../security/publisher_signing.md#the-publisher-key)
+(SPKI SHA-256 `59218576956e493476bc36f7385d8e01a03ff9b92946a531b013ad3937d43fa2`).
+The [CLI release record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md#linuxx86_64-sign-before-publishing-preview-2026-11-25)
+owns its payload digests and native replay details.
+
+Wrong signatures and changed or extra assets are covered by the local
+`tools/test_release_signing.py` controls, not additional hosted publication
+attempts. This is a Linux/x86_64 hosted release qualification, not a new
+native macOS or Windows build, a two-new-artifact compatibility test, pin
+promotion, or OS code signing. Manual Host Tools publication follows the
+same offline key policy outside this automated finalizer.
+

@@ -10,8 +10,8 @@ CRT `88b172c`, CLI `af849da` and `crt-vscode` `e418379`.
 This review uses the work queues, completed work and recorded acceptance results.
 Each result retains its original source revision, artifact identities and host
 scope; it is not a new native replay or artifact adoption. The published-release
-inventory below retains its recorded November 20 scope. Other subsystem entries
-retain their earlier acceptance scope.
+inventory includes the November 25 Linux/x86_64 signing qualification against
+CRT `c89ae1ac` and CLI `20ee7e6`. Unchanged entries retain their earlier scope.
 
 ## Current Baseline
 
@@ -359,12 +359,12 @@ DLLs, collision controls and recovery. The public Windows host-tools bundles use
 [Hosted integration](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/ci_acceptance.md#windowsarm64-hosted-integration-expansion-2026-11-20) · [ARM64 public D1 replay](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/host_environment_acceptance.md#windowsarm64-d1-public-preview-replay-2026-11-20) ·
 [Producer host-tools acceptance](docs/acceptance/host_tools_acceptance.md#host-qualification-closure-2026-11-20).
 
-**Published Dev SDK and CLI Previews** (recorded through 2026-11-20). These `dev`/`02-cxx` SDK archives and workflow-built CLI archives carry
-detached publisher signatures. Each CLI and SDK retains its own build inputs. See the [publisher-key policy](docs/security/publisher_signing.md).
+**Published Dev SDK and CLI Previews** (recorded through 2026-11-25). These `dev`/`02-cxx` SDK archives and workflow-built CLI archives carry
+detached publisher signatures. The table is a release inventory, not a compatibility or CI pin matrix. See the [publisher-key policy](docs/security/publisher_signing.md).
 
 | Host | Development SDK Preview | Signed workflow CLI Preview |
 | --- | --- | --- |
-| Linux/x86_64 | [`v0.0.1-preview.20261118.linux.x64.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.linux.x64.1) | [`v0.1.0-preview.20261116.linux-x86_64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261116.linux-x86_64.1) |
+| Linux/x86_64 | [`v0.0.1-preview.20261125.linux.x64.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261125.linux.x64.1) | [`v0.1.0-preview.20261125.linux-x86_64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261125.linux-x86_64.1) |
 | Linux/aarch64 | [`v0.0.1-preview.20261110.linux.arm64.2`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.linux.arm64.2) | [`v0.1.0-preview.20261116.linux-arm64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261116.linux-arm64.1) |
 | macOS/arm64 | [`v0.0.1-preview.20261110.macos.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1) | [`v0.1.0-preview.20261117.macos-arm64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261117.macos-arm64.1) |
 | Windows/x64 | [`v0.0.1-preview.20261110.windows.1`](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) | [`v0.1.0-preview.20261117.windows-x86_64.1`](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261117.windows-x86_64.1) |
@@ -375,9 +375,11 @@ passes public C/C++ and signature replay with the listed Dev SDK. [Producer smok
 [CLI release evidence](https://github.com/webos21/crt-cli/blob/ec498ce842d109b4e55edb54c60b05a045afdbc8/docs/acceptance/preview_acceptance.md#windowsarm64-workflow-preview-release-2026-11-20).
 
 The Linux/x86_64 `.4` repair retains its [Ubuntu 24.04 and 26.04 loader evidence](docs/acceptance/sdk_split_acceptance.md#linux-loader-compatibility-repair-2026-11-10).
-The newer Linux/x86_64 SDK and Windows/arm64 SDK have independent [workflow release records](docs/acceptance/release_qualification.md).
+The November 25 [sign-before-publishing qualification](docs/acceptance/release_qualification.md#sign-before-publishing-qualification-2026-11-25)
+verified all six SDK and both CLI payload signatures after public download. The SDK smoke used the November 16 CLI, and the new CLI
+was built and exercised with the November 18 SDK. The two new artifacts were not exercised as a pair and CI pins did not move.
 Linux/aarch64's [public replay](docs/acceptance/sdk_split_acceptance.md#linuxaarch64-dev-sdk-public-promotion-2026-11-10) covers glibc 2.43.
-Use the [installation guide](docs/guides/dev_sdk_preview.md) for external toolchain requirements and explicit SDK selection. The detached signature covers the archive. Authenticode, Developer ID and notarization
+Use the [installation guide](docs/guides/dev_sdk_preview.md) for external toolchain requirements and explicit SDK selection. Each detached signature covers its file only. Authenticode, Developer ID and notarization
 remain separate platform gates. The historical Linux pure C shared SDK-provider
 control resolved host libz. The current C static/shared SDK policy is replayed natively on Linux, Windows and macOS from unpromoted candidates ([Tranche 6.4](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23)).
 The published Windows SDKs keep the older behavior until a corrected SDK is promoted.
@@ -610,9 +612,9 @@ statuses, and exceptions are maintained in:
 
 ## Next Priorities
 
-The active producer focus is signature-gated SDK publication, coordinated with
-the CLI. Verified runtime corrections still need artifact promotion and pin
-adoption; their completed native replay gates are not reopened.
+The producer focus is promoting verified runtime corrections and supplying the
+SDK contract for the first editor workflow. Artifact promotion and pin
+adoption are separate from completed native replay and signing gates.
 
 - **Promote a corrected Windows SDK** so consumers can adopt it. The pure C
   shared provider policy (Tranche 6.4) is verified on every host from
@@ -621,10 +623,6 @@ adoption; their completed native replay gates are not reopened.
   these corrections. Promotion, signing and CLI pin adoption remain separate
   from the completed replays.
   [Replay records](docs/acceptance/sdk_split_acceptance.md#windowsx64-physical-machine-pure-c-shared-provider-replay-2026-11-23).
-- **SDK signing P1-01 and P1-02** coordinate draft verification and
-  signature-checked finalization with `crt-cli`. The recorded releases use
-  offline signatures attached after publication.
-  [SDK signing](TODO.md#p1---sign-before-publishing-sdks-d6).
 
 `crt-vscode` is the first consumer of the planned editor API. The CLI owns
 compilation database export and project-state queries. CRT supplies SDK policy

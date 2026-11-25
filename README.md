@@ -18,7 +18,7 @@ The primary target is a Linux-kernel embedded product: set-top boxes, Raspberry-
 > limitations and the Web runtime's embedding/security boundary.
 
 Signed Development SDK Previews (`dev`, `02-cxx`) are available for
-[Linux/x86_64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261118.linux.x64.1),
+[Linux/x86_64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261125.linux.x64.1),
 [Linux/aarch64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.linux.arm64.2),
 [macOS/arm64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.macos.1),
 [Windows/x64](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261110.windows.1) and
@@ -27,6 +27,9 @@ Signed [CLI Previews](https://github.com/webos21/crt-cli#download-the-previews)
 are available for the same hosts. Use the [SDK installation guide](docs/guides/dev_sdk_preview.md)
 to verify the archive digest and detached signature against the trusted
 [publisher key](docs/security/publisher_signing.md), then select the SDK explicitly.
+The November 25 Linux/x86_64 SDK and CLI Previews sign every release file
+before publication. Verify the individual signature of any file you rely on;
+the archive signature does not cover metadata or source archives.
 Signed [Host Tools Previews](docs/acceptance/host_tools_acceptance.md#host-qualification-closure-2026-11-20)
 are separate downloads for source-port workflows.
 

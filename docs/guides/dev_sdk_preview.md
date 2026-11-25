@@ -8,6 +8,12 @@ retains stage `02-cxx`, profile `dev`. Other native Previews have their own sect
 Full SDK delivery is separate. The Linux/x86_64 commands below retain the `.4` example pins.
 The [release snapshot](../../STATUS.md#distribution-and-host-scope) lists the newer Linux/x86_64 Dev SDK Preview.
 
+For the [November 25 Linux/x86_64 SDK](https://github.com/webos21/crt/releases/tag/v0.0.1-preview.20261125.linux.x64.1),
+use the manifest pin and content identity in its [qualification record](../acceptance/release_qualification.md#sign-before-publishing-qualification-2026-11-25),
+not the `.4` values below. Verify each needed file's detached signature
+with the [publisher key](../security/publisher_signing.md#signature-format-accepted-by-crt-cli).
+The November 25 SDK was exercised with the [November 16 Linux/x86_64 CLI](https://github.com/webos21/crt-cli/releases/tag/v0.1.0-preview.20261116.linux-x86_64.1).
+
 ## Download and trusted metadata
 
 Use a trusted HTTPS client/browser and an explicitly selected trusted CA input.
