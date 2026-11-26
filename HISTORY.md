@@ -12,6 +12,25 @@ substantive update.
 
 ## 2026-11-26
 
+### Record the 0.5.0 Dev SDK candidate replay gates
+
+Close D5-01 for the recorded Dev SDK RCs: relocated external C/C++
+consumers with the producer hidden, the supported static/shared modes and
+native dependency checks have evidence on all five host pairs. The same
+records cover independent SDK package verification and the initial ABI
+comparisons with the signed host Previews:
+[Linux/x86_64](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26),
+[Linux/aarch64](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26),
+[macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26),
+[Windows/x64](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26) and
+[Windows/arm64](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26).
+[macOS/arm64 RC2](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26)
+repeats the SDK, consumer and Mach-O checks. Signed Host Tools and zlib
+passed with all five RC1s; they were not replayed with macOS RC2. Final
+artifact ABI and distribution verification, publication and exact pin
+handoff remain open. This is a review of existing results, not a new test
+run, Full SDK qualification or general application-packaging acceptance.
+
 ### Qualify the local Windows/arm64 Dev SDK 0.5.0 RC1
 
 Produced and independently verified the native Release candidate from clean

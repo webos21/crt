@@ -88,19 +88,20 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   0.5.0 release candidate before changing symbol visibility. Compare to the
   previous published Dev SDK for that host and review ABI differences before
   approval. Reuse the [distribution auditor](tools/verify_dist.py).
-  [Linux/x86_64 RC1 comparison](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
-  records the first candidate; the [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26) compares against the signed
-  2026-11-10 Preview (no metadata change). The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
-  compares Mach-O surfaces with its signed 2026-11-10 Preview (one `awk` executable export added, no library change).
-  [macOS/arm64 RC2](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26)
-  supersedes RC1 and changes only the declared minimum OS on 104 images.
-  The [Windows/x64 RC1](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26) compares against the signed 20261110 Preview with the new PE tool
-  (additive only). The [Windows/arm64 RC1](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26)
-  compares against the signed 2026-11-18 Preview and has the same six additive static symbols. Compare the final candidate for each shipped pair.
+  - [x] Compare the recorded RCs to each host's signed Preview baseline:
+    [Linux/x86_64 RC1](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26),
+    [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26),
+    [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26),
+    [Windows/x64 RC1](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26) and
+    [Windows/arm64 RC1](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26).
+  - [x] Verify the Mach-O delta from RC1 to the superseding
+    [macOS/arm64 RC2](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26).
+  - [ ] Compare the exact final candidate for each shipped host pair and
+    review any ABI differences before approval.
 
 #### D5 - Dev SDK application workflow
 
-- [ ] **D5-01** (R05-02) Replay external C and C++ consumers against the
+- [x] **D5-01** (R05-02) Replay external C and C++ consumers against the
   extracted SDK with the producer tree hidden. Verify public imports, startup,
   supported static/shared link and load modes, and declared host dependencies.
   See [SDK acceptance](docs/acceptance/sdk_split_acceptance.md).
@@ -115,34 +116,33 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   The [Windows/arm64 RC1](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26)
   passes the restricted-token static and shared C++ consumer with both source
   checkouts hidden, C provider 36/36 and C++17 22/22.
+  [Completed RC replay scope](HISTORY.md#record-the-050-dev-sdk-candidate-replay-gates).
+  Confirm the exact release inputs and supported modes in D6-03 and D7-02.
 
 #### D6 - Dev SDK and Host Tools distribution
 
 - [ ] **D6-01** (R05-02) Verify the resources, notices and source obligations
   of the Dev SDK and Host Tools release bundles. Check the supported runtime
   resource layout with the external consumers from D5-01.
-  The [Linux/x86_64 RC1 record](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
-  covers SDK notices, dependency provenance, source-archive pins and the
-  signed Host Tools inventory. The [macOS/arm64 RC1 record](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
-  and [Windows/x64 RC1 record](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26)
-  cover the SDK notices. The [Windows/arm64 RC1 record](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26)
-  records the Dev profile and source-asset verification and the retained
-  signed Host Tools bundle verification. Check the final release assets.
+  - [x] Independently verify the Dev SDK packages for the five recorded RC
+    host pairs. See the [candidate records](HISTORY.md#record-the-050-dev-sdk-candidate-replay-gates)
+    for package, notice and source-asset evidence.
+  - [ ] Verify resources, notices and source obligations on the exact final
+    Dev SDK and selected Host Tools assets for each shipped host pair.
 - [ ] **D6-02** (R05-02) Verify the chosen Host Tools bundle alongside the Dev
   SDK and replay the existing zlib workflow where included. Reuse an existing
   signed Host Tools version if that exact combination passes. See
   [Host Tools acceptance](docs/acceptance/host_tools_acceptance.md).
-  [Linux/x86_64 RC1 and signed Host Tools replay](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
-  records the first exercised pair; the [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26) exercised the signed
-  `v0.1.0-hosttools.20261116.linux-aarch64.1` (replay 26/26, zlib D3 25/25). The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
-  exercises the signed `v0.1.0-hosttools.20261119.macos-aarch64.1` (replay 18/18, zlib D3 28/28).
-  The [RC2 record](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26)
-  leaves the paired Host Tools and zlib replay open for the newer candidate.
-  The [Windows/x64 RC1](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26) exercises the signed
-  `v0.1.0-hosttools.20261119.windows-x86_64.1` (replay 18/18, six port suites and a real zlib port build).
-  The [Windows/arm64 RC1](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26)
-  exercises the signed `v0.1.0-hosttools.20261119.windows-aarch64.1` (native
-  bundle replay 18/18, six port suites and a real zlib port build).
+  - [x] Verify signed Host Tools and zlib with the recorded RC1 SDKs on
+    [Linux/x86_64](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26),
+    [Linux/aarch64](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26),
+    [Windows/x64](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26) and
+    [Windows/arm64](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26).
+  - [x] Verify the signed macOS Host Tools and zlib with
+    [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26).
+  - [ ] Replay with the superseding [macOS/arm64 RC2](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26)
+    or its final successor. Confirm that the recorded results cover each
+    shipped combination and replay affected checks if its inputs change.
 - [ ] **D6-03** (R05-04) Update the Dev SDK version, tag and asset naming
   rules for 0.5.0. Stage and verify candidates, use the offline signature and
   approval workflow, then verify the public downloads. Hand the exact
@@ -186,8 +186,8 @@ is proposed.
   to a separately runnable all-library export/import and compatibility regression gate.
   Reuse the [distribution verification](tools/verify_dist.py) and
   [Web export audit](tools/crt_web_exports.py).
-  The [Linux Dev RC1 comparison](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
-  supplies the bounded ELF replay.
+  The [recorded Dev SDK comparisons](HISTORY.md#record-the-050-dev-sdk-candidate-replay-gates)
+  supply the bounded ELF, Mach-O and PE baselines.
 
 ### Broader workflow and feature expansion
 
@@ -227,7 +227,8 @@ and
 for broader SDK selection.
 
 - [ ] **D5-01** **6.1** Extend public imports and startup/link/runtime-query rules
-  to supported Full stages. See the [Dev SDK release scope](#d5---dev-sdk-application-workflow).
+  to supported Full stages. The [completed Dev SDK RC consumer replay](HISTORY.md#record-the-050-dev-sdk-candidate-replay-gates)
+  does not qualify Full stages.
 - [ ] **D5-02** **6.2** Validate CLI-owned templates and external C/C++/GFX/Media/UI/Web
   consumers, including runtime/worker resources and CLI self-build/run.
 - [ ] **D5-03** **6.3** Support broader profile/capability metadata for project-specific SDK
@@ -251,10 +252,12 @@ The complete package and lifecycle gates remain open.
 
 - [ ] **D6-01** **7.1** Extend the SDK-owned runtime/resource/source-notice
   contract to general application packages that run without SDK/build/store roots.
-  See the [Dev SDK and Host Tools release checks](#d6---dev-sdk-and-host-tools-distribution).
+  The [Dev SDK RC evidence](HISTORY.md#record-the-050-dev-sdk-candidate-replay-gates)
+  does not cover general application packages.
 - [ ] **D6-02** **7.2** Review general CLI application packaging, versioned JSON
   job events, and broader cancellation, locked/offline and recovery behavior
-  through consumer evidence. The standalone CLI, scoped Doctor and initial
+  through consumer evidence. The [Dev SDK RC Host Tools replays](HISTORY.md#record-the-050-dev-sdk-candidate-replay-gates)
+  cover the bounded zlib workflow. The standalone CLI, scoped Doctor and initial
   recovery checks are in the [CLI release checks](https://github.com/webos21/crt-cli/blob/main/TODO.md#d6---standalone-cli-packaging-and-promotion).
 - [ ] **D6-03** **7.3** Review general default/project pin adoption and additional
   qualified host or SDK combinations beyond the [0.5.0 handoff](#d6---dev-sdk-and-host-tools-distribution).
