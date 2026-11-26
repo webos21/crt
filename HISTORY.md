@@ -12,6 +12,19 @@ substantive update.
 
 ## 2026-11-26
 
+### Qualify the local Windows/arm64 Dev SDK 0.5.0 RC1
+
+Produced and independently verified the native Release candidate from clean
+CRT `e1e379c`. The PE comparison with the signed 2026-11-18 Preview finds six
+additive static libc++ definitions and no removals. Core CTest has 169 passes,
+one skip and zero failures. The relocated static and shared C++ consumer
+passes with both source checkouts hidden. The retained signed Host Tools
+bundle passes the native replay 18/18. The candidate CLI and bundle pass D1
+32/32, all six D3 suites and a real zlib port build with static and shared
+round trips. The native VS Code source-extension workflow passes with the
+same candidate SDK and CLI.
+[Candidate inputs, verification and limits](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26).
+
 ### Set macOS 15.0 as the supported minimum
 
 SDK images and programs built with the SDK now declare macOS 15.0, the oldest
