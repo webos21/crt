@@ -140,15 +140,21 @@ cover the follow-up scope. R05 numbers link the release work across repositories
     [Windows/arm64](docs/acceptance/release_qualification.md#windowsarm64-dev-sdk-050-rc1-2026-11-26).
   - [x] Verify the signed macOS Host Tools and zlib with
     [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26).
-  - [ ] Replay with the superseding [macOS/arm64 RC2](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26)
-    or its final successor. Confirm that the recorded results cover each
-    shipped combination and replay affected checks if its inputs change.
+  - [x] Replay signed Host Tools and zlib with the superseding
+    [macOS/arm64 RC2](docs/acceptance/release_qualification.md#macosarm64-rc2-follow-up-2026-11-26).
+  - [ ] Confirm that the recorded results cover each shipped combination and
+    replay affected checks if its inputs change.
 - [ ] **D6-03** (R05-04) Update the Dev SDK version, tag and asset naming
   rules for 0.5.0. Stage and verify candidates, use the offline signature and
   approval workflow, then verify the public downloads. Hand the exact
   manifest, archive, policy and content identities to crt-cli. Apply the Host
   Tools signing policy if publishing a new bundle. See
   [release qualification](docs/acceptance/release_qualification.md#sign-before-publishing-qualification-2026-11-25).
+  - [x] Define and implement the rules: SDK version `v0.5.0` on every host,
+    one non-prerelease release per host tagged `v0.5.0+<host>`
+    ([rules](docs/guides/sdk_ci.md#releasing-a-dev-sdk-sdk-releaseyml)).
+  - [ ] State the trust policy of these releases, rehearse a `dry_run` per
+    host (the first run with a `+` tag), then stage, sign, publish and verify.
 
 #### D7 - Release compatibility
 
