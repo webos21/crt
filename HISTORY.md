@@ -12,6 +12,14 @@ substantive update.
 
 ## 2026-11-26
 
+### Set macOS 15.0 as the supported minimum
+
+SDK images and programs built with the SDK now declare macOS 15.0, the oldest
+macOS the project's CI uses, instead of the build host's version. The release
+collector enforces it and the SDK workflows run the assets on `macos-15`.
+Against RC1 only the declared minimum changes.
+[Local replay and open hosted run](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26).
+
 ### Prepare the macOS/arm64 Dev SDK 0.5.0 candidate
 
 Built local `v0.5.0-rc.1` on macOS from the same clean CRT `dc092e49` as the
