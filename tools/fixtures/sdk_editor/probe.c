@@ -3,7 +3,7 @@
 
 #include "editor_probe.h"
 
-#ifndef CRT_TARGET_OS_LINUX
+#if !defined(CRT_TARGET_OS_LINUX) && !defined(CRT_TARGET_OS_MACOS)
 #error The SDK must declare the native target.
 #endif
 

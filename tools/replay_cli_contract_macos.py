@@ -127,6 +127,8 @@ def main():
             terms += ' (regex "^/private/tmp/crt-cli-native-[^/]+/.*")'
             # the native suite builds its fixtures under $TMPDIR (the replay's work/tmp), not a literal /tmp
             terms += ' (regex ' + json.dumps('^' + re.escape(str(work / 'tmp')) + '/crt-cli-native-[^/]+/.*', ensure_ascii=False) + ')'
+            # the editor suite runs what it builds in its own fixture directory there (name with a space and Hangul)
+            terms += ' (regex ' + json.dumps('^' + re.escape(str(work / 'tmp')) + '/editor space 한글-[0-9]+/.*', ensure_ascii=False) + ')'
         text = '(version 1)\n(allow default)\n(deny network*)\n'
         text += ''.join('(deny file-read* file-write* (subpath ' + json.dumps(str(p), ensure_ascii=False) + '))\n' for p in denied)
         if bare:

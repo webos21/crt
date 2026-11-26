@@ -1781,3 +1781,104 @@ Raw evidence stays outside the checkout in `crt-release-050-linux-arm64-20261126
 `cli-contract/`, the package and the signed inputs); nothing there is a release input. **Not done:** signatures and publication of the new SDK, adoption of its exact pin by the CLI,
 a native Ubuntu 24.04 (glibc 2.39) aarch64 run, a 0.5.0 version/tag/asset-name decision (R05-04; `tools/ci_sdk_publish.py` still derives tags from the fixed `0.0.1` Preview base), and the
 macOS and Windows candidates.
+
+
+## macOS/arm64 Dev SDK 0.5.0 RC1 (2026-11-26)
+
+First native macOS/arm64 producer candidate for R05-01/R05-02. The candidate commit is the clean CRT
+`dc092e494fbdc682e8240fe201218eb24d730e8e` used for both Linux RC1s; later changes on `main` up to `8689b4c8` are tools and documentation only.
+The CLI is `8942a356704cd74f98db41d66421ed5f746de07d` (only its TODO differs at `2644716`). Host: macOS 27.2.1 (26B131), arm64, Xcode 27.2,
+Apple clang 21.0.0 with Xcode `ld-27106.1`, CMake 4.5.1, Python 3.15.2.
+
+A fresh detached worktree and Release tree were configured from preset `macos-host-ninja-debug` with `CRT_TARGET_OS=macos`, `CRT_TARGET_ARCH=aarch64`,
+`CRT_USE_IMPORTED_LIBCXX=ON`, `CRT_RELEASE_TAG=v0.5.0-rc.1` and Skia, FFmpeg, media curl and LVGL OFF. Building
+`crt-development-sdk-test crt-c-test crt-cxx-test crt-dev-release crt-host-tools-test` exits zero: core CTest **146/146**, the imported-libc++
+runtime, string-ABI, iostream and EH-register smokes static and shared, and the Dev static/shared HTTPS+inflate consumer with its trust
+negatives. `ci_sdk_release.py verify` run independently with the full commit, version and macOS/aarch64 target reports `OK`. The version is a
+build parameter, not a release name; R05-04 still owns it.
+
+| Artifact or identity | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Dev archive | 6,141,304 | `f360105afa1477411dfcffa3eab938a23385fd59e04831c3bc43acef5a4a278d` |
+| Dev manifest | 1,588 | `589a8559d0b09a483df46ff655cc271beea95117c92bfe21bf3c829153f598fc` |
+| Portable toolchain policy | 403,193 | `b854b821d3a427ab65ba70091c439ae0681076a9792b5bc7e01231a963847173` |
+| Extracted SDK content | | `6f64de079bdce8fc785834375711409de5dacbc7b5b7d9d99f9117ac3d57fb0f` |
+| macOS `02-cxx` source archive | 9,015,048 | `0a716b472578fa401d5d40324e0f3f3bd6b1cd56243100329b5e00424735b576` |
+| macOS `03-gfx-simple` source archive | 135,992 | `96610f5b0b8e598936d0fe7fa31964af67d61a5144159cf40ebce2a8952883a6` |
+
+The SDK has 2,786 entries (2,598 files, 178 directories, 10 symlinks).
+
+**ABI baseline.** The baseline is the published Preview `v0.0.1-preview.20261110.macos.1` (content
+`e3dc7fb1810a3f78ab8ef33882225ccb562d21f6f5977a2037ab92819326bac8`, source `445f127d`). Its retained public bytes match the frozen pins, and
+the later detached signature (fetched from that release, SHA-256 `58f8749aeb71e4382de7aa4c3aeecac62f78936c2668ace19940b472b2a4f6e1`) verifies with
+the publisher key (fingerprint `59218576...3fa2`). The ELF tool cannot read Mach-O, so
+[the Mach-O comparison tool](../../tools/compare_dev_sdk_macho_abi.py) captures exports (with weakness), undefined symbols with their
+two-level-namespace provider, dylib dependencies, install names, RPATHs, build and dylib versions, and static archive and startup-object
+definitions, and reuses the ELF tool's comparison. As on Linux/aarch64 the old baseline predates the current Dev profile
+(`--baseline-predates-profile`, recorded in `verification.json`; the candidate is verified).
+
+The comparison covers **118 images and archives on each side: none added or removed, 10 unchanged aliases and 105 files with different
+bytes**. The only metadata change is `_memchr` added to the exports of the `awk` executable (the same file at `bin/`, `system/bin/` and
+`usr/bin/`). No library export, import or dependency changed. Mach-O carries no export sizes, so data-object widths are not compared; this
+is the link and load surface, not behavior. `comparison.json` SHA-256 `a5b6f31bb77aff697500d07c23268290ac777b3a87077c5f718bf670532eda9c`.
+
+**Deployment target (support-scope item).** All 104 executables, dylibs and the startup object of the candidate declare
+`LC_BUILD_VERSION minos 27.2`; the published baseline does the same. No deployment target is set, so the build host's version is recorded.
+These artifacts therefore require macOS 27.2 or later. 0.5.0 must either advertise that limit or choose a lower deployment target before
+the final candidate and qualify it on such a host. Nothing older than 27.2 was exercised here.
+
+**External consumers (D5-01, D6-01).** `tools/test_dev_sdk_external.py` passes under Seatbelt with the CRT checkout, the producer worktree and
+the original extracted SDK unreadable: relocated static and shared C++ HTTPS+inflate and the trust negatives, SDK payload unchanged
+(`result.json` `fa75b6eed4c49bdfad2330f9bef4d478334214a9f7005cbcac0da2fd842e4d7c`). The CLI-owned C provider replay
+(`replay_c_shared_macos.py` with `libc/tests/sdk_c_provider_images_test.c` and `sdk_c_provider_dso.c`) passes **76/76** gates (`5e1001798ea57d79ba32aae98373227460460f64e055a1d206df58f8e8749d29`).
+The SDK declares 11 redistributed dependencies; all 38 notice and provenance references exist in the extracted tree. The only external
+prerequisite is `libSystem.B.dylib`, not bundled. The two stage recipes pin the actual source-archive hashes, and both archives record the
+clean candidate commit.
+
+**Editor compile policy.** `tools/test_sdk_editor_policy.py` now also runs natively on macOS (Seatbelt: no network, writes only to the evidence
+directory, hidden trees, read-only installed SDK; explicit Xcode tools). With the signed `v0.1.0-preview.20261117.macos-arm64.1` CLI Preview
+(archive signature verified; executable `afcdf9b6a368e0c9c2efbfc9f2d8ac18945c310c361c627ac6e0c0d3e0df0073`) it installs the candidate and passes
+**8 native C/C++ compile commands** over four modes, the unsupported-mode and stale-contract refusals, both runs and a zero-compile warm
+build (`16af6490b965dc4dcd0d71d272dc2819e9aa3101974e3dac9ed3d0253e7acdee`).
+
+**CLI built from the candidate.** `replay_cli_contract_macos.py` builds the CLI from the extracted SDK alone: cold **22 executed / 0 reused**,
+warm **0 / 22**; the bootstrap loop differs only in `LC_UUID` and `__LINKEDIT`; native **1016**, archive **221**, SDK-store **114**, recipe **147**,
+store-lock **9** and editor **417** checks pass (the port suites report skipped there and run below); only `libSystem` is imported.
+Executable SHA-256 `4e4b0ac317de4e9d4bd64e0017697493049fafd7562fa092a33b3ea0d9306a24` (4,523,752 bytes); result
+`22faebafe082a0ee2b3e622f8939b49cb2819420f181d1c1a102b5217ba29fa1`.
+
+**Host Tools and zlib D3 (D6-02).** The published `v0.1.0-hosttools.20261119.macos-aarch64.1` is reused (archive
+`90c7585a92fc020e05ea69e7bcd752a4df67f060706c87f81822cb11b0c676a1`, manifest `27fac5efbb6f846041b471d8b0be8e8004608ef5839ce4a2ef23c62aae8e07b8`);
+its signature verifies and its native replay passes **18/18**. `replay_port_macos.py` with the candidate SDK, this bundle, the candidate
+CLI as seed and pinned zlib 1.3.1 (`9a93b2b7...df23`) passes **28/28** gates: the six port suites (447 checks: recipe 147, build 40, store 105,
+project 81, command 33, oracle 41; none skipped), one actual publication reused by the next call and re-verified, a warm build of 0
+executed / 22 reused and unchanged SDK, Host Tools and source inventories. As in earlier macOS D3 runs the differential oracle alone may
+use the labeled host Python, shell, make and coreutils; loopback networking is enabled only for the HTTPS cases
+(`a0115e4539f4a55aba7a334040ba132584ea1925ac1a796d28b9c9102564b98a`).
+
+**Standalone CLI package (CLI D6-02/D6-03).** A local package (`crt-cli-local-macos-aarch64-20261126.tar.xz`, 1,272,304 bytes, SHA-256
+`3b0555e093d1b5b194967492e04ae3e5976ae6cdabbe8fcb3dd936db95ed44d5`; 30 files, manifest `3fc8c8d205b129c2b80742a3aeb92247349c4650849448ba417bd97bfbc6abca`)
+packs deterministically and extracts to the byte-identical executable (no `LC_RPATH`, ad-hoc linker signature only). With the checkouts,
+the SDK trees, `~/.crt`, Xcode and the Command Line Tools unreadable, an empty `PATH` and no network, `--version`, self Doctor and pinned
+resource Doctor (`pinned-file-match`) pass, a wrong pin is refused, and first build and project Doctor without tools name the missing
+`--cc`/`--cxx`/`--linker`/`--ar` inputs. The same executable consumes the local handoff in `replay_preview_public_macos.py`: **54/54** with the
+project-pin cases (`84f3a944ac0cc51a87dd46a83004901c469abeea09e57fc4ad6b98bdee3b0231`). The CLI version is still the development value.
+
+**VS Code (V1-01, macOS part).** The extension `cadea6e` passes **54/54** checks in a VS Code 1.148.0 Extension Development Host with the
+candidate CLI and SDK, clangd extension 0.6.0 and Apple clangd 21 without `--query-driver`: Restricted Mode and trust, build consent, C and
+C++ Build/Test/Run/Doctor, Problems, the compilation database and clangd completion, definitions, headers and diagnostics. It used the
+source checkout, not a VSIX. The [extension record](https://github.com/webos21/crt-vscode/blob/main/HISTORY.md#replay-the-editor-workflow-on-macosarm64-v1-01)
+owns the method, excluded attempts and limits. Before it, Node typecheck and the three protocol tests passed.
+
+**Retained failures (test inputs and drivers, not product).** Contract replay r1: the Seatbelt execution allow list lacked the newer editor
+suite's fixture directory. Editor policy r1/r2: the fixture accepted only the Linux target macro, and Apple clang lists the `-isysroot`
+`SDKSettings.json` in its header trace (now excluded by that exact path; any OS SDK header still fails). Handoff consumer r1: a stale gate
+expected an empty `.locks`, while the CLI keeps its per-content lock file by design. C provider r1: the Linux `/proc/self/maps` fixture was
+selected by mistake instead of the macOS image-enumeration fixture. The ABI comparison's first run was refused by the baseline's old
+profile. The changed Linux paths of the editor policy tool were not rerun on Linux.
+
+Release-tool tests: 13 modules, 164 tests pass with 3 host skips. Raw evidence stays outside the checkouts in
+`crt-release-050-macos-arm64-20261126/`; nothing there is a release input. **Not done:** signatures and publication of the new SDK and
+CLI, acquisition of a signed candidate, adoption of its pin, any HTTPS fetch/redirect or real `sdk acquire` replay with the candidate CLI,
+CLI D6-01 failure/cancel recovery cases, the deployment-target decision, a 0.5.0 version/tag/asset-name decision (R05-04), the VSIX
+packaging and clean-profile install replay, and the Windows candidates.

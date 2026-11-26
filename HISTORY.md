@@ -12,6 +12,20 @@ substantive update.
 
 ## 2026-11-26
 
+### Prepare the macOS/arm64 Dev SDK 0.5.0 candidate
+
+Built local `v0.5.0-rc.1` on macOS from the same clean CRT `dc092e49` as the
+Linux candidates. Against the signed 2026-11-10 macOS Preview, 118 Mach-O
+images and archives show one executable export added (`_memchr` in `awk`) and
+no library change; a new Mach-O comparison tool captures that surface. The
+hidden-producer consumer, C provider (76/76), editor compile policy, signed
+Host Tools (18/18), zlib D3 (28/28), a CLI built from the candidate and its
+local package pass. Both macOS builds require macOS 27.2 because no deployment
+target is set. The VS Code Extension Development Host replay with these
+candidates passes 54/54 on macOS. The editor policy tool gained a macOS path,
+and test drivers and fixtures were corrected.
+[Inputs, evidence and remaining release gates](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26).
+
 ### Prepare the first Linux/x86_64 Dev SDK 0.5.0 candidate
 
 Build local `v0.5.0-rc.1` from clean CRT `dc092e49`. The extracted SDK
