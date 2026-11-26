@@ -7,6 +7,11 @@ policy, acceptance evidence and provenance stay in `docs/` and import manifests.
 
 ## Notice
 
+- When the same task ID appears in In Progress and Planned, record the
+  verification in HISTORY and link it from both entries in the same update.
+  Check both entries together once the evidence satisfies both scopes. If only
+  the release scope passes, check the In Progress entry and keep the follow-up
+  open with a link to the release evidence.
 - Keep recipe statuses current in
   [`porting/recipes/*.json`](porting/recipes) and
   [`docs/porting/porting_status.md`](docs/porting/porting_status.md) whenever a host is
@@ -63,6 +68,60 @@ when a prefix such as `P1` or `V1` appears under multiple headings.
 
 ## In Progress
 
+### Release 0.5.0 - Dev SDK and Host Tools
+
+Qualify the `dev` (`02-cxx`) SDK on the existing five host pairs as release
+targets: Linux/x86_64, Linux/aarch64, macOS/arm64, Windows/x64 and Windows/arm64.
+Advertise the host and runtime modes verified on the actual release bytes.
+The [CLI release queue](https://github.com/webos21/crt-cli/blob/main/TODO.md#release-050---standalone-cli)
+owns CLI packaging and exact SDK adoption. The
+[extension release queue](https://github.com/webos21/crt-vscode/blob/main/TODO.md#release-050---vs-code-extension)
+owns VSIX verification and the editor support matrix. Keep separate version
+identities for the Dev SDK, Host Tools, CLI and VSIX.
+
+The checkboxes below cover 0.5.0. Items with the same ID in Planned
+cover the follow-up scope. R05 numbers link the release work across repositories.
+
+#### P1 - Dev SDK ABI baseline
+
+- [ ] **P1-02** (R05-01) Capture public exports and native imports from each
+  0.5.0 release candidate before changing symbol visibility. Compare to the
+  previous published Dev SDK for that host and review ABI differences before
+  approval. Reuse the [distribution auditor](tools/verify_dist.py).
+
+#### D5 - Dev SDK application workflow
+
+- [ ] **D5-01** (R05-02) Replay external C and C++ consumers against the
+  extracted SDK with the producer tree hidden. Verify public imports, startup,
+  supported static/shared link and load modes, and declared host dependencies.
+  See [SDK acceptance](docs/acceptance/sdk_split_acceptance.md).
+
+#### D6 - Dev SDK and Host Tools distribution
+
+- [ ] **D6-01** (R05-02) Verify the resources, notices and source obligations
+  of the Dev SDK and Host Tools release bundles. Check the supported runtime
+  resource layout with the external consumers from D5-01.
+- [ ] **D6-02** (R05-02) Verify the chosen Host Tools bundle alongside the Dev
+  SDK and replay the existing zlib workflow where included. Reuse an existing
+  signed Host Tools version if that exact combination passes. See
+  [Host Tools acceptance](docs/acceptance/host_tools_acceptance.md).
+- [ ] **D6-03** (R05-04) Update the Dev SDK version, tag and asset naming
+  rules for 0.5.0. Stage and verify candidates, use the offline signature and
+  approval workflow, then verify the public downloads. Hand the exact
+  manifest, archive, policy and content identities to crt-cli. Apply the Host
+  Tools signing policy if publishing a new bundle. See
+  [release qualification](docs/acceptance/release_qualification.md#sign-before-publishing-qualification-2026-11-25).
+
+#### D7 - Release compatibility
+
+- [ ] **D7-02** (R05-06) Confirm SDK and Host Tools provenance, notices and
+  supported host/mode scope in the release records and the
+  [CLI compatibility ledger](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#adoption-and-exercised-combinations).
+  Review the combinations exercised with the exact release candidates.
+
+The published SDK must pass verification before the CLI adopts its exact pin.
+The VSIX release uses the approved CLI and SDK combinations.
+
 ## Planned
 
 ### P1 - Public ABI baseline and runtime architecture hardening
@@ -83,17 +142,16 @@ is proposed.
   required runtime symbols and establishing an ABI evolution baseline
   ([libc build](libc/CMakeLists.txt),
   [ABI boundary policy](docs/design/host_abi_firewall.md)).
-- [ ] **P1-02** Extend existing package/dependency and Web export audits into a separately
-  runnable all-library public export/import baseline and compatibility
-  regression gate; reuse current checks rather than introducing duplicate lint
-  ([distribution verification](tools/verify_dist.py),
-  [Web export audit](tools/crt_web_exports.py)).
+- [ ] **P1-02** Extend the [Dev SDK ABI baseline](#p1---dev-sdk-abi-baseline)
+  to a separately runnable all-library export/import and compatibility regression gate.
+  Reuse the [distribution verification](tools/verify_dist.py) and
+  [Web export audit](tools/crt_web_exports.py).
 
 ### Broader workflow and feature expansion
 
 The following tranches keep their original IDs and capability prerequisites.
-D4 is P2 expansion; the D5/D6 consumer and deployment work can be scoped after
-the current correctness/API gates without waiting for all D4 or Full SDK work.
+D4 is P2 expansion. The [0.5.0 queue](#release-050---dev-sdk-and-host-tools)
+covers the Dev SDK release scope of D5/D6. The tranches below retain broader work.
 
 ### Tranche 5. Dependencies, variants, locks and cache (D4)
 
@@ -126,8 +184,8 @@ and
 [crt-cli D2-01](https://github.com/webos21/crt-cli/blob/main/TODO.md#d2---management-beyond-the-first-workflow)
 for broader SDK selection.
 
-- [ ] **D5-01** **6.1** Complete public imports and startup/link/runtime-query rules for
-  Development and supported Full stages; keep technical policy in the SDK.
+- [ ] **D5-01** **6.1** Extend public imports and startup/link/runtime-query rules
+  to supported Full stages. See the [Dev SDK release scope](#d5---dev-sdk-application-workflow).
 - [ ] **D5-02** **6.2** Validate CLI-owned templates and external C/C++/GFX/Media/UI/Web
   consumers, including runtime/worker resources and CLI self-build/run.
 - [ ] **D5-03** **6.3** Support broader profile/capability metadata for project-specific SDK
@@ -145,20 +203,21 @@ Acceptance basis:
 and
 [public Preview replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/preview_acceptance.md)
 as the bounded baseline. Pair with
-[crt-cli D6-01 through D6-04](https://github.com/webos21/crt-cli/blob/main/TODO.md#d6---packaging-and-automation)
-. The complete package and lifecycle gates remain open.
+[crt-cli D6-01 through D6-03](https://github.com/webos21/crt-cli/blob/main/TODO.md#d6---packaging-and-automation)
+and the [0.5.0 handoff in D6-04](https://github.com/webos21/crt-cli/blob/main/TODO.md#d6---standalone-cli-packaging-and-promotion).
+The complete package and lifecycle gates remain open.
 
-- [ ] **D6-01** **7.1** Complete SDK-owned runtime/resource/source-notice contracts for
-  packages that run without development SDK/build/store roots.
-- [ ] **D6-02** **7.2** Review CLI test/package, versioned JSON/job events, cancellation,
-  locked/offline behavior and recovery through original consumer evidence.
-  Include the one-executable release goal and self/environment/project doctor scopes.
-- [ ] **D6-03** **7.3** Review explicit default/project pin adoption against the published five-host
-  Dev SDK/CLI combinations (Linux x86_64/aarch64, macOS/arm64, Windows x64/arm64);
-  the latest published CLI and the CI bootstrap pin may differ. Retain the
-  [Windows publication handoff](docs/acceptance/sdk_split_acceptance.md#windows-cli-preview-publication-handoff-2026-11-10).
-  Keep unqualified Linux C shared SDK mode excluded until 6.4 is resolved. Full SDK delivery
-  and its source/license/security/assembly review stay separate; D4 does not block the preview.
+- [ ] **D6-01** **7.1** Extend the SDK-owned runtime/resource/source-notice
+  contract to general application packages that run without SDK/build/store roots.
+  See the [Dev SDK and Host Tools release checks](#d6---dev-sdk-and-host-tools-distribution).
+- [ ] **D6-02** **7.2** Review general CLI application packaging, versioned JSON
+  job events, and broader cancellation, locked/offline and recovery behavior
+  through consumer evidence. The standalone CLI, scoped Doctor and initial
+  recovery checks are in the [CLI release checks](https://github.com/webos21/crt-cli/blob/main/TODO.md#d6---standalone-cli-packaging-and-promotion).
+- [ ] **D6-03** **7.3** Review general default/project pin adoption and additional
+  qualified host or SDK combinations beyond the [0.5.0 handoff](#d6---dev-sdk-and-host-tools-distribution).
+  Keep project locks, release versions and CI bootstrap pins distinct.
+  [Prior Windows handoff](docs/acceptance/sdk_split_acceptance.md#windows-cli-preview-publication-handoff-2026-11-10).
 
 ### Tranche 8. Developer-tool integration and exercised combinations (D7)
 
@@ -167,7 +226,7 @@ Adoption evidence goes in the
 . Pair with
 [crt-cli D7-01 and D7-02](https://github.com/webos21/crt-cli/blob/main/TODO.md#d7---developer-tool-integration)
 ,
-[crt-vscode V1-10](https://github.com/webos21/crt-vscode/blob/main/TODO.md#v1---extension-mvp)
+[crt-vscode native replay](https://github.com/webos21/crt-vscode/blob/main/TODO.md#v1-follow-up---native-replay)
 and
 [crt-vscode V3-01 through V3-03](https://github.com/webos21/crt-vscode/blob/main/TODO.md#v3---debugging)
 for the corresponding editor and debugger runs.
@@ -175,10 +234,11 @@ for the corresponding editor and debugger runs.
 - [ ] **D7-01** **8.1** Support consumer-proven generic SDK/PAL/debugger gaps. `crt-vscode`
   owns extension/clangd/debug UX, CLI owns workflow and public command/JSON APIs;
   standalone Studio retains its later S0-S5 UI/input/IME/editor acceptance.
-- [ ] **D7-02** **8.2** Review actual SDK/CLI/editor combinations against implemented
-  command/JSON/debug capabilities; retain native evidence and immutable adoption
-  identities in the CLI compatibility ledger. Start with `crt-vscode`; do not
-  infer Windows debugger support from build or exception-runtime passes.
+- [ ] **D7-02** **8.2** Review SDK/CLI/editor combinations beyond the 0.5.0
+  release matrix in [D7-02](#d7---release-compatibility), including future
+  debugger or editor capabilities.
+  Record exact identities and native evidence in the CLI compatibility ledger.
+  Windows debug acceptance requires its own ABI and debugger evidence.
 
 Studio SDK-only S0/UI PoCs may proceed earlier. Live build/run requires the
 applicable D5/D6 capabilities, not completion of every tranche or D7 approval
