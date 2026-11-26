@@ -63,12 +63,6 @@ when a prefix such as `P1` or `V1` appears under multiple headings.
 
 ## In Progress
 
-The first editor workflow's CRT producer validation is complete
-([P1-01 evidence](docs/acceptance/sdk_split_acceptance.md#linuxx86_64-sdk-compile-policy-for-the-first-editor-workflow-2026-11-25)).
-[CRT-CLI P0](https://github.com/webos21/crt-cli/blob/main/TODO.md#p0---minimal-public-editor-api-d7-slice-coordinated-with-d5d6)
-owns the next implementation. Revisit CRT policy if an exact installed-SDK
-consumer exposes a gap.
-
 ## Planned
 
 ### P1 - Public ABI baseline and runtime architecture hardening
