@@ -17,8 +17,12 @@ substantive update.
 SDK images and programs built with the SDK now declare macOS 15.0, the oldest
 macOS the project's CI uses, instead of the build host's version. The release
 collector enforces it and the SDK workflows run the assets on `macos-15`.
-Against RC1 only the declared minimum changes.
-[Local replay and open hosted run](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26).
+Against RC1 only the declared minimum changes. A hosted run built the SDK on
+macOS 26.7.2 and, on macOS 15.8.2, verified the downloaded assets and passed
+the source-hidden C++ consumer and the published CLI's C/C++ smoke. This
+closes D7-03.
+[Local replay](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26) ·
+[hosted macOS 15 execution and limits](docs/acceptance/release_qualification.md#hosted-macos-15-execution-2026-11-26).
 
 ### Prepare the macOS/arm64 Dev SDK 0.5.0 candidate
 

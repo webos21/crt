@@ -1828,7 +1828,8 @@ This is a declaration, not a measured minimum: nothing older than 27.2 was exerc
 [hosted CLI replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#hosted-qualification-on-the-pr-branch)
 on macOS 15.8.2 consumed the published Preview, which carries the same declaration, and passed 26/26 gates with static and shared zlib
 consumers, so the declared value alone does not show that older hosts fail. It does not establish a supported minimum either. 0.5.0 must set
-the deployment target deliberately before the final candidate and qualify that version on a matching host.
+the deployment target deliberately before the final candidate and qualify that version on a matching host. The
+[macOS 15.0 deployment target](#macos-150-deployment-target-2026-11-26) below does so.
 
 **External consumers (D5-01, D6-01).** `tools/test_dev_sdk_external.py` passes under Seatbelt with the CRT checkout, the producer worktree and
 the original extracted SDK unreadable: relocated static and shared C++ HTTPS+inflate and the trust negatives, SDK payload unchanged
@@ -1907,6 +1908,35 @@ declare 15.0 and Apple's copied `libclang_rt.builtins.a` declares 11.0 and 14.0.
 editor compile policy (8 commands), the CLI handoff replay (54/54) and the C provider replay (76/76) pass with the RC1 CLI binary, and the
 17 programs and libraries those CLI builds produced declare 15.0.
 
-**Not established here:** execution on macOS 15 (the host is 27.2; the hosted `macos-15` jobs own it). Zlib D3, the CLI contract replay,
+**Not established by this local replay:** execution on macOS 15 (the host is 27.2; see the hosted execution below). Zlib D3, the CLI contract replay,
 Host Tools and the VS Code replay were run with RC1 and not repeated with RC2. RC2 supersedes RC1 as the macOS candidate input; the final
 candidate needs the affected replays on its exact bytes.
+
+### Hosted macOS 15 execution (2026-11-26)
+
+[SDK integration run 45764867921](https://github.com/webos21/crt/actions/runs/45764867921), dispatched on the change branch at
+`8f266ec85910f92aece048341bde3555637d9cab` (merged by `6bf8dc83`), succeeds in all seven jobs. `sdk (macos-aarch64)` builds the SDK on macOS
+26.7.2 (25G332), Xcode 26.6, Apple clang 21.0.0, so it passes the new release gate; its log has no "built for newer macOS" warning.
+`macOS minimum (macos-15)` then takes those downloaded bytes to macOS **15.8.2 (24H232)**, image `macos-15-arm64`, Xcode 16.4, Apple
+clang 17.0.0:
+
+- `ci_sdk_release.py verify` reports `OK` with no problems for `v0.0.1-ci.45764867921`: manifest
+  `790016417510fa5fd3c1b4a58c94275dcdd906306dd54e296ed5d7299002d4e0` (1,658 bytes), content
+  `b0e10c66d3e3d659db9352c31ffa0210a3b12c14839371a360e5934ff8af2890`, archive
+  `6d7d1e63650aa130f9b71e27e4d679ecc683df881fd5d1fb2d14db9181212678`, policy
+  `26883af957cd40b84f3cb178d77ac000eb5052711a9eef9640fd76c15bc09f7a`.
+- `test_dev_sdk_external.py` passes: the relocated static and shared C++ HTTPS+inflate consumers run with the trust negatives while the
+  producer checkout and original SDK are hidden. They are compiled by Apple clang 17 against this SDK.
+- The pinned, signature-checked public CLI Preview `v0.1.0-preview.20261117.macos-arm64.1` installs the SDK, then builds (cold and
+  warm), tests and runs a C and a C++ project.
+
+Artifacts `15091847228` (SDK) and `15092004756` (receipts) expire after 14 days; the receipts and both job logs are also kept outside
+the checkouts in `crt-release-050-macos-arm64-20261126/min15/hosted-45764867921/` (`sdk-verification.json`
+`c74ce982c2dc9d306437cf915e4ced1552f54067cae9d4627a9101f0068e726e`, external `result.json`
+`22bdd070b8d6e668398ac5f97262e41420bf6665aaf90cc2bc1186dad9746f94`, CLI smoke
+`4b35c6259e426c70a7184ab3144feaae5fe6df492279496b57acb68c0fb05485`).
+
+This closes the deployment-target item: 15.0 is set, enforced and executed on a matching host. These are CI bytes, not the local RC2
+bytes or a release. Not run on macOS 15: an SDK build, core CTest, the C provider, editor compile policy, D3, CLI contract, Host
+Tools and VS Code replays. The final candidate still needs its affected replays on its exact bytes, and the release notes state macOS
+15.0 as the minimum.

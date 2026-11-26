@@ -118,10 +118,6 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   records the first exercised pair; the [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26) exercised the signed
   `v0.1.0-hosttools.20261116.linux-aarch64.1` (replay 26/26, zlib D3 25/25). The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
   exercises the signed `v0.1.0-hosttools.20261119.macos-aarch64.1` (replay 18/18, zlib D3 28/28) and checks the SDK notices.
-- [ ] **D7-03** (R05-04) The [macOS 15.0 deployment target](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26) is set and passes
-  the local replay; its execution on a hosted `macos-15` runner remains. Background: RC1 and the published Preview
-  declare `minos 27.2` because no target is set ([record](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)). Set the target
-  deliberately and qualify that version on a matching host.
 - [ ] **D6-03** (R05-04) Update the Dev SDK version, tag and asset naming
   rules for 0.5.0. Stage and verify candidates, use the offline signature and
   approval workflow, then verify the public downloads. Hand the exact
@@ -135,6 +131,8 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   supported host/mode scope in the release records and the
   [CLI compatibility ledger](https://github.com/webos21/crt-cli/blob/main/docs/compatibility.md#adoption-and-exercised-combinations).
   Review the combinations exercised with the exact release candidates.
+- [x] **D7-03** (R05-04) macOS 15.0 is the supported minimum: set, enforced by the release gate and
+  [executed on a hosted `macos-15` runner](docs/acceptance/release_qualification.md#hosted-macos-15-execution-2026-11-26).
 
 The published SDK must pass verification before the CLI adopts its exact pin.
 The VSIX release uses the approved CLI and SDK combinations.
