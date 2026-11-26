@@ -10,6 +10,19 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-26
+
+### Prepare the first Linux/x86_64 Dev SDK 0.5.0 candidate
+
+Build local `v0.5.0-rc.1` from clean CRT `dc092e49`. The extracted SDK
+passes independent verification, producer-hidden C/C++ runs and the C
+provider matrix. Compare 122 ELF files and static archives against the signed
+November 25 SDK. Public symbol, import and runtime metadata and 17 aliases
+match. Record 21 binary byte changes separately. The signed Host Tools
+package passes native verification with the retained CLI and the
+zlib source-port replay with CLI `8942a35` built against RC1.
+[Inputs, evidence and remaining release gates](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26).
+
 ## 2026-11-25
 
 ### Validate the installed SDK compile policy for the first editor workflow (P1-01)
