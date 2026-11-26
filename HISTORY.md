@@ -38,6 +38,12 @@ candidates passes 54/54 on macOS. The editor policy tool gained a macOS path,
 and test drivers and fixtures were corrected.
 [Inputs, evidence and remaining release gates](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26).
 
+### Prepare the first Windows/x64 Dev SDK 0.5.0 candidate
+
+Build local `v0.5.0-rc.1` from clean CRT `8689b4c8` (CTest 170/170, in-build C provider 4/4, independent verification OK). New `compare_dev_sdk_pe_abi.py` compares it with the signature-verified 20261110 Preview: 255 images and archives on both sides, nothing removed, only six static libc++ definitions added (the PAL-05 wide-path streams).
+The restricted-token Dev consumer, C 36/36 and C++17 22/22 (direct `std::ofstream(path)`) pass; the editor-policy replay and its fixture now run natively on Windows (cleared environment, 8 compile commands). The SDK alone builds CLI `2644716` (cold 22/0, warm 0/22), its local package passes 12/12 clean-token checks, and the signed Windows Host Tools (18/18) pass the six D3 suites and a real zlib port build.
+Signing, publication, pin adoption, R05-04 naming, Windows/arm64 and the VSIX stay open; the same candidates pass the [VS Code replay from the extension's source checkout](https://github.com/webos21/crt-vscode/blob/main/HISTORY.md#replay-the-editor-workflow-on-windowsx64-v1-01). [Evidence](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26).
+
 ### Prepare the first Linux/x86_64 Dev SDK 0.5.0 candidate
 
 Build local `v0.5.0-rc.1` from clean CRT `dc092e49`. The extracted SDK

@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Compare real Linux or macOS CLI compile commands (native) with an installed Dev SDK policy.
+"""Compare real native CLI compile commands (Linux, macOS or Windows) with an installed Dev SDK policy.
 
 Inputs are public release files independently verified against publisher pins.
 This producer replay does not implement or invoke a compilation database API.
+Linux runs every step in bubblewrap with the producer trees hidden and no network. Windows runs every step with a
+cleared environment, a private HOME and explicit LLVM tools; it does not hide the producer trees or deny the
+network (the producer-hidden Windows consumer is `test_dev_sdk_external.py`), and the result records that.
 """
 
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import re
@@ -18,8 +22,9 @@ from crt_sdk_install_metadata import content_sha256, inventory
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE_ARCH = {'x86_64': 'x86_64', 'amd64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'aarch64'}.get(platform.machine().lower())
-NATIVE_OS = {'Linux': 'linux', 'Darwin': 'macos'}.get(platform.system())
+NATIVE_OS = {'Linux': 'linux', 'Darwin': 'macos', 'Windows': 'windows'}.get(platform.system())
 TARGET = {'os': NATIVE_OS, 'arch': NATIVE_ARCH}
+SUFFIX = '.exe' if NATIVE_OS == 'windows' else ''
 MODES = {
     'app-static': ('executable', 'static', 'executable-static'),
     'app-shared': ('executable', 'shared', 'executable-shared'),
@@ -62,7 +67,7 @@ def compare_compile(argv, recipe, substitutions, expected_flags):
     extras = argv[len(prefix):-len(suffix)]
     require(all(flag in extras for flag in expected_flags), 'missing project language/include flags')
     require(not any(arg.startswith(('-Wl,', '-l', '-L', '--ld-path=')) or
-                    arg.endswith(('.a', '.so', '.dylib')) or arg in ('-shared', '-dynamiclib') for arg in argv),
+                    arg.endswith(('.a', '.so', '.dylib', '.lib', '.dll')) or arg in ('-shared', '-dynamiclib') for arg in argv),
             'link inputs leaked into the compile command')
 
 
@@ -83,7 +88,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('cli', 'archive', 'manifest', 'output'):
         parser.add_argument('--' + name, required=True, type=Path)
-    parser.add_argument('--llvm-bin', type=Path, help='Linux: directory holding clang, clang++, ld.lld and llvm-ar')
+    parser.add_argument('--llvm-bin', type=Path, help='Linux and Windows: directory holding clang, clang++, ld.lld and llvm-ar')
     for name in ('cc', 'cxx', 'linker', 'ar'):
         parser.add_argument('--' + name, type=Path, help='macOS: the explicit Xcode tool (the real file, not a /usr/bin shim)')
     parser.add_argument('--manifest-sha256', required=True)
@@ -92,12 +97,13 @@ def main():
     parser.add_argument('--hide-root', action='append', type=Path, default=[])
     args = parser.parse_args()
     require(NATIVE_OS is not None and NATIVE_ARCH is not None and
-            (NATIVE_OS == 'linux' or NATIVE_ARCH == 'aarch64'), 'native Linux x86_64/aarch64 or macOS/arm64 required')
-    macos = NATIVE_OS == 'macos'
+            (NATIVE_OS != 'macos' or NATIVE_ARCH == 'aarch64'),
+            'native Linux or Windows on x86_64/aarch64, or macOS/arm64 required')
+    macos, windows = NATIVE_OS == 'macos', NATIVE_OS == 'windows'
     if macos:
         require(all((args.cc, args.cxx, args.linker, args.ar)), 'macOS needs --cc, --cxx, --linker and --ar')
     else:
-        require(args.llvm_bin, 'Linux needs --llvm-bin')
+        require(args.llvm_bin, 'Linux and Windows need --llvm-bin')
     require(sha(args.cli) == args.cli_sha256, 'CLI executable SHA-256 mismatch')
     require(sha(args.manifest) == args.manifest_sha256, 'release manifest SHA-256 mismatch')
     manifest = read(args.manifest)
@@ -118,10 +124,10 @@ def main():
         require(isolator, 'sandbox-exec is required')
     else:
         llvm = args.llvm_bin.absolute()
-        compilers = {name: llvm / name for name in ('clang', 'clang++')}
-        linker, archiver = llvm / 'ld.lld', llvm / 'llvm-ar'
-        isolator = shutil.which('bwrap')
-        require(isolator, 'bubblewrap is required')
+        compilers = {name: llvm / (name + SUFFIX) for name in ('clang', 'clang++')}
+        linker, archiver = llvm / ('ld.lld' + SUFFIX), llvm / ('llvm-ar' + SUFFIX)
+        isolator = None if windows else shutil.which('bwrap')
+        require(windows or isolator, 'bubblewrap is required')
     tools = ['--cc', compilers['clang'], '--cxx', compilers['clang++'], '--linker', linker, '--ar', archiver]
     resource = {name: Path(subprocess.check_output([path, '-print-resource-dir'], text=True).strip())
                 for name, path in compilers.items()}
@@ -141,13 +147,22 @@ def main():
                       'producer_source_commit': manifest['source_commit'], 'archive_sha256': entry['sha256'],
                       'manifest_sha256': args.manifest_sha256, 'contract_sha256': args.contract_sha256},
               'cli_sha256': args.cli_sha256,
-              'llvm': subprocess.check_output([compilers['clang'], '--version'], text=True).splitlines()[0]}
+              'llvm': subprocess.check_output([compilers['clang'], '--version'], text=True).splitlines()[0],
+              'isolation': {'linux': 'bubblewrap: producer trees hidden, no network',
+                            'macos': 'Seatbelt: producer trees hidden, no network',
+                            'windows': 'cleared environment and private HOME only: producer trees are not hidden, '
+                                       'network is not denied'}[NATIVE_OS]}
     environment = {'HOME': str(home), 'PATH': '/nonexistent', 'TMPDIR': str(work / 'tmp'), 'LC_ALL': 'C'}
-    sandbox = [] if macos else [isolator, '--die-with-parent', '--unshare-user', '--unshare-net', '--ro-bind', '/', '/',
-               '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--bind', str(work), str(work),
-               '--clearenv', '--setenv', 'HOME', str(home), '--setenv', 'PATH', '/nonexistent',
-               '--setenv', 'LC_ALL', 'C.UTF-8', '--chdir', str(work)]
-    if macos:
+    if windows:
+        environment = {'HOME': str(home), 'USERPROFILE': str(home), 'PATH': '', 'LC_ALL': 'C',
+                       'SystemRoot': os.environ['SystemRoot'], 'TEMP': str(work / 'tmp'), 'TMP': str(work / 'tmp'),
+                       'CRT_WINDOWS_SDK_LIBPATH': os.environ['CRT_WINDOWS_SDK_LIBPATH']}
+    sandbox = [] if macos or windows else [
+        isolator, '--die-with-parent', '--unshare-user', '--unshare-net', '--ro-bind', '/', '/',
+        '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--bind', str(work), str(work),
+        '--clearenv', '--setenv', 'HOME', str(home), '--setenv', 'PATH', '/nonexistent',
+        '--setenv', 'LC_ALL', 'C.UTF-8', '--chdir', str(work)]
+    if macos or windows:
         (work / 'tmp').mkdir()
     else:
         for path in hidden:
@@ -162,6 +177,9 @@ def main():
             policy.write_text(seatbelt_profile(hidden, work, readonly_store), encoding='utf-8')
             proc = subprocess.run([isolator, '-f', str(policy), *argv], text=True, capture_output=True,
                                   timeout=600, env=environment, cwd=work)
+        elif windows:
+            proc = subprocess.run(argv, text=True, encoding='utf-8', errors='replace', capture_output=True,
+                                  timeout=300, env=environment, cwd=work, stdin=subprocess.DEVNULL)
         else:
             proc = subprocess.run([*sandbox, *readonly_store, '--', *argv],
                                   text=True, capture_output=True, timeout=90)
@@ -186,7 +204,7 @@ def main():
         return run(label, [args.cli.resolve(), '--json', *options], failure=failure, cli=True)
 
     try:
-        for index, path in enumerate(hidden):
+        for index, path in enumerate([] if windows else hidden):
             require((path / 'TODO.md').exists() or index, 'the checkout control file is missing')
             run(f'checkout-hidden-{index}', ['/bin/test' if macos else '/usr/bin/test', '!', '-e', path / 'TODO.md'])
         installed = invoke('install', 'sdk', 'install', '--archive', args.archive.resolve(),
@@ -196,7 +214,8 @@ def main():
         require(identity['content_sha256'] == expected_content, 'installed SDK content mismatch')
         sdk = store / identity['directory']
         require(content_sha256(inventory(sdk)) == expected_content, 'installed inventory mismatch')
-        readonly_store.extend([store] if macos else ['--ro-bind', str(store), str(store)])
+        if not windows:
+            readonly_store.extend([store] if macos else ['--ro-bind', str(store), str(store)])
         invoke('new', 'new', project)
         declaration_path = project / 'crt.json'
         lock_path = project / 'crt.lock'

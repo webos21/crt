@@ -92,7 +92,8 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   records the first candidate; the [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26) compares against the signed
   2026-11-10 Preview (no metadata change). The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
   compares Mach-O surfaces with its signed 2026-11-10 Preview (one `awk` executable export added, no library change).
-  Capture the Windows baselines and compare the final candidate for each shipped pair.
+  The [Windows/x64 RC1](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26) compares against the signed 20261110 Preview with the new PE tool
+  (additive only). Capture the Windows/arm64 baseline and compare the final candidate for each shipped pair.
 
 #### D5 - Dev SDK application workflow
 
@@ -104,6 +105,8 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   covers the first native archive and its associated distribution checks; the [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26)
   repeats the producer, editor-policy and hidden-producer consumer replays on aarch64. The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
   passes the hidden-producer C++ consumer, C provider 76/76 and editor policy; its images declare `minos 27.2`.
+  The [Windows/x64 RC1](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26) adds the
+  restricted-token consumer, C 36/36, C++17 22/22 and a cleared-environment editor-policy replay.
 
 #### D6 - Dev SDK and Host Tools distribution
 
@@ -118,6 +121,8 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   records the first exercised pair; the [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26) exercised the signed
   `v0.1.0-hosttools.20261116.linux-aarch64.1` (replay 26/26, zlib D3 25/25). The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
   exercises the signed `v0.1.0-hosttools.20261119.macos-aarch64.1` (replay 18/18, zlib D3 28/28) and checks the SDK notices.
+  The [Windows/x64 RC1](docs/acceptance/release_qualification.md#windowsx64-dev-sdk-050-rc1-2026-11-26) exercises the signed
+  `v0.1.0-hosttools.20261119.windows-x86_64.1` (replay 18/18, six port suites and a real zlib port build).
 - [ ] **D6-03** (R05-04) Update the Dev SDK version, tag and asset naming
   rules for 0.5.0. Stage and verify candidates, use the offline signature and
   approval workflow, then verify the public downloads. Hand the exact

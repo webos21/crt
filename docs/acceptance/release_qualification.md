@@ -1940,3 +1940,49 @@ This closes the deployment-target item: 15.0 is set, enforced and executed on a 
 bytes or a release. Not run on macOS 15: an SDK build, core CTest, the C provider, editor compile policy, D3, CLI contract, Host
 Tools and VS Code replays. The final candidate still needs its affected replays on its exact bytes, and the release notes state macOS
 15.0 as the minimum.
+
+## Windows/x64 Dev SDK 0.5.0 RC1 (2026-11-26)
+
+First native Windows/x64 producer candidate for R05-01/R05-02. Reviewed baselines are CRT `8689b4c8df3f7bac38c33454a9a31c49aa591b54`, CRT-CLI `26447162c9f692128e24b4c01e148e7bdf4c5481` and CRT VS Code `cadea6e`.
+The candidate compile, base and producer commit are the clean CRT revision (`producer_working_tree_dirty: false`). Host: Windows 11 Pro 10.0.26100 x64 (physical), LLVM 22.1.8, Windows SDK `10.0.28000.0`, Python 3.11.9.
+
+The candidate was built in a detached clean worktree from a fresh Release tree (`windows-host-ninja-debug`, `CMAKE_BUILD_TYPE=Release`, `CRT_RELEASE_TAG=v0.5.0-rc.1`, imported libc++ ON, Skia, FFmpeg, media curl and LVGL OFF), reusing
+only the verified-on-use download caches and pinned LLVM clones (29 minutes). Core CTest passes **170/170**; the installed C provider gate passes 4/4 (project DLL, static, shared, shared + project DLL). `ci_sdk_release.py verify` run independently with the full commit,
+version, Windows/x86_64 target and `--forbid C:\Users\Lee` reports `OK`. The local version is a build parameter, not a release name; R05-04 still owns it.
+
+| Artifact or identity | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Dev archive (`.zip`) | 73,155,157 | `f1e78b7d53548c6bc9f63bedcd5e0001c8461683ebf72d58670c18c4f51892aa` |
+| Dev manifest | 1,646 | `cbe5630d858e15d199754e1829ab81ecf0187d1718d0144508da7b0400f03cdd` |
+| Portable toolchain policy | 440,622 | `d7da0eabdfd8c6a38bd9d80baea6f64c8cec0e7d86c4f02613ada4c264e68a64` |
+| Extracted SDK content | | `07e901ab0439d324702b298b51ff2946a3c4557976a3fc2121af367d30332831` |
+| Windows `02-cxx` source archive | 9,131,600 | `e18df7dd3dc4262ee9edab394645bcbed3ee893ac01411fe1036e65c75a484ff` |
+| Windows `03-gfx-simple` source archive | 135,532 | `9ed94f7714151ab33052cd39dad8e418ac5b2d0352058dbe8d514fe305f2aeb6` |
+
+The extracted SDK declares notices and provenance for the same 11 dependencies as the Linux candidates; none is missing and `verify_dist.py --profile dev` passes.
+
+**ABI baseline (R05-01).** New [PE comparison tool](../../tools/compare_dev_sdk_pe_abi.py), the Windows counterpart of the ELF tool (it reuses its static-symbol capture and diff; named and ordinal exports, normal and delay-load imports as (DLL, symbol) pairs, COFF machine checks of every image, object and archive member; four parser tests).
+The baseline is the published `v0.0.1-preview.20261110.windows.1` SDK: its signed archive (SHA-256 `c71bb91e9f2c623d44e8154c7798a446b850781bdc1cf515eb9675dc04137be1`) verifies with the repository publisher key (RSA-PSS command of the [signing record](../security/publisher_signing.md)); content `5bb55372ec10e3cfa24c84de981a7130f56aeb57ef0d43d5da22a65036dec7ef`.
+It predates the current Dev profile (missing capability records, non-empty consumer compile options, no persona shims), so `--baseline-predates-profile` skips the **baseline** profile check only and records it; the candidate is verified. Result: **255 images and archives on both sides, none added or removed, no changed alias, 204 files with different bytes, and
+only two changed metadata entries**: `lib/libc++.a` and `lib/c++.lib` each **add** six static definitions (the wide-path `filebuf`/`ifstream`/`ofstream` `open` overloads, `__make_mdwstring` and the path-narrowing helpers of the PAL-05 fix). **No export, import, DLL dependency or static name is removed.** The candidate has 5,793 named PE exports and 20,714 import pairs over `kernel32`, `api-ms-win-core-synch-l1-2-0` and the SDK's own DLLs.
+This covers the recorded link surface; behavior and source compatibility need the consumer evidence below.
+
+**Consumers (R05-02, D5-01).** Producer-hidden Dev consumer (`test_dev_sdk_external.py`, restricted token, producer worktree hidden): relocated static and shared C++ HTTPS, decompression and certificate-failure cases pass. The first run was a harness input error (`CRT_WINDOWS_SDK_LIBPATH` unset) and is retained.
+With the CLI built from this SDK (below): the C static/shared driver passes **36/36** (the loaded `libc.dll` equals the installed SDK's; static-runtime executable depending on a shared library refused), and the external C++17 persona consumer passes **22/22**, now writing through `std::ofstream(path)` directly, so the 2026-11-23 finding is closed on these bytes.
+
+**Editor compile-policy replay.** `tools/test_sdk_editor_policy.py` now also runs natively on Windows: it installs the candidate from files outside the producer trees, then checks installation, `new`, refusal of an unsupported mode, `configure`, a cold build, the **8** C/C++ compile commands against the SDK contract with a header trace per command, both executable runs, a warm build with nothing executed, and the stale-contract lock refusal with an unchanged SDK inventory.
+The Windows run uses a cleared environment, a private HOME and explicit LLVM tools; unlike the Linux bubblewrap run it **does not hide the producer trees or deny the network** (the producer-hidden evidence is the consumer replay above), and the result file says so. The fixture was Linux-only: it required `CRT_TARGET_OS_LINUX` and a `char` `path::value_type` (first Windows attempt retained); it now requires exactly one native target and the platform's path persona. The Linux command, sandbox and checks are unchanged but were not rerun on Linux here.
+This ran before the macOS path reached `main`. The two paths are now one tool and the fixture requires exactly one of the three native targets; the merged
+tool passes the same Windows inputs again with 8 compile commands (`s14/editor-merged/result.json` SHA-256
+`19268855b9ae5d1a1c79f1e9a77e71f9e1b74243bb63cd23e894b48a58f846d6`). Neither the Linux nor the macOS path of the merged tool was run.
+
+**CLI built from the candidate.** The CLI contract replay builds CLI `2644716` from the extracted SDK alone under the restricted token (753 recorded processes): cold **22 executed / 0 reused**, warm **0 / 22**, 11 suites exit 0 (`native-test`, `archive-test`, `sdk-store-test`, `store-lock-test`, `editor-test` and six input-gated `port-*` suites, whose substantive run is the D3 line below), only `kernel32.dll` and `api-ms-win-core-synch-l1-2-0.dll` imported and an unchanged SDK inventory.
+Executable SHA-256 `95b6f99a355709d7d62f65575afdc59f106b4e782b5df235a5cded0008683d18` (48,401,408 bytes). `--version` is still the development `0.1.0-dev`; the 0.5.0 identity is the CLI queue's R05-04.
+A local package of it (`crt-cli-local-windows-x86_64-rc1.tar.xz`, 5,732,712 bytes, SHA-256 `6e2afe192cac3cbdcbfafc8dd4655467efd0bfb2174ec184f554b43d09fd639d`; 30 files, manifest `f98cd6b0c421a0691ab91188359f9769655eef6b994244a7bd06b757196120c0`) passes `package_cli_archive.py verify` and `replay_cli_package_windows.py` **12/12** from the extracted directory with the producer, CLI and SDK trees unreadable: `--version`, help, self Doctor before SDK setup, doctor with the pinned resources, and refusal of a wrong pin, a changed notice and an extra file.
+
+**Host Tools and D3 (D6-02).** The retained signed `v0.1.0-hosttools.20261119.windows-x86_64.1` (archive `bd65a2b8d1a5b7865110233bb47a1d13ea56724ad76593333cc349bb0980a210`, manifest `cd6cb75e91b8f9202cda82876de9898e19fb4aeb01be981ebcfde9eabb7b7e00`) is reused: its signature verifies with the same publisher key, `create_host_tools_release.py verify` passes and the native replay passes **18/18**.
+With that bundle, this CLI and the candidate, `replay_port_windows.py` passes all six port suites (recipe **147**, build **36**, store **97**, project **83**, command **33**, oracle **21** checks) and one real `port build zlib` from the pinned archive (`9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23`), published as `351c404ad9458e645ec54e877c7e3fd7c1927009452c99636f3f050588d8019e`, with 0 undeclared process images in 5,823 recorded and unchanged SDK, Host Tools and source inventories; the SDK-hidden help/version/doctor/imports checks pass. This adapter publishes once; the cached-reuse check of the Linux records was not repeated.
+
+**Not claimed.** Signature or publication of the candidate, so the CLI has not acquired a signed candidate; CLI pin adoption; version, tag and asset-name decision (R05-04; `tools/ci_sdk_publish.py` still derives tags from the fixed `0.0.1` base); Windows/arm64; a VSIX or clean installed editor profile (the source-checkout VS Code replay of this combination is the
+[extension record](https://github.com/webos21/crt-vscode/blob/main/HISTORY.md#replay-the-editor-workflow-on-windowsx64-v1-01)); Windows network or file-system denial beyond the restricted token; a hosted CI run of this candidate.
+On this host four `tools.test_ci_sdk_release` fixtures fail identically on the clean candidate commit (a symlink fixture is reported as escaping the extracted SDK); the real candidate verification above passes, and the fixtures were not changed. Evidence (outside the repositories): `C:\Users\Lee\s14\` (`c/out/r050`, `rel`, `abi`, `ext2`, `editor2`, `contract`, `cshared-out`, `cpp17-out`, `ht-replay`, `d3`, `pkg-replay`).

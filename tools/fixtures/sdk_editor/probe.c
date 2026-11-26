@@ -3,8 +3,8 @@
 
 #include "editor_probe.h"
 
-#if !defined(CRT_TARGET_OS_LINUX) && !defined(CRT_TARGET_OS_MACOS)
-#error The SDK must declare the native target.
+#if defined(CRT_TARGET_OS_LINUX) + defined(CRT_TARGET_OS_MACOS) + defined(CRT_TARGET_OS_WINDOWS) != 1
+#error The SDK must declare exactly one native target.
 #endif
 
 int editor_probe(void) {
