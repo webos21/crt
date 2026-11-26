@@ -143,6 +143,10 @@ def main():
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--readelf", default="readelf")
     parser.add_argument("--nm", default="llvm-nm")
+    parser.add_argument("--baseline-predates-profile", action="store_true",
+                        help="skip the current Dev profile verification of the BASELINE only, for a published SDK that "
+                             "predates the profile's newer capability records; the candidate is always verified and the "
+                             "skip is recorded in verification.json")
     args = parser.parse_args()
     readelf, nm = (shutil.which(tool) for tool in (args.readelf, args.nm))
     if not readelf or not nm:
@@ -153,9 +157,15 @@ def main():
         parser.error("use distinct SDKs and an evidence directory outside both")
     destination.mkdir(parents=True)
     snapshots = []
+    verification = {}
     for label, path in (("baseline", old), ("candidate", new)):
-        subprocess.run([sys.executable, TOOLS / "verify_dist.py", "--dist", path, "--stage", "02-cxx", "--profile", "dev"],
-                       check=True, timeout=120)
+        if label == "baseline" and args.baseline_predates_profile:
+            # The baseline keeps the verification it passed when it was published; only its ELF surface is compared.
+            verification[label] = {"profile_verified": False, "reason": "baseline predates the current Dev profile"}
+        else:
+            subprocess.run([sys.executable, TOOLS / "verify_dist.py", "--dist", path, "--stage", "02-cxx", "--profile", "dev"],
+                           check=True, timeout=120)
+            verification[label] = {"profile_verified": True}
         state = capture(path, readelf, nm)
         write(destination / (label + ".json"), state)
         snapshots.append(state)
@@ -164,6 +174,7 @@ def main():
         raise ValueError("compare SDKs for the same native target")
     delta = compare(earlier, current)
     write(destination / "comparison.json", delta)
+    write(destination / "verification.json", verification)
     print(f"ELF baseline: {len(earlier['binaries'])} -> {len(current['binaries'])} images and archives")
     print(", ".join(f"{key}={len(rows)}" for key, rows in delta.items()))
     print("See comparison.json for ABI review.")

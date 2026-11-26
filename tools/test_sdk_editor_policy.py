@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare real Linux/x86_64 CLI compile commands with an installed Dev SDK policy.
+"""Compare real Linux CLI compile commands (x86_64 or aarch64, native) with an installed Dev SDK policy.
 
 Inputs are public release files independently verified against publisher pins.
 This producer replay does not implement or invoke a compilation database API.
@@ -17,7 +17,8 @@ import subprocess
 from crt_sdk_install_metadata import content_sha256, inventory
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET = {'os': 'linux', 'arch': 'x86_64'}
+NATIVE_ARCH = {'x86_64': 'x86_64', 'amd64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'aarch64'}.get(platform.machine().lower())
+TARGET = {'os': 'linux', 'arch': NATIVE_ARCH}
 MODES = {
     'app-static': ('executable', 'static', 'executable-static'),
     'app-shared': ('executable', 'shared', 'executable-shared'),
@@ -73,7 +74,7 @@ def main():
     parser.add_argument('--cli-sha256', required=True, help='exact executable digest from the verified CLI archive')
     parser.add_argument('--hide-root', action='append', type=Path, default=[])
     args = parser.parse_args()
-    require(platform.system() == 'Linux' and platform.machine() == 'x86_64', 'native Linux/x86_64 required')
+    require(platform.system() == 'Linux' and NATIVE_ARCH is not None, 'native Linux x86_64 or aarch64 required')
     require(sha(args.cli) == args.cli_sha256, 'CLI executable SHA-256 mismatch')
     require(sha(args.manifest) == args.manifest_sha256, 'release manifest SHA-256 mismatch')
     manifest = read(args.manifest)
