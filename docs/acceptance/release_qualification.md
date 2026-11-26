@@ -1625,3 +1625,89 @@ Raw receipts, ELF audits and scripts are retained under the consumer's
 owns reproduction commands and its archive identities. Existing x86_64 Ubuntu
 24.04/glibc 2.39 and ARM64 Ubuntu 26.04/glibc 2.43 records retain their original
 identities. This is native compatibility evidence, not a new release or pin.
+
+## Linux/x86_64 Dev SDK 0.5.0 RC1 (2026-11-26)
+
+First native producer candidate for R05-01/R05-02. Baselines reviewed together
+are CRT `dc092e494fbdc682e8240fe201218eb24d730e8e`, CRT-CLI `8942a35`
+and CRT VS Code `4b77290`. The candidate compile, base and producer commit
+are the clean CRT revision above. Host Ubuntu 26.04.1, kernel
+`7.0.0-44-generic`, glibc 2.43 and LLVM 21.1.8.
+
+Configure a fresh tree with `linux-host-ninja-debug`, `CMAKE_BUILD_TYPE=Release`
+and `CRT_RELEASE_TAG=v0.5.0-rc.1`. Keep Skia, FFmpeg, media curl and LVGL OFF
+in the ordinary stage build. The Dev profile still supplies its declared curl
+and TLS dependencies. Run `crt-dev-release` and independently run
+`tools/ci_sdk_release.py verify` with the exact commit, version and Linux/x86_64
+target, retaining the extracted archive. The local version is a build parameter.
+The published release naming and version selection remain under R05-04.
+
+| Artifact or identity | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Dev archive | 7,698,020 | `9ad380bb112f83094a6a6d960bfec1d5f42e73cb22b68a5cceb6ff169992ccb0` |
+| Dev manifest | 1,585 | `7f8327fe562f1e3348a367be51ba4aa4f72587ef15c8562c56a1c9748ce159e5` |
+| Portable toolchain policy | 403,292 | `5377434eae0aecce763e656e36ebf63cb2a6239949fa96f69a6679ebcd582f7c` |
+| Extracted SDK content | | `b4372ad21cfad4bb555cc70fe525a33242143c2614a90e7fff37165c0429341d` |
+| Linux `02-cxx` source archive | 9,120,608 | `a5035da5f4c1876305aa42a289e37a5c8455659766a093ad3b9714d89863dccc` |
+| Linux `03-gfx-simple` source archive | 841,028 | `645d7cc18eae215cbef0d64717f94cc530a422f8a283b6cec3b612225686fdf5` |
+
+The baseline is the [signed November 25 Dev Preview](#sign-before-publishing-qualification-2026-11-25)
+from `c89ae1ac`, SDK content
+`d2edb36c64f8f7c6d67603763e07a83d0cb4c2858c99e7957e00dde2d54dc921`.
+Run [the ELF comparison tool](../../tools/compare_dev_sdk_elf_abi.py) with
+`--baseline`, `--candidate`, `--output` and `--nm` pointing at LLVM nm.
+It verifies both distributions, checks target ELF and static archive members,
+and records versioned exports, undefined dynamic symbols, native dependencies,
+SONAMEs, runtime paths, loader and archive/startup definition names. All 122
+files and 17 aliases agree in the captured metadata. Twenty-one files have
+different binary SHA-256 values. This comparison covers the recorded link
+surface and load metadata. API behavior and source compatibility require
+their own consumer evidence.
+
+The release collector's installed C provider gate passes. The separately
+extracted SDK passes all five C provider cases with the host loader and the
+[pinned 2.39 loader](sdk_split_acceptance.md#linux-pure-c-shared-provider-correction-2026-11-20).
+This is not a native Ubuntu 24.04 run. The producer-hidden Dev consumer passes
+static/shared C++ HTTPS, decompression and certificate failure cases. A separate
+CLI installation of the archived candidate passes eight C/C++ compile/header
+checks, both executable runs, warm reuse and lock refusal checks in
+`tools/test_sdk_editor_policy.py`. The SDK inventory remains stable. The first
+attempt supplied release files from inside the hidden producer tree and was
+refused before installation. The successful retry uses byte-identical files
+copied outside the checkout. The seed is the independently verified signed
+November 25 CLI Preview.
+
+The extracted SDK and published Host Tools pass distribution and inventory
+checks. The SDK declares notices and provenance for 11 dependencies. Its two
+source recipes pin the actual archive hashes, and both source archives record
+the clean candidate commit. The retained Host Tools archive
+`v0.1.0-hosttools.20261116.linux-x86_64.1` has SHA-256
+`811748496ed027339916609fceaee1a78c806d9dbdbb3aaa8b3a035095972155`
+and manifest SHA-256
+`9bd3ddf18176c5a875e137846edc4f7e62dc2f178e1f1afcc97533a4cc5f192a`.
+Its publisher signature and release record verify, and the native replay
+passes 26/26. The focused producer suites pass 98 tests with three host skips.
+
+The source-hidden port adapter builds CLI
+`8942a356704cd74f98db41d66421ed5f746de07d` against this extracted SDK and
+uses the verified Host Tools above. The rebuilt standalone executable
+(SHA-256 `465c83233c6e8f336a4b194bdf60f638839125eb0081b767c023772a09a61476`)
+passes SDK-free version/Doctor, all 82 `port-project-test` checks and 17/17
+adapter gates. Both zlib 1.3.1 variants build and pass their roundtrip tests
+from the pinned source archive. The real `port build` publishes
+`8bf8bf2fdc6c9b30bf950c7a90a839974573e78ce7e9a36e75c83d479f144b30` once,
+reuses it on the next invocation and verifies all 16 inventory entries. After priming
+with the rebuilt CLI, the warm build executes 0 and reuses 22 commands.
+The source, SDK and Host Tools inventories remain stable. This run selects
+the zlib project suite and explicit port commands. The remaining standalone
+CLI release tests belong to R05-03.
+
+The exact local evidence is in
+`/home/syszone/GitLocal/crt-release-050-linux-x64-20261126.JmDXrd`.
+The archived inputs, ABI snapshots/diff and replay results remain separate
+from the Git checkout. Signatures, publication and pin adoption for the
+new SDK, native Ubuntu 24.04 replay of the new combination, and the other four
+host artifact comparisons remain release work. The protected SDK workflow
+currently derives its tags from the fixed `0.0.1` Preview base in
+`tools/ci_sdk_publish.py`. R05-04 still needs the 0.5.0 public version/tag and
+asset naming decision before running that workflow for the new SDK.

@@ -88,6 +88,9 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   0.5.0 release candidate before changing symbol visibility. Compare to the
   previous published Dev SDK for that host and review ABI differences before
   approval. Reuse the [distribution auditor](tools/verify_dist.py).
+  [Linux/x86_64 RC1 comparison](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
+  records the first candidate. Capture the other host baselines and compare
+  the final candidate for each shipped pair.
 
 #### D5 - Dev SDK application workflow
 
@@ -95,6 +98,8 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   extracted SDK with the producer tree hidden. Verify public imports, startup,
   supported static/shared link and load modes, and declared host dependencies.
   See [SDK acceptance](docs/acceptance/sdk_split_acceptance.md).
+  [Linux/x86_64 RC1 producer replay](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
+  covers the first native archive and its associated distribution checks.
 
 #### D6 - Dev SDK and Host Tools distribution
 
@@ -105,6 +110,8 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   SDK and replay the existing zlib workflow where included. Reuse an existing
   signed Host Tools version if that exact combination passes. See
   [Host Tools acceptance](docs/acceptance/host_tools_acceptance.md).
+  [Linux/x86_64 RC1 and signed Host Tools replay](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
+  records the first exercised pair.
 - [ ] **D6-03** (R05-04) Update the Dev SDK version, tag and asset naming
   rules for 0.5.0. Stage and verify candidates, use the offline signature and
   approval workflow, then verify the public downloads. Hand the exact
@@ -146,6 +153,8 @@ is proposed.
   to a separately runnable all-library export/import and compatibility regression gate.
   Reuse the [distribution verification](tools/verify_dist.py) and
   [Web export audit](tools/crt_web_exports.py).
+  The [Linux Dev RC1 comparison](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
+  supplies the bounded ELF replay.
 
 ### Broader workflow and feature expansion
 
