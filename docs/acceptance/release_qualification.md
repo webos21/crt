@@ -1824,8 +1824,11 @@ is the link and load surface, not behavior. `comparison.json` SHA-256 `a5b6f31bb
 
 **Deployment target (support-scope item).** All 104 executables, dylibs and the startup object of the candidate declare
 `LC_BUILD_VERSION minos 27.2`; the published baseline does the same. No deployment target is set, so the build host's version is recorded.
-These artifacts therefore require macOS 27.2 or later. 0.5.0 must either advertise that limit or choose a lower deployment target before
-the final candidate and qualify it on such a host. Nothing older than 27.2 was exercised here.
+This is a declaration, not a measured minimum: nothing older than 27.2 was exercised with the candidate. An earlier
+[hosted CLI replay](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/ci_acceptance.md#hosted-qualification-on-the-pr-branch)
+on macOS 15.8.2 consumed the published Preview, which carries the same declaration, and passed 26/26 gates with static and shared zlib
+consumers, so the declared value alone does not show that older hosts fail. It does not establish a supported minimum either. 0.5.0 must set
+the deployment target deliberately before the final candidate and qualify that version on a matching host.
 
 **External consumers (D5-01, D6-01).** `tools/test_dev_sdk_external.py` passes under Seatbelt with the CRT checkout, the producer worktree and
 the original extracted SDK unreadable: relocated static and shared C++ HTTPS+inflate and the trust negatives, SDK payload unchanged

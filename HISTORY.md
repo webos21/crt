@@ -20,8 +20,8 @@ images and archives show one executable export added (`_memchr` in `awk`) and
 no library change; a new Mach-O comparison tool captures that surface. The
 hidden-producer consumer, C provider (76/76), editor compile policy, signed
 Host Tools (18/18), zlib D3 (28/28), a CLI built from the candidate and its
-local package pass. Both macOS builds require macOS 27.2 because no deployment
-target is set. The VS Code Extension Development Host replay with these
+local package pass. Both macOS builds declare `minos 27.2` because no deployment
+target is set; no older host was exercised with this candidate. The VS Code Extension Development Host replay with these
 candidates passes 54/54 on macOS. The editor policy tool gained a macOS path,
 and test drivers and fixtures were corrected.
 [Inputs, evidence and remaining release gates](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26).

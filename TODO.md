@@ -103,7 +103,7 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   [Linux/x86_64 RC1 producer replay](docs/acceptance/release_qualification.md#linuxx86_64-dev-sdk-050-rc1-2026-11-26)
   covers the first native archive and its associated distribution checks; the [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26)
   repeats the producer, editor-policy and hidden-producer consumer replays on aarch64. The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
-  passes the hidden-producer C++ consumer, C provider 76/76 and editor policy; its images require macOS 27.2.
+  passes the hidden-producer C++ consumer, C provider 76/76 and editor policy; its images declare `minos 27.2`.
 
 #### D6 - Dev SDK and Host Tools distribution
 
@@ -119,8 +119,8 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   `v0.1.0-hosttools.20261116.linux-aarch64.1` (replay 26/26, zlib D3 25/25). The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
   exercises the signed `v0.1.0-hosttools.20261119.macos-aarch64.1` (replay 18/18, zlib D3 28/28) and checks the SDK notices.
 - [ ] **D7-03** (R05-04) Decide the macOS deployment target before the final candidate. RC1 and the published Preview
-  declare `minos 27.2` ([record](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)). Advertise that limit, or set a lower target and qualify it
-  on such a host.
+  declare `minos 27.2` because no target is set ([record](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)). Set the target
+  deliberately and qualify that version on a matching host.
 - [ ] **D6-03** (R05-04) Update the Dev SDK version, tag and asset naming
   rules for 0.5.0. Stage and verify candidates, use the offline signature and
   approval workflow, then verify the public downloads. Hand the exact
