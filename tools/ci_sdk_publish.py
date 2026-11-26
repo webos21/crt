@@ -30,7 +30,9 @@ BASE_VERSION = '0.0.1'
 HOSTS = {
     'linux-x64': {'os': 'linux', 'arch': 'x86_64', 'runner': 'ubuntu-26.04', 'label': 'linux.x64'},
     'linux-arm64': {'os': 'linux', 'arch': 'aarch64', 'runner': 'ubuntu-26.04-arm', 'label': 'linux.arm64'},
-    'macos-arm64': {'os': 'macos', 'arch': 'aarch64', 'runner': 'macos-latest', 'label': 'macos.arm64'},
+    # The macOS SDK is built on the newest image and verified, as downloaded, on the oldest supported macOS
+    # (crt_macho.MACOS_DEPLOYMENT_TARGET).
+    'macos-arm64': {'os': 'macos', 'arch': 'aarch64', 'runner': 'macos-latest', 'verify_runner': 'macos-15', 'label': 'macos.arm64'},
     'windows-x64': {'os': 'windows', 'arch': 'x86_64', 'runner': 'windows-latest', 'label': 'windows.x64', 'msvc_arch': 'x64', 'llvm_asset': 'win64'},
     'windows-arm64': {'os': 'windows', 'arch': 'aarch64', 'runner': 'windows-11-arm', 'label': 'windows.arm64', 'msvc_arch': 'arm64',
                       'llvm_asset': 'woa64'},
@@ -201,7 +203,7 @@ def command_plan(args):
     render_notes(notes_text, tag=info['tag'], commit=commit, manifest={'sha256': '0' * 64, 'size': 0}, content_sha256='0' * 64,
                  assets=[{'name': 'x', 'size': 0, 'sha256': '0' * 64}], target=info['target'])
     smoke_cli = smoke_policy(args.host, info, load_pins_hosts(), notes_text)
-    outputs = {'tag': info['tag'], 'runner': info['runner'], 'os': info['os'], 'arch': info['arch'], 'smoke_host': '%s-%s' % (info['os'], info['arch']),
+    outputs = {'tag': info['tag'], 'runner': info['runner'], 'verify_runner': info.get('verify_runner', info['runner']), 'os': info['os'], 'arch': info['arch'], 'smoke_host': '%s-%s' % (info['os'], info['arch']),
                'preset': '%s-host-ninja-debug' % info['os'], 'msvc_arch': info.get('msvc_arch', ''), 'llvm_asset': info.get('llvm_asset', ''),
                'smoke_cli': smoke_cli}
     for key, value in outputs.items():

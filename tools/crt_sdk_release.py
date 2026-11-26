@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 
 import crt_dev_profile as dev
+import crt_macho
 import crt_sdk_install_metadata as install_metadata
 import prepare_release_assets as release
 from crt_web_stage import run
@@ -117,7 +118,65 @@ def toolchain_contract(extracted, archive, install):
         raise release.ReleaseError("toolchain contract names a machine path; it must be portable")
     check_linux_c_provider(extracted, contract, document)
     check_windows_c_provider(extracted, contract, document)
+    check_macos_deployment_target(extracted, document)
     return contract
+
+
+def version_tuple(text):
+    parts = [int(part) for part in text.split(".")]
+    return tuple(parts + [0] * (3 - len(parts)))
+
+
+def archive_minimum_versions(path, otool="otool"):
+    """The minimum macOS versions the arm64 members of a static archive declare."""
+    text = subprocess.check_output([otool, "-arch", "arm64", "-l", path], text=True, timeout=300)
+    found, command = set(), None
+    for line in text.splitlines():
+        words = line.split()
+        if len(words) == 2 and words[0] == "cmd":
+            command = words[1]
+        elif len(words) == 2 and ((command == "LC_BUILD_VERSION" and words[0] == "minos") or
+                                  (command == "LC_VERSION_MIN_MACOSX" and words[0] == "version")):
+            found.add(words[1])
+    return found
+
+
+def check_macos_deployment_target(extracted, document, archive_versions=archive_minimum_versions):
+    """The shipped macOS SDK must run on, and build for, the supported minimum.
+
+    Every linked image and object declares exactly the target, no static archive member declares a newer one, and
+    every exported compile and link command names it, so a consumer's program gets the same minimum whatever
+    macOS it is built on."""
+    if document.get("target", {}).get("os") != "macos":
+        return
+    target = crt_macho.MACOS_DEPLOYMENT_TARGET
+    flag = "-mmacos-version-min=" + target
+    problems = []
+    for group_name, group in (("commands", document.get("commands", {})), *document.get("modes", {}).items()):
+        for name, vector in group.items():
+            if name != "archive" and flag not in vector:
+                problems.append(f"policy {group_name}/{name} lacks {flag}")
+    images = 0
+    for path in sorted(extracted.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(extracted).as_posix()
+        if path.suffix == ".a":
+            newer = sorted(v for v in archive_versions(path) if version_tuple(v) > version_tuple(target))
+            if newer:
+                problems.append(f"{relative}: archive members require macOS {', '.join(newer)}")
+            continue
+        if crt_macho._read_macho(path) is None:
+            continue
+        images += 1
+        declared = crt_macho.minimum_os(path)
+        if declared != target:
+            problems.append(f"{relative}: declares minimum macOS {declared}, expected {target}")
+    if not images:
+        problems.append("no Mach-O image found")
+    if problems:
+        raise release.ReleaseError("macOS deployment target check failed: " + "; ".join(problems[:20])
+                                   + (f" (+{len(problems) - 20} more)" if len(problems) > 20 else ""))
 
 
 def check_linux_c_provider(extracted, contract, document):

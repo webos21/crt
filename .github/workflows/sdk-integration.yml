@@ -34,6 +34,8 @@ on:
       - 'tools/export_cli_toolchain.py'
       - 'tools/prepare_release_assets.py'
       - 'tools/verify_dist.py'
+      - 'tools/crt_macho.py'
+      - 'tools/test_macos_deployment_target.py'
       - 'tools/ci_sdk_release.py'
       - 'tools/test_ci_sdk_release.py'
       - 'tools/ci_sdk_cli_smoke.py'
@@ -73,7 +75,7 @@ jobs:
         run: |
           python -m unittest discover -s tools -p "test_ci_sdk_release.py"
           python -m unittest discover -s tools -p "test_ci_sdk_cli_smoke.py"
-          python -m unittest tools.test_sdk_workflows tools.test_crt_port_build_env
+          python -m unittest tools.test_sdk_workflows tools.test_crt_port_build_env tools.test_macos_deployment_target
 
   sdk:
     name: sdk (${{ matrix.host }})
@@ -356,5 +358,70 @@ jobs:
             ${{ runner.temp }}/sdk-verification.json
             ${{ runner.temp }}/sdk-external/result.json
             ${{ runner.temp }}/sdk-cli-smoke.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  macos-minimum:
+    # The macOS SDK above is built on the newest image. This job takes those bytes to the oldest supported macOS
+    # (crt_macho.MACOS_DEPLOYMENT_TARGET) and runs them there: asset verification, the source-hidden external consumer
+    # and the published CLI smoke. It builds no SDK.
+    name: macOS minimum (macos-15)
+    needs: sdk
+    if: ${{ !cancelled() }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Check out the producer commit under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Download the macOS SDK assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sdk-macos-aarch64-${{ github.sha }}
+          path: ${{ runner.temp }}/downloaded
+
+      - name: Verify the downloaded bytes on the oldest supported macOS
+        shell: bash
+        run: |
+          sw_vers
+          clang --version
+          manifest=$(find "$RUNNER_TEMP/downloaded" -name release-manifest-dev-macos-aarch64.json)
+          test -n "$manifest"
+          mkdir "$RUNNER_TEMP/assets"
+          cp "$(dirname "$manifest")"/* "$RUNNER_TEMP/assets/"
+          python tools/ci_sdk_release.py verify --assets "$RUNNER_TEMP/assets" --os macos --arch aarch64 \
+            --version "$SDK_CI_TAG" --commit "$GITHUB_SHA" \
+            --keep-extracted "$RUNNER_TEMP/sdk-extracted" --json "$RUNNER_TEMP/sdk-verification.json"
+
+      - name: External consumer of the extracted archive with the producer checkout hidden
+        shell: bash
+        run: >
+          python tools/test_dev_sdk_external.py
+          --sdk-root "$RUNNER_TEMP/sdk-extracted/dev"
+          --output "$RUNNER_TEMP/sdk-external"
+
+      - name: Consumer smoke by the pinned, signature-checked published CLI Preview
+        shell: bash
+        run: >
+          python tools/ci_sdk_cli_smoke.py --assets "$RUNNER_TEMP/assets" --host macos-aarch64
+          --work "$RUNNER_TEMP/sdk-cli-smoke" --json "$RUNNER_TEMP/sdk-cli-smoke.json"
+
+      - name: Keep the receipts and any logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sdk-macos-minimum-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/sdk-verification.json
+            ${{ runner.temp }}/sdk-external/*
+            ${{ runner.temp }}/sdk-cli-smoke.json
+            ${{ runner.temp }}/sdk-cli-smoke/logs/*
           if-no-files-found: warn
           retention-days: 14

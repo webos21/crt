@@ -64,6 +64,7 @@ jobs:
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       runner: ${{ steps.plan.outputs.runner }}
+      verify_runner: ${{ steps.plan.outputs.verify_runner }}
       os: ${{ steps.plan.outputs.os }}
       arch: ${{ steps.plan.outputs.arch }}
       preset: ${{ steps.plan.outputs.preset }}
@@ -168,7 +169,7 @@ jobs:
   verify:
     name: verify (${{ inputs.host }})
     needs: [plan, package]
-    runs-on: ${{ needs.plan.outputs.runner }}
+    runs-on: ${{ needs.plan.outputs.verify_runner }}
     timeout-minutes: 60
     steps:
       - name: Check out the driver at the requested commit
