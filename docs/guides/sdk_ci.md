@@ -121,21 +121,40 @@ the actual mbedTLS `conftest` link and execution. See the
 [macOS replay](../acceptance/release_qualification.md#macos-dyld-investigation-and-local-replay-2026-11-17)
 for the native versus hosted scope.
 
-## Releasing a Dev SDK Preview (`sdk-release.yml`)
+## Releasing a Dev SDK (`sdk-release.yml`)
 
 CI success is necessary, never publication authority. The workflow is manual (`workflow_dispatch`) and `dry_run` defaults to **true**.
 
 | Job | Runner | Permission | Does |
 | --- | --- | --- | --- |
-| `plan` | ubuntu-24.04 | read (+ `actions: read`) | refuses the request unless: host/date/serial are valid, the commit is a full SHA that is an ancestor of `origin/main` and has a successful `CI` run (a docs-only commit, which `ci.yml` does not run for, is covered by its nearest ancestor with a run, provided every commit passed over changed only `*.md` or `docs/**`; `porting/**` counts as code here), no release of that tag exists, the notes are a `docs/releases/*.md` file at that commit that renders, and the `release` environment **has required reviewers** (GitHub auto-creates a missing environment with no approval, so its absence must fail, not pass) |
-| `package` | the host's runner | read | builds exactly that commit with `crt-dev-release` under the real tag; `ci_sdk_release.py verify` on the result; uploads the six assets |
+| `plan` | ubuntu-24.04 | read (+ `actions: read`) | refuses the request unless: host/serial are valid, the commit is a full SHA that is an ancestor of `origin/main` and has a successful `CI` run (a docs-only commit, which `ci.yml` does not run for, is covered by its nearest ancestor with a run, provided every commit passed over changed only `*.md` or `docs/**`; `porting/**` counts as code here), no release of that tag exists, the notes are a `docs/releases/*.md` file at that commit that renders, and the `release` environment **has required reviewers** (GitHub auto-creates a missing environment with no approval, so its absence must fail, not pass) |
+| `package` | the host's runner | read | builds exactly that commit with `crt-dev-release` as version `v0.5.0` (`CRT_RELEASE_TAG`), downloaded from the real tag (`CRT_RELEASE_DOWNLOAD_TAG`); `ci_sdk_release.py verify` on the result; uploads the six assets |
 | `verify` | a fresh runner of the same host | read | downloads the artifact, re-verifies it, and runs the S2 consumer smoke (pinned CLI Preview installs the packaged archive; C and C++ build/test/run, cold and warm); a first host without a published CLI records S2 as `NOT RUN` and runs the source-hidden native consumer of the extracted archive instead |
 | `stage` | ubuntu-24.04 | **write**, behind environment `release` | waits for a reviewer, re-verifies the bytes, creates a draft and verifies the download. Never publishes or overwrites |
 
 A dry run goes through the same approval and creates a verified draft without
 a finalization receipt; delete that draft by hand. Dispatch from `main`
-and choose a tested commit containing the staging driver. The tag is
-`v0.0.1-preview.<date>.<os>.<arch>.<serial>` (for example `v0.0.1-preview.20261118.linux.x64.1`; a prerelease identifier cannot contain `_`).
+and choose a tested commit containing the staging driver.
+
+**Version and tag.** From 0.5.0 the owner publishes per-host releases that are
+not prereleases (decided 2026-11-26). Every host builds the same SDK version,
+`v0.5.0` (`SDK_VERSION` in `tools/ci_sdk_publish.py`); it is in the SDK
+`VERSION`, manifest and asset names, which already carry OS and architecture.
+Each host has its own git tag and GitHub release, the version plus the host
+label: `v0.5.0+linux.x64`, `v0.5.0+macos.arm64`. Serial 1 has no suffix; a
+replacement build of the same version and host takes `.2` and up, because a
+published release is never overwritten. `+` appears only in the tag and in the
+stage-source download URL, never in an asset name. Releases are created with
+`--latest=false`; consumers pin a tag. The earlier
+`v0.0.1-preview.<date>.<os>.<arch>.<serial>` Previews stay as published.
+
+**Not yet exercised:** no 0.5.0 release has been staged. GitHub's handling of
+`+` in this tag (draft creation, `gh release download`, the tag ref check, the
+public download URL and the CLI's redirect policy) is verified only against
+fakes. The first `dry_run` covers the draft steps; the public URL needs the
+first published release. The [Preview trust policy](../design/dev_preview_trust.md)
+does not yet state the policy of these releases.
+
 Host keys: `linux-x64`, `linux-arm64`, `macos-arm64`, `windows-x64` and
 `windows-arm64`. All five have pins and run the normal consumer smoke.
 

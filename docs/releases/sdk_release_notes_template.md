@@ -1,10 +1,10 @@
-# Development SDK Preview {{TAG}} ({{TARGET}})
+# CRT Development SDK {{TAG}} ({{TARGET}})
 
 <!-- Reviewed template for `sdk-release.yml`. Copy to `docs/releases/release_notes_<tag>.md` in a reviewed commit that
      precedes the release commit, replace the prose, and keep the tokens: the build fills them after the bytes exist. Any other
      double-brace token, or a missing MANIFEST_SHA256/CONTENT_SHA256/ASSET_TABLE token, stops the workflow. -->
 
-State in two or three sentences what changed relative to the previous Preview and why a consumer would adopt it. This is a stage
+State in two or three sentences what changed relative to the previous release and why a consumer would adopt it. This is a stage
 `02-cxx`, profile `dev` SDK; use the external LLVM tools named in the compatibility notes.
 
 [Producer source](https://github.com/webos21/crt/commit/{{COMMIT}}) · [Release page](https://github.com/webos21/crt/releases/tag/{{TAG}}).
@@ -27,4 +27,4 @@ The manifest and checksum file for this target also have detached signatures.
 ## Qualification and migration
 
 Link the acceptance record for this build (`sdk-integration` run, `sdk-release` run IDs) and state exactly what was and was not
-exercised on this target. Existing SDKs and project locks are not migrated; install alongside and select the new identity explicitly.
+exercised on this target. State the supported host minimum (macOS releases: macOS 15.0). Existing SDKs and project locks are not migrated; install alongside and select the new identity explicitly.

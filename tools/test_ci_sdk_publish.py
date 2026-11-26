@@ -80,18 +80,22 @@ FAKE_GH = textwrap.dedent('''\
 class NamingTest(unittest.TestCase):
     def test_the_tag_is_a_valid_release_version_that_names_the_host(self):
         import ci_sdk_release
+        tags = set()
         for host in publish.HOSTS:
-            info = publish.names(host, '20261118', '3')
-            self.assertRegex(info['tag'], ci_sdk_release.VERSION_RE.pattern)
-            self.assertTrue(info['tag'].startswith('v0.0.1-preview.20261118.'))
-            self.assertTrue(info['tag'].endswith('.3'))
-        self.assertEqual(publish.names('linux-x64', '20261118', '1')['tag'], 'v0.0.1-preview.20261118.linux.x64.1')
+            info = publish.names(host, '3')
+            self.assertRegex(info['version'], '^%s$' % ci_sdk_release.VERSION_RE.pattern)
+            self.assertEqual('v0.5.0', info['version'], 'every host builds the same version')
+            self.assertEqual('v0.5.0+%s.3' % publish.HOSTS[host]['label'], info['tag'])
+            self.assertRegex(info['tag'], publish.release_signing.TAG.pattern)
+            tags.add(info['tag'])
+        self.assertEqual(len(publish.HOSTS), len(tags), 'each host has its own tag')
+        self.assertEqual('v0.5.0+linux.x64', publish.names('linux-x64')['tag'])
+        self.assertNotIn('preview', publish.names('linux-x64')['title'].lower())
 
     def test_bad_requests_are_refused(self):
-        for host, date, serial in (('linux-riscv', '20261118', '1'), ('linux-x64', '2026-11-18', '1'), ('linux-x64', '20261399', '1'),
-                                   ('linux-x64', '20261118', '0'), ('linux-x64', '20261118', '01'), ('linux-x64', '20261118', '1.2')):
-            with self.assertRaises(publish.ReleaseError, msg=(host, date, serial)):
-                publish.names(host, date, serial)
+        for host, serial in (('linux-riscv', '1'), ('linux-x64', '0'), ('linux-x64', '01'), ('linux-x64', '1.2'), ('linux-x64', '')):
+            with self.assertRaises(publish.ReleaseError, msg=(host, serial)):
+                publish.names(host, serial)
 
     def test_only_a_full_lowercase_commit_is_accepted(self):
         publish.require_commit('a' * 40)
@@ -101,6 +105,7 @@ class NamingTest(unittest.TestCase):
 
     def test_notes_must_be_a_reviewed_path_under_docs_releases(self):
         publish.require_notes_path('docs/releases/release_notes_v0.0.1-preview.20261118.linux.x64.1.md')
+        publish.require_notes_path('docs/releases/release_notes_v0.5.0+linux.x64.md')
         for bad in ('../x.md', '/etc/passwd', 'docs/releases/../../x.md', 'docs/releases/a b.md', 'notes.md', 'docs/releases/x.txt', ''):
             with self.assertRaises(publish.ReleaseError, msg=bad):
                 publish.require_notes_path(bad)
@@ -198,7 +203,7 @@ class CiGateTest(unittest.TestCase):
 
 
 class NotesTest(unittest.TestCase):
-    ARGS = dict(tag='v0.0.1-preview.20261118.linux.x64.1', commit=COMMIT, manifest={'sha256': 'c' * 64, 'size': 1716}, content_sha256='d' * 64,
+    ARGS = dict(tag='v0.5.0+linux.x64', commit=COMMIT, manifest={'sha256': 'c' * 64, 'size': 1716}, content_sha256='d' * 64,
                 assets=[{'name': 'b.tar.xz', 'size': 2, 'sha256': 'e' * 64}, {'name': 'a.json', 'size': 1, 'sha256': 'f' * 64}], target='linux/x86_64')
     TEMPLATE = 'Release {{TAG}} from {{COMMIT}} for {{TARGET}}\npin {{MANIFEST_SHA256}} {{MANIFEST_BYTES}}\ncontent {{CONTENT_SHA256}}\n{{ASSET_TABLE}}\n'
 
@@ -226,8 +231,8 @@ class PublishFlowTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
-        self.info = publish.names('linux-x64', '20261118', '1')
-        self.fixture = Fixture(root / 'fx', 'linux', 'x86_64', version=self.info['tag'], commit=COMMIT).build()
+        self.info = publish.names('linux-x64')
+        self.fixture = Fixture(root / 'fx', 'linux', 'x86_64', version=self.info['version'], commit=COMMIT).build()
         self.release = self.fixture.assets
         self.state = root / 'state'
         (self.state / 'releases').mkdir(parents=True)
@@ -248,7 +253,7 @@ class PublishFlowTest(unittest.TestCase):
 
     def args(self, **extra):
         self.counter += 1
-        values = dict(host='linux-x64', commit=COMMIT, date='20261118', serial='1', repo='o/r', release_dir=str(self.release), notes_file='docs/releases/x.md',
+        values = dict(host='linux-x64', commit=COMMIT, serial='1', repo='o/r', release_dir=str(self.release), notes_file='docs/releases/x.md',
                       work=str(Path(self.tmp.name) / ('work%d' % self.counter)), dry_run=False, receipt=self.receipt)
         values.update(extra)
         return type('Args', (), values)()
@@ -267,7 +272,7 @@ class PublishFlowTest(unittest.TestCase):
         self.run_stage(dry_run=True)
         meta = self.meta()
         self.assertTrue(meta['draft'])
-        self.assertTrue(meta['prerelease'])
+        self.assertFalse(meta['prerelease'], 'a 0.5.0 SDK release is not a prerelease')
         self.assertEqual(meta['target'], COMMIT)
         self.assertEqual(sorted(meta['assets']), sorted(p.name for p in self.release.iterdir()))
         notes = (self.state / 'releases' / self.info['tag'] / 'NOTES.md').read_text()
@@ -278,7 +283,7 @@ class PublishFlowTest(unittest.TestCase):
     def test_real_staging_leaves_a_draft_and_pins_its_entire_inventory(self):
         self.run_stage()
         self.assertTrue(self.meta()['draft'])
-        self.assertTrue(self.meta()['prerelease'])
+        self.assertFalse(self.meta()['prerelease'])
         receipt = json.loads(self.receipt.read_text())
         self.assertEqual(set(receipt['draft']['assets']), set(self.meta()['assets']))
         self.assertEqual(receipt['run_id'], 123)

@@ -14,12 +14,15 @@ import re
 import subprocess
 import sys
 import tempfile
+from urllib.parse import quote
 
 PUBLISHER_SPKI = "59218576956e493476bc36f7385d8e01a03ff9b92946a531b013ad3937d43fa2"
 RECEIPT_NAME = "release-stage.json"
 STAGE_WORKFLOWS = {"crt": "sdk-release.yml", "crt-cli": "release.yml"}
 SHA = re.compile(r"[0-9a-f]{64}")
 ASSET = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+# A tag may also carry "+" (v0.5.0+linux.x64). Asset names may not: GitHub rewrites special characters in them.
+TAG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]*")
 PSS = ("-sigopt", "rsa_padding_mode:pss", "-sigopt", "rsa_pss_saltlen:32",
        "-sigopt", "rsa_mgf1_md:sha256")
 
@@ -71,8 +74,8 @@ def require_approval(repo):
 
 def release_view(repo, release_id):
     release = api(repo, f"releases/{release_id}")
-    require(release["id"] == release_id and release["prerelease"] is True,
-            "release identity changed or is not a prerelease")
+    require(release["id"] == release_id and isinstance(release["prerelease"], bool),
+            "release identity changed")
     assets = {}
     pages = api(repo, f"releases/{release_id}/assets?per_page=100", "--paginate", "--slurp")
     for page in pages:
@@ -89,13 +92,13 @@ def release_view(repo, release_id):
             }
     return {
         "tag": release["tag_name"], "commit": release["target_commitish"],
-        "draft": release["draft"], "assets": assets, "title": release["name"],
+        "draft": release["draft"], "prerelease": release["prerelease"], "assets": assets, "title": release["name"],
         "body_sha256": hashlib.sha256((release["body"] or "").encode("utf-8")).hexdigest(),
     }
 
 
 def verify_tag(repo, tag, commit, *, required=False):
-    refs = api(repo, f"git/matching-refs/tags/{tag}")
+    refs = api(repo, f"git/matching-refs/tags/{quote(tag, safe='')}")
     exact = [item["object"] for item in refs if item["ref"] == f"refs/tags/{tag}"]
     require((not exact and not required)
             or (len(exact) == 1 and exact[0]["type"] == "commit" and exact[0]["sha"] == commit),
@@ -117,7 +120,8 @@ def download_release(repo, tag, directory, assets):
     verify_files(directory, assets)
 
 
-def stage(repo, tag, commit, title, notes, files, work, receipt, dry_run):
+def stage(repo, tag, commit, title, notes, files, work, receipt, dry_run, prerelease=True):
+    require(TAG.fullmatch(tag), "unsafe release tag")
     require_approval(repo)
     verify_tag(repo, tag, commit)
     expected = {path.name: {"size": path.stat().st_size, "sha256": sha256(path)} for path in files}
@@ -128,13 +132,13 @@ def stage(repo, tag, commit, title, notes, files, work, receipt, dry_run):
         run_id = number(os.environ.get("GITHUB_RUN_ID"), "stage run ID")
         attempt = number(os.environ.get("GITHUB_RUN_ATTEMPT"), "stage run attempt")
         require(not receipt.exists(), "stage receipt already exists")
-    gh("release", "create", tag, "--repo", repo, "--draft", "--prerelease", "--latest=false",
+    gh("release", "create", tag, "--repo", repo, "--draft", *(["--prerelease"] if prerelease else []), "--latest=false",
        "--target", commit, "--title", title, "--notes-file", notes, *files)
     res = json.loads(gh("release", "view", tag, "--repo", repo, "--json", "databaseId"))
     release_id = number(res["databaseId"], "release ID")
     view = release_view(repo, release_id)
     require(view["tag"] == tag and view["commit"] == commit and view["draft"] is True
-            and view["title"] == title, "staged draft does not match the request")
+            and view["title"] == title and view["prerelease"] is prerelease, "staged draft does not match the request")
     require({name: {k: item[k] for k in ("size", "sha256")} for name, item in view["assets"].items()} == expected,
             "draft inventory differs from the verified files")
     download_release(repo, tag, work, expected)
@@ -192,7 +196,7 @@ def finalize(repo, run_id, key, work):
     release_id = number(receipt["release_id"], "release ID")
     staged = receipt["draft"]
     tag, commit = staged["tag"], staged["commit"]
-    require(ASSET.fullmatch(tag) and re.fullmatch(r"[0-9a-f]{40}", commit)
+    require(TAG.fullmatch(tag) and re.fullmatch(r"[0-9a-f]{40}", commit)
             and staged["draft"] is True, "invalid staged release identity")
     payload = staged["assets"]
     require(payload and all(ASSET.fullmatch(name) and not name.endswith(".sig") for name in payload),
@@ -218,7 +222,8 @@ def finalize(repo, run_id, key, work):
         download_release(repo, tag, work / "published", view["assets"])
     except (SigningError, OSError, ValueError, KeyError, TypeError) as error:
         raise SigningError(f"{tag}: publication occurred but post-publication verification failed: {error}") from error
-    print(f"{tag}: signed non-latest prerelease published and downloaded assets reverified")
+    kind = "prerelease" if view["prerelease"] else "release"
+    print(f"{tag}: signed non-latest {kind} published and downloaded assets reverified")
 
 
 def main():
