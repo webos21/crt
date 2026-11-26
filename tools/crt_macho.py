@@ -13,6 +13,9 @@ import struct
 from pathlib import Path
 
 
+# The oldest macOS the SDK supports. CMakeLists.txt, tools/crt-cc and tools/crt-c++ carry the same value.
+MACOS_DEPLOYMENT_TARGET = "15.0"
+
 MH_MAGIC = 0xfeedface
 MH_MAGIC_64 = 0xfeedfacf
 MH_EXECUTE = 0x2
@@ -22,6 +25,8 @@ MH_EXECUTE = 0x2
 _LC_REQ_DYLD = 0x80000000
 LC_LOAD_DYLIB = 0xc
 LC_ID_DYLIB = 0xd
+LC_VERSION_MIN_MACOSX = 0x24
+LC_BUILD_VERSION = 0x32
 LC_LOAD_WEAK_DYLIB = 0x18 | _LC_REQ_DYLD
 LC_RPATH = 0x1c | _LC_REQ_DYLD
 LC_REEXPORT_DYLIB = 0x1f | _LC_REQ_DYLD
@@ -90,6 +95,24 @@ def _load_commands(data: bytes):
             raise ValueError("Mach-O load command has an invalid size")
         yield cmd, cmdsize, offset
         offset += cmdsize
+
+
+def minimum_os(path: Path) -> str | None:
+    """Return the oldest macOS this image declares ("15.0", "15.2.1"), or None for a file that declares none
+    or is not a Mach-O file."""
+    data = _read_macho(path)
+    if data is None:
+        return None
+    for cmd, cmdsize, offset in _load_commands(data):
+        if cmd == LC_BUILD_VERSION and cmdsize >= 16:
+            packed = struct.unpack_from("<I", data, offset + 12)[0]
+        elif cmd == LC_VERSION_MIN_MACOSX and cmdsize >= 12:
+            packed = struct.unpack_from("<I", data, offset + 8)[0]
+        else:
+            continue
+        major, minor, patch = packed >> 16, (packed >> 8) & 0xff, packed & 0xff
+        return f"{major}.{minor}" + (f".{patch}" if patch else "")
+    return None
 
 
 def dependencies(path: Path) -> list[str]:

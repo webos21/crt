@@ -1885,3 +1885,28 @@ Release-tool tests: 13 modules, 164 tests pass with 3 host skips. Raw evidence s
 CLI, acquisition of a signed candidate, adoption of its pin, any HTTPS fetch/redirect or real `sdk acquire` replay with the candidate CLI,
 CLI D6-01 failure/cancel recovery cases, the deployment-target decision, a 0.5.0 version/tag/asset-name decision (R05-04), the VSIX
 packaging and clean-profile install replay, and the Windows candidates.
+
+
+## macOS 15.0 deployment target (2026-11-26)
+
+The owner chose the oldest macOS used by the project's GitHub CI as the supported minimum: `macos-15` (CRT-CLI CI and release, CRT Host
+Tools). CRT's own CI and SDK workflows build on `macos-latest` (macOS 26.7.2 on this date). CMake now defaults
+`CMAKE_OSX_DEPLOYMENT_TARGET` to 15.0 and `crt-cc`/`crt-c++` pass `-mmacos-version-min=15.0` ahead of the caller's arguments, so ports,
+libc++, the exported CLI policy and user programs carry it. The release collector refuses a macOS SDK unless every image declares exactly
+15.0, no archive member declares a newer version and every exported compile and link command names the flag
+(`tools/test_macos_deployment_target.py`). The `sdk-release` verify job and a new `macos-minimum` job of SDK integration run the
+downloaded assets on `macos-15`.
+
+**Local producer replay** on macOS 27.2.1 / Xcode 27.2 from clean `ce1808cdbd3083b72935ca99041a84332fd87957` as `v0.5.0-rc.2`
+(manifest `d87793e72f3e534a44dcafb1134ed9fd640849598e8912287c533d3cdea40903`, content
+`9e35624a8bf568e86b076efba23d60b63057d1ac0fd6561972e4e4131ffb507b`, archive `268cb416bdb7a5af94456c026b683b43a729b1c87d37f1a9eda58868f8029988`,
+policy `09947bb265313efc3d5fbd932a5185081bc1f74c559bb2bc28175d3dd9fbd751`): CTest 146/146, no "built for newer macOS" linker warning, the new gate
+and the independent asset verifier pass. A separate `otool` pass finds 104 images at 15.0; the arm64 members of the 13 CRT-built archives
+declare 15.0 and Apple's copied `libclang_rt.builtins.a` declares 11.0 and 14.0. Against RC1 the Mach-O comparison changes **only
+`minimum_os` on the 104 images**: no export, import, dependency, install name or alias differs. The source-hidden external consumer, the
+editor compile policy (8 commands), the CLI handoff replay (54/54) and the C provider replay (76/76) pass with the RC1 CLI binary, and the
+17 programs and libraries those CLI builds produced declare 15.0.
+
+**Not established here:** execution on macOS 15 (the host is 27.2; the hosted `macos-15` jobs own it). Zlib D3, the CLI contract replay,
+Host Tools and the VS Code replay were run with RC1 and not repeated with RC2. RC2 supersedes RC1 as the macOS candidate input; the final
+candidate needs the affected replays on its exact bytes.

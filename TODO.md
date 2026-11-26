@@ -118,7 +118,8 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   records the first exercised pair; the [Linux/aarch64 RC1](docs/acceptance/release_qualification.md#linuxaarch64-dev-sdk-050-rc1-2026-11-26) exercised the signed
   `v0.1.0-hosttools.20261116.linux-aarch64.1` (replay 26/26, zlib D3 25/25). The [macOS/arm64 RC1](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)
   exercises the signed `v0.1.0-hosttools.20261119.macos-aarch64.1` (replay 18/18, zlib D3 28/28) and checks the SDK notices.
-- [ ] **D7-03** (R05-04) Decide the macOS deployment target before the final candidate. RC1 and the published Preview
+- [ ] **D7-03** (R05-04) The [macOS 15.0 deployment target](docs/acceptance/release_qualification.md#macos-150-deployment-target-2026-11-26) is set and passes
+  the local replay; its execution on a hosted `macos-15` runner remains. Background: RC1 and the published Preview
   declare `minos 27.2` because no target is set ([record](docs/acceptance/release_qualification.md#macosarm64-dev-sdk-050-rc1-2026-11-26)). Set the target
   deliberately and qualify that version on a matching host.
 - [ ] **D6-03** (R05-04) Update the Dev SDK version, tag and asset naming

@@ -483,6 +483,9 @@ common_flags="-ffreestanding -fno-builtin -Xclang -fwchar-type=int -ffunction-se
 case "$target_os" in
   macos)
     common_flags="$common_flags -DCRT_TARGET_OS_MACOS=1"
+    # The oldest macOS the SDK supports (see CMakeLists.txt). It precedes the caller's arguments, so an
+    # explicit -mmacos-version-min of the caller still wins. The SDK policy export records it for CLI builds.
+    common_flags="$common_flags -mmacos-version-min=${CRT_MACOS_DEPLOYMENT_TARGET:-15.0}"
     if [ "$is_asm_source" -eq 0 ]; then
       common_flags="$common_flags -U__APPLE__"
       if [ "$want_real_apple_sdk" -eq 1 ]; then

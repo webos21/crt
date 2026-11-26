@@ -183,6 +183,29 @@ class ReleaseHostRulesTest(unittest.TestCase):
         self.assertIn('--keep-extracted "$RUNNER_TEMP/sdk-extracted"', verify)
 
 
+class MacosMinimumRulesTest(unittest.TestCase):
+    """The macOS SDK is run on the oldest supported macOS, both in integration and before a release is staged."""
+
+    def test_the_minimum_runner_is_the_deployment_target(self):
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import ci_sdk_publish
+        import crt_macho
+        runner = 'macos-' + crt_macho.MACOS_DEPLOYMENT_TARGET.split('.')[0]
+        self.assertEqual(runner, ci_sdk_publish.HOSTS['macos-arm64']['verify_runner'])
+        integration = (ROOT / '.github/workflows/sdk-integration.yml').read_text(encoding='utf-8')
+        job = integration[integration.index('\n  macos-minimum:\n'):]
+        self.assertIn('    runs-on: ' + runner + '\n', job)
+        self.assertIn('needs: sdk', job)
+        for script in ('tools/ci_sdk_release.py verify', 'tools/test_dev_sdk_external.py', 'tools/ci_sdk_cli_smoke.py'):
+            self.assertIn(script, job)
+        self.assertNotIn('cmake --build', job)
+
+    def test_the_release_verify_job_uses_the_verify_runner(self):
+        verify = ReleaseWorkflowRulesTest().jobs()['verify']
+        self.assertIn('    runs-on: ${{ needs.plan.outputs.verify_runner }}\n', verify)
+
+
 class MatrixHostRulesTest(unittest.TestCase):
     """Every matrix host either has a pinned published CLI Preview for the consumer smoke or says, explicitly, that it has none."""
     TEXT = (ROOT / '.github/workflows/sdk-integration.yml').read_text(encoding='utf-8')

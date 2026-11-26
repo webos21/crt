@@ -150,6 +150,13 @@ elseif(CRT_TARGET_OS STREQUAL "linux")
   set(CMAKE_CXX_FLAGS "-stdlib=libc++" CACHE STRING "C++ flags" FORCE)
 endif()
 
+# The oldest macOS the SDK supports. Without it clang records the build host's version in every image
+# (LC_BUILD_VERSION minos). tools/crt-cc, tools/crt-c++ and tools/crt_macho.py carry the same value
+# (tools/test_macos_deployment_target.py keeps them equal). An explicit -DCMAKE_OSX_DEPLOYMENT_TARGET wins.
+if(CRT_TARGET_OS STREQUAL "macos" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Oldest supported macOS" FORCE)
+endif()
+
 project(crt LANGUAGES C CXX ASM)
 
 if(CRT_TARGET_OS STREQUAL "linux")
