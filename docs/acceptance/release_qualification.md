@@ -1986,3 +1986,130 @@ With that bundle, this CLI and the candidate, `replay_port_windows.py` passes al
 **Not claimed.** Signature or publication of the candidate, so the CLI has not acquired a signed candidate; CLI pin adoption; version, tag and asset-name decision (R05-04; `tools/ci_sdk_publish.py` still derives tags from the fixed `0.0.1` base); Windows/arm64; a VSIX or clean installed editor profile (the source-checkout VS Code replay of this combination is the
 [extension record](https://github.com/webos21/crt-vscode/blob/main/HISTORY.md#replay-the-editor-workflow-on-windowsx64-v1-01)); Windows network or file-system denial beyond the restricted token; a hosted CI run of this candidate.
 On this host four `tools.test_ci_sdk_release` fixtures fail identically on the clean candidate commit (a symlink fixture is reported as escaping the extracted SDK); the real candidate verification above passes, and the fixtures were not changed. Evidence (outside the repositories): `C:\Users\Lee\s14\` (`c/out/r050`, `rel`, `abi`, `ext2`, `editor2`, `contract`, `cshared-out`, `cpp17-out`, `ht-replay`, `d3`, `pkg-replay`).
+
+## Windows/arm64 Dev SDK 0.5.0 RC1 (2026-11-26)
+
+Native Release build on physical Windows arm64 (build 26300), LLVM 22.1.8 and
+Windows SDK `10.0.28000.0`. Producer, base and compile provenance name clean
+CRT `e1e379c00d298661c2a0feaaf9149053fe23afc4`. Reviewed CLI and VS Code
+baselines are `4e4c96c80d0ab42d243ba7255857d56a65a32f14` and
+`b272297471f700dec4a54ca990dbf363c43ad756`. The build uses
+`windows-host-ninja-debug` with `CMAKE_BUILD_TYPE=Release`, imported libc++
+enabled and Skia, FFmpeg, media curl and LVGL disabled.
+
+| Artifact or identity | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Dev archive (`.zip`) | 69,781,079 | `768cfa084577192f22c8e260c5e014a5991fa5f09e96c2d09b6d937a6892c2f8` |
+| Dev manifest | 1,651 | `927109dc1f44bb006e7a428d50cdc78879428274816ccbb554967319a07fa8d8` |
+| Portable toolchain policy | 441,429 | `9b1919de43b987306186584758dcfe29480945e4f3bc23984d1743f429fdee67` |
+| Extracted SDK content | | `7ed3afd11b02de097e524d1bb7ac60dacfca2d160bf30ccb90894707ac208b31` |
+| Windows `02-cxx` source archive | 9,125,896 | `13e3a8857a372b7a5830c7c95389e947cdfc141a8905cf1224b235de56797b37` |
+| Windows `03-gfx-simple` source archive | 135,884 | `4893ba911824c4ff6ff3b4d927fb6c9bba71c4fed2504900c29af77ed93d002b` |
+
+`ci_sdk_release.py verify` passes on the local assets with the full producer
+commit, `v0.5.0-rc.1`, Windows/aarch64 and `--forbid C:/Users/cmjo`. The ZIP
+contains 2,738 files, 181 directories and zero symlinks. `verify_dist.py`
+passes for the dev profile. Core CTest reports 169 passed, zero failed and
+one skipped (`fork_heap_snapshot`). The focused run passes 10/10, including
+concurrent file I/O, UTF-8 paths, owned-spawn groups, spawned environment and
+stdio. The installed C provider gate passes 4/4 (project DLL, static,
+shared, shared with project DLL). The in-tree installed C++ consumer passes
+static and shared decompression, pinned HTTPS and wrong, missing and malformed
+CA cases.
+
+The first collector run stopped at portable policy export because its
+environment lacked `CRT_WINDOWS_SDK_LIBPATH`. Calling the collector directly
+with the ARM64 import-library directory reused the completed build. The first
+retry through Ninja stopped on existing stage source outputs. Both failed
+logs are retained alongside the successful collector and verifier logs.
+
+**Signed inputs.** The `v0.0.1-preview.20261118.windows.arm64.1` publisher
+signature verifies against the repository key (Dev archive SHA-256
+`d3cd0a6491ffc1ef1c540092c41fcc06f2178de985f73889177ccbc8f7a070b6`, content
+`3b251637845621ba28d6ba1d9c2f6a5e097f6b328f57054f7e7cb5c5eb52621f`).
+The retained public Host Tools `v0.1.0-hosttools.20261119.windows-aarch64.1`
+reverify with RSA-PSS and `create_host_tools_release.py verify` (archive
+`c74ad50ea5f5008d515e1aac3581fa5d73d7acba276ae990a9d3df84599706ee`, manifest
+`6f7225ac4ffafe4c5651bf025b47d7b58df0939c520dbf40b7a029aa2892b6f1`). The
+native replay passes 18/18 in a relocated path with spaces and Hangul.
+
+**PE ABI (R05-01).** `compare_dev_sdk_pe_abi.py` compares 255 images and
+archives on each side. `--baseline-predates-profile` applies only to the
+published Preview. 204 binaries differ in bytes. The only link metadata
+changes are six added static definitions in both `lib/libc++.a` and
+`lib/c++.lib`, for the PAL-05 wide-path streams and conversion helpers. No
+image, alias, export, import, DLL dependency or static definition is removed.
+The PE comparator's four parser tests pass.
+
+**External Dev consumer (R05-02).** `test_dev_sdk_external.py` relocates the
+candidate, verifies the installed profile and checks access under a restricted
+token. The probe confirms that the original SDK and both producer and CLI
+checkouts are unreadable. Static and shared HTTPS, decompression and trust
+negatives pass from the relocated copy.
+
+**CLI self-build and consumer inputs (R05-03).** The Windows replay builds
+CLI `4e4c96c` from the extracted candidate using the restricted token and a
+cleared `PATH`. The `build-visibility` probe passes. The self-built CLI
+executes 22 commands on the cold replay and reuses all 22 on the warm replay.
+All 11 aggregate suites exit 0 (739 recorded processes and an unchanged SDK
+inventory). With the SDK, provider and source hidden, help, version and
+bootstrap Doctor pass. The port suites that require external inputs get
+their substantive coverage in the D3 run with those inputs supplied.
+The standalone image has 48,407,552 bytes and SHA-256
+`b982f755d2796cd99d1f35c3fea207eb485bee07c72b69159de2f6b63789f629`.
+`llvm-readobj` reports `IMAGE_FILE_MACHINE_ARM64` and direct imports of
+`KERNEL32.dll` and `api-ms-win-core-synch-l1-2-0.dll` only.
+`test_sdk_editor_policy.py` checks eight native C/C++ compile commands, runs
+the resulting programs and verifies warm reuse and stale-contract refusal.
+The C++17 persona replay passes 22/22, including `std::ofstream(path)` and
+the wide path persona in a relocated path with spaces, Hangul and U+1F600.
+The C static/shared provider replay passes 36/36. The shared executable uses
+the installed `libc.dll` and fails when it is absent. The mixed static/shared
+dependency is rejected with its lock and outputs untouched. The first C
+invocation used the wrong fixture directory. Its log is retained beside the
+successful replay with the two tracked fixtures under `libc/tests`.
+
+The standalone package `crt-cli-windows-aarch64-local-rc1.tar.xz` has 30
+files (5,501,152 bytes, SHA-256
+`af7f761c6fb5beabe9d6de0a00e9a13c8d5ae6b667603eb0c714ae65c022b4b1`, manifest
+`138f4a950d4492ced4cdd4c2842e4852b570ba327de040682422380b9201a25d`). Archive
+verification and the 12/12 restricted-token package replay pass with the
+producer, CLI and SDK roots unreadable. The extracted CLI runs `--version`
+(`0.1.0-dev`), help and self Doctor before SDK setup. Pinned-resource Doctor
+reports the compiled-in candidate and `explicit-at-fetch` trust. A wrong
+manifest pin, changed notice and extra file each fail closed. An earlier
+CA-bearing test package passes 11/12 because it declares `explicit-ca-file`.
+It is retained separately as the D1 resource fixture.
+
+**Host Tools consumer (D1).** The candidate CLI and the same signed Host
+Tools pass all 32 cases in `replay_host_environment_windows.py`. The cases
+cover the large-output relay, normal and timeout cleanup, environment
+selection and refusal of wrong pins, tampered tools and unauthenticated or
+tampered resources. The harness uses a private workspace, a restricted token
+and process records. Its CA-bearing fixture is separate from the standalone
+release-shaped package.
+
+**Host Tools and zlib (R05-02, D6-02).** With the same CLI and signed Host
+Tools, `replay_port_windows.py` passes six input-complete suites (recipe 147,
+build 36, store 97, project 83, command 33 and oracle 21 checks) and the
+actual `port build zlib` from the pinned 1.3.1 source archive (SHA-256
+`9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23`). The
+build publishes a new local port item, key
+`0376315ed5cd9bbd4355b170520cbc793172ec27ed7540bb829c01415ccbffa9`, and both
+static and shared zlib round trips pass. There are zero undeclared images in
+5,288 recorded processes. The SDK and Host Tools inventories are unchanged.
+The separate SDK-hidden visibility, help, version, Doctor and imports checks
+also pass. This pass exercises a fresh port build.
+
+**Native editor.** On VS Code 1.147.0 ARM64 the `b272297` source extension
+passes Restricted Mode and the trusted C++ task workflow with the RC1 CLI
+and SDK. Build, Test, Run and Doctor exit 0. The four exported compile
+commands and clangd's definition in the installed libc++ are checked.
+[Extension host and scope](https://github.com/webos21/crt-vscode/blob/main/HISTORY.md#run-the-native-windowsarm64-extension-development-host).
+
+`v0.5.0-rc.1` is a local, unsigned candidate. The public release version,
+signing, publication and adoption of consumer pins remain under R05-04.
+Windows isolation uses restricted tokens, private directories and job-object
+process accounting. It checks access to the listed inputs and records child
+images. Network and general executable launch denial are outside its scope.
+Local evidence is under `C:\Users\cmjo\DevWorks\crt\out\rc050-arm64\`.
