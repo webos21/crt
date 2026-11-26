@@ -1711,3 +1711,73 @@ host artifact comparisons remain release work. The protected SDK workflow
 currently derives its tags from the fixed `0.0.1` Preview base in
 `tools/ci_sdk_publish.py`. R05-04 still needs the 0.5.0 public version/tag and
 asset naming decision before running that workflow for the new SDK.
+
+
+## Linux/aarch64 Dev SDK 0.5.0 RC1 (2026-11-26)
+
+First native Linux/aarch64 producer candidate for R05-01/R05-02. Reviewed baselines are CRT
+`dc092e494fbdc682e8240fe201218eb24d730e8e`, CRT-CLI `8942a356704cd74f98db41d66421ed5f746de07d` and CRT VS Code
+`4b77290`. The candidate compile, base and producer commit are the clean CRT revision above (`producer_working_tree_dirty: false`;
+both source archives record it and `working_tree_dirty: false`). Host: Ubuntu 26.04.1 aarch64 QEMU guest, glibc 2.43, LLVM 21.1.8.
+The only later product-tree change on `main` is the ELF comparison tool of the x86_64 record, so the commit stays valid.
+
+The candidate was built from a fresh Release tree with `CRT_RELEASE_TAG=v0.5.0-rc.1` and Skia, FFmpeg, media curl and LVGL OFF,
+as for the Linux/x86_64 RC1 above. `ci_sdk_release.py verify` run independently with the full commit, the version and the
+Linux/aarch64 target reports `ok` with no problems. The local version is a build parameter, not a release name; R05-04 still owns it.
+
+| Artifact or identity | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Dev archive | 7,638,112 | `3602059866a055df42008c0bbdac95cf3d82bcb878bbe08b04c203e6c34d3855` |
+| Dev manifest | 1,590 | `af2fb9d91b7ceec4746f784f4bae187a930ae275f302d0b819a13fd985d1ac94` |
+| Portable toolchain policy | 403,329 | `876d2639533164252951079db0c492e7582148ebf5abe7ed023398aadc813464` |
+| Extracted SDK content | | `bb013e9de95fece2a4b36a7994c25fb40338d99a1f1417e55fcd2cb974a01ae9` |
+| Linux `02-cxx` source archive | 9,120,608 | `a5035da5f4c1876305aa42a289e37a5c8455659766a093ad3b9714d89863dccc` |
+| Linux `03-gfx-simple` source archive | 841,028 | `645d7cc18eae215cbef0d64717f94cc530a422f8a283b6cec3b612225686fdf5` |
+
+The two Linux source archives are byte-identical to the x86_64 RC1's. The SDK has 2,796 entries (2,601 files, 17 symlinks) and declares
+notices and provenance for the same 11 dependencies.
+
+**ABI baseline.** The only published Linux/aarch64 Dev SDK is the signed Preview `v0.0.1-preview.20261110.linux.arm64.2` (content
+`cd2ab657615c0fa52a1804f301a57dfa21b1067e3e5ed5a9f9a07d86ae050cc6`, source `e6a94ab`); its archive signature verifies with the published
+publisher key (fingerprint `59218576...3fa2`, RSA-PSS command of the [signing record](../security/publisher_signing.md)). That Preview predates
+the Dev profile's current capability records, so `verify_dist.py --profile dev` rejects it. [The ELF comparison tool](../../tools/compare_dev_sdk_elf_abi.py)
+therefore gained `--baseline-predates-profile`, which skips the profile check of the **baseline only**, still verifies the candidate and records the
+skip in `verification.json`. The comparison covers **122 images and archives on each side: none added or removed, no changed metadata (versioned
+exports, undefined dynamic symbols, dependencies, SONAMEs, runtime paths, loader), no changed alias, and 103 files with different bytes**. The byte
+differences are the code changes since 2026-11-10 (the baseline is much older than the x86_64 one, which had 21). This is the recorded link and load
+surface; behavior and source compatibility need the consumer evidence below.
+
+**Producer.** Core CTest passes **147/147**; the imported-libc++ runtime, string-ABI, iostream and EH-register smokes pass static and shared, and the shared-loader
+regression (calloc, TLS descriptors, thread-local destruction, a cross-DSO exception) passes. The release collector's installed C provider gate passes all five
+cases with the host 2.43 loader; **no pinned glibc 2.39 aarch64 loader was run** (the x86_64 record has one). The producer-hidden Dev consumer passes static and
+shared C++ HTTPS, decompression and certificate-failure cases. The release-tool tests pass (109, three host skips).
+
+**Editor policy replay.** `tools/test_sdk_editor_policy.py`, now native on aarch64 as well as x86_64 (its target was fixed to x86_64), installs the archived candidate with
+the signed November 16 CLI Preview and passes **8 native C/C++ compile commands** over 20 steps: installation, `new`, refusal of an unsupported mode, `configure`, a cold build,
+header checks for application (static and shared), archive and module outputs in C and C++, both executable runs, a warm build and the stale-contract lock refusal. The
+installed SDK inventory is unchanged. The seed CLI (SHA-256 `4b5109e99568fcf0f80d62f5e496748aec471d31dd8ea7ddc5e6235e339b3d3b`) is the verified, signed Preview.
+
+**Host Tools.** The published Preview `v0.1.0-hosttools.20261116.linux-aarch64.1` is reused (archive SHA-256
+`7a4c26ada280e8a877d05d3adab9c76df2b6dc181a96cac42e8977030019c75f`, manifest SHA-256 `2ea7bff56cd784dd2dd5b6d5a858b59bf41a1585bf3f77e8b09e79c8b4b7b3c2`); its signature verifies with
+the same key and its native replay passes **26/26**, including the CLI's fail-closed controls (changed alias, extra or missing file, escaping symlink, lost execute bit, wrong pin, unknown
+promotion, wrong host). The CLI built from this SDK (below) runs the zlib D3 path against the extracted candidate and this bundle: pinned zlib 1.3.1 archive (SHA-256
+`9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23`), all five port suites, one actual `port` publication reused by the next call and re-verified, no host shell or
+interpreter executed, and unchanged SDK, Host Tools and source inventories: **25/25**.
+
+**CLI built from the candidate.** The CRT-CLI contract replay builds the current CLI from the extracted SDK alone: cold **22 executed / 0 reused**, warm **0 / 22**, no
+`DT_NEEDED`, interpreter `/lib/ld-linux-aarch64.so.1`, 36 distinct executed paths, SDK inventory unchanged, SDK-hidden help/version/doctor. All 11 suites exit 0: native **981**,
+archive **221**, SDK-store **114**, port-recipe **147**, store-lock **9**, editor **389** checks and the port build, store, oracle, command and project suites. Executable SHA-256
+`85e1cfdb1bdf8813ef9337b24dfcbad677c4ba762650c7e0ead3bab50c1c3e46` (24,540,544 bytes). A local package of it (`crt-cli-local-linux-aarch64-20261126.tar.xz`, 5,321,280 bytes,
+SHA-256 `10ab8c8e9be6112db9e95aad09c11546bafe48c04e545948c9bf1d9938a6c994`; 30 files, manifest SHA-256 `ec56f0804e7121528cc6e0cc6a079126507b12a090f62e66be52cd8e0eb93416`)
+extracts to a single executable with its notices, reports `0.1.0-dev`, runs doctor with no SDK, build or store root visible and imports no dynamic library. With that CLI, the HTTPS fetch
+and signature replay passes **32** cases (including every negative publisher-key and signature case), and the packaged executable's explicit `sdk acquire` of the signed baseline Preview takes four downloads, each through one verified redirect to `release-assets.githubusercontent.com`, and reports `publisher_authentication: signature_verified`.
+The CLI version is still the development value; its 0.5.0 identity is the CLI queue's R05-04.
+
+**VS Code extension.** Node 24.22.3 for arm64 (SHA-256 matches the published `SHASUMS256.txt`) is kept in the evidence tree, not installed. The extension's typecheck and its three
+protocol tests pass. **Linux/aarch64 is not one of the extension's advertised editor hosts** (Linux/x86_64, macOS/arm64, Windows/x64); no VS Code, clangd or VSIX replay was run here, so
+nothing is claimed for an arm64 editor.
+
+Raw evidence stays outside the checkout in `crt-release-050-linux-arm64-20261126/` and `crt/out/release-050-linux-arm64-20261126/` (build, tests, `abi-repo-tool/`, `editor-policy/`, `d3/`,
+`cli-contract/`, the package and the signed inputs); nothing there is a release input. **Not done:** signatures and publication of the new SDK, adoption of its exact pin by the CLI,
+a native Ubuntu 24.04 (glibc 2.39) aarch64 run, a 0.5.0 version/tag/asset-name decision (R05-04; `tools/ci_sdk_publish.py` still derives tags from the fixed `0.0.1` Preview base), and the
+macOS and Windows candidates.
