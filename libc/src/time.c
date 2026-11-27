@@ -201,11 +201,11 @@ int gettimeofday(struct timeval* tv, void* tz) {
      * mach_absolute_time() below for CLOCK_MONOTONIC. Avoid the legacy
      * mach_host_self()/host_get_clock_service()/clock_get_time() path: it
      * does a real Mach IPC round trip through a per-thread cached reply
-     * port (mig_get_reply_port()), and that cache does not survive our
-     * raw-syscall fork() cleanly across a nested fork (our fork() does not
-     * run libSystem's internal post-fork port-cache reset), which can send
-     * mig_get_reply_port()/_kernelrpc_mach_port_construct() into unbounded
-     * mutual recursion and crash with a stack overflow. */
+     * port (mig_get_reply_port()), and that cache does not survive a
+     * raw-syscall fork (_Fork(); fork() itself now goes through libSystem,
+     * see libc/src/arch/macos/common/fork.c): without libSystem's post-fork
+     * port-cache reset, mig_get_reply_port()/_kernelrpc_mach_port_construct()
+     * can recurse into each other and crash with a stack overflow. */
     uint64_t nsec = clock_gettime_nsec_np(CRT_DARWIN_CLOCK_REALTIME);
 
     tv->tv_sec = (time_t)(nsec / UINT64_C(1000000000));

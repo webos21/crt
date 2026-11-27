@@ -688,6 +688,13 @@ set_tests_properties(fork_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_test: ok"
 )
 
+add_crt_test(fork_thread_test fork_thread_test.c)
+set_tests_properties(fork_thread_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fork_thread_test: ok"
+  # A broken post-fork runtime can also deadlock the child instead of crashing it.
+  TIMEOUT 60
+)
+
 add_crt_test(fork_signal_test fork_signal_test.c)
 set_tests_properties(fork_signal_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_signal_test: ok"

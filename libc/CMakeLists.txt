@@ -194,6 +194,7 @@ if(CRT_TARGET_OS STREQUAL "macos")
   set(CRT_SIGNAL_BACKEND_FILE
     src/arch/macos/common/signal_backend.c
     src/arch/macos/common/macho_symbol.c
+    src/arch/macos/common/fork.c
   )
   # Real ioctl(TIOCGETA/TIOCSETA{,W,F}/...)-backed tcgetattr()/tcsetattr()/
   # tcdrain()/tcflow()/tcflush()/tcsendbreak() -- see that file's own
