@@ -1241,14 +1241,9 @@ if(CRT_TARGET_OS STREQUAL "windows")
   # "-Wl,--exclude-symbols=read"/"-Wl,--exclude-symbols=__crt_sys_read"
   # (one flag per symbol -- clang's "-Wl,A,B" splits on commas into
   # separate linker arguments, so a single comma-joined flag silently
-  # mis-parses the second name as a file path) -- the same
-  # --exclude-symbols mechanism porting/recipes/mbedtls.json's own
-  # Windows LDFLAGS now applies to mbedtls's real DLLs (there via a
-  # checked-in linker response file,
-  # porting/recipes/mbedtls-windows-exclude-symbols.rsp, one flag per
-  # real libc symbol -- the two flags spelled out directly here are
-  # this fixture's own much smaller, hand-picked equivalent, not the
-  # full list). This makes the permanent regression here about the fix
+  # mis-parses the second name as a file path). This keeps the fixture's
+  # own deliberate read() out of its export table. That makes the
+  # permanent regression here about the exclusion
   # mechanism itself continuing to hold (lld-link's --exclude-symbols
   # keeps the fixture DLL from re-exporting read() at all, so the
   # middle DLL's own read() call can only resolve to the real libc
@@ -1320,6 +1315,24 @@ if(CRT_TARGET_OS STREQUAL "windows")
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR}/bin"
   )
   set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_dll_symbol_priority_test_runs)
+
+  # A DLL built by tools/crt-cc -shared imports the CRT from libc.dll and must
+  # not re-export it. The middle DLL above calls libc and is linked with no
+  # --exclude-symbols flag of its own, so it must export its one function and
+  # nothing else. This replaces the hand-maintained per-symbol exclude list
+  # mbedtls.json carried while -shared links still embedded libc.a.
+  find_program(CRT_LLVM_READOBJ NAMES llvm-readobj REQUIRED)
+  add_test(NAME windows_dll_crt_export_test_runs
+    COMMAND "${CMAKE_COMMAND}"
+      "-DREADOBJ=${CRT_LLVM_READOBJ}"
+      "-DDLL=${CRT_DLL_PRIORITY_TEST_MIDDLE_DLL}"
+      "-DEXPECTED=windows_dll_symbol_priority_check"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/check_dll_exports.cmake"
+  )
+  set_tests_properties(windows_dll_crt_export_test_runs PROPERTIES
+    PASS_REGULAR_EXPRESSION "check_dll_exports: ok"
+  )
+  set_property(GLOBAL APPEND PROPERTY CRT_REGISTERED_TESTS windows_dll_crt_export_test_runs)
 
   # Permanent regression test for libc/src/arch/windows/common/
   # dwarf_unwind_safety_net.c -- see that file's own top comment (TODO.md

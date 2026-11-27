@@ -38,11 +38,6 @@ policy, acceptance evidence and provenance stay in `docs/` and import manifests.
   host tools only. The wrapper details live in [`tools/crt-cc`](tools/crt-cc),
   [`tools/crt-c++`](tools/crt-c++), [`tools/crt-native-tool`](tools/crt-native-tool),
   and [`docs/porting/sysroot_ports.md`](docs/porting/sysroot_ports.md).
-- If a new public libc or `__crt_sys_*` symbol is added, regenerate or replace
-  [`porting/recipes/mbedtls-windows-exclude-symbols.rsp`](porting/recipes/mbedtls-windows-exclude-symbols.rsp)
-  in the same pass. The reason is documented in
-  [`porting/recipes/mbedtls.json`](porting/recipes/mbedtls.json) and
-  [`docs/porting/porting_status.md`](docs/porting/porting_status.md).
 - Keep work status in exactly one place per purpose, not restated across all
   three: [`HISTORY.md`](HISTORY.md) holds the detailed, dated record of what
   was actually done and why; `TODO.md` keeps only the terse ordered checkbox

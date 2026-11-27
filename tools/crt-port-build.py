@@ -895,15 +895,7 @@ def apply_recipe_env(env, recipe, target_os, root, preset_build_dir=None, work_b
     # configure_args/make_args/install_args already get via
     # substitute_recipe_value) applied to env values too -- added so a
     # recipe's env block can reference a repo-checked-in file by an
-    # absolute, host-independent path (e.g. a linker response file:
-    # see mbedtls.json's own Windows LDFLAGS, which points
-    # --exclude-symbols's several-hundred-entry list at
-    # @ROOT@/porting/recipes/mbedtls-windows-exclude-symbols.rsp via
-    # -Wl,@... instead of spelling every --exclude-symbols=NAME flag
-    # out on the command line -- the fully-spelled-out form blew past
-    # this project's own rootfs mksh's argv length limit ("Argument
-    # list too long") well before hitting any real Windows
-    # CreateProcess limit). preset_build_dir/work_build_dir/sysroot/
+    # absolute, host-independent path. preset_build_dir/work_build_dir/sysroot/
     # port_prefix are optional (default None, substituted as empty
     # tokens) purely so any future caller that doesn't need path
     # substitution isn't forced to pass them.

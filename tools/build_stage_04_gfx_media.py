@@ -1286,9 +1286,7 @@ def main() -> None:
             build_asset / "porting" / "recipes" / "mbedtls.json",
             build_asset / "porting" / "recipes" / "zlib.json",
             build_asset / "porting" / "recipes" / "make.json",
-        ] + ([build_asset / "porting" / "recipes" /
-              "mbedtls-windows-exclude-symbols.rsp"]
-             if target_os == "windows" else []))
+        ])
         with timings.measure("fingerprint installed FreeType/FFmpeg/Skia layer"):
             curl_key = inventory_fingerprint(
                 tree_inventory(staged)) + "-" + curl_inputs_key

@@ -317,9 +317,6 @@ STAGES = {
         ),
         "project_paths_by_os": {
             "windows": (
-                # mbedtls.json's Windows LDFLAGS references this response
-                # file by its repo-relative path (@ROOT@-substituted).
-                "porting/recipes/mbedtls-windows-exclude-symbols.rsp",
                 "libcrtgfx/src/arch/windows/gpu_win32.c",
                 "libcrtgfx/src/arch/windows/skia_shared_d3d12.cc",
                 # libcrtgfx/src/gpu.c #includes this directly; missing here
