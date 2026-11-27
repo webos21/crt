@@ -10,6 +10,81 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-27
+
+### Windows: fork() from a created thread, and fork() beside a busy one
+
+The new `fork_thread_test` was the one failing test of both Windows CI jobs. The memory-copy `fork()`
+assumed the caller's stack was the one the child's initial thread has: from a created thread,
+committing that address in the child failed (`err=487`, `fork()` returned `EAGAIN`). Both backends now
+recreate that stack at the same address with a guard page and set the child's TEB bounds. They also
+overwrite, instead of reallocating, the thread context already copied inside the pthread block, and the
+child's pthread block takes its new thread id.
+
+Reaching the test's last step then showed a second defect: the heap was copied without the heap lock,
+so while another thread allocated, the child could crash in `malloc()`, typically in
+`pthread_create()`. The lock is now held across the heap and `.data` copy, and the resumed child
+releases it, `_Fork()` included. With allocator churn added to the test, it failed 30 of 30 runs
+without the lock.
+
+Verified on a Windows 11 x64 machine: after a fresh configure and clean build, core CTest 172/172
+(`fork_heap_snapshot_test` still skips) and 200 direct runs of `fork_thread_test`, which now also
+covers stack growth, nested and new-thread forks, `_Fork()`, a fault handler and a forked thread
+returning; before the fault-handler case was added, the fork and signal tests passed 100 repeats; six
+fork and signal tests passed 20 repeats in a Release build. The aarch64 backend carries the same changes and
+was only cross-compiled here. [Design and limits](docs/design/windows_fork_emulation.md#fork-from-a-created-thread-2026-11-27).
+
+[CI at `98c3fdf5`](https://github.com/webos21/crt/actions/runs/45936963641) then passed all five hosts
+with no core CTest failures: Windows/x64 and arm64 (172 each; `windows-11-arm` runs the aarch64 backend),
+Linux/amd64 and arm64 (149 each) and macOS/aarch64 (148). `fork_thread_test` and
+`signal_default_action_test` ran once per job and passed.
+
+Related Planned items in `TODO.md` (SIG, SIG-01, ALLOC-02, JOB-01) and the Toybox `timeout` note now
+describe this state; none is complete. The four libc symbols this branch adds to the Windows build joined
+`mbedtls-windows-exclude-symbols.rsp`. The mbedTLS port was not rebuilt, and the list still lacks other,
+older libc symbols.
+
+### Deliver raise(), self-kill() and abort() as real signals
+
+`raise()` emulated delivery: `SIGHUP`, `SIGQUIT` and even `SIGKILL` returned, and `SIGINT`/`SIGTERM`
+exited 134. As in Bionic, it now sends a signal to the calling thread on Linux and macOS, so parents see
+`WIFSIGNALED`; `abort()` follows Bionic's sequence; blocked signals stay pending; Windows ends the
+process with the tagged exit code its `waitpid()` already decodes. macOS `kill()` and `waitpid()` now
+translate signal numbers (`kill(pid, SIGUSR1)` had sent Darwin `SIGBUS`). `process_signal_test` had
+expected a blocked signal to be dropped and was corrected. Design, host differences and verification
+limits: [signal delivery](docs/design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27).
+
+This changes SDK runtime behaviour and takes effect in an SDK built from it, not in v0.5.0-rc.2.
+`crt-cli` was not changed; its `_exit(128+signal)` workaround for canceled runs can be revisited
+against such an SDK. A separate crash found here, `pthread_create()` in a forked macOS child, is the next
+entry.
+
+### macOS: threads in a forked child crashed with SIGSEGV
+
+A child of `fork()` that did not exec died with SIGSEGV (wait status `0xb`) in
+`pthread_create()`, with single- and multithreaded parents alike. macOS threads
+are Apple pthreads, but `fork()` was a bare system call, so libSystem's atfork
+child handlers never ran. The crash report showed `_pthread_create` ->
+`mach_vm_allocate` followed by `mig_get_reply_port` and
+`_kernelrpc_mach_port_construct` recursing on the parent's cached port state
+into the stack guard.
+
+Decision: `fork()` (and so `vfork()`) now calls `libsystem_c`'s own `fork()`,
+found by Mach-O symbol lookup like the `pthread_*` entry points
+(`libc/src/arch/macos/common/fork.c`). CRT `pthread_atfork()` handlers are a
+separate list and still run once; handlers host libraries registered with
+Apple's `pthread_atfork()` now run too. This follows Bionic, where `fork()` is
+the atfork handlers around `_Fork()` and the child's libc stays usable.
+
+Limit: `_Fork()` remains the raw system call (no public libSystem entry
+reinitialises without running Apple's `pthread_atfork()` handlers), so unlike
+Bionic its macOS child must not create threads. The internal `posix_spawn()`
+child, which only execs, also keeps the raw call.
+
+Evidence (macOS/arm64): `libc/tests/fork_thread_test.c` fails with status `0xb`
+on the old `fork()`; with the fix it passed 200 `ctest --repeat` runs and 800
+runs across eight parallel loops. macOS/x86_64 was not run.
+
 ## 2026-11-26
 
 ### Define the 0.5.0 per-host release naming (D6-03)

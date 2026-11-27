@@ -326,7 +326,9 @@ long-term extensions stay conditional on a real consumer.
 
 ### Windows process signals and Toybox `timeout`
 
-Positive-pid existence/access probes and `SIGKILL` already exist. Remaining
+Positive-pid existence/access probes and `SIGKILL` already exist, as do
+self-directed delivery with default actions and the signal-killed wait status
+([sending signals](docs/design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27)). Remaining
 work is catchable cross-process delivery, general process groups and real child-exit
 siginfo. This is non-interactive lifecycle work, not full POSIX job control
 ([signal dispatch](docs/design/signal_delivery.md),
@@ -342,6 +344,8 @@ only where its owned-child cancellation scope needs a new PAL capability.
   live/dead-pid and child/group regressions, plus a child exiting 7 whose handler
   must see its real pid, `CLD_EXITED` and status; recheck the timeout deadline
   failure without discarding the existing probe/SIGKILL behavior.
+  The [self-directed default-action table](docs/design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27)
+  is recorded; the pid-domain, other-process errno and SIGCHLD rules stay open.
 - [ ] **SIG-02** Carry actual child-registry exit data through dispatch, distinguishing
   natural and signal-killed exits; preserve raise's self-delivery, once-per-
   state-change notification, blocked SIGCHLD and pselect behavior.
@@ -365,7 +369,8 @@ not the former full-heap scans; it still has a global lock
 ([indexed-allocator evidence](docs/acceptance/allocator_baseline.md#web-camera-follow-up-2026-10-15)).
 The resolved allocator-domain linkage incident does not justify replacement.
 
-Regression basis: [fork test policy](docs/design/process_fork.md#test-policy-current)
+Regression basis: [fork test policy](docs/design/process_fork.md#test-policy-current),
+the [Windows heap snapshot](docs/design/windows_fork_emulation.md#heap-snapshot-2026-11-27)
 and the allocator baseline below. Adoption remains conditional on the workload and fork
 evidence.
 
@@ -374,6 +379,9 @@ evidence.
 - [ ] **ALLOC-02** Before any swap, decouple both Windows fork implementations from
   `__crt_malloc_os_region_count()`/`_base()`/`_size()` through an allocator-neutral
   heap-region snapshot contract; prove many-region child preservation first.
+  The contract includes the [lock boundary](docs/design/windows_fork_emulation.md#heap-snapshot-2026-11-27):
+  quiesce across the heap and image copy and release in parent and child, `_Fork()`
+  included. Keep `fork_thread_test`'s allocator churn passing.
 - [ ] **ALLOC-03** If justified, add an explicit allocator selection with pinned provenance
   and unchanged Bionic public behavior. Compare correctness, fork, performance,
   RSS, distribution and upper-runtime workloads on supported hosts before
@@ -446,7 +454,8 @@ Replay basis:
 
 - [ ] **JOB-01** Activate only for a real interactive-shell requirement: console-signal
   delivery, foreground process-group arbitration and an explicit stopped-child
-  policy before revisiting mksh's current job-control disablement. This is
+  policy (Windows [`raise()` of a stop signal](docs/design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27)
+  fails with `ENOTSUP` today) before revisiting mksh's current job-control disablement. This is
   separate from non-interactive timeout/cancellation; do not enable it by merely
   defining `MKSH_UNEMPLOYED`, which disables job control. Follow the
   [owning design](docs/design/job_control.md#interactive-job-control-decided-policy-not-yet-implemented).

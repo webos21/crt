@@ -58,8 +58,10 @@ before file actions would lose the descriptor mapping rather than fix it.
 `_Fork()` remains the raw primitive; it does not acquire allocator locks or
 promise that application malloc is async-signal-safe afterward. This change
 also does not make every CRT/host library operation after a multithreaded fork
-async-signal-safe. Windows's memory-copy backend is unchanged: it allocates
-while copying and cannot use this outer native-COW heap guard.
+async-signal-safe. Windows's memory-copy backend allocates before it copies, so
+it cannot use this outer guard; since 2026-11-27 it holds the heap lock around
+its heap and image copy only
+([heap snapshot](windows_fork_emulation.md#heap-snapshot-2026-11-27)).
 
 References: Bionic's [`fork.cpp`](https://android.googlesource.com/platform/bionic/+/refs/heads/main/libc/bionic/fork.cpp)
 separates the raw primitive and application atfork boundary. The allocator

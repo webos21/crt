@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <private/crt_signal_backend.h>
 #include <private/crt_fd_table.h>
 #include <private/crt_seqpacket.h>
 #include <private/crt_shell_process.h>
@@ -25,10 +26,17 @@ long __crt_sys_getppid(void);
 long __crt_sys_setpgid(long pid, long pgid);
 long __crt_sys_getpgrp(void);
 long __crt_sys_setsid(void);
+#if defined(CRT_TARGET_OS_MACOS)
+long __crt_sys_kill(long pid, int sig, int posix);
+#else
 long __crt_sys_kill(long pid, int sig);
+#endif
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]);
 long __crt_sys_access(const char* path, int mode);
 long __crt_sys_fork(void);
+#if defined(CRT_TARGET_OS_MACOS)
+long __crt_macos_libsystem_fork(void);
+#endif
 long __crt_sys_waitpid(long pid, int* status, int options);
 #if defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_posix_spawn(
@@ -63,8 +71,34 @@ long __crt_sys_waitpid(long pid, int* status, int options) {
 #elif defined(CRT_TARGET_OS_MACOS)
 long __crt_sys_wait4(long pid, int* status, int options, void* rusage);
 
+/* Darwin's wait status has the Linux layout, but its signal numbers, option bit for WCONTINUED and
+ * "continued" encoding differ. */
+#define CRT_DARWIN_WCONTINUED 0x10
+#define CRT_DARWIN_SIGCONT 19
+
 long __crt_sys_waitpid(long pid, int* status, int options) {
-  return __crt_sys_wait4(pid, status, options, 0);
+  int host_options = options;
+  long result;
+
+  if ((options & WCONTINUED) != 0) {
+    host_options = (options & ~WCONTINUED) | CRT_DARWIN_WCONTINUED;
+  }
+  result = __crt_sys_wait4(pid, status, host_options, 0);
+  if (result > 0 && status != 0) {
+    if ((*status & 0xff) == 0x7f) {
+      int stop_sig = (*status >> 8) & 0xff;
+
+      *status = stop_sig == CRT_DARWIN_SIGCONT ? 0xffff : (__crt_macos_bionic_signal(stop_sig) << 8) | 0x7f;
+    } else if ((*status & 0x7f) != 0) {
+      int bionic_sig = __crt_macos_bionic_signal(*status & 0x7f);
+
+      /* SIGEMT/SIGINFO have no Bionic number and are passed through. */
+      if (bionic_sig != 0) {
+        *status = (*status & ~0x7f) | bionic_sig;
+      }
+    }
+  }
+  return result;
 }
 #elif defined(CRT_TARGET_OS_WINDOWS)
 static long windows_process_group;
@@ -514,10 +548,18 @@ pid_t fork(void) {
 #if !defined(CRT_TARGET_OS_WINDOWS)
   /* A native COW snapshot must not copy allocator metadata mid-mutation.
    * User callbacks stay outside the heap lock because they may allocate.
-   * Windows memory-copy fork itself allocates and has a separate protocol. */
+   * Windows memory-copy fork itself allocates, so it takes the lock only
+   * around its heap and image copy (arch/windows/.../fork_memcopy.c). */
   __crt_malloc_before_fork();
 #endif
+#if defined(CRT_TARGET_OS_MACOS)
+  /* The child must be able to use libSystem (pthread_create() and more), which a bare system call
+   * does not arrange; see libc/src/arch/macos/common/fork.c. _Fork() and the spawn path below,
+   * whose child only calls exec, stay on the system call. */
+  child = __crt_macos_libsystem_fork();
+#else
   child = __crt_sys_fork();
+#endif
   if (child == 0) {
     __crt_atfork_child(current_context);
     return 0;
@@ -852,17 +894,34 @@ int tcsetpgrp(int fd, pid_t pgrp) {
 }
 
 int kill(pid_t pid, int sig) {
-  long self;
-
   if (sig < 0) {
     errno = EINVAL;
     return -1;
   }
-  self = __crt_sys_getpid();
-  if (pid == (pid_t)self && sig != 0) {
+#if defined(CRT_TARGET_OS_WINDOWS)
+  if (pid == (pid_t)__crt_sys_getpid() && sig != 0) {
     return raise(sig);
   }
   return (int)normalize_syscall_result(__crt_sys_kill((long)pid, sig));
+#elif defined(CRT_TARGET_OS_MACOS)
+  {
+    int darwin_sig = __crt_macos_darwin_signal(sig);
+
+    if (sig != 0 && darwin_sig == 0) {
+      /* SIGSTKFLT/SIGPWR: only this process can receive them, through raise()'s software path. */
+      if (pid == (pid_t)__crt_sys_getpid()) {
+        return raise(sig);
+      }
+      errno = EINVAL;
+      return -1;
+    }
+    /* The third argument asks Darwin for POSIX semantics. */
+    return (int)normalize_syscall_result(__crt_sys_kill((long)pid, darwin_sig, 1));
+  }
+#else
+  /* The host's kill(), also for this process: a process-directed signal, as in Bionic. */
+  return (int)normalize_syscall_result(__crt_sys_kill((long)pid, sig));
+#endif
 }
 
 int killpg(pid_t pgrp, int sig) {

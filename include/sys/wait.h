@@ -12,8 +12,8 @@
 #define WSTOPSIG(status) WEXITSTATUS(status)
 #define WIFEXITED(status) (WTERMSIG(status) == 0)
 #define WIFSIGNALED(status) (WTERMSIG(status) != 0 && WTERMSIG(status) != 0x7f)
-#define WIFSTOPPED(status) (WTERMSIG(status) == 0x7f)
-#define WIFCONTINUED(status) (0)
+#define WIFSTOPPED(status) (((status) & 0xff) == 0x7f)
+#define WIFCONTINUED(status) ((status) == 0xffff)
 
 #ifdef __cplusplus
 extern "C" {

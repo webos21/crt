@@ -33,6 +33,8 @@
 --exclude-symbols=__crt_initial_envp
 --exclude-symbols=__crt_makecontext_trampoline
 --exclude-symbols=__crt_malloc_after_fork_child
+--exclude-symbols=__crt_malloc_after_fork_parent
+--exclude-symbols=__crt_malloc_before_fork
 --exclude-symbols=__crt_malloc_os_region_base
 --exclude-symbols=__crt_malloc_os_region_count
 --exclude-symbols=__crt_malloc_os_region_size
@@ -41,6 +43,8 @@
 --exclude-symbols=__crt_run_fini_array
 --exclude-symbols=__crt_shell_fork_exec
 --exclude-symbols=__crt_shell_spawn
+--exclude-symbols=__crt_signal_backend_default_action
+--exclude-symbols=__crt_signal_backend_raise
 --exclude-symbols=__crt_signal_backend_set_action
 --exclude-symbols=__crt_signal_backend_set_mask
 --exclude-symbols=__crt_signal_delivery_generation

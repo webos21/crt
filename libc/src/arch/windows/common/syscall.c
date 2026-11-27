@@ -8237,10 +8237,6 @@ long __crt_sys_fchown(int fd, unsigned int owner, unsigned int group) {
   return 0;
 }
 
-/* Exit codes this PAL gives a process it terminates for a signal: 0x4B11 in the high half, the
- * signal number in the low one. waitpid() reports such a status as "killed by <signal>". */
-#define CRT_EXIT_SIGNAL_TAG 0x4B110000UL
-
 /* kill(pid, sig) for a process other than the caller. Windows has no signals; what is honest to
  * offer is the existence probe (sig 0) and SIGKILL, which cannot be caught on any system and so is
  * exactly TerminateProcess(). Negative group ids address only this process's owned spawn jobs;
