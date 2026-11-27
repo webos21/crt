@@ -203,6 +203,7 @@ __declspec(dllimport) BOOL CRT_WINAPI GetThreadContext(HANDLE thread, struct crt
 __declspec(dllimport) BOOL CRT_WINAPI SetThreadContext(HANDLE thread, const struct crt_win_context* context);
 #endif
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentProcess(void);
+__declspec(dllimport) int CRT_WINAPI TerminateProcess(HANDLE process, unsigned int exit_code);
 __declspec(dllimport) HANDLE CRT_WINAPI GetCurrentThread(void);
 __declspec(dllimport) DWORD CRT_WINAPI GetCurrentThreadId(void);
 __declspec(dllimport) BOOL CRT_WINAPI DuplicateHandle(HANDLE source_process, HANDLE source, HANDLE target_process,
@@ -1229,6 +1230,32 @@ int __crt_signal_backend_sigprocmask(int how, const sigset_t* set, sigset_t* old
     deliver_pending_now();
   }
   return 0;
+}
+
+int __crt_signal_backend_raise(int sig) {
+  crt_signal_state* state;
+
+  if (!signal_in_range(sig) || sig == SIGKILL || sig == SIGSTOP) {
+    return 1;
+  }
+  state = current_state();
+  if ((state->mask & bit_of(sig)) == 0) {
+    return 1;
+  }
+  /* Blocked: pending until the mask lets it through. */
+  __atomic_fetch_or(&state->pending, bit_of(sig), __ATOMIC_SEQ_CST);
+  return 0;
+}
+
+int __crt_signal_backend_default_action(int sig) {
+  if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
+    /* No job control: a process stopped here could never be continued or reported to its parent. */
+    errno = ENOTSUP;
+    return -1;
+  }
+  /* Like a signal death: no atexit handlers, DLL detach or stdio flush. */
+  (void)TerminateProcess(GetCurrentProcess(), (unsigned int)(CRT_EXIT_SIGNAL_TAG | (unsigned int)sig));
+  _exit(128 + sig);
 }
 
 int __crt_signal_backend_sigsuspend(const sigset_t* mask) {

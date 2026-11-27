@@ -98,9 +98,11 @@ int main(void) {
       sigprocmask(SIG_BLOCK, &set, &oldset) != 0 ||
       raise(SIGUSR1) != 0 ||
       signal_count != 1 ||
+      /* The blocked signal is pending, so unblocking it delivers it. */
       sigprocmask(SIG_UNBLOCK, &set, 0) != 0 ||
-      raise(SIGUSR1) != 0 ||
       signal_count != 2 ||
+      raise(SIGUSR1) != 0 ||
+      signal_count != 3 ||
       sigprocmask(SIG_SETMASK, &oldset, 0) != 0) {
     return fail("sigprocmask");
   }

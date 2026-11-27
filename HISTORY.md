@@ -10,6 +10,23 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-27
+
+### Deliver raise(), self-kill() and abort() as real signals
+
+`raise()` emulated delivery: `SIGHUP`, `SIGQUIT` and even `SIGKILL` returned, and `SIGINT`/`SIGTERM`
+exited 134. As in Bionic, it now sends a signal to the calling thread on Linux and macOS, so parents see
+`WIFSIGNALED`; `abort()` follows Bionic's sequence; blocked signals stay pending; Windows ends the
+process with the tagged exit code its `waitpid()` already decodes. macOS `kill()` and `waitpid()` now
+translate signal numbers (`kill(pid, SIGUSR1)` had sent Darwin `SIGBUS`). `process_signal_test` had
+expected a blocked signal to be dropped and was corrected. Design, host differences and verification
+limits (Windows not run): [signal delivery](docs/design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27).
+
+This changes SDK runtime behaviour and takes effect in an SDK built from it, not in v0.5.0-rc.2.
+`crt-cli` was not changed; its `_exit(128+signal)` workaround for canceled runs can be revisited
+against such an SDK. Found and not fixed: on macOS, `pthread_create()` in a forked child that has not
+exec'd segfaults, with the earlier libc too.
+
 ## 2026-11-26
 
 ### Record the 0.5.0 Dev SDK candidate replay gates

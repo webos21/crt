@@ -688,6 +688,14 @@ set_tests_properties(fork_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_test: ok"
 )
 
+# Default actions as the parent sees them (WIFSIGNALED/WTERMSIG, stop) for raise(), self-kill,
+# pthread_kill(self) and abort(). On macOS each core-dumping case may leave a crash report.
+add_crt_test(signal_default_action_test signal_default_action_test.c)
+set_tests_properties(signal_default_action_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "signal_default_action_test: ok"
+  TIMEOUT 180
+  LABELS "signal")
+
 add_crt_test(fork_signal_test fork_signal_test.c)
 set_tests_properties(fork_signal_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_signal_test: ok"
