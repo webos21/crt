@@ -118,6 +118,22 @@ int __crt_signal_backend_set_action(int bionic_sig, enum crt_signal_backend_acti
   return __crt_signal_backend_set_action_ex(bionic_sig, action, 0, 0);
 }
 
+int __crt_signal_backend_raise(int sig) {
+  /* Bionic's raise(): tgkill() on the calling thread; the kernel validates the number. */
+  return syscall(SYS_tgkill, syscall(SYS_getpid), syscall(SYS_gettid), (long)sig) < 0 ? -1 : 0;
+}
+
+int __crt_signal_backend_default_action(int sig) {
+  unsigned long bit = 1UL << (unsigned int)(sig - 1);
+
+  /* SIGSTOP/SIGKILL refuse a new disposition; theirs is already the default one. */
+  if (sig != SIGKILL && sig != SIGSTOP) {
+    (void)__crt_signal_backend_set_action(sig, CRT_SIGNAL_BACKEND_DEFAULT);
+  }
+  (void)__crt_signal_backend_set_mask(SIG_UNBLOCK, (const sigset_t*)&bit);
+  return __crt_signal_backend_raise(sig);
+}
+
 int __crt_signal_backend_sigprocmask(int how, const sigset_t* set, sigset_t* oldset) {
   return normalize_syscall_result(__crt_sys_rt_sigprocmask(how, (const unsigned long*)set,
                                                           (unsigned long*)oldset, sizeof(unsigned long))) < 0 ? -1 : 0;

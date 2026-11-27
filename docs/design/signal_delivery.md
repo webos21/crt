@@ -22,6 +22,58 @@ the kernel to deliver an already-pending or in-flight `SIGCHLD` as an
 after every child had already exited -- the concrete symptom that started
 this work: `port-rebuild-zlib`'s `make -j 10` hanging indefinitely.
 
+## Sending a signal and default actions (2026-11-27)
+
+Bionic's `raise()` is `tgkill()` on the calling thread, and its `abort()` unblocks `SIGABRT`, raises it,
+restores `SIG_DFL`, raises it again and only then calls `_exit(127)`. CRT used to emulate delivery in
+`signal.c`: a default action did nothing except for `SIGABRT`/`SIGINT`/`SIGTERM`, which ran
+`abort()` = `_exit(134)`, so even `raise(SIGKILL)` returned. Now the host delivers wherever it can.
+
+| | `raise()` (and `pthread_kill(self)`) | `kill(getpid())` | parent's `waitpid()` after a fatal default action |
+| --- | --- | --- | --- |
+| Linux | `tgkill` | `kill` system call (process-directed) | kernel status |
+| macOS | `__pthread_kill` on `mach_thread_self()` with the Darwin number | `kill` system call with the Darwin number | Darwin status, signal number translated to Bionic |
+| Windows | software delivery; blocked signals stay pending | `raise()` | exit code `0x4B110000 \| sig`, decoded by CRT `waitpid()` |
+
+macOS asks for the thread's Mach port each time because Apple's cached `pthread_self()` port is still
+the parent's in a child of `_Fork()`, the raw system call (`fork()` goes through libSystem). `kill()` to another process also translates the number, and
+`waitpid()` translates terminating and stop signals back, maps `WCONTINUED` and reports "continued" as
+`0xffff` as Linux does (`WIFCONTINUED`, which was always 0). Before this, `kill(pid, SIGUSR1)` sent
+Darwin's `SIGBUS`.
+
+`abort()` follows Bionic's sequence. `sigaction()` rejects `SIGKILL`/`SIGSTOP` with `EINVAL`.
+
+Default actions follow Linux `signal(7)`. On Linux and macOS the kernel applies its own; the table in
+`signal.c` is used only for software delivery.
+
+| Default action | Signals | Windows |
+| --- | --- | --- |
+| ignore | `SIGCHLD`, `SIGURG`, `SIGWINCH` | same |
+| continue | `SIGCONT` | nothing to continue: ignored |
+| stop | `SIGSTOP`, `SIGTSTP`, `SIGTTIN`, `SIGTTOU` | `raise()` fails with `ENOTSUP` |
+| terminate (with or without core) | every other signal | `TerminateProcess()` with the tagged code |
+
+Where a host differs, and is left as it is:
+
+- macOS discards `SIGIO` by default; Linux terminates.
+- macOS has no `SIGSTKFLT` or `SIGPWR`. `raise()` and self-`kill()` deliver them in software, and
+  their default action is `_exit(128 + sig)`; `kill()` of another process fails with `EINVAL`.
+- Linux ignores default-action signals sent to the init process of a PID namespace; `abort()` then
+  ends with status 127, as in Bionic.
+- Inherited `SIG_IGN` and blocked masks are now honored by `raise()` on Linux and macOS.
+- Windows: only a CRT parent decodes the tagged code. Other parents (cmd, PowerShell, Python, a CI
+  runner) see an exit code such as `0x4B11000F`, where they saw 134 before. There is no
+  `WCOREDUMP`/stop reporting, and `kill()` of another process still offers only 0 and `SIGKILL`.
+  A hardware fault with no handler still exits `128 + sig` through the DWARF unwind safety net, so a
+  parent sees `WIFEXITED`.
+
+`signal_default_action_test` covers this. Verified on macOS/arm64 (core CTest) and on a
+Linux/aarch64 kernel (eight signal tests, cross-built outside the CMake preset and run in Docker, with
+trapping stubs for the unused quad-float builtins). On Windows it passed in CI on x64 and arm64 and
+in the core CTest on a Windows 11 x64 machine; macOS/x86_64 was not run and Linux/x86_64 was not run
+before CI. The branch's `fork_thread_test` then exposed two older Windows `fork()` defects, fixed in
+[Windows fork emulation](windows_fork_emulation.md#fork-from-a-created-thread-2026-11-27).
+
 ## Architecture
 
 A new private interface, `libc/include/private/crt_signal_backend.h`, sits
@@ -265,8 +317,8 @@ those are single Win32 syscalls with no polling loop to hook a check into
 here, and making them interruptible would need a much larger overlapped-I/O
 rework -- out of scope for this fix.
 
-Every signal other than `SIGCHLD` stays exactly as before: pure software
-`signal_actions[]` bookkeeping, self-delivery only via `raise()`/`abort()`.
+Apart from `SIGCHLD` and the thread-directed delivery above, signals are
+software `signal_actions[]` bookkeeping delivered within this process.
 Console control events (Ctrl-C/Ctrl-Break) and structured exception
 handling are a distinct, real Win32 mechanism that could eventually be
 bridged into the same `signal_actions[]`/`raise()` dispatch the same

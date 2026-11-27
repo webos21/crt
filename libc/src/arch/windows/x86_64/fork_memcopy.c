@@ -219,6 +219,9 @@ __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
 #define CRT_PAGE_READWRITE 0x04UL
 #define CRT_PAGE_NOACCESS 0x01UL
 #define CRT_PAGE_GUARD 0x100UL
+/* Committed in a relocated stack below the lowest live frame; deeper frames grow through the guard page. */
+#define CRT_RELOCATED_STACK_HEADROOM ((uintptr_t)256 * 1024)
+#define CRT_STACK_PAGE ((uintptr_t)4096)
 #define CRT_CONTEXT_AMD64 0x00100000UL
 #define CRT_CONTEXT_AMD64_CONTROL (CRT_CONTEXT_AMD64 | 0x1UL)
 #define CRT_CONTEXT_AMD64_INTEGER (CRT_CONTEXT_AMD64 | 0x2UL)
@@ -235,6 +238,9 @@ __declspec(dllimport) DWORD CRT_WINAPI GetLastError(void);
  * block_header split chain -- the latter can subdivide one 64KB region
  * into several non-64KB-aligned sub-blocks, and VirtualAllocEx() requires
  * lpAddress to be allocation-granularity-aligned. */
+void __crt_malloc_before_fork(void);
+void __crt_malloc_after_fork_parent(void);
+void __crt_malloc_after_fork_child(void);
 int __crt_malloc_os_region_count(void);
 void* __crt_malloc_os_region_base(int index);
 size_t __crt_malloc_os_region_size(int index);
@@ -267,6 +273,13 @@ static int write_region_into_child(HANDLE process, void* addr, size_t size) {
   return 0;
 }
 
+/* Writes `size` bytes at `value` to the (already mapped) address `target` in the child. */
+static int write_values_into_child(HANDLE process, void* target, const void* value, size_t size) {
+  SIZE_T written = 0;
+
+  return WriteProcessMemory(process, target, value, (SIZE_T)size, &written) && written == (SIZE_T)size ? 0 : -1;
+}
+
 /* Copies [dest_addr, dest_addr+size) from *this* process into `process`
  * at the identical address, committing it first since nothing is mapped
  * there yet in a CREATE_SUSPENDED child that has not executed a single
@@ -286,6 +299,15 @@ static int copy_region_into_child(HANDLE process, void* addr, size_t size) {
   return write_region_into_child(process, addr, size);
 }
 
+static int copy_thread_context(HANDLE process, void* addr, size_t size) {
+  struct crt_memory_basic_information mbi;
+
+  if (VirtualQueryEx(process, addr, &mbi, sizeof(mbi)) == sizeof(mbi) && mbi.State == CRT_MEM_COMMIT) {
+    return write_region_into_child(process, addr, size);
+  }
+  return copy_region_into_child(process, addr, size);
+}
+
 /* Like copy_region_into_child(), but MEM_COMMIT only (no MEM_RESERVE) --
  * for the thread stack specifically, which the loader already reserves
  * as one block at thread creation (unlike heap/TLS regions, which are
@@ -302,6 +324,15 @@ static int commit_region_into_child(HANDLE process, void* addr, size_t size) {
   }
   return write_region_into_child(process, addr, size);
 }
+
+/* The stack bounds a child must put in its own TEB, all zero when it resumes on its initial thread's
+ * stack. The parent writes this into the child's copy; the parent's own object stays zero. */
+struct crt_relocated_stack {
+  void* base;       /* TEB.StackBase, NT_TIB +0x08 */
+  void* limit;      /* TEB.StackLimit, NT_TIB +0x10: lowest committed, non-guard page */
+  void* allocation; /* TEB.DeallocationStack, +0x1478 on both 64-bit ABIs */
+};
+static struct crt_relocated_stack fork_relocated_stack;
 
 /* Walks the loaded image's PE section table for writable sections
  * (.data/.bss and anything else IMAGE_SCN_MEM_WRITE) and copies each one
@@ -372,6 +403,40 @@ static int copy_heap_chunks(HANDLE process) {
   return 0;
 }
 
+/* fork() from any thread but the one running on the initial stack: the caller's stack is a region the
+ * child does not have at all. Reserve the whole range at the same address, commit the live part plus
+ * headroom, and put a guard page below it so that the kernel keeps growing the stack once the child's
+ * TEB describes this range (see __crt_windows_memcopy_fork()'s resume branch). The child's initial
+ * stack stays reserved and unused, which also keeps its address free for the next fork() generation. */
+static int copy_relocated_stack(HANDLE process, void* allocation_base, void* copy_low, void* stack_base,
+                                uintptr_t resume_sp) {
+  uintptr_t bottom = (uintptr_t)allocation_base;
+  uintptr_t floor = (resume_sp - CRT_RELOCATED_STACK_HEADROOM) & ~(CRT_STACK_PAGE - 1);
+  uintptr_t low;
+
+  /* Keep at least the lowest page uncommitted and one page for the guard. */
+  if (resume_sp < bottom + CRT_RELOCATED_STACK_HEADROOM || floor < bottom + 2 * CRT_STACK_PAGE) {
+    floor = bottom + 2 * CRT_STACK_PAGE;
+  }
+  low = (uintptr_t)copy_low < floor ? (uintptr_t)copy_low : floor;
+  if (VirtualAllocEx(process, allocation_base, (SIZE_T)((uintptr_t)stack_base - bottom), CRT_MEM_RESERVE,
+                     CRT_PAGE_READWRITE) != allocation_base ||
+      VirtualAllocEx(process, (void*)low, (SIZE_T)((uintptr_t)stack_base - low), CRT_MEM_COMMIT,
+                     CRT_PAGE_READWRITE) == 0) {
+    return -1;
+  }
+  if (low >= bottom + 2 * CRT_STACK_PAGE &&
+      VirtualAllocEx(process, (void*)(low - CRT_STACK_PAGE), (SIZE_T)CRT_STACK_PAGE, CRT_MEM_COMMIT,
+                     CRT_PAGE_READWRITE | CRT_PAGE_GUARD) == 0) {
+    return -1;
+  }
+  if (write_region_into_child(process, copy_low, (size_t)((uintptr_t)stack_base - (uintptr_t)copy_low)) != 0) {
+    return -1;
+  }
+  fork_relocated_stack.limit = (void*)low;
+  return 0;
+}
+
 /* Copies the calling thread's entire committed stack, not just the
  * currently-used portion -- simpler and safer than computing exactly how
  * much is "live", at the cost of copying a bit more than strictly
@@ -380,18 +445,14 @@ static int copy_heap_chunks(HANDLE process) {
  * already committed, so the child cannot auto-grow its stack past what
  * the parent had committed at fork() time.
  *
- * The copy target must be clamped to the CHILD's own stack reservation,
- * not the parent's: a CREATE_SUSPENDED child's initial thread has not
- * run a single instruction yet, so its TEB.StackLimit still sits at
- * whatever the loader committed by default (often just one page above
- * the guard page) -- nowhere near matching the parent's StackLimit,
- * which has receded from real, deep call-stack usage by the time
- * fork() actually runs. VirtualQueryEx() on the child's own initial Sp
- * reports the AllocationBase of its *entire* stack reservation, which is
- * what actually needs to be checked/committed against -- not what the
- * parent's TEB happens to say. Architecture-independent (NT_TIB's
- * StackBase/StackLimit sit at the same +0x08/+0x10 offsets on x64 as on
- * ARM64); unchanged from the aarch64 version. */
+ * Where it goes is decided by the CHILD's own stack reservation, not the
+ * parent's TEB: a CREATE_SUSPENDED child's initial thread has not run a single
+ * instruction yet, so its TEB.StackLimit still sits at the loader's default.
+ * VirtualQueryEx() on the child's own initial Sp reports the AllocationBase of
+ * its entire stack reservation. When the caller's stack is that reservation,
+ * the committed part is copied into it; otherwise copy_relocated_stack()
+ * recreates the caller's. The NT_TIB StackBase/StackLimit offsets +0x08/+0x10
+ * are the same on x64 and ARM64. */
 static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, DWORD64 resume_sp,
                               void** out_low, void** out_high) {
   unsigned char* teb = (unsigned char*)read_teb();
@@ -399,6 +460,8 @@ static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, DWORD64 
   void* stack_limit = *(void**)(teb + 0x10);
   struct crt_memory_basic_information mbi;
   void* copy_low = stack_limit;
+  void* parent_allocation;
+  struct crt_relocated_stack child_stack;
   size_t size;
 
   /* A prior memory-copy fork commits pages with VirtualAllocEx, which
@@ -412,6 +475,7 @@ static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, DWORD64 
                      &mbi, sizeof(mbi)) != sizeof(mbi) ||
       mbi.AllocationBase == 0 || mbi.State != CRT_MEM_COMMIT ||
       (mbi.Protect & (CRT_PAGE_GUARD | CRT_PAGE_NOACCESS)) != 0) return -1;
+  parent_allocation = mbi.AllocationBase;
   {
     void* allocation_base = mbi.AllocationBase;
     uintptr_t cursor = (uintptr_t)allocation_base;
@@ -438,11 +502,24 @@ static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, DWORD64 
   }
 
   memset(&mbi, 0, sizeof(mbi));
-  if (VirtualQueryEx(process, (void*)(ULONG_PTR)child_initial_sp, &mbi, sizeof(mbi)) == sizeof(mbi) &&
-      mbi.AllocationBase != 0 && (uintptr_t)mbi.AllocationBase > (uintptr_t)copy_low) {
-    /* Restrict the copy to the child's reservation. The check below
-     * rejects a clamp that would omit the saved SP/live caller frames. */
-    copy_low = mbi.AllocationBase;
+  if (VirtualQueryEx(process, (void*)(ULONG_PTR)child_initial_sp, &mbi, sizeof(mbi)) != sizeof(mbi) ||
+      mbi.AllocationBase == 0) return -1;
+
+  if (mbi.AllocationBase != parent_allocation) {
+    *out_low = copy_low;
+    *out_high = stack_base;
+    memset(&fork_relocated_stack, 0, sizeof(fork_relocated_stack));
+    if (copy_relocated_stack(process, parent_allocation, copy_low, stack_base, (uintptr_t)resume_sp) != 0) {
+      fprintf(stderr, "fork_memcopy: relocated stack copy failed: allocation=%p copy_low=%p stack_base=%p err=%lu\n",
+              parent_allocation, copy_low, stack_base, (unsigned long)GetLastError());
+      return -1;
+    }
+    child_stack.base = stack_base;
+    child_stack.limit = fork_relocated_stack.limit;
+    child_stack.allocation = parent_allocation;
+    /* This process may itself be a relocated child: its own copy only mattered when it resumed. */
+    memset(&fork_relocated_stack, 0, sizeof(fork_relocated_stack));
+    return write_values_into_child(process, &fork_relocated_stack, &child_stack, sizeof(child_stack));
   }
 
   /* Never report success after clamping away a live resume frame. */
@@ -458,7 +535,8 @@ static int copy_current_stack(HANDLE process, DWORD64 child_initial_sp, DWORD64 
             (unsigned long)mbi.State, copy_low, size, (unsigned long)GetLastError());
     return -1;
   }
-  return 0;
+  memset(&child_stack, 0, sizeof(child_stack));
+  return write_values_into_child(process, &fork_relocated_stack, &child_stack, sizeof(child_stack));
 }
 
 long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_process) {
@@ -486,6 +564,18 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
      * running mainCRTStartup or reading any resume state from memory.
      * Every frame between here and fork()'s original caller is part of
      * the copied stack range and resumes exactly as the parent left it. */
+    /* The heap was copied while the parent held its lock. Released here, not
+     * only in fork()'s child hooks, so that a _Fork() child gets it too. */
+    __crt_malloc_after_fork_child();
+    if (fork_relocated_stack.base != 0) {
+      /* Resumed on a copy of another thread's stack: describe it in this thread's TEB before
+       * anything probes the stack (__chkstk) or needs it to grow. */
+      unsigned char* teb = (unsigned char*)read_teb();
+
+      *(void**)(teb + 0x1478) = fork_relocated_stack.allocation;
+      *(void**)(teb + 0x08) = fork_relocated_stack.base;
+      *(void**)(teb + 0x10) = fork_relocated_stack.limit;
+    }
     return 0;
   }
 
@@ -545,8 +635,17 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
    * written *before* SetThreadContext()/ResumeThread(), since the child
    * runs immediately and unsupervised as soon as it is resumed. */
   {
-    int heap_rc = copy_heap_chunks(pi.hProcess);
-    int image_rc = heap_rc == 0 ? copy_image_data_sections(pi.hProcess) : heap_rc;
+    int heap_rc;
+    int image_rc;
+
+    /* Other threads must not change the allocator between the copy of its
+     * blocks and the copy of its .data (list heads, region table). Nothing
+     * between these two calls may allocate. */
+    __crt_malloc_before_fork();
+    heap_rc = copy_heap_chunks(pi.hProcess);
+    image_rc = heap_rc == 0 ? copy_image_data_sections(pi.hProcess) : heap_rc;
+    __crt_malloc_after_fork_parent();
+
     int stack_rc = image_rc == 0 ? copy_current_stack(pi.hProcess, ctx.Rsp, (DWORD64)resume[8],
                                                      &stack_low, &stack_high) : image_rc;
 
@@ -560,11 +659,11 @@ long __crt_windows_memcopy_fork(unsigned long* out_child_pid, void** out_child_p
     }
   }
 
-  /* The current thread's own crt_thread_context block (tls.c) is a
-   * standalone VirtualAlloc(), not part of the heap/stack/image regions
-   * above -- copy it explicitly. */
+  /* The current thread's own crt_thread_context block (tls.c). For a pthread it
+   * is part of the heap-allocated control block the heap copy already placed in
+   * the child; otherwise it is a standalone VirtualAlloc() (or image .bss). */
   tls_context = __crt_thread_get_current();
-  if (copy_region_into_child(pi.hProcess, tls_context, sizeof(*tls_context)) != 0) {
+  if (copy_thread_context(pi.hProcess, tls_context, sizeof(*tls_context)) != 0) {
     fprintf(stderr, "fork_memcopy: tls_context copy failed err=%lu\n", (unsigned long)GetLastError());
     TerminateProcess(pi.hProcess, (unsigned int)-1);
     CloseHandle(pi.hThread);

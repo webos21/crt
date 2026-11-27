@@ -150,6 +150,11 @@ int sigaction(int sig, const struct sigaction* act, struct sigaction* oldact) {
   if (oldact != 0) {
     *oldact = signal_actions[sig];
   }
+  if (act != 0 && (sig == SIGKILL || sig == SIGSTOP)) {
+    /* As the kernel does: these two cannot be caught or ignored. */
+    errno = EINVAL;
+    return -1;
+  }
   if (act != 0) {
     enum crt_signal_backend_action backend_action;
 
@@ -316,12 +321,12 @@ unsigned long __crt_signal_delivery_generation(void) {
  * OS-delivered signal reaching __crt_signal_dispatch() was already allowed
  * through by the host's own mask, kept in sync by
  * __crt_signal_backend_set_mask()). */
-static void deliver_signal(int sig, const siginfo_t* host_info, void* host_context) {
+static int deliver_signal(int sig, const siginfo_t* host_info, void* host_context) {
   struct sigaction* action = &signal_actions[sig];
   sighandler_t handler = action->sa_handler;
 
   if (handler == SIG_IGN) {
-    return;
+    return 0;
   }
   if (handler != SIG_DFL && handler != 0 && (action->sa_flags & SA_RESETHAND) != 0) {
     /* One-shot handler: restore the default disposition before the handler runs. */
@@ -350,19 +355,31 @@ static void deliver_signal(int sig, const siginfo_t* host_info, void* host_conte
     }
     ++signal_delivery_generation;
     action->sa_sigaction(sig, &info, host_context);
-    return;
+    return 0;
   }
   if (handler != SIG_DFL && handler != 0) {
     ++signal_delivery_generation;
     handler(sig);
-    return;
+    return 0;
   }
-  if (sig == SIGABRT || sig == SIGTERM || sig == SIGINT) {
-    abort();
+  /* SIG_DFL. Every default action but these four ends or stops the process (signal(7)). */
+  if (sig == SIGCHLD || sig == SIGURG || sig == SIGWINCH || sig == SIGCONT) {
+    return 0;
   }
+  return __crt_signal_backend_default_action(sig);
 }
 
+/* Bionic's raise() is tgkill() on the calling thread. The software path below is only for what the
+ * host cannot send: every signal but a blocked one on Windows, SIGSTKFLT/SIGPWR on macOS. */
 int raise(int sig) {
+  int result = __crt_signal_backend_raise(sig);
+
+  if (result != 1) {
+    return result;
+  }
+  if (sig == 0) {
+    return 0;
+  }
   if (!signal_valid(sig)) {
     errno = EINVAL;
     return -1;
@@ -370,8 +387,7 @@ int raise(int sig) {
   if ((current_signal_mask() & signal_bit(sig)) != 0) {
     return 0;
   }
-  deliver_signal(sig, 0, 0);
-  return 0;
+  return deliver_signal(sig, 0, 0);
 }
 
 /* Called by each backend's own OS-level signal entry point after
@@ -391,6 +407,14 @@ void __crt_signal_dispatch_info(int sig, const siginfo_t* info, void* uctx) {
   deliver_signal(sig, info, uctx);
 }
 
+/* Bionic's abort(): unblock SIGABRT and raise it; if a handler returns or the signal is ignored,
+ * restore the default action and raise it again. No atexit handlers, no stdio flush. */
 void abort(void) {
-  _exit(128 + SIGABRT);
+  sigset_t unblock = signal_bit(SIGABRT);
+
+  (void)sigprocmask(SIG_UNBLOCK, &unblock, 0);
+  (void)raise(SIGABRT);
+  (void)signal(SIGABRT, SIG_DFL);
+  (void)raise(SIGABRT);
+  _exit(127);
 }

@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <private/crt_linux_ucontext_aarch64.h>
 #include <private/crt_macho_symbol.h>
@@ -108,6 +109,14 @@ static const int kDarwinToBionic[32] = {
   0, 10, 12,                          /* 29..31 */
 };
 
+int __crt_macos_darwin_signal(int bionic_sig) {
+  return bionic_sig > 0 && bionic_sig <= 31 ? kBionicToDarwin[bionic_sig] : 0;
+}
+
+int __crt_macos_bionic_signal(int darwin_sig) {
+  return darwin_sig > 0 && darwin_sig <= 31 ? kDarwinToBionic[darwin_sig] : 0;
+}
+
 /* Darwin sa_flags (<sys/signal.h>) versus the Bionic/Linux values this project's <signal.h> uses. */
 #define CRT_DARWIN_SA_ONSTACK 0x0001
 #define CRT_DARWIN_SA_RESTART 0x0002
@@ -165,6 +174,22 @@ static crt_darwin_sigsuspend_fn real_sigsuspend;
 static crt_darwin_pthread_kill_fn real_pthread_kill;
 static crt_darwin_pthread_main_thread_fn real_pthread_main_thread_np;
 
+/* raise()'s pieces. The thread's Mach port is asked for each time instead of going through Apple's
+ * pthread_kill(pthread_self()): in a _Fork() child, which is the raw system call (see fork.c),
+ * libpthread's cached port is still the parent's, and raise()/abort() must work there. */
+typedef unsigned int (*crt_darwin_port_fn)(void);
+typedef int (*crt_darwin_port_deallocate_fn)(unsigned int, unsigned int);
+typedef int (*crt_darwin_thread_port_kill_fn)(unsigned int, int);
+
+static crt_darwin_port_fn real_mach_thread_self;
+static crt_darwin_port_fn real_task_self_trap;
+static crt_darwin_port_deallocate_fn real_mach_port_deallocate;
+static crt_darwin_thread_port_kill_fn real_thread_port_kill;
+
+static void* kernel_symbol(const char* name) {
+  return (void*)__crt_macho_find_symbol_in_loaded_image("/usr/lib/system/libsystem_kernel.dylib", name);
+}
+
 static void resolve_real_symbols(void) {
   const void* image;
 
@@ -202,6 +227,10 @@ static void resolve_real_symbols(void) {
     real_sigsuspend = (crt_darwin_sigsuspend_fn)__crt_macho_find_symbol_in_loaded_image(
         "/usr/lib/system/libsystem_kernel.dylib", "sigsuspend");
   }
+  real_mach_thread_self = (crt_darwin_port_fn)kernel_symbol("mach_thread_self");
+  real_task_self_trap = (crt_darwin_port_fn)kernel_symbol("task_self_trap");
+  real_mach_port_deallocate = (crt_darwin_port_deallocate_fn)kernel_symbol("mach_port_deallocate");
+  real_thread_port_kill = (crt_darwin_thread_port_kill_fn)kernel_symbol("__pthread_kill");
 }
 
 #if defined(__aarch64__)
@@ -298,6 +327,10 @@ static void convert_siginfo(siginfo_t* out, const struct crt_darwin_siginfo* in,
   out->si_pid = in->host_si_pid;
   out->si_uid = (uid_t)in->host_si_uid;
   out->si_status = in->host_si_status;
+  /* For a killed or stopped child, si_status is a signal number (CLD_EXITED, 1, carries an exit code). */
+  if (bionic_sig == SIGCHLD && in->si_code != 1) {
+    out->si_status = __crt_macos_bionic_signal(in->host_si_status);
+  }
   /* si_addr (the faulting address for SIGSEGV/SIGBUS/SIGILL/SIGFPE) sits after si_status at offset
    * 24 in Darwin's record, in the same union slot Bionic's si_addr uses. It aliases pid/uid for the
    * signals that carry those instead, so it is only read for the fault signals. */
@@ -413,6 +446,54 @@ int __crt_signal_backend_set_mask(int how, const sigset_t* set) {
   if (real_sigprocmask(darwin_how, &darwin_mask, 0) != 0) {
     errno = EINVAL;
     return -1;
+  }
+  return 0;
+}
+
+int __crt_signal_backend_raise(int bionic_sig) {
+  int darwin_sig;
+  unsigned int port;
+  int result;
+
+  if (bionic_sig < 0 || bionic_sig > 31) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (bionic_sig == 0) {
+    return 0;
+  }
+  darwin_sig = kBionicToDarwin[bionic_sig];
+  resolve_real_symbols();
+  if (darwin_sig == 0 || !real_symbols_available || real_mach_thread_self == 0 || real_thread_port_kill == 0) {
+    return 1;
+  }
+  port = real_mach_thread_self();
+  result = real_thread_port_kill(port, darwin_sig);
+  /* mach_thread_self() added a reference to the port name. */
+  if (real_task_self_trap != 0 && real_mach_port_deallocate != 0) {
+    (void)real_mach_port_deallocate(real_task_self_trap(), port);
+  }
+  if (result != 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+int __crt_signal_backend_default_action(int bionic_sig) {
+  sigset_t unblock;
+
+  if (__crt_macos_darwin_signal(bionic_sig) == 0) {
+    /* SIGSTKFLT/SIGPWR do not exist here, so no wait status can name them. */
+    _exit(128 + bionic_sig);
+  }
+  if (bionic_sig != SIGKILL && bionic_sig != SIGSTOP) {
+    (void)__crt_signal_backend_set_action(bionic_sig, CRT_SIGNAL_BACKEND_DEFAULT);
+  }
+  unblock = (sigset_t)1UL << (unsigned int)(bionic_sig - 1);
+  (void)__crt_signal_backend_set_mask(SIG_UNBLOCK, &unblock);
+  if (__crt_signal_backend_raise(bionic_sig) == 1) {
+    _exit(128 + bionic_sig);
   }
   return 0;
 }

@@ -58,6 +58,31 @@ int __crt_signal_backend_set_action_ex(int bionic_sig, enum crt_signal_backend_a
 int __crt_signal_backend_sigprocmask(int how, const sigset_t* set, sigset_t* oldset);
 int __crt_signal_backend_sigsuspend(const sigset_t* mask);
 
+/* raise(): send `sig` to the calling thread through the host, as Bionic's tgkill() does, so that the
+ * host applies the disposition and the mask (a blocked signal stays pending, a default action ends the
+ * process with a status the parent sees as WIFSIGNALED). Returns 0, -1 with errno set, or 1 when the
+ * host cannot send this signal: signal.c then delivers it in software. */
+int __crt_signal_backend_raise(int bionic_sig);
+
+/* A SIG_DFL delivery that reached signal.c's software path, for a signal whose default action is not
+ * "ignore": end (or stop) the process the way the host does for that signal. Does not return for a
+ * terminating signal unless the host itself ignores it (Linux: the init process of a PID namespace).
+ * Returns 0, or -1 with errno set when the host cannot perform the action (stop on Windows). */
+int __crt_signal_backend_default_action(int bionic_sig);
+
+#if defined(CRT_TARGET_OS_WINDOWS)
+/* The exit code of a process this PAL ends for a signal: this tag in the high half, the signal number
+ * in the low one. waitpid() reports such a status as "killed by <signal>". A parent that is not a CRT
+ * program sees the whole value as an ordinary exit code. */
+#define CRT_EXIT_SIGNAL_TAG 0x4B110000UL
+#endif
+
+#if defined(CRT_TARGET_OS_MACOS)
+/* Signal number translation, both ways; 0 means there is no equivalent. */
+int __crt_macos_darwin_signal(int bionic_sig);
+int __crt_macos_bionic_signal(int darwin_sig);
+#endif
+
 /* Implemented once, in libc/src/signal.c. Every backend's own OS-level signal
  * entry point calls this after translating the host's native signal number
  * back to Bionic/Linux numbering. Looks up signal_actions[bionic_sig] and
