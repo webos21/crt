@@ -86,9 +86,10 @@ UTF-8-assuming text edit.
   real, general `poll()` fix independent of `timeout`'s own status), but
   the applet itself still needs two more, separate PAL features before
   it's actually correct:
-  - `deliver_signal()`'s `SA_SIGINFO` path (`libc/src/signal.c`) always
-    hands the handler a zeroed `siginfo_t` (`si_code = 0`, `si_status =
-    0`) regardless of which signal or why -- for `SIGCHLD` specifically
+  - `deliver_signal()`'s `SA_SIGINFO` path (`libc/src/signal.c`), when no
+    host record exists (Windows `SIGCHLD`), hands the handler a synthesized
+    `siginfo_t` (`si_code = 0`, `si_status = 0`, `si_pid` of the caller)
+    regardless of why -- for `SIGCHLD` specifically
     this means a handler can never learn which child exited or how.
     `timeout.c`'s own handler reads exactly those fields, so it always
     computes a wrong exit status (always `128`, since `si_code` can never
@@ -97,12 +98,13 @@ UTF-8-assuming text edit.
     (`child_process_table`/`child_pid_table`, already used by
     `waitpid()`) have the real data; `SIGCHLD` dispatch just doesn't
     thread it through to `siginfo_t` yet.
-  - `kill()` still only supports signaling the calling process itself (a
-    pre-existing, previously-documented gap) -- sending a signal to a
-    genuinely different process is a no-op, so `timeout`'s own deadline
-    enforcement (`kill(pid, SIGTERM)` on the child once the clock runs
-    out) silently does nothing. Confirmed directly: `timeout 2 sleep 10`
-    ran the full ~10 seconds instead of being cut off at ~2.
+  - Windows `kill()` cannot deliver a catchable signal to another process:
+    other processes accept only the existence probe and `SIGKILL`
+    ([sending signals](../design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27)),
+    so `timeout`'s own deadline enforcement (`kill(pid, SIGTERM)` on the
+    child once the clock runs out) cannot work. When it was investigated,
+    that call did nothing and `timeout 2 sleep 10` ran the full ~10 seconds;
+    it now fails with `ENOSYS`. The applet has not been re-run since.
 
   `timeout` stays disabled until at least the `kill()` gap closes --
   re-registering it now would ship a command that reports wrong exit codes

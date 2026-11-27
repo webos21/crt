@@ -317,10 +317,11 @@ readable extent containing the saved resume SP, and copies through StackBase.
 Querying only the saved SP is insufficient: VirtualQueryEx scans forward
 from the requested page, so that would discard already committed headroom
 used by LdrInitializeThunk before NtContinue. Region iteration preserves
-that headroom without committing an arbitrary larger stack. Child-reservation
-clamping now fails with EAGAIN rather than silently omit a live resume frame.
-The native loader runs normally; its ABI/context is not replaced. This fix
-does not preserve a guard page or promise future automatic stack growth.
+that headroom without committing an arbitrary larger stack. A caller whose
+reservation is not the child's initial one takes the relocated path
+([below](#fork-from-a-created-thread-2026-11-27)). The native loader runs
+normally; its ABI/context is not replaced. This nested-fork fix does not
+preserve a guard page or promise future automatic stack growth.
 The source proof and bounded nested-fork regression are in
 [the investigation](../bringup/windows_mksh_tranche10_crash.md).
 
@@ -333,6 +334,40 @@ earlier x86_64 verification caveat is closed. Remaining mechanism limits are:
   at all -- but pthread-created OS threads' own stacks are not otherwise
   touched or cleaned up in the child beyond the existing
   `__crt_pthread_after_fork_child()` hook).
-- **No guard-page preservation**: the stack copy does not preserve a guard
-  page beyond what was already committed at `fork()` time, so the child
-  cannot auto-grow its stack past that point.
+- **No guard-page preservation on the initial stack**: when the caller runs on
+  the stack the child's initial thread also has, the copy does not preserve a
+  guard page beyond what was already committed at `fork()` time, so that child
+  cannot auto-grow its stack past that point. The relocated case below does.
+
+## fork() From A Created Thread (2026-11-27)
+
+As in Bionic, any thread may call `fork()`, and it becomes the child's only
+thread. Its stack is a region the new process does not have, so committing it
+failed with `ERROR_INVALID_ADDRESS` (487) and `fork()` returned `EAGAIN`.
+
+When the caller's stack reservation is not the child's initial one, the backend
+reserves the whole range at the same address in the suspended child, commits the
+live part plus 256 KiB of headroom, and puts a guard page below it. The resumed
+child first writes `StackBase`, `StackLimit` and `DeallocationStack` (TEB
+`+0x08`, `+0x10`, `+0x1478` on x86_64 and aarch64) so that stack probes, growth
+and exception dispatch use that range. The initial stack stays reserved and
+unused, which keeps its address free in later generations. A thread's
+`crt_thread_context` lives in its heap-allocated pthread block, which the heap
+copy has already mapped, and the child's pthread block takes the new native
+thread id and drops the parent's handle.
+
+## Heap Snapshot (2026-11-27)
+
+The backend copies allocator blocks and then image `.data` (list heads and the
+region table) with `WriteProcessMemory()`. It now holds the heap lock across
+those two copies only; its own `malloc()` calls come before them. Without it,
+another thread's allocation could be copied half finished, and the child crashed
+in `malloc()`, typically in its first `pthread_create()`. The resumed child
+releases the copied lock itself, so `_Fork()` children, which run no child
+hooks, do not inherit it held. The lock covers the allocator only: other CRT and
+host library state that another thread was changing is still copied as it is.
+
+Remaining limits of both: if something in the new process already occupies the
+caller's stack range, `fork()` fails with `EAGAIN`; user-provided thread stacks
+(`pthread_attr_setstack()`) are not supported by Windows `pthread_create()`.
+`libc/tests/fork_thread_test.c` covers these paths.

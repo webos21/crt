@@ -69,8 +69,10 @@ Where a host differs, and is left as it is:
 
 `signal_default_action_test` covers this. Verified on macOS/arm64 (core CTest) and on a
 Linux/aarch64 kernel (eight signal tests, cross-built outside the CMake preset and run in Docker, with
-trapping stubs for the unused quad-float builtins). Windows targets were only syntax-checked, and
-macOS/x86_64 and Linux/x86_64 were not run.
+trapping stubs for the unused quad-float builtins). On Windows it passed in CI on x64 and arm64 and
+in the core CTest on a Windows 11 x64 machine; macOS/x86_64 was not run and Linux/x86_64 was not run
+before CI. The branch's `fork_thread_test` then exposed two older Windows `fork()` defects, fixed in
+[Windows fork emulation](windows_fork_emulation.md#fork-from-a-created-thread-2026-11-27).
 
 ## Architecture
 

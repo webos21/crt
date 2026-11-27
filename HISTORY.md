@@ -12,6 +12,33 @@ substantive update.
 
 ## 2026-11-27
 
+### Windows: fork() from a created thread, and fork() beside a busy one
+
+The new `fork_thread_test` was the one failing test of both Windows CI jobs. The memory-copy `fork()`
+assumed the caller's stack was the one the child's initial thread has: from a created thread,
+committing that address in the child failed (`err=487`, `fork()` returned `EAGAIN`). Both backends now
+recreate that stack at the same address with a guard page and set the child's TEB bounds. They also
+overwrite, instead of reallocating, the thread context already copied inside the pthread block, and the
+child's pthread block takes its new thread id.
+
+Reaching the test's last step then showed a second defect: the heap was copied without the heap lock,
+so while another thread allocated, the child could crash in `malloc()`, typically in
+`pthread_create()`. The lock is now held across the heap and `.data` copy, and the resumed child
+releases it, `_Fork()` included. With allocator churn added to the test, it failed 30 of 30 runs
+without the lock.
+
+Verified on a Windows 11 x64 machine: after a fresh configure and clean build, core CTest 172/172
+(`fork_heap_snapshot_test` still skips) and 200 direct runs of `fork_thread_test`, which now also
+covers stack growth, nested and new-thread forks, `_Fork()`, a fault handler and a forked thread
+returning; before the fault-handler case was added, the fork and signal tests passed 100 repeats; six
+fork and signal tests passed 20 repeats in a Release build. The aarch64 backend carries the same changes and
+was only cross-compiled here. [Design and limits](docs/design/windows_fork_emulation.md#fork-from-a-created-thread-2026-11-27).
+
+Related Planned items in `TODO.md` (SIG, SIG-01, ALLOC-02, JOB-01) and the Toybox `timeout` note now
+describe this state; none is complete. The four libc symbols this branch adds to the Windows build joined
+`mbedtls-windows-exclude-symbols.rsp`. The mbedTLS port was not rebuilt, and the list still lacks other,
+older libc symbols.
+
 ### Deliver raise(), self-kill() and abort() as real signals
 
 `raise()` emulated delivery: `SIGHUP`, `SIGQUIT` and even `SIGKILL` returned, and `SIGINT`/`SIGTERM`
@@ -20,7 +47,7 @@ exited 134. As in Bionic, it now sends a signal to the calling thread on Linux a
 process with the tagged exit code its `waitpid()` already decodes. macOS `kill()` and `waitpid()` now
 translate signal numbers (`kill(pid, SIGUSR1)` had sent Darwin `SIGBUS`). `process_signal_test` had
 expected a blocked signal to be dropped and was corrected. Design, host differences and verification
-limits (Windows not run): [signal delivery](docs/design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27).
+limits: [signal delivery](docs/design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27).
 
 This changes SDK runtime behaviour and takes effect in an SDK built from it, not in v0.5.0-rc.2.
 `crt-cli` was not changed; its `_exit(128+signal)` workaround for canceled runs can be revisited

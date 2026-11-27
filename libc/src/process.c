@@ -548,7 +548,8 @@ pid_t fork(void) {
 #if !defined(CRT_TARGET_OS_WINDOWS)
   /* A native COW snapshot must not copy allocator metadata mid-mutation.
    * User callbacks stay outside the heap lock because they may allocate.
-   * Windows memory-copy fork itself allocates and has a separate protocol. */
+   * Windows memory-copy fork itself allocates, so it takes the lock only
+   * around its heap and image copy (arch/windows/.../fork_memcopy.c). */
   __crt_malloc_before_fork();
 #endif
 #if defined(CRT_TARGET_OS_MACOS)

@@ -126,6 +126,7 @@ __declspec(dllimport) HANDLE CRT_WINAPI CreateThread(
     DWORD dwCreationFlags,
     DWORD* lpThreadId);
 __declspec(dllimport) DWORD CRT_WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+__declspec(dllimport) DWORD CRT_WINAPI GetCurrentThreadId(void);
 __declspec(dllimport) BOOL CRT_WINAPI CloseHandle(HANDLE hObject);
 __declspec(dllimport) void CRT_WINAPI ExitThread(DWORD dwExitCode) __attribute__((noreturn));
 #elif defined(CRT_TARGET_OS_LINUX)
@@ -404,6 +405,17 @@ void __crt_pthread_after_fork_child(void) {
   linux_reaper_started = 0;
   linux_reaper_tid = 0;
   linux_reaper_stack = 0;
+#elif defined(CRT_TARGET_OS_WINDOWS)
+  {
+    /* fork() from a created thread: its control block now describes the child's only thread, whose
+     * native id is new and whose handle value belongs to the parent process. */
+    crt_pthread_control* control = pthread_get_current_control();
+
+    if (control != 0) {
+      control->thread_id = GetCurrentThreadId();
+      control->handle = 0;
+    }
+  }
 #endif
 }
 
