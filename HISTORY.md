@@ -34,6 +34,11 @@ returning; before the fault-handler case was added, the fork and signal tests pa
 fork and signal tests passed 20 repeats in a Release build. The aarch64 backend carries the same changes and
 was only cross-compiled here. [Design and limits](docs/design/windows_fork_emulation.md#fork-from-a-created-thread-2026-11-27).
 
+[CI at `98c3fdf5`](https://github.com/webos21/crt/actions/runs/45936963641) then passed all five hosts
+with no core CTest failures: Windows/x64 and arm64 (172 each; `windows-11-arm` runs the aarch64 backend),
+Linux/amd64 and arm64 (149 each) and macOS/aarch64 (148). `fork_thread_test` and
+`signal_default_action_test` ran once per job and passed.
+
 Related Planned items in `TODO.md` (SIG, SIG-01, ALLOC-02, JOB-01) and the Toybox `timeout` note now
 describe this state; none is complete. The four libc symbols this branch adds to the Windows build joined
 `mbedtls-windows-exclude-symbols.rsp`. The mbedTLS port was not rebuilt, and the list still lacks other,
