@@ -24,8 +24,34 @@ limits (Windows not run): [signal delivery](docs/design/signal_delivery.md#sendi
 
 This changes SDK runtime behaviour and takes effect in an SDK built from it, not in v0.5.0-rc.2.
 `crt-cli` was not changed; its `_exit(128+signal)` workaround for canceled runs can be revisited
-against such an SDK. Found and not fixed: on macOS, `pthread_create()` in a forked child that has not
-exec'd segfaults, with the earlier libc too.
+against such an SDK. A separate crash found here, `pthread_create()` in a forked macOS child, is the next
+entry.
+
+### macOS: threads in a forked child crashed with SIGSEGV
+
+A child of `fork()` that did not exec died with SIGSEGV (wait status `0xb`) in
+`pthread_create()`, with single- and multithreaded parents alike. macOS threads
+are Apple pthreads, but `fork()` was a bare system call, so libSystem's atfork
+child handlers never ran. The crash report showed `_pthread_create` ->
+`mach_vm_allocate` followed by `mig_get_reply_port` and
+`_kernelrpc_mach_port_construct` recursing on the parent's cached port state
+into the stack guard.
+
+Decision: `fork()` (and so `vfork()`) now calls `libsystem_c`'s own `fork()`,
+found by Mach-O symbol lookup like the `pthread_*` entry points
+(`libc/src/arch/macos/common/fork.c`). CRT `pthread_atfork()` handlers are a
+separate list and still run once; handlers host libraries registered with
+Apple's `pthread_atfork()` now run too. This follows Bionic, where `fork()` is
+the atfork handlers around `_Fork()` and the child's libc stays usable.
+
+Limit: `_Fork()` remains the raw system call (no public libSystem entry
+reinitialises without running Apple's `pthread_atfork()` handlers), so unlike
+Bionic its macOS child must not create threads. The internal `posix_spawn()`
+child, which only execs, also keeps the raw call.
+
+Evidence (macOS/arm64): `libc/tests/fork_thread_test.c` fails with status `0xb`
+on the old `fork()`; with the fix it passed 200 `ctest --repeat` runs and 800
+runs across eight parallel loops. macOS/x86_64 was not run.
 
 ## 2026-11-26
 

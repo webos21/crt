@@ -34,6 +34,9 @@ long __crt_sys_kill(long pid, int sig);
 long __crt_sys_execve(const char* path, char* const argv[], char* const envp[]);
 long __crt_sys_access(const char* path, int mode);
 long __crt_sys_fork(void);
+#if defined(CRT_TARGET_OS_MACOS)
+long __crt_macos_libsystem_fork(void);
+#endif
 long __crt_sys_waitpid(long pid, int* status, int options);
 #if defined(CRT_TARGET_OS_WINDOWS)
 long __crt_sys_posix_spawn(
@@ -548,7 +551,14 @@ pid_t fork(void) {
    * Windows memory-copy fork itself allocates and has a separate protocol. */
   __crt_malloc_before_fork();
 #endif
+#if defined(CRT_TARGET_OS_MACOS)
+  /* The child must be able to use libSystem (pthread_create() and more), which a bare system call
+   * does not arrange; see libc/src/arch/macos/common/fork.c. _Fork() and the spawn path below,
+   * whose child only calls exec, stay on the system call. */
+  child = __crt_macos_libsystem_fork();
+#else
   child = __crt_sys_fork();
+#endif
   if (child == 0) {
     __crt_atfork_child(current_context);
     return 0;

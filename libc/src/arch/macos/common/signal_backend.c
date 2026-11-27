@@ -175,8 +175,8 @@ static crt_darwin_pthread_kill_fn real_pthread_kill;
 static crt_darwin_pthread_main_thread_fn real_pthread_main_thread_np;
 
 /* raise()'s pieces. The thread's Mach port is asked for each time instead of going through Apple's
- * pthread_kill(pthread_self()): the CRT's fork() is the raw system call, so libpthread's cached port
- * is the parent's in a forked child. */
+ * pthread_kill(pthread_self()): in a _Fork() child, which is the raw system call (see fork.c),
+ * libpthread's cached port is still the parent's, and raise()/abort() must work there. */
 typedef unsigned int (*crt_darwin_port_fn)(void);
 typedef int (*crt_darwin_port_deallocate_fn)(unsigned int, unsigned int);
 typedef int (*crt_darwin_thread_port_kill_fn)(unsigned int, int);

@@ -19,7 +19,6 @@ static const char* const how_name[HOW_COUNT] = {"raise", "self-kill", "pthread_k
 static volatile sig_atomic_t handled;
 static volatile sig_atomic_t handled_signal;
 static int failures;
-static const char* self_path;
 
 static void count_handler(int sig) {
   handled_signal = sig;
@@ -203,32 +202,40 @@ static void* raise_on_thread(void* argument) {
   return 0;
 }
 
-/* From a thread other than the first, the default action still ends the whole process. It runs in a
- * fresh exec of this test: pthread_create() in a merely forked child crashes on macOS (a fork()
- * limitation there, independent of signals). */
-#define THREAD_CASE "--raise-on-second-thread"
-
-static int thread_case_main(void) {
+/* From a thread other than the first, the default action still ends the whole process. */
+static void thread_body(int unused, int sig) {
   pthread_t thread;
-  int sig = SIGTERM;
-
-  make_default(sig);
-  if (pthread_create(&thread, 0, raise_on_thread, &sig) != 0 || pthread_join(thread, 0) != 0) return 115;
-  return SURVIVED;
-}
-
-static void exec_thread_case_body(int unused, int sig) {
-  char flag[] = THREAD_CASE;
-  char* arguments[3];
 
   (void)unused;
-  (void)sig;
-  arguments[0] = (char*)self_path;
-  arguments[1] = flag;
-  arguments[2] = 0;
-  execv(self_path, arguments);
-  _exit(114);
+  make_default(sig);
+  if (pthread_create(&thread, 0, raise_on_thread, &sig) != 0 || pthread_join(thread, 0) != 0) _exit(115);
 }
+
+#if !defined(CRT_TARGET_OS_WINDOWS)
+/* _Fork() is the bare system call on every host (on macOS nothing resets libSystem's state in its
+ * child), and raise() and abort() are what such a child may still need. */
+static void test_raw_fork_child(void) {
+  int use_abort;
+
+  for (use_abort = 0; use_abort <= 1; ++use_abort) {
+    int sig = use_abort ? SIGABRT : SIGTERM;
+    int status = -1;
+    pid_t pid = _Fork();
+
+    if (pid == 0) {
+      make_default(sig);
+      if (use_abort) abort();
+      (void)raise(sig);
+      _exit(SURVIVED);
+    }
+    if (pid < 0 || waitpid(pid, &status, 0) != pid) {
+      fail("_Fork/waitpid", sig, errno);
+    } else if (!WIFSIGNALED(status) || WTERMSIG(status) != sig) {
+      fail("_Fork child", sig, status);
+    }
+  }
+}
+#endif
 
 enum abort_case { ABORT_DEFAULT, ABORT_IGNORED, ABORT_BLOCKED, ABORT_HANDLER_RETURNS, ABORT_HANDLER_EXITS };
 
@@ -407,19 +414,16 @@ static void test_arguments(void) {
   if (signal(SIGSTOP, SIG_IGN) != SIG_ERR || errno != EINVAL) fail("ignore SIGSTOP", SIGSTOP, errno);
 }
 
-int main(int argc, char** argv) {
-  if (argc > 1 && strcmp(argv[1], THREAD_CASE) == 0) {
-    return thread_case_main();
-  }
-  self_path = argv[0];
+int main(void) {
   test_arguments();
   test_terminating();
   test_ignored();
   test_blocked();
-  expect_killed("raise on a second thread", run_child(exec_thread_case_body, 0, SIGTERM), SIGTERM);
+  expect_killed("raise on a second thread", run_child(thread_body, 0, SIGTERM), SIGTERM);
   test_abort();
 #if !defined(CRT_TARGET_OS_WINDOWS)
   test_parent_kill();
+  test_raw_fork_child();
 #endif
   test_stop();
   if (failures != 0) {

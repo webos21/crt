@@ -35,8 +35,8 @@ restores `SIG_DFL`, raises it again and only then calls `_exit(127)`. CRT used t
 | macOS | `__pthread_kill` on `mach_thread_self()` with the Darwin number | `kill` system call with the Darwin number | Darwin status, signal number translated to Bionic |
 | Windows | software delivery; blocked signals stay pending | `raise()` | exit code `0x4B110000 \| sig`, decoded by CRT `waitpid()` |
 
-macOS asks for the thread's Mach port each time because Apple's cached `pthread_self()` port is the
-parent's after the CRT's raw `fork()`. `kill()` to another process also translates the number, and
+macOS asks for the thread's Mach port each time because Apple's cached `pthread_self()` port is still
+the parent's in a child of `_Fork()`, the raw system call (`fork()` goes through libSystem). `kill()` to another process also translates the number, and
 `waitpid()` translates terminating and stop signals back, maps `WCONTINUED` and reports "continued" as
 `0xffff` as Linux does (`WIFCONTINUED`, which was always 0). Before this, `kill(pid, SIGUSR1)` sent
 Darwin's `SIGBUS`.
@@ -67,7 +67,7 @@ Where a host differs, and is left as it is:
   A hardware fault with no handler still exits `128 + sig` through the DWARF unwind safety net, so a
   parent sees `WIFEXITED`.
 
-`signal_default_action_test` covers this. Verified on macOS/arm64 (full core CTest, 149/149) and on a
+`signal_default_action_test` covers this. Verified on macOS/arm64 (core CTest) and on a
 Linux/aarch64 kernel (eight signal tests, cross-built outside the CMake preset and run in Docker, with
 trapping stubs for the unused quad-float builtins). Windows targets were only syntax-checked, and
 macOS/x86_64 and Linux/x86_64 were not run.
