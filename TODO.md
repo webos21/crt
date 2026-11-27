@@ -73,6 +73,10 @@ when a prefix such as `P1` or `V1` appears under multiple headings.
 Qualify the `dev` (`02-cxx`) SDK on the existing five host pairs as release
 targets: Linux/x86_64, Linux/aarch64, macOS/arm64, Windows/x64 and Windows/arm64.
 Advertise the host and runtime modes verified on the actual release bytes.
+The recorded RCs predate the 2026-11-27 signal and `fork()` runtime changes
+([crt#38](https://github.com/webos21/crt/pull/38)). A candidate built from
+current `main` contains them: RC results do not cover that behaviour or its
+exports, so replay the affected checks on the final candidates.
 The [CLI release queue](https://github.com/webos21/crt-cli/blob/main/TODO.md#release-050---standalone-cli)
 owns CLI packaging and exact SDK adoption. The
 [extension release queue](https://github.com/webos21/crt-vscode/blob/main/TODO.md#release-050---vs-code-extension)

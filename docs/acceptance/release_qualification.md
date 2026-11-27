@@ -2128,6 +2128,9 @@ The CLI D6-01 replay on this SDK found and corrected a CLI cancellation defect; 
 [acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/lifecycle_acceptance.md#d6-01-cancellation-recovery-and-diagnostics-on-macosarm64-2026-11-26)
 owns it, the first-build/selection and OS SDK diagnostics, and the D3 and handoff replays with the corrected CLI. The same work measured
 that CRT's `raise()` and self-directed `kill()` only emulate delivery; that libc deviation is not changed by this record.
+It was corrected on 2026-11-27 ([crt#38](https://github.com/webos21/crt/pull/38),
+[signal delivery](../design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27)). RC2 and the other RCs recorded
+above predate that change and the accompanying `fork()` corrections, so their results describe the earlier runtime behaviour.
 
 Not repeated with RC2: the CLI-package, Host Tools and VS Code replays recorded with RC1. These are local candidate bytes, not a release.
 Evidence stays outside the checkouts in `crt-release-050-macos-arm64-20261126/rc2-followup/`.
