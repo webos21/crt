@@ -74,6 +74,8 @@ hooks before user atfork child handlers:
 
 - TLS/current-thread state is rebound to the surviving calling thread.
 - Linux thread registry and detached-thread reaper bootstrap state are cleared.
+- The Linux native-TLS setup lock is released, and a first-time setup that the
+  fork interrupted is discarded so the child redoes it.
 - pthread key/reaper locks, malloc heap lock, and stdio `FILE` locks are reset
   so the child is not left with locks owned by vanished threads.
 - fd tracking has an explicit `__crt_fd_after_fork_child()` reset hook. Linux

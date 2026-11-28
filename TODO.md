@@ -103,15 +103,16 @@ cover the follow-up scope. R05 numbers link the release work across repositories
 The 0.5.0 candidates must include the 2026-11-28
 [`pthread_create()` use-after-free fix](HISTORY.md#linux-pthread_create-wrote-to-the-control-block-of-a-thread-that-could-already-be-freed),
 the likely cause of the `linux-arm64` `fork_thread_test` failure
-([run 45986232785](https://github.com/webos21/crt/actions/runs/45986232785)).
-Found by reading the same code, not reproduced:
+([run 45986232785](https://github.com/webos21/crt/actions/runs/45986232785)), and the
+[`pthread_detach()` and TLS-lock fixes](HISTORY.md#pthread_detach-kept-using-the-control-block-and-fork-could-copy-the-tls-lock-held)
+of the same day.
 
-- [ ] `pthread_detach()` can touch a control block the detached thread has already freed (all three
-  backends), and on Linux a detach that races the thread's exit can leave it unreaped. Compare with
-  Bionic's single `join_state` transition.
-- [ ] The Linux `fork()` child does not reset `tls_lock`
-  ([thread_tls.c](libc/src/arch/linux/common/thread_tls.c)): a `fork()` while another thread holds it
-  would hang the child's next `pthread_create()`.
+- [ ] Replay the two thread-lifetime fixes on Windows (build and core CTest; the new detach fixture
+  skips there) and on native Linux/x86_64.
+- [ ] Linux/aarch64 native thread TLS is declined, and CRT threads then share every `__thread`
+  variable, when the initial thread pointer is not 64-byte aligned
+  ([thread_tls.c](libc/src/arch/linux/common/thread_tls.c) starts `tls_align` at 64, which the
+  loader does not promise). Seen as a `pthread_native_tls_test` failure on arm64 Ubuntu 24.04.
 
 #### D5 - Dev SDK application workflow
 

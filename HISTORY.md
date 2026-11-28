@@ -12,6 +12,65 @@ substantive update.
 
 ## 2026-11-28
 
+### pthread_detach() kept using the control block, and fork() could copy the TLS lock held
+
+Two defects found by reading the code around the `pthread_create()` fix below.
+
+`pthread_detach()` set `detached` and then read the control block again (`tid_word` on Linux, the
+handle on Windows, the native thread on macOS), although a thread that saw the flag could already
+have freed it. A thread that read the flag just before it was set freed nothing: on Linux the block
+and stack stayed when `tid_word` was still non-zero, and on macOS and Windows no code path freed the
+block. The same ownership gap had three more forms: `pthread_exit()` read the flag before running the
+key destructors, so a detach from a destructor was lost; on macOS a detach after the thread's exit
+detached the native thread but never freed the block; and the macOS and Windows creators tested the
+live flag to decide whether to release the native handle, so a thread that detached itself early
+had it released twice (on macOS `pthread_create()` then returned `EINVAL` or `ESRCH`).
+
+`detached` is now Bionic's
+[`join_state`](https://android.googlesource.com/platform/bionic/+/refs/heads/main/libc/bionic/pthread_detach.cpp)
+(not joined, exited not joined, joined, detached), changed from "not joined" by one compare-and-swap.
+`pthread_detach()` reads the handle or native thread first and does not touch the block after the
+change; on an exited thread it joins. `pthread_exit()` and the routine's return decide after the key
+destructors, and `pthread_join()` claims the thread before waiting (a refused host wait gives the
+claim back). The creator uses the creation attribute, and the startup handshake, so far Linux only,
+now holds the new thread on all three backends; it replaces the spin of an exiting detached thread.
+Only one party can now queue a block for the Linux reaper, so `reap_queued` is gone.
+
+The Linux `fork()` child did not reset `tls_lock` in `thread_tls.c`, so a fork while another thread
+held it hung the child's next `pthread_create()`. The new
+`__crt_linux_thread_tls_after_fork_child()` releases it and, if the first TLS setup was interrupted,
+also clears the half-filled module table.
+
+Two new ctests force the interleavings. `pthread_detach_lifetime_test` (Linux and macOS) owns
+`pthread.c`, gives each control block a page that `free()` makes inaccessible, and has six cases. On
+the unfixed code:
+
+| Case | macOS arm64 | Linux aarch64 |
+|---|---|---|
+| `exit-inside-detach` | faults | faults |
+| `detach-during-exit` | block never freed | block never freed |
+| `detach-after-exit` | block never freed | passes |
+| `detach-in-destructor` | `pthread_create` returns `ESRCH` | block never freed |
+| `exit-call-detached` (control) | passes | passes |
+| `self-detach-during-create` | `pthread_create` returns `EINVAL` | passes |
+
+`fork_tls_lock_test` (Linux) stops a thread inside the TLS setup and forks. The unfixed child hung in
+three of three runs. With only the lock reset, the child's new thread had no TLS block of its own.
+
+With the fixes, on macOS arm64 (Debug, default options) all 151 core tests passed or skipped as
+intended (the two Linux-only fixtures skip), and repeats 8 in parallel had no failure: the detach
+fixture and `fork_thread_test` 200 each, `pthread_detach_test` 500. On arm64 Ubuntu 24.04 in Docker,
+`cmake --workflow --preset linux-host-ninja-debug` passed 151 of 152; `pthread_native_tls_test`
+fails there on unmodified `1b8e3469` too. Repeats 20 in parallel had no failure: the detach fixture
+100, `fork_tls_lock_test` and `fork_runtime_reset_test` 300 each, `pthread_detach_test` and
+`fork_thread_test` 1,000 each. Windows was not built or run (`pthread.c` and the two new tests passed
+only a Clang syntax check for both Windows targets), and the detach fixture does not wrap its
+backend. Native Linux/x86_64 was not run (syntax check only).
+
+While writing the fork test, native thread TLS turned out to be declined on aarch64 when the initial
+thread pointer is not 64-byte aligned; the test aligns its own TLS to avoid that. This is not fixed
+here (`TODO.md`).
+
 ### Linux: pthread_create() wrote to the control block of a thread that could already be freed
 
 `fork_thread_test` failed once on the `linux-arm64` CI job of `main` at `97765c67`

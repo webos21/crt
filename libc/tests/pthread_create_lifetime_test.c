@@ -134,7 +134,8 @@ int main(void) {
 #include <stdio.h>
 
 int main(void) {
-  /* macOS and Windows create threads through the host and have their own publication handshake. */
+  /* macOS and Windows create threads through the host; pthread_detach_lifetime_test holds the
+   * creator on macOS. */
   puts("pthread_create_lifetime_test: skipped (Linux clone() backend)");
   return 0;
 }

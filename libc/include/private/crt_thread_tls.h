@@ -13,5 +13,8 @@
  * pointer to pass to clone(CLONE_SETTLS), or 0 on failure. */
 size_t __crt_linux_thread_tls_size(void);
 void* __crt_linux_thread_tls_setup(void* region_end);
+/* For the fork() child: releases the setup lock, which a thread that the child does not have may
+ * have held, and drops a first-time setup that the fork interrupted. */
+void __crt_linux_thread_tls_after_fork_child(void);
 
 #endif
