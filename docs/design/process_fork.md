@@ -113,6 +113,12 @@ patterns it was built for), but it is no longer *the* Windows process
 story -- real `fork()` now backs it and everything else that needs process
 duplication on Windows.
 
+A `fork_thread_test` crash seen on Linux/aarch64 was not a `fork()` defect: `pthread_create()` wrote
+to a detached thread's freed control block and corrupted the heap of whichever process did so. See
+the [2026-11-28 record](../../HISTORY.md#linux-pthread_create-wrote-to-the-control-block-of-a-thread-that-could-already-be-freed).
+A heap crash after `fork()` can come from corruption made before or after the snapshot; check the
+allocator state in the core before suspecting the snapshot.
+
 ## Test Policy (current)
 
 Windows `fork()` now has the same real test coverage Linux/macOS always

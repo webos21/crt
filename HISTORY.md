@@ -10,6 +10,56 @@ substantively updated each entry, so an entry whose investigation spanned
 multiple days is dated by its span (`start..resolved`) or by its last
 substantive update.
 
+## 2026-11-28
+
+### Linux: pthread_create() wrote to the control block of a thread that could already be freed
+
+`fork_thread_test` failed once on the `linux-arm64` CI job of `main` at `97765c67`
+([run 45986232785](https://github.com/webos21/crt/actions/runs/45986232785)): a forked grandchild
+died with `SIGSEGV`. On arm64 Ubuntu 24.04 with clang 21 in Docker, 20 parallel runs at a time
+reproduced it: two of about 1,550 runs failed, one with the CI output and one in the first phase,
+before the test's top-level process had created a thread.
+
+The core dump (from a child forked in that first phase) showed a corrupt allocator free list.
+`unindex_free_block()` faulted under `pthread_create()`'s `calloc()`; the block's
+`free_links.previous` was a thread id. The same payload held `tid_word` 0, a stack address and the
+default 1 MiB stack size: a freed `crt_pthread_control`, whose first member is `tid`. That this also
+caused the CI failure is an inference: neither the CI run nor the local run with the CI output left a
+core that was examined.
+
+The Linux `pthread_create()` stored the `clone()` result in `control->tid` after the new thread was
+runnable, then read it back. A thread created detached (or one that detached itself) could exit, be
+reaped and have the block freed first, so the store overwrote the free-list link and a later
+`malloc()` crashed. `fork()` was not the cause: the fault is in thread creation, and the test creates
+a detached thread in nearly every process. macOS and Windows already held such a thread back before
+freeing its block (`creation_published`); Linux did not.
+
+Bionic's [`pthread_create.cpp`](https://android.googlesource.com/platform/bionic/+/refs/heads/main/libc/bionic/pthread_create.cpp)
+holds `startup_handshake_lock` across `clone()`: the new thread waits for it before any user code,
+the creator assigns the `pthread_t` before unlocking and leaves the thread structure alone
+afterwards, and the kernel (`CLONE_PARENT_SETTID`), not the creator, stores the tid. CRT's Linux
+backend now has the same handshake on `creation_published`: the creator keeps the `clone()` result in
+a local, stores `tid` and `*thread` while the new thread waits, releases it and does not touch the
+block again. A new thread now also sees its own `pthread_t` and tid.
+
+New ctest `pthread_create_lifetime_test_runs` owns `pthread.c`, holds the creator for 300 ms right
+after `clone()` returns and requires that the thread has not run, for a joinable, a created-detached
+and a self-detaching thread. All three cases failed on the old `pthread.c` and pass with the fix.
+`fork_thread_test` is unchanged.
+
+With the fix, 6,000 runs of `fork_thread_test`, 20 in parallel, had no failure and left no core. In
+the same container `cmake --workflow --preset linux-host-ninja-debug` passed 149 of 150 tests; the
+exception, `pthread_native_tls_test`, also fails there on unmodified `1937d7e8` (148 of 149) and was
+not investigated. It passed in the failed CI run.
+
+On x86_64 under Docker's emulation on the arm64 Mac, the new test passed 50 repeats.
+`fork_thread_test` hangs there, with the fix and on unmodified `1937d7e8` (five of five loops, within
+four runs each): three of the four threads in each sampled process wait in `FUTEX_LOCK_PI`, which CRT
+does not use, so the emulator is the likely cause (not established). Native x86_64 was not run. On macOS arm64, in a
+Debug build with default options, the pthread and fork tests passed (27, plus the new test's
+Linux-only skip). Windows was not rebuilt; its `pthread.c` code changes only in where the
+`creation_published` member is declared.
+
 ## 2026-11-27
 
 ### Retire the mbedTLS Windows exclude-symbols list
