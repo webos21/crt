@@ -1,10 +1,10 @@
 name: SDK release
 
-# Manually started, protected packaging and publication of a Development SDK Preview from a tested commit on main.
+# Manually started, protected packaging and publication of one host's Development SDK from a tested commit on main.
 # CI success is necessary, never publication authority:
-#   plan     validates the request: host/date/serial, a full commit that is on main with a successful CI run, no existing
+#   plan     validates the request: host/serial, a full commit that is on main with a successful CI run, no existing
 #            release of that tag, reviewed notes at that commit, and a `release` environment that requires reviewers;
-#   package  builds exactly that commit with `crt-dev-release` under the real tag, then checks the asset set from its bytes
+#   package  builds exactly that commit with `crt-dev-release` as the release version, downloaded from the real tag, then checks the asset set from its bytes
 #            (no write permission);
 #   verify   on a separate fresh runner: independent re-verification of the downloaded bytes and the consumer smoke by the
 #            pinned, signature-checked published CLI Preview installing that archive (no write permission). A host that has no
@@ -27,12 +27,8 @@ on:
         description: Full 40-character commit SHA on main to build (a branch or tag is refused)
         type: string
         required: true
-      date:
-        description: Preview date, for example 20261118
-        type: string
-        required: true
       serial:
-        description: Serial within that date and host, starting at 1
+        description: "Serial for this version and host: 1 is v0.5.0+<host>, 2 and up name a replacement build"
         type: string
         required: true
         default: '1'
@@ -63,6 +59,7 @@ jobs:
       actions: read
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
       runner: ${{ steps.plan.outputs.runner }}
       verify_runner: ${{ steps.plan.outputs.verify_runner }}
       os: ${{ steps.plan.outputs.os }}
@@ -98,14 +95,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HOST: ${{ inputs.host }}
           COMMIT: ${{ inputs.commit }}
-          DATE: ${{ inputs.date }}
           SERIAL: ${{ inputs.serial }}
           NOTES: ${{ inputs.notes_file }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           git fetch --quiet origin main
-          python tools/ci_sdk_publish.py plan --host "$HOST" --commit "$COMMIT" --date "$DATE" --serial "$SERIAL" --repo "$REPO" --notes-file "$NOTES"
+          python tools/ci_sdk_publish.py plan --host "$HOST" --commit "$COMMIT" --serial "$SERIAL" --repo "$REPO" --notes-file "$NOTES"
 
   package:
     name: package (${{ inputs.host }})
@@ -136,11 +132,12 @@ jobs:
         env:
           PRESET: ${{ needs.plan.outputs.preset }}
           TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: >
           cmake --preset "$PRESET" -B out/sdk-ci
           -DCMAKE_BUILD_TYPE=Release
           -DCRTGFX_ENABLE_SKIA=OFF -DCRTMEDIA_ENABLE_FFMPEG=OFF -DCRTMEDIA_ENABLE_CURL=OFF -DCRTUI_ENABLE_LVGL=OFF
-          -DCRT_RELEASE_TAG="$TAG"
+          -DCRT_RELEASE_TAG="$VERSION" -DCRT_RELEASE_DOWNLOAD_TAG="$TAG"
 
       - name: Build the Development SDK release assets
         shell: bash
@@ -149,13 +146,13 @@ jobs:
       - name: Check the asset set from its bytes
         shell: bash
         env:
-          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
           OS: ${{ needs.plan.outputs.os }}
           ARCH: ${{ needs.plan.outputs.arch }}
           COMMIT: ${{ inputs.commit }}
         run: >
           python tools/ci_sdk_release.py verify
-          --assets out/sdk-ci/release/dev --os "$OS" --arch "$ARCH" --version "$TAG" --commit "$COMMIT"
+          --assets out/sdk-ci/release/dev --os "$OS" --arch "$ARCH" --version "$VERSION" --commit "$COMMIT"
           --forbid "$GITHUB_WORKSPACE" --forbid "${GITHUB_WORKSPACE//\\//}" --forbid "$RUNNER_TEMP" --forbid "${RUNNER_TEMP//\\//}"
 
       - name: Upload the release files
@@ -199,13 +196,13 @@ jobs:
       - name: Re-verify the downloaded bytes
         shell: bash
         env:
-          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
           OS: ${{ needs.plan.outputs.os }}
           ARCH: ${{ needs.plan.outputs.arch }}
           COMMIT: ${{ inputs.commit }}
         run: >
           python tools/ci_sdk_release.py verify
-          --assets "$RUNNER_TEMP/release-files" --os "$OS" --arch "$ARCH" --version "$TAG" --commit "$COMMIT"
+          --assets "$RUNNER_TEMP/release-files" --os "$OS" --arch "$ARCH" --version "$VERSION" --commit "$COMMIT"
           --keep-extracted "$RUNNER_TEMP/sdk-extracted"
           --json "$RUNNER_TEMP/sdk-release-verification.json"
 
@@ -333,14 +330,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HOST: ${{ inputs.host }}
           COMMIT: ${{ inputs.commit }}
-          DATE: ${{ inputs.date }}
           SERIAL: ${{ inputs.serial }}
           NOTES: ${{ inputs.notes_file }}
           REPO: ${{ github.repository }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          args=(--host "$HOST" --commit "$COMMIT" --date "$DATE" --serial "$SERIAL" --repo "$REPO"
+          args=(--host "$HOST" --commit "$COMMIT" --serial "$SERIAL" --repo "$REPO"
                 --release-dir "$RUNNER_TEMP/release-files" --notes-file "$NOTES" --work "$RUNNER_TEMP/draft-check"
                 --receipt "$RUNNER_TEMP/release-stage.json")
           if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi

@@ -108,6 +108,23 @@ runs across eight parallel loops. macOS/x86_64 was not run.
 
 ## 2026-11-26
 
+### Define the 0.5.0 per-host release naming (D6-03)
+
+By the owner's decision, 0.5.0 SDKs are non-prerelease, per-host releases:
+version `v0.5.0` in the SDK and asset names, tag `v0.5.0+<host>`. The build
+takes the download tag separately from the version, the release driver and
+workflow use the new rules without a date input, and the signing gate accepts
+`+` tags and keeps the reviewed prerelease flag; CRT-CLI's copy of that helper
+is the same and keeps staging prereleases. Unit and workflow tests pass. No
+release was staged, so GitHub's handling of the tag is not yet exercised.
+[Rules and what is unverified](docs/guides/sdk_ci.md#releasing-a-dev-sdk-sdk-releaseyml).
+
+### Replay the macOS checks with RC2
+
+Signed Host Tools and zlib D3 pass 28/28 with RC2. The CLI cancellation and
+diagnostic replays on that SDK led to a CLI fix, recorded in CRT-CLI.
+[Inputs and scope](docs/acceptance/release_qualification.md#macosarm64-rc2-follow-up-2026-11-26).
+
 ### Record the 0.5.0 Dev SDK candidate replay gates
 
 Close D5-01 for the recorded Dev SDK RCs: relocated external C/C++

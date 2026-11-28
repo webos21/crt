@@ -100,8 +100,9 @@ this process's own bookkeeping.
 `__crt_signal_dispatch()` is the other direction: each backend's own
 OS-level signal entry point calls it after translating the host's native
 signal number back to Bionic/Linux numbering. It looks up `signal_actions[]`
-and invokes the registered handler exactly like a self-directed `raise()`
-would (both now share one `deliver_signal()` helper in `signal.c`).
+and invokes the registered handler as `raise()`'s software delivery does (both
+share the `deliver_signal()` helper in `signal.c`; where the host can send the
+signal, `raise()` [goes through the host](#sending-a-signal-and-default-actions-2026-11-27)).
 
 ### macOS
 

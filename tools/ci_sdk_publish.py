@@ -22,8 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_sdk_release  # noqa: E402
 import release_signing  # noqa: E402
 
-BASE_VERSION = '0.0.1'
-# host key -> OS, architecture, hosted runner, and the dotted host label carried by the tag (a prerelease identifier allows no `_`).
+# Every host builds the same SDK version; its asset names already carry the OS and architecture. Each host is released on its
+# own, under a tag that adds the host to the version: v0.5.0+linux.x64. The version is baked into the SDK and the asset
+# names; the tag is only the GitHub release (and the stage-source download URL, CRT_RELEASE_DOWNLOAD_TAG).
+SDK_VERSION = 'v0.5.0'
+# host key -> OS, architecture, hosted runner, and the dotted host label carried by the tag.
 # `msvc_arch` and `llvm_asset` feed .github/actions/sdk-host-tools on Windows and must equal the sdk-integration.yml row of the host
 # (tools/test_sdk_workflows.py); `bootstrap` marks a host that has no published, pinned crt-cli Preview yet (see `smoke_policy`). No host is
 # marked now: Windows/arm64 was the first and lost the mark when its Preview was pinned.
@@ -45,7 +48,7 @@ TOKEN_RE = re.compile(r'\{\{[A-Z0-9_]+\}\}')
 NOTES_TOKENS = ('{{TAG}}', '{{COMMIT}}', '{{MANIFEST_SHA256}}', '{{MANIFEST_BYTES}}', '{{CONTENT_SHA256}}', '{{ASSET_TABLE}}', '{{TARGET}}')
 
 
-NOTES_PATH_RE = re.compile(r'docs/releases/[A-Za-z0-9][A-Za-z0-9_.-]*\.md')
+NOTES_PATH_RE = re.compile(r'docs/releases/[A-Za-z0-9][A-Za-z0-9_.+-]*\.md')
 
 
 class ReleaseError(Exception):
@@ -62,21 +65,18 @@ def require_commit(sha):
     return sha
 
 
-def names(host, date, serial):
-    """Tag and title for one release, e.g. v0.0.1-preview.20261118.linux.x64.1."""
+def names(host, serial='1'):
+    """Version, tag and title of one host's release: v0.5.0 under v0.5.0+linux.x64, or .2 and up for another build of it.
+
+    A published release is never overwritten, so a replacement of the same version takes the next serial."""
     if host not in HOSTS:
         raise ReleaseError('unknown host %r' % host)
-    if not re.fullmatch(r'20[0-9]{6}', str(date)):
-        raise ReleaseError('the date must be YYYYMMDD')
-    try:
-        datetime.datetime.strptime(str(date), '%Y%m%d')
-    except ValueError:
-        raise ReleaseError('the date %s is not a calendar date' % date)
     if not re.fullmatch(r'[1-9][0-9]{0,2}', str(serial)):
         raise ReleaseError('the serial must be a positive integer without leading zeros')
     info = HOSTS[host]
-    tag = 'v%s-preview.%s.%s.%s' % (BASE_VERSION, date, info['label'], serial)
-    return {'tag': tag, 'title': 'Development SDK Preview %s (%s/%s)' % (tag, info['os'], info['arch']), 'target': '%s/%s' % (info['os'], info['arch']), **info}
+    tag = '%s+%s' % (SDK_VERSION, info['label']) + ('' if str(serial) == '1' else '.%s' % serial)
+    return {'version': SDK_VERSION, 'tag': tag, 'title': 'CRT Development SDK %s (%s/%s)' % (SDK_VERSION, info['os'], info['arch']),
+            'target': '%s/%s' % (info['os'], info['arch']), **info}
 
 
 def render_notes(template, *, tag, commit, manifest, content_sha256, assets, target):
@@ -181,7 +181,7 @@ def load_pins_hosts():
 
 def command_plan(args):
     commit = require_commit(args.commit)
-    info = names(args.host, args.date, args.serial)
+    info = names(args.host, args.serial)
     done = run(['git', 'merge-base', '--is-ancestor', commit, 'origin/main'], check=False)
     if done.returncode != 0:
         raise ReleaseError('%s is not on main' % commit)
@@ -203,7 +203,7 @@ def command_plan(args):
     render_notes(notes_text, tag=info['tag'], commit=commit, manifest={'sha256': '0' * 64, 'size': 0}, content_sha256='0' * 64,
                  assets=[{'name': 'x', 'size': 0, 'sha256': '0' * 64}], target=info['target'])
     smoke_cli = smoke_policy(args.host, info, load_pins_hosts(), notes_text)
-    outputs = {'tag': info['tag'], 'runner': info['runner'], 'verify_runner': info.get('verify_runner', info['runner']), 'os': info['os'], 'arch': info['arch'], 'smoke_host': '%s-%s' % (info['os'], info['arch']),
+    outputs = {'tag': info['tag'], 'version': info['version'], 'runner': info['runner'], 'verify_runner': info.get('verify_runner', info['runner']), 'os': info['os'], 'arch': info['arch'], 'smoke_host': '%s-%s' % (info['os'], info['arch']),
                'preset': '%s-host-ninja-debug' % info['os'], 'msvc_arch': info.get('msvc_arch', ''), 'llvm_asset': info.get('llvm_asset', ''),
                'smoke_cli': smoke_cli}
     for key, value in outputs.items():
@@ -215,9 +215,9 @@ def command_plan(args):
 
 def command_stage(args):
     commit = require_commit(args.commit)
-    info = names(args.host, args.date, args.serial)
+    info = names(args.host, args.serial)
     release = Path(args.release_dir).resolve()
-    result = ci_sdk_release.verify(release, info['os'], info['arch'], info['tag'], commit)
+    result = ci_sdk_release.verify(release, info['os'], info['arch'], info['version'], commit)
     if result['problems']:
         raise ReleaseError('the packaged bytes no longer verify: ' + '; '.join(result['problems']))
     manifest, content = result['manifest'], result.get('content_sha256')
@@ -237,7 +237,7 @@ def command_stage(args):
     notes.parent.mkdir(parents=True, exist_ok=True)
     notes.write_text(rendered, encoding='utf-8')
     release_signing.stage(args.repo, info['tag'], commit, info['title'], notes, files,
-                          work, Path(args.receipt), args.dry_run)
+                          work, Path(args.receipt), args.dry_run, prerelease=False)
 
 
 def main(argv=None):
@@ -247,8 +247,7 @@ def main(argv=None):
         p = sub.add_parser(name)
         p.add_argument('--host', required=True, choices=sorted(HOSTS))
         p.add_argument('--commit', required=True)
-        p.add_argument('--date', required=True)
-        p.add_argument('--serial', required=True)
+        p.add_argument('--serial', default='1')
         p.add_argument('--repo', required=True)
         p.add_argument('--notes-file', required=True)
         if name == 'plan':

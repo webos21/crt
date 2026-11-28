@@ -149,6 +149,20 @@ class FinalizeFlow(unittest.TestCase):
         self.assertTrue(self.release["draft"])
         self.assertEqual(self.patch_count, 0)
 
+    def test_an_official_release_passes_the_same_gate_and_stays_non_prerelease(self):
+        self.release["prerelease"] = False
+        self.receipt["draft"] = signing.release_view(self.repo, 30)
+        self.receipt["draft"]["assets"] = {name: item for name, item in self.receipt["draft"]["assets"].items()
+                                           if not name.endswith(".sig")}
+        signing.finalize(self.repo, "123", self.public, self.work)
+        self.assertFalse(self.release["draft"])
+        self.assertFalse(self.release["prerelease"])
+        self.assertEqual(self.patch_count, 1)
+
+    def test_a_flag_changed_after_staging_is_refused(self):
+        self.release["prerelease"] = False
+        self.refuse("staged release metadata or payload identity changed")
+
     def test_signed_draft_published_and_downloaded_once(self):
         signing.finalize(self.repo, "123", self.public, self.work)
         self.assertFalse(self.release["draft"])

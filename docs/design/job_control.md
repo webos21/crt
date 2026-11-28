@@ -111,7 +111,7 @@ created with `CREATE_NEW_PROCESS_GROUP` (already used by this PAL's
 signal handler's restrictions -- and none of its safety either.
 
 Decided policy: bridge console control events into the *same*
-`signal_actions[]`/`raise()` dispatch `libc/src/arch/windows/common/
+`signal_actions[]` dispatch `libc/src/arch/windows/common/
 signal_backend.c` already uses for `SIGCHLD`, following that file's own
 established pattern rather than inventing a new one -- but, deliberately,
 **not** synchronously from the handler thread itself. The handler thread's
@@ -162,10 +162,9 @@ the undocumented `NtSuspendProcess`) but this project has consistently
 avoided reaching for undocumented NT internals elsewhere, and a
 signal-shaped POSIX suspend built out of them would need a fair amount of new
 machinery for a feature mksh itself has compiled out anyway (`MKSH_UNEMPLOYED`
-above). Decided policy: stay honest rather than fake it -- `SIGTSTP`/`SIGSTOP`
-remain pure software bookkeeping (self-delivery only via `raise()`, matching
-`signal_backend.c`'s already-documented policy for every signal besides
-`SIGCHLD`/the `SIGINT` bridge above), and `waitpid()`/`wait()` never report
+above). Decided policy: stay honest rather than fake it -- `raise()` runs an
+installed `SIGTSTP` handler (`SIGSTOP` cannot have one), the stop signals'
+default action [fails with `ENOTSUP`](signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27), and `waitpid()`/`wait()` never report
 `WIFSTOPPED` for a real Windows child. Stopped-child support stays explicitly
 out of scope until real interactive job control (`MKSH_UNEMPLOYED`
 re-enabled) is an actual priority, not a "later" this document leaves

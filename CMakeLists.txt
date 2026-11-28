@@ -10,6 +10,14 @@ set(CRT_STAGE_SOURCE_ROOT "${CMAKE_BINARY_DIR}/stage-sources" CACHE PATH "Genera
 # release build passes the real tag (e.g. v0.4.0-preview.1) and must come from
 # a clean git tree -- --allow-dirty is only ever added for "development".
 set(CRT_RELEASE_TAG "development" CACHE STRING "Release tag for stage-source recipes, SDK VERSION files and archive names")
+# The git tag of the GitHub release that serves the stage-source assets. It is part of their download URL only. It
+# differs from CRT_RELEASE_TAG for the per-host releases: version v0.5.0, tag v0.5.0+linux.x64.
+set(CRT_RELEASE_DOWNLOAD_TAG "" CACHE STRING "Git tag serving the stage-source assets (empty: CRT_RELEASE_TAG)")
+if(CRT_RELEASE_DOWNLOAD_TAG STREQUAL "")
+  set(CRT_EFFECTIVE_DOWNLOAD_TAG "${CRT_RELEASE_TAG}")
+else()
+  set(CRT_EFFECTIVE_DOWNLOAD_TAG "${CRT_RELEASE_DOWNLOAD_TAG}")
+endif()
 if(CRT_RELEASE_TAG STREQUAL "development")
   set(CRT_STAGE_SOURCE_DIRTY_ARGS --allow-dirty)
 else()
@@ -1035,6 +1043,7 @@ if(Python3_Interpreter_FOUND)
     --key "target=${CRT_TARGET_OS}-${CRT_EFFECTIVE_ARCH_FOR_FLAGS}"
     --key "build_type=${CMAKE_BUILD_TYPE}"
     --key "release_tag=${CRT_RELEASE_TAG}"
+    --key "download_tag=${CRT_EFFECTIVE_DOWNLOAD_TAG}"
     --key "imported_libcxx=${CRT_USE_IMPORTED_LIBCXX}"
     --key "skia=${CRTGFX_ENABLE_SKIA}"
     --key "ffmpeg=${CRTMEDIA_ENABLE_FFMPEG}"
@@ -1607,7 +1616,7 @@ if(Python3_Interpreter_FOUND)
       --source-root "${CRT_LIBCXX_FETCH_ROOT}"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
       --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/03-gfx-simple.json"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
+      --release-tag "${CRT_RELEASE_TAG}" --download-tag "${CRT_EFFECTIVE_DOWNLOAD_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
   set(CRT_STAGE_03_SOURCE_DEPENDS)
   if(CRT_TARGET_OS STREQUAL "linux")
     list(APPEND CRT_STAGE_03_SOURCE_DEPENDS crtgfx-xkbcommon-build)
@@ -1620,7 +1629,7 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
+      --release-tag "${CRT_RELEASE_TAG}" --download-tag "${CRT_EFFECTIVE_DOWNLOAD_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
   crt_add_cached_stage_target(crt-stage-04-source NAME stage-04-source STAGE gfx-media
     OUTPUTS "${CRT_STAGE_SOURCE_ROOT}/04-gfx-media.json"
     DEPENDS crt-stage-05-source
@@ -1630,7 +1639,7 @@ if(Python3_Interpreter_FOUND)
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
       --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/05-ui.json"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
+      --release-tag "${CRT_RELEASE_TAG}" --download-tag "${CRT_EFFECTIVE_DOWNLOAD_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
   # (crt-stage-04-source embeds 05-ui.json so the isolated 04 SDK can bootstrap 05-ui with nothing
   # but a downloaded asset, the same contract 02-cxx -> 03-gfx-simple has.)
   # 04-gfx-media -> 05-ui (Tranche 7): crtui, its Skia/MediaView companions and
@@ -1645,7 +1654,7 @@ if(Python3_Interpreter_FOUND)
       --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external"
       --output-dir "${CRT_STAGE_SOURCE_ROOT}"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
+      --release-tag "${CRT_RELEASE_TAG}" --download-tag "${CRT_EFFECTIVE_DOWNLOAD_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS}
       --successor-recipe "${CRT_STAGE_SOURCE_ROOT}/06-web.json")
   crt_add_cached_stage_target(crt-stage-06-source NAME stage-06-source STAGE web
     OUTPUTS "${CRT_STAGE_SOURCE_ROOT}/06-web.json"
@@ -1653,7 +1662,7 @@ if(Python3_Interpreter_FOUND)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_stage_source.py"
       --root "${CMAKE_SOURCE_DIR}" --stage 06-web --target-os "${CRT_TARGET_OS}"
       --source-root "${CMAKE_BINARY_DIR}/external" --output-dir "${CRT_STAGE_SOURCE_ROOT}"
-      --release-tag "${CRT_RELEASE_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
+      --release-tag "${CRT_RELEASE_TAG}" --download-tag "${CRT_EFFECTIVE_DOWNLOAD_TAG}" ${CRT_STAGE_SOURCE_DIRTY_ARGS})
   crt_add_cached_stage_target(crt-c-dist NAME c-dist STAGE c OUTPUTS "${CRT_DIST_ROOT}/01-c"
     DEPENDS crt-c-build crt-stage-02-source
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/create_dist.py"

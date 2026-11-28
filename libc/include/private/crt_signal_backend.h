@@ -4,10 +4,10 @@
 #include <signal.h>
 
 /* Real, host OS-level signal disposition to request for a CRT/Bionic-numbered
- * signal (1..NSIG-1). This is orthogonal to the existing pure-software
- * signal_actions[]/raise() dispatch in signal.c, which keeps working
- * unchanged for self-directed signals (raise()/abort()). This backend layer
- * is what lets a *real*, asynchronously OS-delivered signal (SIGCHLD from an
+ * signal (1..NSIG-1). Handlers stay in signal.c's signal_actions[] table;
+ * self-directed delivery (raise()/abort()) goes through __crt_signal_backend_raise()
+ * below and uses signal.c's software path only where the host cannot send. This
+ * backend layer is what lets a *real*, asynchronously OS-delivered signal (SIGCHLD from an
  * actual child exit, a real kill() from another process, Ctrl-C, ...)
  * actually reach a handler registered through sigaction()/signal(), instead
  * of silently going to the host's default disposition. */
@@ -24,7 +24,7 @@ enum crt_signal_backend_action {
  *
  * Returns 0 on success. A host is free to treat a signal that has no real
  * OS-level equivalent (e.g. Linux-only SIGSTKFLT/SIGPWR on macOS) as a
- * successful no-op: the software raise()/signal_actions[] path already
+ * successful no-op: signal.c's software delivery already
  * covers self-directed delivery for such signals regardless, and there is
  * nothing at the OS level to hook up. Returns -1 with errno set only for a
  * genuine failure to change a signal that *does* have a real OS mapping. */
@@ -86,7 +86,7 @@ int __crt_macos_bionic_signal(int darwin_sig);
 /* Implemented once, in libc/src/signal.c. Every backend's own OS-level signal
  * entry point calls this after translating the host's native signal number
  * back to Bionic/Linux numbering. Looks up signal_actions[bionic_sig] and
- * invokes it the same way raise() does for a self-directed signal. */
+ * invokes it as raise()'s software delivery does. */
 void __crt_signal_dispatch(int bionic_sig);
 
 /* Same, for a backend that received the host's own siginfo_t and ucontext_t

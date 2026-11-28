@@ -2113,3 +2113,24 @@ Windows isolation uses restricted tokens, private directories and job-object
 process accounting. It checks access to the listed inputs and records child
 images. Network and general executable launch denial are outside its scope.
 Local evidence is under `C:\Users\cmjo\DevWorks\crt\out\rc050-arm64\`.
+
+
+## macOS/arm64 RC2 follow-up (2026-11-26)
+
+Closes the macOS replays that had only used RC1. The SDK is the local RC2 above (CRT `ce1808cd`, content
+`9e35624a8bf568e86b076efba23d60b63057d1ac0fd6561972e4e4131ffb507b`); CRT and CLI product sources are unchanged between that build and the
+`main` heads of this date (`3f50be90`, CRT-CLI `0b53ac5`). With the signed Host Tools
+`v0.1.0-hosttools.20261119.macos-aarch64.1` and pinned zlib 1.3.1, `replay_port_macos.py` passes **28/28** gates (six port suites, 447 checks,
+none skipped) with the RC1-built CLI (`d3/result.json` `6ed243a8926f8aa328cd0231f9c35eb7455c6c06236763ef0bd6ad2285d42d8c`). The editor
+compile-policy replay, as changed by the Windows RC1 work, passes its 8 commands on macOS with RC2.
+
+The CLI D6-01 replay on this SDK found and corrected a CLI cancellation defect; the CLI repository's
+[acceptance record](https://github.com/webos21/crt-cli/blob/main/docs/acceptance/lifecycle_acceptance.md#d6-01-cancellation-recovery-and-diagnostics-on-macosarm64-2026-11-26)
+owns it, the first-build/selection and OS SDK diagnostics, and the D3 and handoff replays with the corrected CLI. The same work measured
+that CRT's `raise()` and self-directed `kill()` only emulate delivery; that libc deviation is not changed by this record.
+It was corrected on 2026-11-27 ([crt#38](https://github.com/webos21/crt/pull/38),
+[signal delivery](../design/signal_delivery.md#sending-a-signal-and-default-actions-2026-11-27)). RC2 and the other RCs recorded
+above predate that change and the accompanying `fork()` corrections, so their results describe the earlier runtime behaviour.
+
+Not repeated with RC2: the CLI-package, Host Tools and VS Code replays recorded with RC1. These are local candidate bytes, not a release.
+Evidence stays outside the checkouts in `crt-release-050-macos-arm64-20261126/rc2-followup/`.

@@ -534,6 +534,9 @@ def main() -> None:
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--release-tag", required=True)
+    parser.add_argument("--download-tag",
+                        help="git tag of the GitHub release that serves the assets, when it differs from "
+                             "--release-tag (the version in the asset names); defaults to --release-tag")
     parser.add_argument("--repository-url", default="https://github.com/webos21/crt")
     parser.add_argument("--allow-dirty", action="store_true")
     # verify_dist.py requires a packaged 01-c/02-cxx SDK to carry the
@@ -646,7 +649,7 @@ def main() -> None:
         "output_stage": args.stage,
         "target": {"os": args.target_os},
         "source": {
-            "url": f"{args.repository_url.rstrip('/')}/releases/download/{args.release_tag}/{asset_name}",
+            "url": f"{args.repository_url.rstrip('/')}/releases/download/{args.download_tag or args.release_tag}/{asset_name}",
             "archive": asset_name,
             "size": asset.stat().st_size,
             "sha256": digest,
