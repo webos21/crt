@@ -227,8 +227,8 @@ typedef struct crt_pthread_control {
 #endif
 #if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
   int stack_bounds_ready;
-  int creation_published;
 #endif
+  int creation_published; /* set once pthread_create() no longer needs the new thread to wait */
   crt_thread_context context;
   pthread_attr_t attr;
   void* (*start_routine)(void*);
@@ -603,6 +603,14 @@ static int pthread_start(void* arg) {
   crt_pthread_control* control = (crt_pthread_control*)arg;
   int detached;
 
+#if defined(CRT_TARGET_OS_LINUX)
+  /* Bionic's startup_handshake_lock: run nothing until pthread_create() has stored the tid and the
+   * pthread_t. From then on the creator does not touch the control block, so this thread may exit
+   * detached -- or detach itself -- and have the block freed at once. */
+  while (__atomic_load_n(&control->creation_published, __ATOMIC_ACQUIRE) == 0) {
+    (void)__crt_wait32(&control->creation_published, 0);
+  }
+#endif
   __crt_thread_set_current(&control->context);
 #if defined(CRT_TARGET_OS_WINDOWS)
   __crt_windows_signal_attach_current();
@@ -1948,6 +1956,7 @@ int pthread_create(
     }
   }
   {
+    long tid;
     /* A native ELF TLS block for the new thread (see thread_tls.c): carved from the
      * top of its stack, which is freed with the stack. A thread that cannot get one
      * keeps the creator's thread pointer, as before. */
@@ -1965,7 +1974,7 @@ int pthread_create(
         clone_flags |= CRT_CLONE_SETTLS;
       }
     }
-    control->tid = __crt_sys_clone_thread(
+    tid = __crt_sys_clone_thread(
         stack_end,
         pthread_start,
         control,
@@ -1973,15 +1982,19 @@ int pthread_create(
         &control->tid_word,
         &control->tid_word,
         thread_pointer);
-  }
-  if (control->tid < 0) {
-    if (control->stack_owned) {
-      munmap(control->mapping, control->mapping_size);
+    if (tid < 0) {
+      if (control->stack_owned) {
+        munmap(control->mapping, control->mapping_size);
+      }
+      free(control);
+      return (int)-tid;
     }
-    free(control);
-    return -control->tid;
+    control->tid = tid;
   }
   *thread = (pthread_t)(uintptr_t)control;
+  __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
+  /* The block may be gone by now; a private futex wake only uses its address. */
+  (void)__crt_wake32_one(&control->creation_published);
   return 0;
 #elif defined(CRT_TARGET_OS_MACOS)
   {

@@ -98,6 +98,21 @@ cover the follow-up scope. R05 numbers link the release work across repositories
   - [ ] Compare the exact final candidate for each shipped host pair and
     review any ABI differences before approval.
 
+#### Linux thread lifetime follow-up
+
+The 0.5.0 candidates must include the 2026-11-28
+[`pthread_create()` use-after-free fix](HISTORY.md#linux-pthread_create-wrote-to-the-control-block-of-a-thread-that-could-already-be-freed),
+the likely cause of the `linux-arm64` `fork_thread_test` failure
+([run 45986232785](https://github.com/webos21/crt/actions/runs/45986232785)).
+Found by reading the same code, not reproduced:
+
+- [ ] `pthread_detach()` can touch a control block the detached thread has already freed (all three
+  backends), and on Linux a detach that races the thread's exit can leave it unreaped. Compare with
+  Bionic's single `join_state` transition.
+- [ ] The Linux `fork()` child does not reset `tls_lock`
+  ([thread_tls.c](libc/src/arch/linux/common/thread_tls.c)): a `fork()` while another thread holds it
+  would hang the child's next `pthread_create()`.
+
 #### D5 - Dev SDK application workflow
 
 - [x] **D5-01** (R05-02) Replay external C and C++ consumers against the

@@ -696,6 +696,13 @@ set_tests_properties(signal_default_action_test_runs PROPERTIES
   TIMEOUT 180
   LABELS "signal")
 
+add_crt_test(pthread_create_lifetime_test pthread_create_lifetime_test.c)
+set_tests_properties(pthread_create_lifetime_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_create_lifetime_test: ok"
+  SKIP_REGULAR_EXPRESSION "pthread_create_lifetime_test: skipped"
+  TIMEOUT 30
+)
+
 add_crt_test(fork_thread_test fork_thread_test.c)
 set_tests_properties(fork_thread_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_thread_test: ok"
