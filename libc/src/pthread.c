@@ -208,6 +208,17 @@ static void* crt_macos_pthread_symbol(const char* name) {
 }
 #endif
 
+/* Who frees a thread's control block, as in Bionic's join_state: one compare-and-swap from
+ * NOT_JOINED decides between the thread's exit, pthread_detach() and pthread_join().
+ * - DETACHED: the thread frees the block when it exits. Whoever made it so must not touch the block
+ *   again, because that may already have happened.
+ * - EXITED_NOT_JOINED, JOINED: the thread does not touch the block again. The joiner, which a
+ *   pthread_detach() that comes this late also is, frees it once the thread is gone. */
+#define CRT_THREAD_NOT_JOINED 0
+#define CRT_THREAD_EXITED_NOT_JOINED 1
+#define CRT_THREAD_JOINED 2
+#define CRT_THREAD_DETACHED 3
+
 typedef struct crt_pthread_control {
 #if defined(CRT_TARGET_OS_WINDOWS)
   HANDLE handle;
@@ -220,7 +231,6 @@ typedef struct crt_pthread_control {
   void* mapping;
   unsigned long mapping_size;
   int stack_owned;
-  int reap_queued;
   struct crt_pthread_control* reap_next;
 #elif defined(CRT_TARGET_OS_MACOS)
   crt_macos_pthread_t native_thread;
@@ -234,7 +244,7 @@ typedef struct crt_pthread_control {
   void* (*start_routine)(void*);
   void* arg;
   void* result;
-  int detached;
+  int join_state;
 } crt_pthread_control;
 
 static int pthread_key_used[CRT_PTHREAD_KEYS_MAX];
@@ -405,6 +415,7 @@ void __crt_pthread_after_fork_child(void) {
   linux_reaper_started = 0;
   linux_reaper_tid = 0;
   linux_reaper_stack = 0;
+  __crt_linux_thread_tls_after_fork_child();
 #elif defined(CRT_TARGET_OS_WINDOWS)
   {
     /* fork() from a created thread: its control block now describes the child's only thread, whose
@@ -488,13 +499,7 @@ static void pthread_control_destroy_from_worker(crt_pthread_control* control) {
 
 #if defined(CRT_TARGET_OS_LINUX)
 static void linux_reap_enqueue(crt_pthread_control* control) {
-  int expected = 0;
-
   if (control == 0) {
-    return;
-  }
-  if (!__atomic_compare_exchange_n(
-          &control->reap_queued, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     return;
   }
 
@@ -599,18 +604,26 @@ static int linux_reaper_ensure_started(void) {
 }
 #endif
 
+/* The calling thread's last access to its control block. */
+static void pthread_release_control(crt_pthread_control* control) {
+  int state = CRT_THREAD_NOT_JOINED;
+
+  if (!__atomic_compare_exchange_n(&control->join_state, &state, CRT_THREAD_EXITED_NOT_JOINED, 0,
+                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
+      state == CRT_THREAD_DETACHED) {
+    pthread_control_destroy_from_worker(control);
+  }
+}
+
 static int pthread_start(void* arg) {
   crt_pthread_control* control = (crt_pthread_control*)arg;
-  int detached;
 
-#if defined(CRT_TARGET_OS_LINUX)
-  /* Bionic's startup_handshake_lock: run nothing until pthread_create() has stored the tid and the
-   * pthread_t. From then on the creator does not touch the control block, so this thread may exit
-   * detached -- or detach itself -- and have the block freed at once. */
+  /* Bionic's startup_handshake_lock: run nothing until pthread_create() has stored the thread's
+   * identity and the pthread_t. From then on the creator does not touch the control block, so this
+   * thread may exit detached -- or detach itself -- and have the block freed at once. */
   while (__atomic_load_n(&control->creation_published, __ATOMIC_ACQUIRE) == 0) {
     (void)__crt_wait32(&control->creation_published, 0);
   }
-#endif
   __crt_thread_set_current(&control->context);
 #if defined(CRT_TARGET_OS_WINDOWS)
   __crt_windows_signal_attach_current();
@@ -622,18 +635,7 @@ static int pthread_start(void* arg) {
   __crt_windows_emutls_thread_cleanup();
 #endif
   __crt_thread_clear_current(&control->context);
-  detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
-  if (detached) {
-#if defined(CRT_TARGET_OS_WINDOWS) || defined(CRT_TARGET_OS_MACOS)
-    /* A detached routine can finish immediately after publishing its stack bounds. Keep the
-     * control block alive until pthread_create() has finished reading it and returned the id.
-     * This wait is deliberately a bounded atomic spin: after publication the worker may free
-     * the control immediately, so the creator must not issue a wake against that address. */
-    while (__atomic_load_n(&control->creation_published, __ATOMIC_ACQUIRE) == 0) {
-    }
-#endif
-    pthread_control_destroy_from_worker(control);
-  }
+  pthread_release_control(control);
   return 0;
 }
 
@@ -1855,6 +1857,13 @@ int pthread_getattr_np(pthread_t thread, pthread_attr_t* attr) {
   }
 }
 
+/* Lets the new thread run. pthread_create() must not touch the control block after this. */
+static void pthread_publish_creation(crt_pthread_control* control) {
+  __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
+  /* The block may be gone by now; a private wake only uses its address. */
+  (void)__crt_wake32_one(&control->creation_published);
+}
+
 int pthread_create(
     pthread_t* thread,
     const pthread_attr_t* attr,
@@ -1862,6 +1871,7 @@ int pthread_create(
     void* arg) {
   crt_pthread_control* control;
   int* context_tid_word = 0;
+  int create_detached;
 
   if (thread == 0 || start_routine == 0) {
     return EINVAL;
@@ -1886,8 +1896,8 @@ int pthread_create(
   } else {
     pthread_attr_init(&control->attr);
   }
-  control->detached =
-      (control->attr.flags & CRT_PTHREAD_ATTR_FLAG_DETACHED) != 0;
+  create_detached = (control->attr.flags & CRT_PTHREAD_ATTR_FLAG_DETACHED) != 0;
+  control->join_state = create_detached ? CRT_THREAD_DETACHED : CRT_THREAD_NOT_JOINED;
 
 #if defined(CRT_TARGET_OS_WINDOWS)
   if ((control->attr.flags & CRT_PTHREAD_ATTR_FLAG_STACK_USER) != 0) {
@@ -1908,15 +1918,15 @@ int pthread_create(
   while (__atomic_load_n(&control->stack_bounds_ready, __ATOMIC_ACQUIRE) == 0) {
     (void)__crt_wait32(&control->stack_bounds_ready, 0);
   }
-  if (control->detached) {
+  if (create_detached) {
     CloseHandle(control->handle);
     control->handle = 0;
   }
   *thread = (pthread_t)(uintptr_t)control;
-  __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
+  pthread_publish_creation(control);
   return 0;
 #elif defined(CRT_TARGET_OS_LINUX)
-  if (control->detached) {
+  if (create_detached) {
     int reaper_result = linux_reaper_ensure_started();
     if (reaper_result != 0) {
       free(control);
@@ -1992,9 +2002,7 @@ int pthread_create(
     control->tid = tid;
   }
   *thread = (pthread_t)(uintptr_t)control;
-  __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
-  /* The block may be gone by now; a private futex wake only uses its address. */
-  (void)__crt_wake32_one(&control->creation_published);
+  pthread_publish_creation(control);
   return 0;
 #elif defined(CRT_TARGET_OS_MACOS)
   {
@@ -2073,22 +2081,22 @@ int pthread_create(
     while (__atomic_load_n(&control->stack_bounds_ready, __ATOMIC_ACQUIRE) == 0) {
       (void)__crt_wait32(&control->stack_bounds_ready, 0);
     }
-    if (control->detached) {
+    if (create_detached) {
       crt_macos_pthread_detach_fn detach_fn =
           (crt_macos_pthread_detach_fn)crt_macos_pthread_symbol("pthread_detach");
       if (detach_fn == 0) {
-        __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
+        pthread_publish_creation(control);
         return ENOSYS;
       }
       result = detach_fn(control->native_thread);
       if (result != 0) {
-        __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
+        pthread_publish_creation(control);
         return result;
       }
     }
   }
   *thread = (pthread_t)(uintptr_t)control;
-  __atomic_store_n(&control->creation_published, 1, __ATOMIC_RELEASE);
+  pthread_publish_creation(control);
   return 0;
 #else
   free(control);
@@ -2098,7 +2106,13 @@ int pthread_create(
 
 int pthread_detach(pthread_t thread) {
   crt_pthread_control* control = pthread_control_from_thread(thread);
-  int expected = 0;
+  int state = CRT_THREAD_NOT_JOINED;
+#if defined(CRT_TARGET_OS_WINDOWS)
+  HANDLE handle;
+#elif defined(CRT_TARGET_OS_MACOS)
+  crt_macos_pthread_detach_fn detach_fn;
+  crt_macos_pthread_t native_thread;
+#endif
 
   if (control == 0) {
     return EINVAL;
@@ -2110,39 +2124,59 @@ int pthread_detach(pthread_t thread) {
       return reaper_result;
     }
   }
+#elif defined(CRT_TARGET_OS_MACOS)
+  detach_fn = (crt_macos_pthread_detach_fn)crt_macos_pthread_symbol("pthread_detach");
+  if (detach_fn == 0) {
+    return ENOSYS;
+  }
 #endif
-  if (!__atomic_compare_exchange_n(
-          &control->detached, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-    return EINVAL;
+  /* What the host detach needs is read first: after the change to DETACHED, the thread may exit and
+   * free the control block at any moment. */
+#if defined(CRT_TARGET_OS_WINDOWS)
+  handle = control->handle;
+#elif defined(CRT_TARGET_OS_MACOS)
+  native_thread = control->native_thread;
+#endif
+  if (!__atomic_compare_exchange_n(&control->join_state, &state, CRT_THREAD_DETACHED, 0,
+                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+    /* A thread that has exited left its block to be joined, so this detach does that. */
+    return state == CRT_THREAD_EXITED_NOT_JOINED ? pthread_join(thread, 0) : EINVAL;
   }
 
 #if defined(CRT_TARGET_OS_WINDOWS)
-  if (control->handle != 0) {
-    CloseHandle(control->handle);
-    control->handle = 0;
+  if (handle != 0) {
+    CloseHandle(handle);
   }
   return 0;
 #elif defined(CRT_TARGET_OS_MACOS)
-  {
-    crt_macos_pthread_detach_fn detach_fn =
-        (crt_macos_pthread_detach_fn)crt_macos_pthread_symbol("pthread_detach");
-    if (detach_fn == 0) {
-      return ENOSYS;
-    }
-    return detach_fn(control->native_thread);
-  }
+  return detach_fn(native_thread);
 #else
-#if defined(CRT_TARGET_OS_LINUX)
-  if (__atomic_load_n(&control->tid_word, __ATOMIC_ACQUIRE) == 0) {
-    linux_reap_enqueue(control);
-  }
-#endif
   return 0;
 #endif
 }
 
+/* Claims the thread for the caller, which then frees its control block. */
+static int pthread_claim_for_join(crt_pthread_control* control, int* previous_state) {
+  int state = __atomic_load_n(&control->join_state, __ATOMIC_ACQUIRE);
+
+  while (state == CRT_THREAD_NOT_JOINED || state == CRT_THREAD_EXITED_NOT_JOINED) {
+    *previous_state = state;
+    if (__atomic_compare_exchange_n(&control->join_state, &state, CRT_THREAD_JOINED, 0,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+      return 0;
+    }
+  }
+  return EINVAL;
+}
+
+/* The host refused to wait (macOS: two threads joining each other), so the thread stays joinable. */
+static void pthread_abandon_join(crt_pthread_control* control, int previous_state) {
+  __atomic_store_n(&control->join_state, previous_state, __ATOMIC_RELEASE);
+}
+
 int pthread_join(pthread_t thread, void** retval) {
   crt_pthread_control* control = pthread_control_from_thread(thread);
+  int previous_state = CRT_THREAD_NOT_JOINED;
 
 #if !defined(CRT_TARGET_OS_WINDOWS) && !defined(CRT_TARGET_OS_LINUX)
   (void)retval;
@@ -2154,12 +2188,13 @@ int pthread_join(pthread_t thread, void** retval) {
   if (pthread_is_current_thread(thread)) {
     return EDEADLK;
   }
-  if (__atomic_load_n(&control->detached, __ATOMIC_ACQUIRE)) {
+  if (pthread_claim_for_join(control, &previous_state) != 0) {
     return EINVAL;
   }
 
 #if defined(CRT_TARGET_OS_WINDOWS)
   if (__crt_windows_signal_wait_handle(control->handle, CRT_INFINITE) != CRT_WAIT_OBJECT_0) {
+    pthread_abandon_join(control, previous_state);
     return EINVAL;
   }
   if (retval != 0) {
@@ -2184,6 +2219,7 @@ int pthread_join(pthread_t thread, void** retval) {
       continue;
     }
     if (wait_result < 0 && wait_result != -EINTR && wait_result != -EAGAIN) {
+      pthread_abandon_join(control, previous_state);
       return (int)-wait_result;
     }
   }
@@ -2200,10 +2236,12 @@ int pthread_join(pthread_t thread, void** retval) {
     int result;
 
     if (join_fn == 0) {
+      pthread_abandon_join(control, previous_state);
       return ENOSYS;
     }
     result = join_fn(control->native_thread, &native_result);
     if (result != 0) {
+      pthread_abandon_join(control, previous_state);
       return result;
     }
     (void)native_result;
@@ -2408,11 +2446,9 @@ void pthread_testcancel(void) {
 
 void pthread_exit(void* retval) {
   crt_pthread_control* control = pthread_get_current_control();
-  int detached = 0;
 
   if (control != 0) {
     control->result = retval;
-    detached = __atomic_load_n(&control->detached, __ATOMIC_ACQUIRE);
   }
   pthread_run_key_destructors();
 #if defined(CRT_TARGET_OS_WINDOWS)
@@ -2420,9 +2456,7 @@ void pthread_exit(void* retval) {
 #endif
   if (control != 0) {
     __crt_thread_clear_current(&control->context);
-  }
-  if (detached) {
-    pthread_control_destroy_from_worker(control);
+    pthread_release_control(control);
   }
 #if defined(CRT_TARGET_OS_WINDOWS)
   ExitThread(0);

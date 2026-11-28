@@ -63,6 +63,18 @@ modules (`libJavaScriptCore`, `libc++abi`, `libicuuc`).
 `pthread_native_tls_test` covers it; `pthread_getattr_np` now describes the real
 stack of the initial thread.
 
+## Control Block Ownership
+
+All three backends follow Bionic's `join_state`: one compare-and-swap from "not joined" decides who
+frees a thread's control block.
+
+- The new thread runs nothing until `pthread_create()` has published it.
+- If `pthread_detach()` wins, the thread frees the block when it exits. The detaching thread reads
+  what the host detach needs first and does not touch the block afterwards.
+- If the thread's exit wins (after its key destructors), the block waits for `pthread_join()`. A
+  `pthread_detach()` that comes later joins the exited thread.
+- `pthread_join()` claims the thread first, so a detach that arrives during the join gets `EINVAL`.
+
 ## Detached Reaper
 
 Detached Linux workers cannot safely release their own stack mapping because the

@@ -343,6 +343,19 @@ static int tls_ready(void) {
   return tls_state == 1;
 }
 
+void __crt_linux_thread_tls_after_fork_child(void) {
+  tls_lock.state.value = 0;
+  if (tls_state == 0) {
+    /* The fork may have come in the middle of tls_discover(), which appends to the table. */
+    tls_module_count = 0;
+    tls_static_size = 0;
+#if defined(__aarch64__)
+    tls_pre_size = 0;
+    tls_align = CRT_TLS_ALIGN;
+#endif
+  }
+}
+
 #if defined(__aarch64__)
 
 size_t __crt_linux_thread_tls_size(void) {
@@ -449,6 +462,9 @@ size_t __crt_linux_thread_tls_size(void) {
 void* __crt_linux_thread_tls_setup(void* region_end) {
   (void)region_end;
   return 0;
+}
+
+void __crt_linux_thread_tls_after_fork_child(void) {
 }
 
 #endif

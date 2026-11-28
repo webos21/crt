@@ -703,6 +703,20 @@ set_tests_properties(pthread_create_lifetime_test_runs PROPERTIES
   TIMEOUT 30
 )
 
+add_crt_test(pthread_detach_lifetime_test pthread_detach_lifetime_test.c)
+set_tests_properties(pthread_detach_lifetime_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "pthread_detach_lifetime_test: ok"
+  SKIP_REGULAR_EXPRESSION "pthread_detach_lifetime_test: skipped"
+  TIMEOUT 60
+)
+
+add_crt_test(fork_tls_lock_test fork_tls_lock_test.c)
+set_tests_properties(fork_tls_lock_test_runs PROPERTIES
+  PASS_REGULAR_EXPRESSION "fork_tls_lock_test: ok"
+  SKIP_REGULAR_EXPRESSION "fork_tls_lock_test: skipped"
+  TIMEOUT 30
+)
+
 add_crt_test(fork_thread_test fork_thread_test.c)
 set_tests_properties(fork_thread_test_runs PROPERTIES
   PASS_REGULAR_EXPRESSION "fork_thread_test: ok"
